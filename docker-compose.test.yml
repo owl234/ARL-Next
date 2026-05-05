@@ -2,12 +2,14 @@ version: '3'
 
 volumes:
   arl_db_test:
+  arl_mq_test:
 
 services:
   # 🚀 1. 前端 Nginx
   frontend:
     image: ghcr.io/owl234/arl-frontend:latest
     container_name: arl_frontend_test
+    restart: always
     ports:
       - "80:80" # 将虚拟机的 80 端口暴露给您访问
     depends_on:
@@ -17,6 +19,7 @@ services:
   backend:
     image: ghcr.io/owl234/arl-backend:latest
     container_name: arl_backend_test
+    restart: always
     depends_on:
       - mongodb
       - rabbitmq
@@ -30,6 +33,7 @@ services:
   worker:
     image: ghcr.io/owl234/arl-backend:latest
     container_name: arl_worker_test
+    restart: always
     depends_on:
       - mongodb
       - rabbitmq
@@ -42,6 +46,7 @@ services:
   worker-github:
     image: ghcr.io/owl234/arl-backend:latest
     container_name: arl_worker_github_test
+    restart: always
     depends_on:
       - mongodb
       - rabbitmq
@@ -54,6 +59,7 @@ services:
   scheduler:
     image: ghcr.io/owl234/arl-backend:latest
     container_name: arl_scheduler_test
+    restart: always
     depends_on:
       - mongodb
       - rabbitmq
@@ -79,6 +85,8 @@ services:
     image: rabbitmq:3.13.1-management-alpine
     container_name: arl_rabbitmq_test
     restart: always
+    volumes:
+      - arl_mq_test:/var/lib/rabbitmq # 👈 2. 新增这行映射
     environment:
       - RABBITMQ_DEFAULT_PASS=arlpassword
       - RABBITMQ_DEFAULT_USER=arl
