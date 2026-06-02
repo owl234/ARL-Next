@@ -24,6 +24,6 @@ jobs:
       # 3. 核心部署指令：在虚拟机本地执行 Docker 重构与拉起
       - name: 🚀 Build and Deploy via Docker Compose
         run: |
-          docker-compose -f docker-compose.local.yml down
-          docker-compose -f docker-compose.local.yml up -d --build
+          docker-compose -f docker compose.local.yml down
+          docker-compose -f docker compose.local.yml up -d --build
           docker image prune -f
