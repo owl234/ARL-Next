@@ -2,8 +2,11 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# 启用 corepack 以支持 pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+## 启用 corepack 以支持 pnpm
+#RUN corepack enable && corepack prepare pnpm@latest --activate
+
+# 🎯 修复核心：放弃 corepack 的 latest 机制，显式全局安装极其稳定的 pnpm v9
+RUN npm install -g pnpm@9
 
 # 利用 Docker 缓存层，先复制 package.json 和 pnpm-lock.yaml
 COPY package.json pnpm-lock.yaml ./
