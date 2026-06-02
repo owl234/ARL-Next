@@ -1,0 +1,29 @@
+name: Deploy ARL to Laptop VM
+
+# 仅当代码合并/推送到 main 分支时才会触发部署
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    # 🎯 核心调度：指定 [self-hosted, laptop] 标签，确保只派发给笔记本的 Ubuntu 虚拟机
+    runs-on: [self-hosted, laptop]
+
+    steps:
+      # 1. 检出最新代码到虚拟机的 actions-runner/_work 目录下
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v3
+
+      # 2. 修复 Windows/Linux 换行符历史遗留问题
+      - name: 🔧 Prepare Scripts
+        run: |
+          sed -i 's/\r$//' backend/wait-for-it.sh
+          chmod +x backend/wait-for-it.sh
+
+      # 3. 核心部署指令：在虚拟机本地执行 Docker 重构与拉起
+      - name: 🚀 Build and Deploy via Docker Compose
+        run: |
+          docker-compose -f docker-compose.local.yml down
+          docker-compose -f docker-compose.local.yml up -d --build
+          docker image prune -f
