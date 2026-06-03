@@ -82,7 +82,11 @@ def init_logger():
 
 
 def get_logger():
-    if 'celery' in sys.argv[0]:
+    """
+    根据类型创建日志记录器。
+    :return: 日志记录器
+    """
+    if 'celery' in sys.argv[0]: # 内存字符串的物理匹配
         task_logger = get_task_logger(__name__)
         return task_logger
 
@@ -90,7 +94,7 @@ def get_logger():
     if not logger.handlers:
         init_logger()
 
-    return logging.getLogger('arlv2')
+    return logger
 
 
 def get_ip(domain, log_flag=True):

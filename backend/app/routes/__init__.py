@@ -8,6 +8,7 @@ import time
 
 from app.utils import conn_db as conn
 
+# 定义通用的api契约
 base_query_fields = {
     'page': fields.Integer(description="当前页数", example=1),
     'size': fields.Integer(description="页面大小", example=10),
@@ -20,7 +21,7 @@ EQUAL_FIELDS = ["task_id", "task_tag", "ip_type", "scope_id", "type"]
 
 class ARLResource(Resource):
     def get_parser(self, model, location='json'):
-        parser = reqparse.RequestParser(bundle_errors=True)
+        parser = reqparse.RequestParser(bundle_errors=True) # 创建RequestParser对象，请求解析+错误捆绑
         for name in model:
             curr_field = model[name]
 

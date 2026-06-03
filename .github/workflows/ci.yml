@@ -57,7 +57,7 @@ jobs:
 
   deploy-to-test-vm:
       needs: build-and-push-images # 等待构建完成后再执行
-      runs-on: self-hosted # 👈 极其关键！指定使用您虚拟机里的内应
+      runs-on: [self-hosted, laptop]# 👈 极其关键！指定使用您虚拟机里的内应
 
       steps:
         - name: 检出代码 (获取 docker-compose.test.yml)

@@ -50,11 +50,11 @@ base_search_task_fields = {
     'statistic.wih_cnt__lt': fields.Integer(description="WIH 数量小于"),
 }
 
-base_search_task_fields.update(base_query_fields)
+base_search_task_fields.update(base_query_fields) # 覆盖式合并
 
-search_task_fields = ns.model('SearchTask', base_search_task_fields)
+search_task_fields = ns.model('SearchTask', base_search_task_fields) #创建searchtask命名空间
 
-add_task_fields = ns.model('AddTask', {
+add_task_fields = ns.model('AddTask', { # 创建添加任务命名空间。
     'name': fields.String(required=True, example="task name", description="任务名"),
     'target': fields.String(required=True, example="www.freebuf.com", description="目标"),
     "domain_brute": fields.Boolean(example=True),
