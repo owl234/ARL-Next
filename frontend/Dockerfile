@@ -27,14 +27,6 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 
-
-
-# 阶段二：使用 Nginx 部署静态文件
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-
 # 🚀 [必须新增这行代码]：将你的反向代理配置塞进容器
 COPY default.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]

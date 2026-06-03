@@ -27,8 +27,8 @@ services:
       # 部署时不挂载代码，只挂载依赖数据库和配置
       - ./backend/GeoLite2:/data/GeoLite2
       - ./backend/config-docker.yaml:/code/app/config.yaml
-    entrypoint: ["sh", "-c", "sh /usr/bin/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh rabbitmq:5672; gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 3"]
-
+#    entrypoint: ["sh", "-c", "sh /usr/bin/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh rabbitmq:5672; gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 3"]
+    entrypoint: ["sh", "-c", "sh /code/wait-for-it.sh mongodb:27017; sh /code/wait-for-it.sh rabbitmq:5672; gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 3"]
   # 👷 3. 核心扫描节点
   worker:
     image: ghcr.io/owl234/arl-backend:latest
@@ -40,7 +40,7 @@ services:
     volumes:
       - ./backend/GeoLite2:/data/GeoLite2
       - ./backend/config-docker.yaml:/code/app/config.yaml
-    entrypoint: ["sh", "-c", "sh /usr/bin/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q arltask -n arltask -c 2 -O fair -l info"]
+    entrypoint: ["sh", "-c", "sh /code/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q arltask -n arltask -c 2 -O fair -l info"]
 
   # 🕵️ 4. GitHub 监控节点
   worker-github:
@@ -53,7 +53,7 @@ services:
     volumes:
       - ./backend/GeoLite2:/data/GeoLite2
       - ./backend/config-docker.yaml:/code/app/config.yaml
-    entrypoint: ["sh", "-c", "wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q github -n github -c 2"]
+    entrypoint: ["sh", "-c", "/code/wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q github -n github -c 2"]
 
   # ⏱️ 5. 定时调度器
   scheduler:
@@ -66,7 +66,7 @@ services:
     volumes:
       - ./backend/GeoLite2:/data/GeoLite2
       - ./backend/config-docker.yaml:/code/app/config.yaml
-    entrypoint: ["sh", "-c", "wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672; python3 -m app.scheduler"]
+    entrypoint: ["sh", "-c", "/code/wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672; python3 -m app.scheduler"]
 
   # 🗄️ 6. 数据库 (与 local 保持一致，保留初始密码)
   mongodb:
@@ -76,6 +76,11 @@ services:
     volumes:
       - "arl_db_test:/data/db"
       - "./init-mongo-account.js:/docker-entrypoint-initdb.d/init-mongo-account.js:ro"
+    # 👇 把底层数据库的环境变量加回来
+    environment:
+      - MONGO_INITDB_DATABASE=arl
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=admin
 
   # 🐇 7. 消息队列
   rabbitmq:
