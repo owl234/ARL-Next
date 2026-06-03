@@ -72,7 +72,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref,reactive, onMounted, watch, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 // 引入 request (根据你的实际路径调整)
 import request from '@/utils/request';
