@@ -1,130 +1,107 @@
-# ARL-PRO (资产侦察灯塔系统进阶版)
+# 🚀 ARL-PRO (Asset Reconnaissance Lighthouse Professional)
+
+> **专为实战而生：下一代全自动化、分布式的资产侦察与漏洞挖掘工作站。**
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Vue](https://img.shields.io/badge/Vue.js-3.x-4FC08D.svg)
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)
-![Build](https://img.shields.io/github/actions/workflow/status/owl234/arl-pro/deploy-laptop.yml?label=CI%2FCD)
-
-ARL-PRO 是对原版 ARL（Asset Reconnaissance Lighthouse）的全面重构与进阶版本，旨在提供更加现代化、高并发和高度自动化的资产侦察与漏洞扫描功能。系统采用前后端完全分离架构，内置丰富的 ARL-NPoC 武器库、GitHub 敏感信息监控模块，并打通了 GitHub Actions 自动化 CI/CD 部署流水线，为安全研究人员提供持续、稳定的 0-day 挖掘与资产监控能力。
+![Build](https://img.shields.io/github/actions/workflow/status/owl234/arl-pro/ci.yml?label=CI%2FCD)
 
 ---
 
-## 1. 整体功能和架构梳理
+## 📖 关于项目 (About)
 
-系统采用微服务化的容器编排设计，根据 `docker-compose` 的配置，整个系统主要由以下核心服务构成：
+在竞争激烈的 Bug Bounty 生态（如 HackerOne、Intigriti 及各大企业 SRC）中，时间就是赏金。传统的资产扫描工具往往面临着部署繁琐、架构老旧、难以进行分布式横向扩展等痛点。
 
-* **前端服务 (frontend)**：基于 **Vue 3** 和 **Vite** 构建。提供现代化的单页面应用 (SPA) 界面，运行在 Nginx 容器中。
-* **后端 Web API 服务 (backend)**：基于 **Python**、**Flask** 和 **Flask-RESTX** 开发。提供 RESTful API，处理用户请求、数据查询和任务调度，通过 Gunicorn 运行。
-* **核心扫描节点 (worker)**：基于 **Celery** 的分布式工作节点，负责执行重量级的资产收集和扫描任务（如域名枚举、端口扫描、漏洞探测等）。
-* **GitHub 监控节点 (worker-github)**：专门用于监控 GitHub 源码泄露和敏感信息的独立 Celery 节点。
-* **定时调度器 (scheduler)**：处理周期性任务和计划任务的分布式调度模块。
-* **消息队列 (rabbitmq)**：作为 Celery 的 Broker，负责后端 API、Scheduler 与各个 Worker 之间的任务消息传递。
-* **数据库引擎 (mongodb)**：存储各种扫描结果、资产数据、指纹信息及任务状态等持久化数据。
-
-## 2. 技术栈总结
-
-* **前端生态**：Vue 3, Vite, Ant Design Vue, Vue Router, Axios
-* **后端生态**：Python 3, Flask, Flask-RESTX, Gunicorn
-* **分布式/高并发**：Celery, RabbitMQ
-* **持久化存储**：MongoDB
-* **DevOps/部署**：Docker, Docker Compose, GitHub Actions, Shell 自动化
+**ARL-PRO** 是对原版 ARL 的深度重构与架构革新。它不仅仅是一个扫描器，更是一套**高度自动化的 0-day 挖掘与资产监控流水线**。通过彻底的前后端分离与容器化改造，结合坚如磐石的 CI/CD 集成，ARL-PRO 让你能够将扫描节点静默部署在全球的 VPS 上，轻松绕过网络限制，实现 24/7 全天候的自动化资产侦察。释放双手，让系统为你创造稳定的漏洞挖掘收益。
 
 ---
 
-## 3. 🚀 部署方式一：生产环境 CI/CD 自动部署 (强烈推荐)
+## ✨ 核心特性 (Features)
 
-本系统全面打通了 CI/CD 自动化流水线。只需在一台纯净的 Ubuntu 服务器/虚拟机上执行以下三步，后续的所有构建、运行与端口放行均由流水线接管。
+* **🔥 现代化前后端分离架构**
+  彻底告别臃肿。前端基于 Vue 3 + Vite 构建现代化 SPA 面板，后端依托 Python 3.8+ 与 Flask 提供纯粹的 RESTful API。这带来了毫秒级的交互体验和极佳的二次开发扩展性。
 
-> **⚠️ 开发者必看（流水线配置更新）**：
-> 生产环境默认使用 `docker-compose.test.yml`，直接映射宿主机 80 端口。请确保 GitHub 流水线中执行的是 `test.yml`。
+* **⚡ 全自动 CI/CD 敏捷交付**
+  时间应该花在挖掘逻辑上，而不是运维上。本项目已完全打通 GitHub Actions 自动化流水线。代码一经 Push，系统自动在云端构建不可变的纯净 Docker 镜像，并跨网络全自动部署到你的生产节点，实现基础设施的“丝滑热更”。
 
-### Step 1: 节点环境一键初始化
-拉取代码后，在你的 Ubuntu 终端执行以下脚本：
-```bash
-chmod +x init_ubuntu_env.sh
-./init_ubuntu_env.sh
-```
-> **⚙️ 脚本自动完成：** 1. 安装 Docker Engine；2. 配置免 `sudo` 执行；3. 配置自动化流水线免密提权。
+* **🌍 生产级分布式调度与高并发**
+  以 RabbitMQ 为消息中枢，Celery 分布式工作节点为执行引擎。你可以轻松将核心扫描 Worker 和专门的 GitHub 敏感信息监控 Worker 分散部署，实现真正的高并发多节点协同扫描。
 
-### Step 2: 配置并注册 GitHub Runner
-1. 打开本项目 GitHub 网页：`Settings` -> `Actions` -> `Runners` -> `New self-hosted runner`。
-2. 按照网页提示下载 Runner，并绑定仓库（注意打上如 `laptop` 的标签）。
-3. 安装并启动常驻服务：
-   ```bash
-   sudo ./svc.sh install
-   sudo ./svc.sh start
-   ```
+* **⚔️ 硬核武器库无缝集成**
+  内置庞大且不断更新的 ARL-NPoC 武器库，并无缝对接 FOFA 等第三方资产引擎。结合资产梳理、指纹识别、端口扫描，实现从“发现资产”到“自动打出 Payload”的完整闭环。
 
-### Step 3: 刷新权限与触发部署
-```bash
-# 刷新权限并重启 Runner 服务
-newgrp docker
-cd actions-runner
-sudo ./svc.sh stop && sudo ./svc.sh start
-```
-**完成！** 向 `main` 分支推送代码，流水线将自动拉起所有分布式容器，并自动放行 **前端 (80)** 和 **后端 API (5003)** 端口。
+* **🛡️ 7x24 高可用与容灾监控**
+  生产环境编排全面引入 `restart: always` 容灾策略。即使遭遇宿主机意外重启或高负载崩溃，数据库与核心节点也能自动拉起恢复，保障无人值守监控的绝对稳定。
 
 ---
 
-## 4. 💻 部署方式二：测试与手动部署
+## 🏗️ 架构设计 (Architecture)
 
-若不使用 CI/CD，请确保本地已安装 Docker 和 Docker Compose (v2)。
+ARL-PRO 采用经典且强健的微服务容器编排设计，数据流转清晰高效：
+
+1.  **网关与展示层 (Frontend)**：Nginx 承载 Vue3 编译后的静态资源，并将 API 请求反向代理穿透至后端。
+2.  **业务逻辑层 (Backend)**：Gunicorn 驱动的 Flask 应用，负责接收前端指令、操作 MongoDB 数据库，并将重量级扫描任务分发至消息队列。
+3.  **消息总线 (Broker)**：RabbitMQ 承担任务排队与状态分发的高吞吐工作。
+4.  **异步执行层 (Workers)**：
+   * **核心节点 (worker)**：执行耗时的端口探测、指纹识别、漏洞扫描。
+   * **GitHub 监控节点 (worker-github)**：常驻监听，捕捉源码与凭证泄露。
+   * **定时调度器 (scheduler)**：精准触发周期性自动化监控计划。
+5.  **持久化存储 (Database)**：MongoDB 负责海量扫描结果与配置资产的落地存储。
+
+---
+
+## 🚀 极速部署 (Quick Start)
+
+我们为开发者提供了两套编排方案，以平衡“开发效率”与“生产稳定”。
+
+### 方案 A：本地极速迭代调试流 (Local Development)
+
+适用于二次开发、编写 PoC 与前后端联调。采用热重载机制，代码修改浏览器/接口即刻生效，互不干扰。
 
 ```bash
 git clone [https://github.com/owl234/arl-pro.git](https://github.com/owl234/arl-pro.git)
 cd arl-pro
 
-# 方式 A: 生产/测试环境运行 (映射宿主机 80 端口，含容灾重启策略)
-docker compose -f docker-compose.test.yml up -d
+# 1. 一键拉起后端底座（挂载本地源码，暴露 5003 端口供 Vite 代理）
+docker-compose -f docker-compose.local.yml up -d backend worker worker-github scheduler mongodb rabbitmq
 
-# 方式 B: 本地沙盒/独立部署环境 (映射宿主机 8080 端口)
-docker compose -f docker-compose.local.yml up -d --build
+# 2. 另起终端，原生启动前端开发服务器（享受 Vite 极速 HMR）
+cd frontend
+pnpm install
+pnpm run dev
 ```
-> **访问地址**：生产模式访问 `http://IP/`；开发模式访问 `http://127.0.0.1:8080/`
-> **默认账号密码**：`admin` / `arlpass` (登录后请立即修改)
+### 方案 B：生产环境全自动 CI/CD 流 (Production)
 
----
+适用于部署到 VPS 监控节点的正式环境，实现纯净镜像运行和无人值守的 24/7 监控。
 
-## 5. 🛠️ 进阶开发与编排架构指南
+**1. 配置生产节点环境：**
 
-为了兼顾“生产环境的绝对稳定”与“开发环境的极致效率”，本项目严格分离了编排配置：
+在干净的 Ubuntu 生产节点执行初始化脚本：
 
-| 维度 | `local.yml` (本地开发沙盒) | `test.yml` (测试/生产部署靶标) |
-| :--- | :--- | :--- |
-| **核心定位** | 本地写代码、Debug 调试、热重载 | CI/CD 流水线部署、提供稳定服务 |
-| **端口策略** | 暴露调试端口 (如前端 8080，后端 5003) | 仅暴露标准服务端口 (如 Web 80) |
-| **代码挂载** | 直通挂载宿主机目录 (`./backend:/code`) | 源码打包进镜像内，环境高度一致且防篡改 |
-| **容灾策略** | `restart: no` (报错即停，方便查日志) | `restart: always` (崩溃/重启后自动拉起服务) |
+```bash
+chmod +x init_ubuntu_env.sh
+./init_ubuntu_env.sh
+```
+**2. 注册 GitHub Runner：**
 
-### 👨‍💻 最佳开发实践：前后端混合热加载 (Hot-Reload)
+在仓库 Settings -> Actions -> Runners 中绑定该节点，并为其打上专属标签（如 laptop）。
 
-ARL-PRO 支持极其高效的开发体验，建议采用 **“后端跑 Docker，前端跑原生”** 的混合模式：
+**3. 享受全自动部署：**
 
-1. **一键拉起后端底座**（包含数据库、MQ、API 与调度节点）：
-   ```bash
-   # 不启动前端容器，仅启动后端基建
-   docker compose -f docker-compose.local.yml up -d backend worker scheduler mongodb rabbitmq
-   ```
-   *此时，后端 API (映射于 5003 端口) 已开启 Gunicorn `--reload` 机制，修改任意 `.py` 文件，容器内服务即刻无缝重启生效。*
+在本地修改代码后，只需执行 git push 到 main 分支。GitHub Actions 流水线 (ci.yml) 将自动构建纯净的 Docker 镜像，下发至 VPS，并使用 docker-compose.test.yml 自动重启服务（请确保 VPS 已放行 80 端口）。
 
-2. **原生启动 Vue 前端**（享受 Vite 毫秒级 HMR 热更新）：
-   ```bash
-   cd frontend
-   pnpm install
-   pnpm run dev
-   ```
-   *前端将运行于 `localhost:5173`，并通过 Vite Proxy 自动将 API 请求转发至 Docker 承载的 `5003` 端口。前后端热更新互不干扰，开发效率达到极致。*
+**初始账号密码：** admin / arlpass （登录后请立即修改）
 
----
 
-## 6. 完成度评估 (功能清单)
+## 📸 界面预览 (Screenshots)
+精美的现代化控制台，让复杂的数据一目了然。
 
-目前项目已经实现了核心功能模块的重构，完成度极高：
-* **前端功能模块**：涵盖任务列表与详情、资产监控、指纹信息、资产组详情、策略详情、GitHub 敏感信息监控全套面板。
-* **后端 API 支持**：全面支撑高并发任务下发，涵盖资产管理 (`domain`, `ip`, `site`等)、漏洞与安全 (`poc`, `vuln`, `npoc_service`) 及 GitHub 监控体系。
 
-## 7. 近期开发动态
+## ⚠️ 声明与免责 (Disclaimer)
+本工具（ARL-PRO）仅面向合法授权的企业安全建设、SRC 漏洞挖掘以及安全研究学术交流。
 
-* **DevOps 升级**：全面打通 GitHub Actions 自动化部署流水线，支持 Ubuntu 节点一键环境装配与免密提权。
-* **容灾与高可用配置**：为生产环境引入容灾编排策略 (`test.yml`)，确保分布式工作节点及核心数据库在宿主机异常重启后能够自动恢复，实现 24/7 无人值守资产侦察。
+使用本工具进行资产扫描与漏洞探测时，请务必遵守当地法律法规（如《中华人民共和国网络安全法》）及目标平台的测试范围规定。
+
+未经授权对目标进行探测属非法行为。使用者因使用本工具造成的任何直接或间接的法律责任与后果，由使用者自行承担，项目作者及贡献者不负任何连带责任。
