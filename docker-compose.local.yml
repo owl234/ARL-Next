@@ -31,7 +31,7 @@ services:
       - ./backend/wait-for-it.sh:/usr/bin/wait-for-it.sh
       - ./backend/GeoLite2:/data/GeoLite2
         # 👈 修改：在 gunicorn 命令末尾加上 --reload 参数
-    entrypoint: [ "sh", "-c", "sh /usr/bin/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh rabbitmq:5672; gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 3 --reload" ]
+    entrypoint: [ "sh", "-c", "sh /usr/bin/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh rabbitmq:5672; gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 1 --reload" ]
 
   # 👷 3. 核心扫描节点 (对应旧版的 arl-worker)
   worker:
@@ -79,6 +79,10 @@ services:
       - arl_db_local:/data/db
       # 👇 新增这一行：将初始化脚本挂载到 MongoDB 的开机自启目录
       - ./init-mongo-account.js:/docker-entrypoint-initdb.d/init-mongo-account.js:ro
+    environment:
+      - MONGO_INITDB_DATABASE=arl
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=admin
 
   # 🐇 7. 消息队列
   rabbitmq:

@@ -64,12 +64,16 @@ ARL-PRO 采用经典且强健的微服务容器编排设计，数据流转清晰
 git clone [https://github.com/owl234/arl-pro.git](https://github.com/owl234/arl-pro.git)
 cd arl-pro
 
-# 1. 一键拉起后端底座（挂载本地源码，暴露 5003 端口供 Vite 代理）
+# 1. 单独构建本地镜像，一键拉起后端底座（挂载本地源码，暴露 5003 端口供 Vite 代理）
+docker-compose -f docker-compose.local.yml build backend
 docker-compose -f docker-compose.local.yml up -d backend worker worker-github scheduler mongodb rabbitmq
+
 
 # 2. 另起终端，原生启动前端开发服务器（享受 Vite 极速 HMR）
 cd frontend
+npm install -g pnpm
 pnpm install
+pnpm add -D vite@5 @vitejs/plugin-vue@5
 pnpm run dev
 ```
 ### 方案 B：生产环境全自动 CI/CD 流 (Production)
