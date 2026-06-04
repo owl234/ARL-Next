@@ -1,0 +1,3 @@
+# Local HTTPS Certificates
+certs/
+mkcert.exe
