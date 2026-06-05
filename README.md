@@ -47,6 +47,37 @@ ARL-PRO 采用经典且强健的微服务容器编排设计，并在网关层进
 
 ---
 
+## 🔐 配置管理与数据安全 (Configuration & Data Security)
+
+本项目在生产环境严格遵循 DevSecOps 标准，杜绝任何密钥硬编码泄露风险：
+
+### 1. 防泄漏配置隔离机制
+* **代码库原则**：Git 仓库中仅保留 `backend/config-docker.example.yaml` 模板文件，不包含任何真实密码或 Token。
+* **本地生效原则**：真正控制生产环境的 `.env`（存储随机生成的数据库密码）和 `config-docker.yaml`（存储第三方 API 密钥）已经被 `.gitignore` 保护。CI/CD 拉取最新代码时**绝对不会**覆盖或抹除您在服务器上配置的凭据。
+
+### 2. 业务数据 0 丢失 (Volumes 持久化)
+每次 CI/CD 自动部署本质上是销毁旧容器并使用新镜像启动新容器。我们通过 Docker Named Volumes 实现了数据的完全解耦：
+* `arl_db_test`：持久化存储 MongoDB 中的所有扫描资产与漏洞数据。
+* `arl_tmp_test`：存储报表等临时文件。
+* `arl_screenshot_test`：存储系统自动截取的资产快照。
+* `arl_upload_poc_test`：存储用户自定义上传的 PoC 文件。
+  **结论：只要不手动执行 `docker volume rm`，任何高频的代码自动更新都不会导致您的业务数据丢失。**
+
+---
+
+## 🏗️ 环境隔离架构设计 (Architecture: Local vs Prod)
+
+为了兼顾“极致的开发效率”与“铁桶般的生产安全”，项目做了严格的环境分离：
+
+| 特性 | 本地开发环境 (`docker-compose.local.yml`) | 生产/CI 环境 (`docker-compose.test.yml`) |
+| :--- | :--- | :--- |
+| **代码运行方式** | **挂载覆写 (Bind Mounts)**: 宿主机的 `./backend` 直接映射入容器。 | **不可变基础设施 (Immutable)**: 容器 100% 运行从 GHCR 拉取的纯净只读镜像。 |
+| **热重载 (Hot Reload)** | ✅ 支持。保存代码瞬间生效，方便联调。 | ❌ 不支持。彻底杜绝“线上直接改代码”造成的幽灵 Bug。 |
+| **镜像构建** | 每次启动需在本地 `build`。 | 由 GitHub Actions 统一构建，节点仅需 `pull`。 |
+| **外部流量接入** | `localhost` 直连测试。 | Cloudflare Tunnel 加密隧道，服务器真正实现“零入站端口”。 |
+
+---
+
 ## 🚀 极速部署 (Quick Start)
 
 我们为开发者提供了两套编排方案，以平衡“开发效率”与“生产稳定”。
@@ -55,7 +86,13 @@ ARL-PRO 采用经典且强健的微服务容器编排设计，并在网关层进
 
 适用于二次开发、编写 PoC 与前后端联调。采用热重载机制，代码修改浏览器/接口即刻生效。
 
-**1. 准备本地受信任证书 (必须)**
+**1.克隆代码**
+```bash
+git clone https://github.com/owl234/arl-pro.git
+cd arl-pro
+```
+
+**2. 准备本地受信任证书 (必须)**
 为了让本地联调拥有合法的 HTTPS 绿锁并解决跨域问题，需先生成本地证书：
 ```powershell
 # 1. 在项目根目录下载 mkcert (Windows 为例)
@@ -71,7 +108,7 @@ cd certs
 ```
 *(注意：`certs/` 目录已加入 `.gitignore` 防止私钥泄露)*
 
-**2. 启动本地环境**
+**3. 启动本地环境**
 ```bash
 # 启动后端底座（挂载本地源码，暴露 5003 端口供 Vite 代理）
 docker-compose -f docker-compose.local.yml build backend
@@ -107,21 +144,28 @@ pnpm run dev
   * **Service Type**: 选择 `HTTP` (🚨 必须选 HTTP，云端已完成加解密)
   * **Service URL**: `localhost:80`
 
-**3. 享受全自动部署**
-在本地修改代码后，只需执行 `git push` 到 main 分支。系统因为受外部隧道保护，无需在服务器端修改任何代码或防火墙策略。GitHub Actions 会自动构建并更新内部 Nginx 与后端容器。
+**3. 初始化生产安全配置**
+
+在第一次触发 CI/CD 自动部署前，需在服务器上初始化安全环境变量（生成强密码与脱敏配置）：
+```bash
+git clone https://github.com/owl234/arl-pro.git
+cd arl-pro
+chmod +x init_env.sh
+./init_env.sh
+```
+**4. 享受全自动部署**
+
+- 后续只需向 GitHub 的 main 分支 Push 代码。
+- CI/CD 管道会自动打包构建最新的前后端 Docker 镜像至 GitHub Packages (GHCR)。
+- 部署节点会自动拉取新镜像并平滑重启服务，过程仅需数分钟。
+- 访问 https://arl.您的域名.com 即可使用最新版的系统。
 
 **初始账号密码：** `admin / arlpass` （登录后请立即通过 `https://arl.yourdomain.com` 修改）
 
 ---
 
-## 📸 界面预览 (Screenshots)
-*(精美的现代化控制台，让复杂的数据一目了然。)*
-
----
-
 ## ⚠️ 声明与免责 (Disclaimer)
+
 本工具（ARL-PRO）仅面向合法授权的企业安全建设、SRC 漏洞挖掘以及安全研究学术交流。
 
-使用本工具进行资产扫描与漏洞探测时，请务必遵守当地法律法规（如《中华人民共和国网络安全法》）及目标平台的测试范围规定。
-
-未经授权对目标进行探测属非法行为。使用者因使用本工具造成的任何直接或间接的法律责任与后果，由使用者自行承担，项目作者及贡献者不负任何连带责任。
+使用本工具进行资产扫描与漏洞探测时，请务必遵守当地法律法规（如《中华人民共和国网络安全法》）及目标平台的测试范围规定。未经授权对目标进行探测属非法行为。使用者因使用本工具造成的任何直接或间接的法律责任与后果，由使用者自行承担，项目作者及贡献者不负任何连带责任。
