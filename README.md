@@ -1,12 +1,21 @@
-# 🚀 ARL-PRO (Asset Reconnaissance Lighthouse Professional)
+<div align="center">
 
-> **专为实战而生：下一代全自动化、分布式的资产侦察与漏洞挖掘工作站。**
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Vue](https://img.shields.io/badge/Vue.js-3.x-4FC08D.svg)
-![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)
-![Build](https://img.shields.io/github/actions/workflow/status/owl234/arl-pro/ci.yml?label=CI%2FCD)
+  # ARL-PRO
+  **企业级自动化资产侦察与漏洞监控“灯塔”**
+
+  <p>
+    <a href="https://github.com/owl234/arl-pro/actions"><img src="https://img.shields.io/github/actions/workflow/status/owl234/arl-pro/ci.yml?style=flat-square&logo=github&label=Build" alt="build"></a>
+    <a href="https://hub.docker.com/"><img src="https://img.shields.io/badge/docker-ready-blue.svg?style=flat-square&logo=docker" alt="Docker"></a>
+    <a href="https://github.com/owl234/arl-pro/releases"><img src="https://img.shields.io/github/v/release/owl234/arl-pro?style=flat-square&color=success" alt="Release"></a>
+    <img src="https://img.shields.io/badge/python-3.8%2B-blue?style=flat-square&logo=python" alt="Python">
+    <img src="https://img.shields.io/badge/vue-3.x-4fc08d?style=flat-square&logo=vuedotjs" alt="Vue">
+  </p>
+
+  [**English**](./README_EN.md) | [**更新日志**](./CHANGELOG.md) | [**在线文档**](https://your-doc-link.com)
+</div>
+
+<br/>
 
 ---
 
