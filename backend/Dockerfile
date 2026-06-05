@@ -35,7 +35,8 @@ RUN pip install /code/ARL-NPoC/
 COPY . /code/
 
 # 8. 赋予脚本执行权限
-RUN chmod +x wait-for-it.sh || true
+RUN cp /code/wait-for-it.sh /usr/bin/wait-for-it.sh && \
+    chmod +x /usr/bin/wait-for-it.sh
 
 # 9. 赋予 ARL 自带工具执行权限
 RUN chmod +x /code/app/tools/massdns /code/app/tools/phantomjs || true

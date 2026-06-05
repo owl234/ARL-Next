@@ -1,3 +1,17 @@
 # Local HTTPS Certificates
 certs/
 mkcert.exe
+
+# =========================
+# ARL 生产环境敏感配置文件隔离
+# =========================
+
+# 忽略根目录的环境变量文件
+.env
+
+# 忽略后端实际生效的配置文件
+backend/config-docker.yaml
+backend/app/config.yaml
+
+# 如果未来有专门的生产环境配置，也一并忽略
+docker-compose.prod.yml
