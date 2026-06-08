@@ -20,6 +20,10 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     libffi-dev \
     libssl-dev \
     python3-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    zlib1g-dev \
+    make \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
