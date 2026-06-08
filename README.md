@@ -111,7 +111,7 @@ ARL-PRO 采用经典且强健的微服务容器编排设计，并在网关层进
 
 **1.克隆代码**
 ```bash
-git clone https://github.com/owl234/arl-pro.git
+git clone https://github.com/owl234/arl-pro
 cd arl-pro
 ```
 
@@ -148,7 +148,7 @@ pnpm run dev
 
 **1.克隆代码**
 ```bash
-git clone https://github.com/owl234/arl-pro.git
+git clone https://github.com/owl234/arl-pro
 cd arl-pro
 ```
 
@@ -218,7 +218,7 @@ pnpm run dev
 
 在第一次触发 CI/CD 自动部署前，需在服务器上初始化安全环境变量（生成强密码与脱敏配置）：
 ```bash
-git clone https://github.com/owl234/arl-pro.git
+git clone https://github.com/owl234/arl-pro
 cd arl-pro
 chmod +x init_env.sh
 ./init_env.sh
