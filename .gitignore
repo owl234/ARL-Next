@@ -19,3 +19,16 @@ docker-compose.prod.yml
 # Python cache files
 __pycache__/
 *.py[cod]
+
+# Logs
+*.log
+backend/*.log
+
+# IDE & OS files
+.idea/
+.DS_Store
+
+# Test Cache
+.pytest_cache/
+.coverage
+htmlcov/
