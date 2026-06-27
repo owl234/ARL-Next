@@ -7,25 +7,35 @@ from app.config import Config
 
 
 class ScanPortType:
-    TEST = Config.TOP_10
-    TOP100 = Config.TOP_100
-    TOP1000 = Config.TOP_1000
-    ALL = "0-65535"
+    """
+    [枚举：端口扫描策略]
+    定义了几种常见的端口扫描范围，映射到 config.py 中的具体配置。
+    """
+    TEST = Config.TOP_10    # 测试模式：极速扫最常见的10个Web端口
+    TOP100 = Config.TOP_100 # 常规模式：扫常见的100个服务端口
+    TOP1000 = Config.TOP_1000 # 深度模式：扫常见的1000个端口
+    ALL = "0-65535"         # 全端口扫描，极度耗时，非特殊情况不建议使用
 
 
 class DomainDictType:
+    """[枚举：字典类型] 域名爆破使用的字典规模"""
     TEST = Config.DOMAIN_DICT_TEST
     BIG = Config.DOMAIN_DICT_2W
 
 
 class CollectSource:
-    DOMAIN_BRUTE = "domain_brute"
-    BAIDU = "baidu"
-    ALTDNS = "alt_dns"
-    ARL = "arl"
-    SITESPIDER = "site_spider"
-    SEARCHENGINE = "search_engine"
-    MONITOR = "monitor"
+    """
+    [第一性原理：数据溯源]
+    记录资产数据是通过什么渠道收集到的。这不仅用于界面展示“发现来源”，
+    更在权重判断、置信度分析时起关键作用（比如爆破发现的置信度可能高于某个老旧第三方API）。
+    """
+    DOMAIN_BRUTE = "domain_brute" # 子域名爆破获取
+    BAIDU = "baidu"               # 百度搜索爬取
+    ALTDNS = "alt_dns"            # 组合变种词爆破
+    ARL = "arl"                   # 系统内部历史数据碰撞
+    SITESPIDER = "site_spider"    # 爬虫在网页中发现的链接
+    SEARCHENGINE = "search_engine"# 空间测绘引擎(FOFA, Quake等)
+    MONITOR = "monitor"           # 计划监控任务自动发现
 
 
 class TaskStatus:
@@ -56,28 +66,18 @@ class TaskTag:
 
 
 class TaskType:
-    """任务目标类别"""
-
-    """IP任务"""
-    IP = "ip"
-
-    """域名任务"""
-    DOMAIN = "domain"
-
-    """站点， 风险巡航"""
-    RISK_CRUISING = "risk_cruising"
-
-    """资产站点更新"""
-    ASSET_SITE_UPDATE = "asset_site_update"
-
-    """Fofa 任务"""
-    FOFA = "fofa"
-
-    """资产站点添加"""
-    ASSET_SITE_ADD = "asset_site_add"
-
-    """资产 WIH 更新"""
-    ASSET_WIH_UPDATE = "asset_wih_update"
+    """
+    [第一性原理：业务类型隔离]
+    定义了后端引擎究竟在跑什么类型的任务。
+    它决定了 Celery worker 拿到任务后，到底该走哪一条流水线 (Pipeline)。
+    """
+    IP = "ip"                           # IP任务流水线
+    DOMAIN = "domain"                   # 域名任务流水线
+    RISK_CRUISING = "risk_cruising"     # 站点风险巡航(PoC漏扫等)
+    ASSET_SITE_UPDATE = "asset_site_update" # 更新资产库站点信息
+    FOFA = "fofa"                       # 空间测绘查询任务
+    ASSET_SITE_ADD = "asset_site_add"   # 手动录入资产站点
+    ASSET_WIH_UPDATE = "asset_wih_update" # 更新资产Web信息搜集
 
 
 class SiteAutoTag:
@@ -140,43 +140,25 @@ class CeleryRoutingKey:
 
 
 class CeleryAction:
-    """celery任务celery_action字段"""
-
-    """常规IP任务"""
-    IP_TASK = "ip_task"
-
-    """常规域名任务"""
-    DOMAIN_TASK = "domain_task"
-
-    """域名监测任务"""
-    DOMAIN_EXEC_TASK = "domain_exec_task"
-
-    """IP 类型监测任务"""
-    IP_EXEC_TASK = "ip_exec_task"
-
-    """同步已有任务"""
-    DOMAIN_TASK_SYNC_TASK = "domain_task_sync_task"
-
-    """PoC运行任务"""
-    RUN_RISK_CRUISING = "run_risk_cruising"
-
-    """Fofa 查询任务"""
-    FOFA_TASK = "fofa_task"
-
-    """Github 泄漏任务"""
-    GITHUB_TASK_TASK = "github_task_task"
-
-    """Github 泄漏监控任务"""
-    GITHUB_TASK_MONITOR = "github_task_monitor"
-
-    """资产站点更新任务"""
-    ASSET_SITE_UPDATE = "asset_site_update"
-
-    """资产站点添加站点"""
-    ADD_ASSET_SITE_TASK = "add_asset_site_task"
-
-    """资产WIH更新任务"""
-    ASSET_WIH_UPDATE = "asset_wih_update"
+    """
+    [第一性原理：命令分发路由表 (Command Pattern)]
+    这是连接 `helpers/task.py` (下发者) 和 `celerytask.py` (执行者) 的通信暗号。
+    下发任务时，将特定的 Action 塞进消息队列；Worker 收到后，根据这个暗号
+    去 action_map 里找对应的处理函数。
+    如果你想给系统新增一种全新的任务类别，首先就得在这里注册它的“接头暗号”！
+    """
+    IP_TASK = "ip_task"                         # 暗号：跑常规IP任务
+    DOMAIN_TASK = "domain_task"                 # 暗号：跑常规域名任务
+    DOMAIN_EXEC_TASK = "domain_exec_task"       # 暗号：跑域名监测任务
+    IP_EXEC_TASK = "ip_exec_task"               # 暗号：跑IP监测任务
+    DOMAIN_TASK_SYNC_TASK = "domain_task_sync_task" # 暗号：同步已有任务资产
+    RUN_RISK_CRUISING = "run_risk_cruising"     # 暗号：运行漏洞/风险巡航
+    FOFA_TASK = "fofa_task"                     # 暗号：运行Fofa查询
+    GITHUB_TASK_TASK = "github_task_task"       # 暗号：跑Github信息泄露搜索
+    GITHUB_TASK_MONITOR = "github_task_monitor" # 暗号：跑Github监控
+    ASSET_SITE_UPDATE = "asset_site_update"     # 暗号：执行资产站点更新
+    ADD_ASSET_SITE_TASK = "add_asset_site_task" # 暗号：执行资产站点添加
+    ASSET_WIH_UPDATE = "asset_wih_update"       # 暗号：执行资产WIH更新
 
 
 error_map = {

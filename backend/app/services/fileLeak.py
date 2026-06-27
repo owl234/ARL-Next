@@ -115,10 +115,18 @@ class Page():
         self.back_up_suffix_list = [".tar", ".tar.gz", ".zip", ".rar", ".7z", ".bz2", ".gz", ".war"]
 
     def __eq__(self, other):
+        """
+        [第一性原理：假 404 页面的终极对抗算法 (页面相似度)]
+        Web 扫描最头疼的就是“软 404”：你随便访问一个不存在的路径，服务器居然给你返回 200 OK，并展示一个“抱歉，页面找不到”的自建页面。
+        如果你单纯用 HTTP 状态码去判断，那所有的文件都会被误报为“存在”。
+        这里的 __eq__ 是整个模块的灵魂。它的核心思想是：判断两个页面是否本质上是同一个页面（即使它们因为动态时间、动态路径有微小的差别）。
+        """
         if isinstance(other, Page):
+            # 1. 状态码不同，肯定不是同一个页面
             if self.status_code != other.status_code:
                 return False
 
+            # 2. 如果两者都是 302 跳转
             if self.is_302() and other.is_302():
                 self_new_url = self.location_url
                 other_new_url = other.location_url
@@ -134,6 +142,7 @@ class Page():
                 self_new_path = urlparse(self_new_url).path
                 other_new_path = urlparse(other_new_url).path
 
+                # 把各自请求的特定 payload 替换成统一的占位符 $AAAA$，然后比对跳转路径是否一致
                 path1 = self_new_path.replace(self.url.payload, "$AAAA$")
                 path2 = other_new_path.replace(other.url.payload, "$AAAA$")
 
@@ -148,20 +157,25 @@ class Page():
                 else:
                     return False
 
+            # 3. 如果是 200 OK 的页面，抹去页面里反射回来的 payload（防止因为路径回显导致页面不一样）
             self_content = self.content.replace(self.url.payload.encode(), b"")
             other_content = other.content.replace(other.url.payload.encode(), b"")
 
+            # 如果两个页面的大小差距在 5 个字节以内，直接认为一模一样！(应对极其微小的动态时间戳差异)
             if abs(len(self_content) - len(other_content)) <= 5:
                 self.times += 1
                 return True
 
+            # 如果页面大小差距极大（超过10%或500字节），那绝对是两个不同的页面
             min_len_content = min(len(self_content),  len(other_content))
             if abs(len(self_content) - len(other_content)) >= max(500, int(min_len_content*0.1)):
                 return False
 
+            # 如果 Title 相同，认为是同一类页面（比如都有同样的错误标题）
             if len(self.title) > 2 and self.title == other.title:
                 return True
 
+            # 【终极武器】：使用 difflib 计算两个页面的文本相似度，超过 80% (bool_ratio) 就认为是相同的 404 页面
             quick_ratio = difflib.SequenceMatcher(None, self_content, other_content).quick_ratio()
             if quick_ratio >= bool_ratio:
                 self.times +=1
@@ -241,14 +255,22 @@ class Page():
 
 
 class FileLeak(BaseThread):
+    """
+    [第一性原理：底层武器库 - 敏感文件泄露探针]
+    这个类的核心职责不是“发请求”，而是“证伪”。
+    扫描器最怕的是海量的 False Positive（误报）。这个类花了一半以上的代码在做“双重验证”。
+    """
     def __init__(self, target, urls, concurrency=8):
         super().__init__(urls, concurrency = concurrency)
         self.target = target.rstrip("/") + "/"
         self.urls = urls
+        # 【基准 404 测试路径】：一个绝对不可能存在的路径。
+        # 用来打底，看看服务器在遇到真 404 的时候到底会返回什么妖魔鬼怪。
         self.path_404 = "not_found_2222_111"
-        self.page404_set = set()
-        self.page200_set = set()
+        self.page404_set = set() # 存放所有被判定为“假页面”的黑名单集合
+        self.page200_set = set() # 存放初步判定为成功的页面
         self.page200_code_list = [200, 301, 302, 500]
+        # 【黑名单正则与特征】：一旦网页 Title 或 Body 里有这些，就一棍子打死，认为是 404 页面
         self.page404_title = ["404", "不存在", "错误", "403", "禁止访问", "请求含有不合法的参数"]
         self.page404_title.extend(["网络防火墙", "访问拦截", "由于安全原因JSP功能默认关闭"])
         self.page404_content = [b'<script>document.getElementById("a-link").click();</script>']
@@ -269,15 +291,24 @@ class FileLeak(BaseThread):
         if self.record_page:
             self.page_all.append(page)
 
+        # 如果一眼看去就是典型的 404 页面，直接扔进黑名单垃圾桶
         if self.is_404_page(page):
             self.page404_set.add(page)
             return
 
+        # 如果它初步看起来像是真的（没有命中黑名单特征），先放入白名单
+        # 但注意，接下来它还要经受 check_page_200() 的地狱级拷问
         if page not in self.page404_set:
             self.page200_set.add(page)
 
 
     def build_404_page(self):
+        """
+        [第一性原理：建立基线]
+        扫描开始前的第一件事，就是访问 /not_found_2222_111，
+        把服务器的“真实 404 反馈面貌”记录下来，加入黑名单库 (self.page404_set)。
+        后面任何跟它“长得像”（通过 Page.__eq__ 相似度对比）的页面，都会被直接干掉。
+        """
         url_404 = URL(self.target + self.path_404, self.path_404)
         logger.info("req => {}".format(url_404))
         page_404 = Page(self.http_req(url_404))
@@ -292,6 +323,12 @@ class FileLeak(BaseThread):
             self.skip_302 = True
 
     def run(self):
+        """
+        [第一性原理：扫描三部曲]
+        1. 建立 404 基线 (build_404_page)
+        2. 多线程狂奔，并发探测所有字典路径 (_run)
+        3. 对所有初步成活的结果进行二次证伪 (check_page_200)
+        """
         t1 = time.time()
         logger.info("start fileleak {}".format(len(self.targets)))
 
@@ -350,6 +387,13 @@ class FileLeak(BaseThread):
         return False
 
     def check_page_200(self):
+        """
+        [第一性原理：证伪算法 (False Positive Mitigation)]
+        这是防止误报的最强防线。
+        假设你扫到了一个 /admin.php 返回 200 OK，并且内容看起来也很正常。怎么证明它是真的？
+        很简单：你在后面加点垃圾字符，去请求 /admin.php1337。
+        如果 /admin.php1337 也返回 200 OK 且页面相似，那说明这整个目录都在骗人，/admin.php 也是假的！
+        """
         for page in self.page200_set:
             if page in self.page404_set:
                 continue
@@ -358,20 +402,27 @@ class FileLeak(BaseThread):
                 self.page404_set.add(page)
                 continue
 
+            # 生成对应的加了 1337 扰乱字符的对照 URL
             url_404_list = self.gen_check_url(page.url)
 
             for url_404 in url_404_list:
                 page_404 = Page(self.http_req(url_404))
+                # 将扰乱测试页面加入黑名单库
                 self.page404_set.add(page_404)
 
                 if page_404.is_302() and page_404.location_url.endswith(page_404.url.payload + "/"):
                     self.page404_set.add(page)
                     self.skip_302 = True
 
+        # 最终真理：从白名单中剔除掉所有与黑名单（基线404和1337测试页面）相似度过高的页面
+        # 这里的相减操作 `-=` 底层会狂热调用 Page.__eq__ 的文本相似度算法！
         self.page200_set -= self.page404_set
 
 
     def gen_check_url(self, url: URL):
+        """
+        生成用于证伪测试的 URL (就是在这个原本认为是正确的 url 后面拼上 a1337)
+        """
         payload = url.payload
         if url.path in url.scope:
             check_url = url.url + "1337"
@@ -436,6 +487,13 @@ import os
 
 
 class GenBackDicts:
+    """
+    [第一性原理：动态指纹生成字典]
+    死板的扫描器只知道加载一份固定的 backup.zip 字典去跑。
+    高级的扫描器会基于“当前目标特征”去动态生成字典。
+    比如遇到 target.com/admin/ 目录，它会把 target/admin 拆开，
+    自动组合出 target.zip, target.tar.gz, admin.rar 等高命中率的压缩包字典。
+    """
     def __init__(self, url):
         self.target = normal_url(url)
         self.suffixs = [".tar", ".tar.gz", ".zip", ".rar", ".7z", ".bz2", ".gz", "_bak.rar", ".war"]
@@ -445,6 +503,7 @@ class GenBackDicts:
 
 
     def gen_dict_from_domain(self):
+        """基于域名切词：比如 news.baidu.com -> news.zip, baidu.rar"""
         result = []
         res = get_tld(self.target, as_object=True, fail_silently=True)
         if res:
@@ -454,6 +513,7 @@ class GenBackDicts:
         return set(result)
 
     def gen_backup_dicts(self, nemes):
+        """做笛卡尔积组合，生成爆炸式的组合字典"""
         out = []
         items = itertools.product(nemes, self.suffixs)
         for x in items:
@@ -461,6 +521,7 @@ class GenBackDicts:
         return out
 
     def gen_dict_from_path(self):
+        """基于路径切词：比如 /api/v1/auth/ -> auth.zip"""
         out = []
         dirs = os.path.dirname(self.path).split("/")
         if len(dirs)> 1 and dirs[-1]:
@@ -469,6 +530,7 @@ class GenBackDicts:
 
 
     def gen(self):
+        """字典生成总线"""
         ret = set()
         names = self.gen_dict_from_domain()
 
