@@ -18,11 +18,8 @@ class SiteScreenshot(BaseThread):
     def work(self, site):
         file_name = '{}/{}.jpg'.format(self.capture_dir, self.gen_filename(site))
 
-        cmd_parameters = ['phantomjs',
-                          '--ignore-ssl-errors true',
-                          '--ssl-protocol any',
-                          '--ssl-ciphers ALL',
-                          Config.SCREENSHOT_JS,
+        cmd_parameters = ['node',
+                          '/code/app/tools/screenshot_pptr.js',
                           '-u={}'.format(site),
                           '-s={}'.format(file_name),
                           ]

@@ -1,8 +1,10 @@
 <template>
   <div style="background-color: #fff; padding: 24px; min-height: calc(100vh - 64px);">
-    <div style="margin-bottom: 24px;">
-      <h2 style="margin: 0; font-size: 20px; font-weight: 500;">{{ targetName }}相关资产</h2>
-    </div>
+    <a-page-header
+      :title="`${targetName} 相关资产`"
+      @back="() => router.back()"
+      style="padding: 0 0 24px 0;"
+    />
 
     <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs">
       <a-tab-pane key="site" :tab="`站点 - ${queryCounts.site}`"></a-tab-pane>
@@ -369,12 +371,13 @@
 <script setup>
 // 💥 核心修改 2：引入 createVNode 和 Modal、ExclamationCircleOutlined
 import { ref, onMounted, reactive, watch, computed, createVNode } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
 import { SearchOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue';
 
 const route = useRoute();
+const router = useRouter();
 const query = route?.query || {};
 const targetName = ref(query.targetName || '未知目标');
 const activeTab = ref('site');

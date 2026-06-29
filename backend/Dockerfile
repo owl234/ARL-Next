@@ -8,7 +8,8 @@ WORKDIR /code
 ENV PYTHONUNBUFFERED=1 \
     TZ=Asia/Shanghai \
     LANG=en_US.UTF-8 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    NODE_PATH=/usr/local/lib/node_modules
 
 # 4. 🚀 [系统级重构] 安装系统依赖 & Nmap 武器库
 # 使用国内阿里云镜像源加速 apt-get (可选，建议在本地构建时开启)
@@ -24,8 +25,17 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
     libxslt1-dev \
     zlib1g-dev \
     make \
+    fontconfig \
+    chromium \
+    nodejs \
+    npm \
+    fonts-wqy-zenhei \
+    fonts-wqy-microhei \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+RUN npm config set registry https://registry.npmmirror.com/ && \
+    npm install -g puppeteer-core@10.4.0
 
 # 5. 复制依赖清单并安装 (利用 Docker 缓存)
 COPY requirements.txt /code/

@@ -16,6 +16,7 @@ services:
 
   # ⚙️ 2. 后端 Web API 服务
   backend:
+    platform: linux/amd64
     image: arl_backend_test:latest
     container_name: arl_backend_local
     build: ./backend
@@ -31,10 +32,11 @@ services:
       - ./backend/wait-for-it.sh:/usr/bin/wait-for-it.sh
       - ./backend/GeoLite2:/data/GeoLite2
         # 👈 修改：在 gunicorn 命令末尾加上 --reload 参数
-    entrypoint: [ "sh", "-c", "sh /usr/bin/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh rabbitmq:5672; gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 1 --reload" ]
+    entrypoint: [ "bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh rabbitmq:5672; gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 1 --reload" ]
 
   # 👷 3. 核心扫描节点 (对应旧版的 arl-worker)
   worker:
+    platform: linux/amd64
     image: arl_backend_test:latest
     container_name: arl_worker_local
     depends_on:
@@ -44,10 +46,11 @@ services:
       - ./backend:/code # 👈 新增：同样挂载代码，确保 worker 也是最新逻辑
       - ./backend/GeoLite2:/data/GeoLite2
     # 启动 Celery worker
-    entrypoint: ["sh", "-c", "sh /usr/bin/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q arltask -n arltask -c 2 -O fair -l info"]
+    entrypoint: ["bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q arltask -n arltask -c 2 -O fair -l info"]
 
   # 🕵️ 4. GitHub 监控节点 (对应旧版的 arl-worker-github)
   worker-github:
+    platform: linux/amd64
     image: arl_backend_test:latest
     container_name: arl_worker_github_local
     depends_on:
@@ -56,10 +59,11 @@ services:
     volumes:
       - ./backend:/code # 👈 新增：同样挂载代码，确保 worker 也是最新逻辑
       - ./backend/GeoLite2:/data/GeoLite2
-    entrypoint: ["sh", "-c", "wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q github -n github -c 2"]
+    entrypoint: ["bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q github -n github -c 2"]
 
   # ⏱️ 5. 定时调度器 (对应旧版的 arl-scheduler)
   scheduler:
+    platform: linux/amd64
     image: arl_backend_test:latest
     container_name: arl_scheduler_local
     depends_on:
@@ -68,7 +72,7 @@ services:
     volumes:
       - ./backend:/code # 👈 新增：同样挂载代码，确保 worker 也是最新逻辑
       - ./backend/GeoLite2:/data/GeoLite2
-    entrypoint: ["sh", "-c", "wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672; python3 -m app.scheduler"]
+    entrypoint: ["bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh rabbitmq:5672; python3 -m app.scheduler"]
 
   # 🗄️ 6. 数据库
   mongodb:

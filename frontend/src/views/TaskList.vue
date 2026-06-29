@@ -111,7 +111,7 @@
         :columns="columns"
         :loading="loading"
         :pagination="false"
-        :scroll="{ x: 1860 }"
+        :scroll="{ x: 'max-content' }"
         :rowKey="(record) => record.task_id || record._id"
         bordered
         style="margin-bottom: 16px;"
@@ -122,7 +122,11 @@
         </template>
 
         <template v-else-if="column.key === 'target'">
-          <div style="max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="record.target">{{ record.target }}</div>
+          <a-tooltip :title="record.target" placement="topLeft">
+            <div style="width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              {{ record.target }}
+            </div>
+          </a-tooltip>
         </template>
 
         <template v-else-if="column.key === 'statistic'">
@@ -344,15 +348,15 @@ const pagination = reactive({ current: 1, pageSize: 10, total: 0, showSizeChange
 
 // 1:1 还原原版精确的宽带分配，并为任务名和目标开启排序
 const columns = [
-  { title: '任务名', dataIndex: 'name', key: 'name', width: 200, sorter: true },
-  { title: '目标', dataIndex: 'target', key: 'target', width: 120, sorter: true },
+  { title: '任务名', dataIndex: 'name', key: 'name', width: 180, sorter: true, ellipsis: true },
+  { title: '目标', dataIndex: 'target', key: 'target', width: 220, sorter: true, ellipsis: true },
   { title: '统计', dataIndex: 'statistic', key: 'statistic', width: 100 },
-  { title: '配置项', dataIndex: 'options', key: 'options', width: 250 },
-  { title: '状态', dataIndex: 'status', key: 'status', width: 120 },
-  { title: '开始时间', dataIndex: 'start_time', key: 'start_time', width: 200 },
-  { title: '结束时间', dataIndex: 'end_time', key: 'end_time', width: 200 },
-  { title: 'Task_Id', dataIndex: '_id', key: 'task_id', width: 250 },
-  { title: '操作', key: 'action', fixed: 'right', width: 420 },
+  { title: '配置项', dataIndex: 'options', key: 'options', width: 160, ellipsis: true },
+  { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
+  { title: '开始时间', dataIndex: 'start_time', key: 'start_time', width: 160 },
+  { title: '结束时间', dataIndex: 'end_time', key: 'end_time', width: 160 },
+  { title: 'Task_Id', dataIndex: '_id', key: 'task_id', width: 220 },
+  { title: '操作', key: 'action', fixed: 'right', width: 280 },
 ];
 
 // 升级版：智能识别 ARL 的各种动态运行状态

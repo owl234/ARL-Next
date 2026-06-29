@@ -12,11 +12,8 @@ class WebAnalyze(BaseThread):
         self.analyze_map = {}
 
     def work(self, site):
-        cmd_parameters = ['phantomjs',
-                          '--ignore-ssl-errors true',
-                          '--ssl-protocol any',
-                          '--ssl-ciphers ALL',
-                          Config.DRIVER_JS ,
+        cmd_parameters = ['node',
+                          '/code/app/tools/driver_pptr.js',
                           site
                           ]
         logger.debug("WebAnalyze=> {}".format(" ".join(cmd_parameters)))
