@@ -5,16 +5,65 @@ from .pageInfo import PageInfo
 from .wihRecord import WihRecord
 from app.config import Config
 
+import os
 
 class ScanPortType:
     """
     [枚举：端口扫描策略]
-    定义了几种常见的端口扫描范围，映射到 config.py 中的具体配置。
+    仅作为类型的字面量定义，实际端口数据通过 get_scan_ports 动态读取。
     """
-    TEST = Config.TOP_10    # 测试模式：极速扫最常见的10个Web端口
-    TOP100 = Config.TOP_100 # 常规模式：扫常见的100个服务端口
-    TOP1000 = Config.TOP_1000 # 深度模式：扫常见的1000个端口
-    ALL = "0-65535"         # 全端口扫描，极度耗时，非特殊情况不建议使用
+    TEST = "test"
+    TOP100 = "top100"
+    TOP1000 = "top1000"
+    ALL = "all"
+    CUSTOM = "custom"
+
+
+def get_scan_ports(port_type):
+    """
+    [动态读取端口配置]
+    根据 port_type 读取 app/dicts/ 下对应的 port_xxx.txt 文件，并将其转为逗号分隔的字符串。
+    如果没有找到对应字典，回退到兜底配置。
+    """
+    basedir = os.path.dirname(os.path.dirname(__file__))
+    dicts_dir = os.path.join(basedir, 'dicts')
+    filename_map = {
+        ScanPortType.TEST: 'port_test.txt',
+        ScanPortType.TOP100: 'port_top100.txt',
+        ScanPortType.TOP1000: 'port_top1000.txt',
+        ScanPortType.ALL: 'port_all.txt',
+        ScanPortType.CUSTOM: 'port_custom.txt'
+    }
+    filename = filename_map.get(port_type)
+    
+    # 默认兜底配置
+    default_ports = {
+        ScanPortType.TEST: "80,443",
+        ScanPortType.TOP100: "80,443,8080",
+        ScanPortType.TOP1000: "80,443,8080,8443",
+        ScanPortType.ALL: "1-65535",
+        ScanPortType.CUSTOM: "80,443"
+    }
+
+    if not filename:
+        return default_ports.get(port_type, "80,443")
+        
+    path = os.path.join(dicts_dir, filename)
+    if os.path.exists(path):
+        try:
+            ports = []
+            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    p = line.strip()
+                    if p:
+                        ports.append(p)
+            if ports:
+                return ",".join(ports)
+        except Exception:
+            pass
+
+    # 读取失败，返回兜底
+    return default_ports.get(port_type, "80,443")
 
 
 class DomainDictType:

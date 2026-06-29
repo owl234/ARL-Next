@@ -239,6 +239,7 @@
           <a-select-option value="top100">TOP100</a-select-option>
           <a-select-option value="top1000">TOP1000</a-select-option>
           <a-select-option value="all">全端口</a-select-option>
+          <a-select-option value="custom">自定义端口字典</a-select-option>
         </a-select>
       </a-form-item>
 

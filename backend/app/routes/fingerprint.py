@@ -136,6 +136,67 @@ file_upload.add_argument('file',
                          help='JSON file')
 
 
+@ns.route('/sync/')
+class SyncARLFinger(ARLResource):
+
+    @auth
+    def post(self):
+        """
+        同步指纹到 webapp.json
+        """
+        from app.config import Config
+        import json
+        import os
+
+        webapp_file = Config.web_app_rule
+        
+        # Load existing webapp.json
+        webapp_data = {}
+        if os.path.exists(webapp_file):
+            try:
+                with open(webapp_file, 'r', encoding='utf-8') as f:
+                    webapp_data = json.load(f)
+            except Exception as e:
+                logger.error(f"Failed to load webapp.json: {e}")
+                return utils.build_ret(ErrorMsg.Error, {'msg': f"加载 webapp.json 失败: {e}"})
+
+        # Fetch all from DB
+        results = list(utils.conn_db('fingerprint').find())
+        
+        # Keep track of updated or added
+        sync_cnt = 0
+        for result in results:
+            name = result["name"]
+            human_rule = result["human_rule"]
+            
+            if name in webapp_data:
+                # Update existing rule
+                if webapp_data[name].get("fofa_rule") != human_rule:
+                    webapp_data[name]["fofa_rule"] = human_rule
+                    sync_cnt += 1
+            else:
+                # Add new rule
+                webapp_data[name] = {
+                    "cats": [],
+                    "headers": [],
+                    "html": [],
+                    "title": [],
+                    "icon": "default.png",
+                    "website": "https://www.riskivy.com/",
+                    "fofa_rule": human_rule
+                }
+                sync_cnt += 1
+
+        # Save back to webapp.json
+        try:
+            with open(webapp_file, 'w', encoding='utf-8') as f:
+                json.dump(webapp_data, f, ensure_ascii=False, indent=4)
+            return utils.build_ret(ErrorMsg.Success, {'msg': f"成功同步了 {sync_cnt} 条更新到 webapp.json"})
+        except Exception as e:
+            logger.error(f"Failed to save webapp.json: {e}")
+            return utils.build_ret(ErrorMsg.Error, {'msg': f"保存 webapp.json 失败: {e}"})
+
+
 @ns.route('/upload/')
 class UploadARLFinger(ARLResource):
 
@@ -152,32 +213,42 @@ class UploadARLFinger(ARLResource):
             if not isinstance(obj, list):
                 return utils.build_ret(ErrorMsg.Error, {'msg': "not list obj"})
 
+            # Pre-fetch existing rules for in-memory deduplication (massively improves speed)
+            existing_rules = {doc.get('human_rule') for doc in utils.conn_db('fingerprint').find({}, {"human_rule": 1})}
+
             error_cnt = 0
             success_cnt = 0
             repeat_cnt = 0
+            new_docs = []
 
             for rule in obj:
-                human_rule = rule["rule"]
-                rule_name = rule['name']
+                human_rule = rule.get("rule", "")
+                rule_name = rule.get('name', "")
+
+                if not human_rule or not rule_name:
+                    error_cnt += 1
+                    continue
 
                 rule_flag = check_expression(human_rule)
                 if not rule_flag:
                     error_cnt += 1
                     continue
 
-                result = utils.conn_db('fingerprint').find_one({"human_rule": human_rule})
-                if result:
+                if human_rule in existing_rules:
                     repeat_cnt += 1
                     continue
 
-                data = {
+                new_docs.append({
                     "name": rule_name,
                     "human_rule": human_rule,
                     "update_date": utils.curr_date_obj()
-                }
+                })
+                # Prevent duplicates within the uploaded file itself
+                existing_rules.add(human_rule)
                 success_cnt += 1
 
-                utils.conn_db('fingerprint').insert_one(data)
+            if new_docs:
+                utils.conn_db('fingerprint').insert_many(new_docs)
 
             return utils.build_ret(ErrorMsg.Success, {'error_cnt': error_cnt,
                                                       'repeat_cnt': repeat_cnt,'success_cnt': success_cnt})

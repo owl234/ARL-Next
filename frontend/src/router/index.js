@@ -132,9 +132,14 @@ const routes = [
                 component: () => import('../views/GitHubMonitorInfo.vue'), // 这里的组件文件名大小写必须和实际文件一字不差！
                 meta: { title: 'GitHub 监控详情' }
             },
-
-
+            {
+                path: '/systemSettings',
+                name: 'SystemSettings',
+                component: () => import('../views/SystemSettings.vue'),
+                meta: { title: '系统设置' }
+            }
         ]
+
 
     }
 ]

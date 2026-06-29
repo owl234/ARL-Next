@@ -1,13 +1,13 @@
 <div align="center">
 
 
-  # ARL-PRO
+  # ARL-Next
   **企业级自动化资产侦察与漏洞监控“灯塔”**
 
   <p>
-    <a href="https://github.com/owl234/arl-pro/actions"><img src="https://img.shields.io/github/actions/workflow/status/owl234/arl-pro/ci.yml?style=flat-square&logo=github&label=Build" alt="build"></a>
+    <a href="https://github.com/owl234/arl-next/actions"><img src="https://img.shields.io/github/actions/workflow/status/owl234/arl-next/ci.yml?style=flat-square&logo=github&label=Build" alt="build"></a>
     <a href="https://hub.docker.com/"><img src="https://img.shields.io/badge/docker-ready-blue.svg?style=flat-square&logo=docker" alt="Docker"></a>
-    <a href="https://github.com/owl234/arl-pro/releases"><img src="https://img.shields.io/github/v/release/owl234/arl-pro?style=flat-square&color=success" alt="Release"></a>
+    <a href="https://github.com/owl234/arl-next/releases"><img src="https://img.shields.io/github/v/release/owl234/arl-next?style=flat-square&color=success" alt="Release"></a>
     <img src="https://img.shields.io/badge/python-3.8%2B-blue?style=flat-square&logo=python" alt="Python">
     <img src="https://img.shields.io/badge/vue-3.x-4fc08d?style=flat-square&logo=vuedotjs" alt="Vue">
   </p>
@@ -19,19 +19,19 @@
 
 ---
 
-## 💡 什么是 ARL-PRO？
+## 💡 什么是 ARL-Next？
 
-ARL-PRO 旨在为安全团队、红蓝对抗工程师及 Bug Bounty 猎人提供一套**开箱即用**的资产全周期监控与漏洞发现平台。
+ARL-Next 旨在为安全团队、红蓝对抗工程师及 Bug Bounty 猎人提供一套**开箱即用**的资产全周期监控与漏洞发现平台。
 
-彻底告别繁杂的脚本拼接，ARL-PRO 将资产发现、端口扫描、指纹识别到漏洞探测融为一体，并通过现代化的 Vue 控制台为您呈现全局安全态势。
+彻底告别繁杂的脚本拼接，ARL-Next 将资产发现、端口扫描、指纹识别到漏洞探测融为一体，并通过现代化的 Vue 控制台为您呈现全局安全态势。
 
 ## 🤝 致谢与声明 (Acknowledgments)
 
-**ARL-PRO** 是基于优秀的开源项目 [ARL (Asset Reconnaissance Lighthouse) 资产侦察灯塔](https://github.com/TophantTechnology/ARL) 进行深度重构与二次开发的企业级增强版本。
+**ARL-Next** 是基于优秀的开源项目 [ARL (Asset Reconnaissance Lighthouse) 资产侦察灯塔](https://github.com/TophantTechnology/ARL) 进行深度重构与二次开发的企业级增强版本。
 
-我们对原 ARL 开发团队为信息安全开源社区做出的巨大贡献表示最诚挚的感谢！原项目奠定了自动化资产收集与漏洞扫描的坚实基础。本着开源互助的精神，ARL-PRO 将继续遵循开源精神，并将持续为其注入新的活力。
+我们对原 ARL 开发团队为信息安全开源社区做出的巨大贡献表示最诚挚的感谢！原项目奠定了自动化资产收集与漏洞扫描的坚实基础。本着开源互助的精神，ARL-Next 将继续遵循开源精神，并将持续为其注入新的活力。
 
-### 🌟 为什么要重构 ARL-PRO？(与原版的区别)
+### 🌟 为什么要重构 ARL-Next？(与原版的区别)
 
 随着网络环境的演变和安全人员需求的升级，我们对原项目进行了现代化改造，以解决原版在当今复杂环境下的部分痛点：
 
@@ -58,7 +58,7 @@ ARL-PRO 旨在为安全团队、红蓝对抗工程师及 Bug Bounty 猎人提供
 
 ## 🏗️ 架构设计 (Architecture)
 
-ARL-PRO 采用经典且强健的微服务容器编排设计，并在网关层进行了现代化的零信任改造：
+ARL-Next 采用经典且强健的微服务容器编排设计，并在网关层进行了现代化的零信任改造：
 
 1.  **安全网关与展示层 (Frontend / Gateway)**：
   * **本地**：Vite 本地 HTTPS 服务器 -> Vite 代理转发 -> 后端 HTTP。
@@ -113,8 +113,8 @@ ARL-PRO 采用经典且强健的微服务容器编排设计，并在网关层进
 
 **1.克隆代码**
 ```bash
-git clone https://github.com/owl234/arl-pro
-cd arl-pro
+git clone https://github.com/owl234/arl-next
+cd arl-next
 ```
 
 **2. 准备本地受信任证书 (必须)**
@@ -150,8 +150,8 @@ pnpm run dev
 
 **1.克隆代码**
 ```bash
-git clone https://github.com/owl234/arl-pro
-cd arl-pro
+git clone https://github.com/owl234/arl-next
+cd arl-next
 ```
 
 **2. 准备本地受信任证书 (必须)**
@@ -234,8 +234,8 @@ pnpm run dev
 
 在第一次触发 CI/CD 自动部署前，需在服务器上初始化安全环境变量（生成强密码与脱敏配置）：
 ```bash
-git clone https://github.com/owl234/arl-pro
-cd arl-pro
+git clone https://github.com/owl234/arl-next
+cd arl-next
 chmod +x init_env.sh
 ./init_env.sh
 ```
@@ -252,7 +252,7 @@ chmod +x init_env.sh
 
 ## ⚠️ 声明与免责 (Disclaimer)
 
-本工具（ARL-PRO）仅面向合法授权的企业安全建设、SRC 漏洞挖掘以及安全研究学术交流。
+本工具（ARL-Next）仅面向合法授权的企业安全建设、SRC 漏洞挖掘以及安全研究学术交流。
 
 使用本工具进行资产扫描与漏洞探测时，请务必遵守当地法律法规（如《中华人民共和国网络安全法》）及目标平台的测试范围规定。未经授权对目标进行探测属非法行为。使用者因使用本工具造成的任何直接或间接的法律责任与后果，由使用者自行承担，项目作者及贡献者不负任何连带责任。
 
@@ -264,20 +264,20 @@ chmod +x init_env.sh
 
 感谢每一位点亮星星的朋友，你们的支持是我们持续前行的最大动力 ✨
 
-<a href="https://github.com/owl234/arl-pro/stargazers">
-  <img src="https://img.shields.io/github/stars/owl234/arl-pro?style=for-the-badge&logo=github&logoColor=white&label=Stars&color=FFD700&labelColor=1a1a2e" alt="GitHub Stars">
+<a href="https://github.com/owl234/arl-next/stargazers">
+  <img src="https://img.shields.io/github/stars/owl234/arl-next?style=for-the-badge&logo=github&logoColor=white&label=Stars&color=FFD700&labelColor=1a1a2e" alt="GitHub Stars">
 </a>
 &nbsp;
-<a href="https://github.com/owl234/arl-pro/network/members">
-  <img src="https://img.shields.io/github/forks/owl234/arl-pro?style=for-the-badge&logo=github&logoColor=white&label=Forks&color=4fc08d&labelColor=1a1a2e" alt="GitHub Forks">
+<a href="https://github.com/owl234/arl-next/network/members">
+  <img src="https://img.shields.io/github/forks/owl234/arl-next?style=for-the-badge&logo=github&logoColor=white&label=Forks&color=4fc08d&labelColor=1a1a2e" alt="GitHub Forks">
 </a>
 &nbsp;
-<a href="https://github.com/owl234/arl-pro/watchers">
-  <img src="https://img.shields.io/github/watchers/owl234/arl-pro?style=for-the-badge&logo=github&logoColor=white&label=Watchers&color=58a6ff&labelColor=1a1a2e" alt="GitHub Watchers">
+<a href="https://github.com/owl234/arl-next/watchers">
+  <img src="https://img.shields.io/github/watchers/owl234/arl-next?style=for-the-badge&logo=github&logoColor=white&label=Watchers&color=58a6ff&labelColor=1a1a2e" alt="GitHub Watchers">
 </a>
 
 <br/><br/>
 
-[![Star History Chart](https://api.star-history.com/svg?repos=owl234/arl-pro&type=Date)](https://star-history.com/#owl234/arl-pro&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=owl234/arl-next&type=Date)](https://star-history.com/#owl234/arl-next&Date)
 
 </div>

@@ -18,6 +18,7 @@
         <a-menu-item key="/planningTasks"><ClockCircleOutlined /><span>计划任务</span></a-menu-item>
         <a-menu-item key="/GitHubTasks/GitHubTasksList"><GithubOutlined /><span>GitHub管理</span></a-menu-item>
         <a-menu-item key="/GitHubMonitor/GitHubMonitorList"><EyeOutlined /><span>GitHub监控</span></a-menu-item>
+        <a-menu-item key="/systemSettings"><SettingOutlined /><span>系统设置</span></a-menu-item>
       </a-menu>
     </a-layout-sider>
 

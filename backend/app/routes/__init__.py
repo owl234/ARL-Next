@@ -566,3 +566,5 @@ from .wih import ns as wih_ns
 from .assetWih import ns as asset_wih_ns
 from .dashboard import ns as dashboard_ns
 from .syslog import ns as syslog_ns
+from .dictionary import ns as dictionary_ns
+from .cdn_dict import ns as cdn_dict_ns

@@ -12,5 +12,9 @@
 
 > "Simplicity is the ultimate sophistication."
 
+## UI Design
+
+1.  **Minimize Clicks**: Prefer flat, one-click layouts (e.g., expanded side menus or tabbed lists) over nested structures (like dropdowns) to reduce user interaction cost.
+
 
 

@@ -1,7 +1,7 @@
 from bson.objectid import  ObjectId
 import time
 from app import services
-from app.modules import ScanPortType, TaskStatus
+from app.modules import ScanPortType, get_scan_ports, TaskStatus
 from app.services import fetchCert, run_risk_cruising, run_sniffer
 from app import utils
 from app.services.commonTask import CommonTask, BaseUpdateTask, WebSiteFetch
@@ -68,11 +68,18 @@ class IPTask(CommonTask):
             "top100": ScanPortType.TOP100,
             "top1000": ScanPortType.TOP1000,
             "all": ScanPortType.ALL,
-            "custom": self.options.get("port_custom", "80,443")
+            "custom": ScanPortType.CUSTOM
         }
         option_scan_port_type = self.options.get("port_scan_type", "test")
+        
+        if option_scan_port_type == "custom" and self.options.get("port_custom"):
+            actual_ports = self.options.get("port_custom")
+        else:
+            mapped_type = scan_port_map.get(option_scan_port_type, ScanPortType.TEST)
+            actual_ports = get_scan_ports(mapped_type)
+
         scan_port_option = {
-            "ports": scan_port_map.get(option_scan_port_type, ScanPortType.TEST),
+            "ports": actual_ports,
             "service_detect": self.options.get("service_detection", False),
             "os_detect": self.options.get("os_detection", False),
             "port_parallelism": self.options.get("port_parallelism", 32),  # 探测报文并行度

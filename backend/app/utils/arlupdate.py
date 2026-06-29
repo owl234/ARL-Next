@@ -48,7 +48,10 @@ def arl_update():
         return
 
     npoc_info_update()
-
+    
+    from app.services.fingerprint_cache import finger_db_cache
+    finger_db_cache._auto_seed_if_empty()
+    
     update_lock = os.path.join(Config.TMP_PATH, 'arl_update.lock')
     if os.path.exists(update_lock):
         return

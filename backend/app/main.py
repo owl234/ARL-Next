@@ -56,6 +56,8 @@ api.add_namespace(routes.wih_ns)
 api.add_namespace(routes.asset_wih_ns)
 api.add_namespace(routes.dashboard_ns)
 api.add_namespace(routes.syslog_ns)
+api.add_namespace(routes.dictionary_ns)
+api.add_namespace(routes.cdn_dict_ns)
 
 
 arl_update()

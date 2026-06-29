@@ -10,8 +10,7 @@ from .baseThread import BaseThread
 logger = utils.get_logger()
 from .autoTag import auto_tag
 from app.utils import http_req, normal_url
-from app.utils.fingerprint import load_fingerprint, fetch_fingerprint
-
+# Removed static load_fingerprint as we now rely fully on DB
 
 class FetchSite(BaseThread):
     """
@@ -27,30 +26,23 @@ class FetchSite(BaseThread):
     def __init__(self, sites, concurrency=6, http_timeout=None):
         super().__init__(sites, concurrency)
         self.site_info_list = []
-        # 预先将指纹规则加载到内存中，避免每次请求都去读文件
-        self.fingerprint_list = load_fingerprint()
         self.http_timeout = http_timeout
         if http_timeout is None:
             self.http_timeout = (10.1, 30.1)
 
     def fetch_fingerprint(self, item, content):
         """
-        [第一性原理：Web 指纹双重识别]
+        [第一性原理：Web 指纹识别 (统一版)]
         指纹识别不仅靠网页里的关键字，还有 HTTP 响应头（比如 Server 字段），以及独一无二的 Favicon Hash。
-        这里分了两步走：
-        1. 本地 JSON 规则库匹配 (fetch_fingerprint)
-        2. 数据库自定义规则匹配 (finger_db_identify)
+        现在的规则已全部统一存储在数据库中，直接通过 finger_db_identify 进行全量匹配。
         """
         favicon_hash = item["favicon"].get("hash", 0)
-        result = fetch_fingerprint(content=content, headers=item["headers"],
-                                   title=item["title"], favicon_hash=favicon_hash,
-                                   finger_list=self.fingerprint_list)
-
-        result_db = finger_identify(content=content, header=item["headers"],
-                                    title=item["title"], favicon_hash=str(favicon_hash))
-
+        
+        result = finger_identify(content=content, header=item["headers"],
+                                 title=item["title"], favicon_hash=str(favicon_hash))
+        
         # 去重
-        result = set(result + result_db)
+        result = set(result)
 
         finger = []
         for name in result:

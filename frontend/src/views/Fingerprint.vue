@@ -31,7 +31,7 @@
         <a-button :disabled="!hasSelected">批量删除</a-button>
       </a-popconfirm>
 
-      <a-button @click="handleExport">指纹导出</a-button>
+      <a-button @click="handleExport" type="primary" style="background-color: #52c41a; border-color: #52c41a;">一键全部导出</a-button>
       <a-upload
           name="file"
           :show-upload-list="false"
@@ -40,6 +40,7 @@
       >
         <a-button>上传指纹</a-button>
       </a-upload>
+      <a-button @click="handleSync" type="primary" style="background-color: #faad14; border-color: #faad14;" :loading="syncLoading">同步到webapp.json</a-button>
     </div>
 
     <a-table
@@ -109,6 +110,7 @@ const loading = ref(false);
 const dataSource = ref([]);
 const searchForm = reactive({ name: '', rule: '' });
 const pagination = reactive({ current: 1, pageSize: 10, total: 0 });
+const syncLoading = ref(false);
 
 // 表格多选逻辑
 const selectedRowKeys = ref([]);
@@ -255,6 +257,22 @@ const handleExport = async () => {
     message.success('指纹导出成功！');
   } catch (error) {
     message.error('导出请求异常');
+  }
+};
+// ================= 同步指纹逻辑 =================
+const handleSync = async () => {
+  syncLoading.value = true;
+  try {
+    const res = await request.post('/fingerprint/sync/');
+    if (res.code === 200) {
+      message.success(res.data?.msg || '同步成功！');
+    } else {
+      message.error('同步失败: ' + res.message);
+    }
+  } catch (error) {
+    message.error('请求异常，同步失败');
+  } finally {
+    syncLoading.value = false;
   }
 };
 // ================= 上传指纹逻辑 =================

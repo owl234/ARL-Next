@@ -1,10 +1,10 @@
 #!/bin/bash
-# ARL-Pro 节点环境全自动初始化脚本 (Ubuntu)
+# ARL-Next 节点环境全自动初始化脚本 (Ubuntu)
 # 作用：安装 Docker 引擎、配置用户组、配置自动化流水线免密提权
 
 set -e # 遇到错误立即停止执行
 
-echo "🚀 开始初始化 ARL-Pro 运行节点环境..."
+echo "🚀 开始初始化 ARL-Next 运行节点环境..."
 
 # 1. 检测并安装 Docker 引擎
 if ! command -v docker &> /dev/null; then

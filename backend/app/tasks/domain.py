@@ -7,7 +7,7 @@ from app import utils
 from app.config import Config
 from app import services
 from app import modules
-from app.modules import ScanPortType, DomainDictType, CollectSource, TaskStatus
+from app.modules import ScanPortType, get_scan_ports, DomainDictType, CollectSource, TaskStatus
 from app.services import fetchCert, run_risk_cruising, run_sniffer, BaseUpdateTask
 from app.services.commonTask import CommonTask, WebSiteFetch, build_url_item
 from app.helpers.domain import find_private_domain_by_task_id, find_public_ip_by_task_id
@@ -134,7 +134,7 @@ class ScanPort(object):
 
         if option is None:
             option = {
-                "ports": ScanPortType.TEST,
+                "ports": get_scan_ports(ScanPortType.TEST),
                 "service_detect": False,
                 "os_detect": False,
                 "port_parallelism": 32,
@@ -464,11 +464,19 @@ class DomainTask(CommonTask):
             "top100": ScanPortType.TOP100,
             "top1000": ScanPortType.TOP1000,
             "all": ScanPortType.ALL,
-            "custom": self.options.get("port_custom", "80,443")
+            "custom": ScanPortType.CUSTOM
         }
         option_scan_port_type = self.options.get("port_scan_type", "test")
+        
+        # 兼容原本逻辑：如果是 custom 类型，用户传了自定义端口字符串，优先使用用户传的。否则用字典里的 custom 端口
+        if option_scan_port_type == "custom" and self.options.get("port_custom"):
+            actual_ports = self.options.get("port_custom")
+        else:
+            mapped_type = scan_port_map.get(option_scan_port_type, ScanPortType.TEST)
+            actual_ports = get_scan_ports(mapped_type)
+
         scan_port_option = {
-            "ports": scan_port_map.get(option_scan_port_type, ScanPortType.TEST),
+            "ports": actual_ports,
             "service_detect": self.options.get("service_detection", False),
             "os_detect": self.options.get("os_detection", False),
             "skip_scan_cdn_ip": self.options.get("skip_scan_cdn_ip", False),  # 跳过扫描CDN IP

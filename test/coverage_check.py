@@ -9,8 +9,8 @@ import os
 import re
 from pathlib import Path
 
-ROUTES_DIR = Path("/Users/sienchen/Documents/arl-pro/backend/app/routes")
-TEST_DIR   = Path("/Users/sienchen/Documents/arl-pro/test")
+ROUTES_DIR = Path("/Users/sienchen/Documents/arl-next/backend/app/routes")
+TEST_DIR   = Path("/Users/sienchen/Documents/arl-next/test")
 
 # ─────────────────────────────────────────────────────
 # 1. 从路由文件提取所有 Namespace + route 组合
@@ -77,7 +77,7 @@ def check_coverage():
     tested_urls = extract_tested_urls(TEST_DIR)
 
     print(f"\n{'='*70}")
-    print(f"  ARL-PRO API 覆盖度检查报告")
+    print(f"  ARL-Next API 覆盖度检查报告")
     print(f"{'='*70}")
     print(f"  路由文件总计注册端点数：{len(all_routes)}")
     print(f"  测试文件中识别到的 URL 数：{len(tested_urls)}")

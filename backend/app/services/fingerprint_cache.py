@@ -1,5 +1,8 @@
 from .fingerprint import FingerPrint
-from app.utils import get_logger, conn_db
+from app.utils import get_logger, conn_db, load_file, curr_date_obj
+import time
+import json
+from app.config import Config
 
 logger = get_logger()
 
@@ -8,6 +11,8 @@ logger = get_logger()
 class FingerPrintCache:
     def __init__(self):
         self.cache = None
+        self.last_update_time = 0
+        self.cache_ttl = 60  # seconds
 
     def is_cache_valid(self):
         return self.cache is not None
@@ -20,18 +25,41 @@ class FingerPrintCache:
         self.cache = self.fetch_data_from_mongodb()
         return self.cache
 
+    def _auto_seed_if_empty(self):
+        db = conn_db('fingerprint')
+        if db.count_documents({}) == 0:
+            logger.info("Fingerprint collection is empty. Auto-seeding from webapp.json...")
+            try:
+                web_app_rules = json.loads("\n".join(load_file(Config.web_app_rule)))
+                docs = []
+                for rule_name, rule_detail in web_app_rules.items():
+                    if "fofa_rule" in rule_detail and rule_detail["fofa_rule"]:
+                        docs.append({
+                            "name": rule_name,
+                            "human_rule": rule_detail["fofa_rule"],
+                            "update_date": curr_date_obj()
+                        })
+                if docs:
+                    db.insert_many(docs)
+                    logger.info(f"Successfully seeded {len(docs)} fingerprints.")
+            except Exception as e:
+                logger.error(f"Failed to auto-seed fingerprints: {e}")
+
     def fetch_data_from_mongodb(self) -> [FingerPrint]:
+        self._auto_seed_if_empty()
         items = list(conn_db('fingerprint').find())
         finger_list = []
         for rule in items:
             finger = FingerPrint(rule['name'], rule['human_rule'])
             finger_list.append(finger)
 
+        self.last_update_time = time.time()
         return finger_list
 
-    def update_cache(self):
-        # 手动更新缓存
-        self.cache = self.fetch_data_from_mongodb()
+    def update_cache(self, force=False):
+        # 手动更新缓存，带TTL防止高并发启动时频繁查库
+        if force or self.cache is None or (time.time() - self.last_update_time > self.cache_ttl):
+            self.cache = self.fetch_data_from_mongodb()
 
 
 finger_db_cache = FingerPrintCache()
