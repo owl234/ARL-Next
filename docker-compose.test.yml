@@ -2,6 +2,7 @@ version: '3'
 
 volumes:
   arl_db_test:
+  arl_mq_test:
   # 👇 新增：用于隔离和持久化系统运行产生的动态数据
   arl_tmp_test:          # 存放报表等临时文件
   arl_screenshot_test:   # 存放截图文件
@@ -50,7 +51,7 @@ services:
       - mongodb
       - rabbitmq
     volumes:
-      - # Worker 也需要相同的动态数据卷
+      # Worker 也需要相同的动态数据卷
       - arl_upload_poc_test:/opt/ARL-NPoC/xing/plugins/upload_poc
       - arl_tmp_test:/code/tmp
       - arl_screenshot_test:/code/tmp_screenshot

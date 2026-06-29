@@ -31,4 +31,4 @@ backend/*.log
 # Test Cache
 .pytest_cache/
 .coverage
-htmlcov/
+htmlcov/*graph.md

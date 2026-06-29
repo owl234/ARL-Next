@@ -92,9 +92,8 @@ class NucleiScan(object):
         self._gen_target_file()
 
         command = [self.nuclei_bin_path, "-duc",
-                   "-tags cve",
+                   "-tags cve,http",
                    "-severity low,medium,high,critical",
-                   "-type http",
                    "-l {}".format(self.nuclei_target_path),
                    self.nuclei_json_flag,  # 在nuclei 2.9.1 中 将 -json 参数改成了 -jsonl 参数
                    "-stats",

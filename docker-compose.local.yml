@@ -19,7 +19,9 @@ services:
     platform: linux/amd64
     image: arl_backend_test:latest
     container_name: arl_backend_local
-    build: ./backend
+    build:
+      context: ./backend
+      network: host
     ports:
       - "5003:5000" # 👈 新增：将容器的 5000 端口映射到本地的 5003，供 Vite 代理
     depends_on:
