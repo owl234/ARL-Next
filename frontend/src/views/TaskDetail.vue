@@ -20,6 +20,7 @@
       <a-tab-pane key="nuclei_result" :tab="`nuclei - ${queryCounts.nuclei_result}`"></a-tab-pane>
       <a-tab-pane key="stat_finger" :tab="`指纹统计 - ${queryCounts.stat_finger}`"></a-tab-pane>
       <a-tab-pane key="wih" :tab="`WIH - ${queryCounts.wih}`"></a-tab-pane>
+      <a-tab-pane key="syslog" tab="任务日志"></a-tab-pane>
     </a-tabs>
 
     <div v-if="tabConfig[activeTab]?.searchFields" class="search-row" style="margin-bottom: 16px;">
@@ -320,6 +321,19 @@
           </div>
         </template>
 
+        <!-- 💡 新增：日志相关渲染 -->
+        <template v-else-if="column.key === 'syslog_level'">
+          <a-tag :color="record.level === 'error' ? 'red' : record.level === 'warning' ? 'orange' : record.level === 'success' ? 'green' : 'blue'">
+            {{ record.level || 'info' }}
+          </a-tag>
+        </template>
+        
+        <template v-else-if="column.key === 'syslog_message'">
+          <div style="background: #f5f5f5; padding: 8px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word; font-size: 13px;">
+            {{ record.message || '-' }}
+          </div>
+        </template>
+
       </template>
     </a-table>
 
@@ -370,7 +384,7 @@
 
 <script setup>
 // 💥 核心修改 2：引入 createVNode 和 Modal、ExclamationCircleOutlined
-import { ref, onMounted, reactive, watch, computed, createVNode } from 'vue';
+import { ref, onMounted, reactive, watch, computed, createVNode, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
@@ -710,16 +724,31 @@ const tabConfig = {
       { title: '来源 JS', key: 'wih_source', width: 450 },
       { title: '来源站点', dataIndex: 'site', key: 'site', width: 250 }
     ]
+  },
+
+  // 💡 新增：任务日志 Tab 的配置
+  syslog: {
+    url: '/syslog/',
+    // 隐藏删除和导出按钮
+    searchFields: [
+      { label: '日志级别', key: 'level', operator: '=' },
+      { label: '日志标题', key: 'title', operator: '=' },
+      { label: '内容信息', key: 'message', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: '级别', key: 'syslog_level', width: 100, align: 'center' },
+      { title: '标题', dataIndex: 'title', key: 'title', width: 150 },
+      { title: '记录时间', dataIndex: 'create_time', key: 'create_time', width: 180 },
+      { title: '详细信息', key: 'syslog_message', width: 500 }
+    ]
   }
-
-
-
 };
 
 const columns = ref(tabConfig.site.cols);
 
 // 加载数据 (兼容单任务与全局查看)
-const fetchData = async () => {
+const fetchData = async (isPolling = false) => {
   const taskId = query.task_id;
   // 🚨 核心修改 1：删除了 if (!taskId) return; 让全局查看也能放行！
 
@@ -729,7 +758,9 @@ const fetchData = async () => {
     return;
   }
 
-  loading.value = true;
+  if (!isPolling) {
+    loading.value = true;
+  }
   try {
     // 🚨 核心修改 2：动态拼装参数，有 taskId 才传
     const params = { page: pagination.current, size: pagination.pageSize };
@@ -750,11 +781,45 @@ const fetchData = async () => {
       selectedRowKeys.value = [];
     }
   } catch (error) {
-    message.error('加载资产数据失败');
+    if (!isPolling) {
+      message.error('加载资产数据失败');
+    }
   } finally {
-    loading.value = false;
+    if (!isPolling) {
+      loading.value = false;
+    }
   }
 };
+
+// 💡 新增：任务日志自动刷新机制
+let syslogTimer = null;
+
+const startSyslogTimer = () => {
+  if (syslogTimer) clearInterval(syslogTimer);
+  syslogTimer = setInterval(() => {
+    fetchData(true);
+  }, 3000); // 每 3 秒拉取一次最新日志
+};
+
+const stopSyslogTimer = () => {
+  if (syslogTimer) {
+    clearInterval(syslogTimer);
+    syslogTimer = null;
+  }
+};
+
+watch(activeTab, (newVal) => {
+  if (newVal === 'syslog') {
+    startSyslogTimer();
+  } else {
+    stopSyslogTimer();
+  }
+});
+
+// 其他生命周期与清理工作
+onUnmounted(() => {
+  stopSyslogTimer();
+});
 
 // ==========================================
 // 💥 导出站点：1:1 对齐导出纯文本文件流

@@ -12,6 +12,12 @@ import colorlog
 import logging
 import dns.resolver
 from tld import get_tld
+from datetime import datetime
+try:
+    from celery import current_task
+except ImportError:
+    current_task = None
+
 from .conn import http_req, conn_db
 from .http import get_title, get_headers
 from .domain import check_domain_black, is_valid_domain, is_in_scope, is_in_scopes, is_valid_fuzz_domain
@@ -68,6 +74,38 @@ def gen_md5(s):
     return hashlib.md5(s.encode()).hexdigest()
 
 
+class MongoSyslogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            task_id = "global"
+            # 尝试从 celery 运行上下文中提取 task_id
+            if current_task and current_task.request:
+                options = None
+                if current_task.request.args:
+                    options = current_task.request.args[0]
+                elif current_task.request.kwargs and "options" in current_task.request.kwargs:
+                    options = current_task.request.kwargs["options"]
+                    
+                if isinstance(options, dict) and "data" in options:
+                    task_id = options["data"].get("task_id", "global")
+
+            level = record.levelname.lower()
+            if level == 'warn':
+                level = 'warning'
+            elif level in ['fatal', 'critical']:
+                level = 'error'
+
+            log_doc = {
+                "task_id": task_id,
+                "level": level,
+                "title": getattr(record, 'funcName', '系统运行'),
+                "message": str(record.getMessage()),
+                "create_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            conn_db('syslog').insert_one(log_doc)
+        except Exception:
+            pass # 捕获异常防止拖垮主业务进程
+
 def init_logger():
     handler = colorlog.StreamHandler()
     handler.setFormatter(colorlog.ColoredFormatter(
@@ -78,6 +116,12 @@ def init_logger():
 
     logger.setLevel(logging.INFO)
     logger.addHandler(handler)
+    
+    # 💥 添加我们自定义的 MongoDB 拦截器
+    mongo_handler = MongoSyslogHandler()
+    mongo_handler.setLevel(logging.INFO)
+    logger.addHandler(mongo_handler)
+    
     logger.propagate = False
 
 
@@ -88,6 +132,12 @@ def get_logger():
     """
     if 'celery' in sys.argv[0]: # 内存字符串的物理匹配
         task_logger = get_task_logger(__name__)
+        # 确保 task_logger 也挂载了我们的 MongoDB 拦截器
+        has_mongo_handler = any(isinstance(h, MongoSyslogHandler) for h in task_logger.handlers)
+        if not has_mongo_handler:
+            mongo_handler = MongoSyslogHandler()
+            mongo_handler.setLevel(logging.INFO)
+            task_logger.addHandler(mongo_handler)
         return task_logger
 
     logger = logging.getLogger('arlv2')

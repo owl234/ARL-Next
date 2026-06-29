@@ -7,6 +7,7 @@
       </div>
 
       <a-menu v-model:selectedKeys="selectedKeys" theme="dark" mode="inline" @click="handleMenuClick">
+        <a-menu-item key="/dashboard"><DashboardOutlined /><span>仪表盘</span></a-menu-item>
         <a-menu-item key="/taskList"><GlobalOutlined /><span>任务管理</span></a-menu-item>
         <a-menu-item key="/asset-search"><SearchOutlined /><span>资产搜索</span></a-menu-item>
         <a-menu-item key="/assetsMonitor"><DesktopOutlined /><span>资产监控</span></a-menu-item>
@@ -80,7 +81,7 @@ import request from '@/utils/request';
 import { message } from 'ant-design-vue';
 
 // 补全所有需要的图标
-import { MenuUnfoldOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, GlobalOutlined, SearchOutlined, DesktopOutlined, AppstoreOutlined, SettingOutlined, TagsOutlined, BugOutlined, ClockCircleOutlined, GithubOutlined, EyeOutlined, DeploymentUnitOutlined } from '@ant-design/icons-vue';
+import { DashboardOutlined, MenuUnfoldOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, GlobalOutlined, SearchOutlined, DesktopOutlined, AppstoreOutlined, SettingOutlined, TagsOutlined, BugOutlined, ClockCircleOutlined, GithubOutlined, EyeOutlined, DeploymentUnitOutlined } from '@ant-design/icons-vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -115,6 +116,7 @@ watch(() => route.path, (newPath) => {
 const currentPageTitle = computed(() => {
   if (route.path.includes('taskDetail')) return '任务详情'; // 详情页标题
   const titleMap = {
+    '/dashboard': '仪表盘',
     '/taskList': '任务管理',
     '/search': '资产搜索',
     // ... 其他映射

@@ -22,13 +22,19 @@ const routes = [
         path: '/',
         name: 'Layout',
         component: Layout,
-        redirect: '/taskList',
+        redirect: '/dashboard',
         beforeEnter: (to, from, next) => {
             const token = localStorage.getItem('token')
             if (token) next()
             else next('/login')
         },
         children: [
+            {
+                path: 'dashboard',
+                name: 'Dashboard',
+                component: () => import('../views/Dashboard.vue'),
+                meta: { title: '仪表盘' }
+            },
             {
                 path: 'taskList',
                 name: 'TaskList',

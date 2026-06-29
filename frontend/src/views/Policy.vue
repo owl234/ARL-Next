@@ -1,7 +1,16 @@
 <template>
   <div style="background-color: #fff; padding: 24px; min-height: calc(100vh - 64px);">
-    <div style="margin-bottom: 24px;">
+    <div style="margin-bottom: 24px; display: flex; gap: 8px;">
       <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="goToDetail">新建策略</a-button>
+      <a-popconfirm
+          title="确认批量删除选中的数据吗？"
+          ok-text="确认"
+          cancel-text="取消"
+          @confirm="handleBatchDelete"
+          :disabled="selectedRowKeys.length === 0"
+      >
+        <a-button danger :disabled="selectedRowKeys.length === 0">批量删除</a-button>
+      </a-popconfirm>
     </div>
 
     <div class="search-row" style="margin-bottom: 16px;">
@@ -13,7 +22,7 @@
       </div>
     </div>
 
-    <a-table :loading="loading" :dataSource="dataSource" :columns="columns" :pagination="false" size="middle" :rowKey="(record) => record._id">
+    <a-table :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: keys => selectedRowKeys = keys }" :loading="loading" :dataSource="dataSource" :columns="columns" :pagination="false" size="middle" :rowKey="(record) => record._id">
       <template #bodyCell="{ column, record, index }">
         <template v-if="column.key === 'index'"><span>{{ (pagination.current - 1) * pagination.pageSize + index + 1 }}</span></template>
 
@@ -108,6 +117,7 @@ const loading = ref(false);
 const dataSource = ref([]);
 const searchForm = ref({});
 const pagination = reactive({ current: 1, pageSize: 10, total: 0 });
+const selectedRowKeys = ref([]);
 
 const columns = [
   { title: '序号', key: 'index', width: 80, align: 'center' },
@@ -259,6 +269,35 @@ const handleDelete = async (record) => {
   }
 };
 
+// ================= 批量删除策略逻辑 =================
+const handleBatchDelete = async () => {
+  if (selectedRowKeys.value.length === 0) {
+    return message.warning('请先选择要删除的策略！');
+  }
+  try {
+    const payload = {
+      policy_id: selectedRowKeys.value
+    };
+
+    const res = await request.post('/policy/delete/', payload);
+
+    if (res.code === 200) {
+      message.success('批量删除策略成功！');
+      
+      // 体验优化：如果当前页数据全被删除了，退回上一页
+      if (dataSource.value.length === selectedRowKeys.value.length && pagination.current > 1) {
+        pagination.current -= 1;
+      }
+      
+      selectedRowKeys.value = []; // 清空选中
+      fetchData(); // 重新拉取列表数据
+    } else {
+      message.error('批量删除失败: ' + res.message);
+    }
+  } catch (error) {
+    message.error('请求异常，批量删除失败');
+  }
+};
 
 </script>
 
