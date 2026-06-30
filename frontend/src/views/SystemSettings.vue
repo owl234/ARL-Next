@@ -173,6 +173,56 @@
           </a-form>
         </a-modal>
       </a-tab-pane>
+
+      <!-- 安全策略管理 Tab -->
+      <a-tab-pane key="security" tab="安全策略管理" force-render>
+        <div style="max-width: 800px;">
+          <div style="margin-bottom: 16px; color: #888;">
+            此处的配置项用于全局的安全限制，防止系统对指定范围的 IP 或域名发起扫描。保存后立即生效，无需重启。
+          </div>
+          <a-spin :spinning="securityLoading">
+            <a-form layout="vertical" style="margin-top: 20px;">
+              <a-form-item label="IP 黑名单 (支持 CIDR，如 127.0.0.0/8, 192.168.0.0/16，每行一个)">
+                <a-textarea v-model:value="securityForm.blackIpsText" :rows="8" placeholder="例如：\n127.0.0.0/8\n10.0.0.0/8" />
+              </a-form-item>
+              
+              <a-form-item label="禁止扫描域名 (支持后缀匹配，如 gov.cn, edu.cn，每行一个)">
+                <a-textarea v-model:value="securityForm.forbiddenDomainsText" :rows="8" placeholder="例如：\ngov.cn\nedu.cn" />
+              </a-form-item>
+
+              <a-form-item>
+                <a-button type="primary" style="background-color: #52c41a; border-color: #52c41a;" @click="saveSecurityPolicy" :loading="securitySaveLoading">
+                  保存安全策略
+                </a-button>
+              </a-form-item>
+            </a-form>
+          </a-spin>
+        </div>
+      </a-tab-pane>
+      <!-- 性能与并发配置 Tab -->
+      <a-tab-pane key="performance" tab="性能与并发配置" force-render>
+        <div style="max-width: 800px;">
+          <div style="margin-bottom: 16px; color: #888;">
+            此处的配置用于调整扫描节点 (Worker) 的任务并发处理能力。修改保存后，需要手动重启底层的 Celery Worker 进程或容器以使新配置生效。
+          </div>
+          <a-spin :spinning="performanceLoading">
+            <a-form layout="vertical" style="margin-top: 20px;">
+              <a-form-item label="Celery 并发数 (Concurrency)">
+                <a-input-number v-model:value="performanceForm.celeryConcurrency" :min="1" :max="128" style="width: 200px" />
+                <div style="margin-top: 8px; color: #aaa; font-size: 13px;">
+                  设置过大可能会导致内存溢出或目标服务器宕机，建议根据机器配置调整（每增加1个并发约增加 100MB 内存消耗，默认为 2）。
+                </div>
+              </a-form-item>
+
+              <a-form-item>
+                <a-button type="primary" style="background-color: #52c41a; border-color: #52c41a;" @click="savePerformanceConfig" :loading="performanceSaveLoading">
+                  保存性能配置
+                </a-button>
+              </a-form-item>
+            </a-form>
+          </a-spin>
+        </div>
+      </a-tab-pane>
     </a-tabs>
   </div>
 </template>
@@ -493,9 +543,102 @@ const handleCdnImport = (options) => {
   reader.readAsText(file);
 };
 
+// ======================= 安全策略管理逻辑 =======================
+const securityForm = ref({ blackIpsText: '', forbiddenDomainsText: '' });
+const securityLoading = ref(false);
+const securitySaveLoading = ref(false);
+
+const fetchSecurityPolicy = async () => {
+  securityLoading.value = true;
+  try {
+    const res = await request.get('/api/system_config/security_policy');
+    if (res.code === 200) {
+      securityForm.value.blackIpsText = (res.data.black_ips || []).join('\n');
+      securityForm.value.forbiddenDomainsText = (res.data.forbidden_domains || []).join('\n');
+    } else {
+      message.error(res.message || '获取安全策略失败');
+    }
+  } catch (error) {
+    message.error('请求安全策略出错');
+    console.error(error);
+  } finally {
+    securityLoading.value = false;
+  }
+};
+
+const saveSecurityPolicy = async () => {
+  securitySaveLoading.value = true;
+  try {
+    const black_ips = securityForm.value.blackIpsText.split('\n').map(s => s.trim()).filter(s => s);
+    const forbidden_domains = securityForm.value.forbiddenDomainsText.split('\n').map(s => s.trim()).filter(s => s);
+
+    const res = await request.post('/api/system_config/security_policy', {
+      black_ips,
+      forbidden_domains
+    });
+    
+    if (res.code === 200) {
+      message.success('安全策略更新成功！');
+      fetchSecurityPolicy(); // 重新拉取确认
+    } else {
+      message.error(res.message || '保存失败');
+    }
+  } catch (error) {
+    message.error('请求保存安全策略出错');
+    console.error(error);
+  } finally {
+    securitySaveLoading.value = false;
+  }
+};
+
+// ======================= 性能配置管理逻辑 =======================
+const performanceForm = ref({ celeryConcurrency: 2 });
+const performanceLoading = ref(false);
+const performanceSaveLoading = ref(false);
+
+const fetchPerformanceConfig = async () => {
+  performanceLoading.value = true;
+  try {
+    const res = await request.get('/api/system_config/performance');
+    if (res.code === 200) {
+      performanceForm.value.celeryConcurrency = res.data.celery_concurrency || 2;
+    } else {
+      message.error(res.message || '获取性能配置失败');
+    }
+  } catch (error) {
+    message.error('请求性能配置出错');
+    console.error(error);
+  } finally {
+    performanceLoading.value = false;
+  }
+};
+
+const savePerformanceConfig = async () => {
+  performanceSaveLoading.value = true;
+  try {
+    const res = await request.post('/api/system_config/performance', {
+      celery_concurrency: performanceForm.value.celeryConcurrency
+    });
+    
+    if (res.code === 200) {
+      message.success(res.message || '性能配置更新成功！');
+      fetchPerformanceConfig();
+    } else {
+      message.error(res.message || '保存失败');
+    }
+  } catch (error) {
+    message.error('请求保存性能配置出错');
+    console.error(error);
+  } finally {
+    performanceSaveLoading.value = false;
+  }
+};
+
 onMounted(() => {
   fetchDictList();
   fetchCdnList();
+  fetchSecurityPolicy();
+  fetchPerformanceConfig();
 });
 </script>
 

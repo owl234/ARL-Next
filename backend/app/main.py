@@ -58,9 +58,10 @@ api.add_namespace(routes.dashboard_ns)
 api.add_namespace(routes.syslog_ns)
 api.add_namespace(routes.dictionary_ns)
 api.add_namespace(routes.cdn_dict_ns)
+api.add_namespace(routes.system_config_ns)
 
 
 arl_update()
 
 if __name__ == '__main__':
-    arl_app.run(debug=True, port=5018, host="0.0.0.0")
+    arl_app.run(debug=True, port=5003, host="0.0.0.0")

@@ -26,7 +26,7 @@ services:
       - "5003:5000" # 👈 新增：将容器的 5000 端口映射到本地的 5003，供 Vite 代理
     depends_on:
       - mongodb
-      - rabbitmq
+      - redis
     volumes:
       # 👈 新增：将本地的 backend 代码完整挂载到容器内 (假设容器内工作目录是 /code)
       - ./backend:/code
@@ -34,7 +34,7 @@ services:
       - ./backend/wait-for-it.sh:/usr/bin/wait-for-it.sh
       - ./backend/GeoLite2:/data/GeoLite2
         # 👈 修改：在 gunicorn 命令末尾加上 --reload 参数
-    entrypoint: [ "bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh rabbitmq:5672; gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 1 --reload" ]
+    entrypoint: [ "bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh redis:6379; gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 1 --reload" ]
 
   # 👷 3. 核心扫描节点 (对应旧版的 arl-worker)
   worker:
@@ -43,12 +43,12 @@ services:
     container_name: arl_worker_local
     depends_on:
       - mongodb
-      - rabbitmq
+      - redis
     volumes:
       - ./backend:/code # 👈 新增：同样挂载代码，确保 worker 也是最新逻辑
       - ./backend/GeoLite2:/data/GeoLite2
     # 启动 Celery worker
-    entrypoint: ["bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q arltask -n arltask -c 2 -O fair -l info"]
+    entrypoint: ["bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh redis:6379; CONC=$(python3 -c 'from app.utils.performance_config import get_performance_config; print(get_performance_config())' | tail -n 1) && celery -A app.celerytask.celery worker -Q arltask -n arltask -c ${CONC:-2} -O fair -l info"]
 
   # 🕵️ 4. GitHub 监控节点 (对应旧版的 arl-worker-github)
   worker-github:
@@ -57,11 +57,11 @@ services:
     container_name: arl_worker_github_local
     depends_on:
       - mongodb
-      - rabbitmq
+      - redis
     volumes:
       - ./backend:/code # 👈 新增：同样挂载代码，确保 worker 也是最新逻辑
       - ./backend/GeoLite2:/data/GeoLite2
-    entrypoint: ["bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q github -n github -c 2"]
+    entrypoint: ["bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh redis:6379; celery -A app.celerytask.celery worker -Q github -n github -c 2"]
 
   # ⏱️ 5. 定时调度器 (对应旧版的 arl-scheduler)
   scheduler:
@@ -70,11 +70,11 @@ services:
     container_name: arl_scheduler_local
     depends_on:
       - mongodb
-      - rabbitmq
+      - redis
     volumes:
       - ./backend:/code # 👈 新增：同样挂载代码，确保 worker 也是最新逻辑
       - ./backend/GeoLite2:/data/GeoLite2
-    entrypoint: ["bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh rabbitmq:5672; python3 -m app.scheduler"]
+    entrypoint: ["bash", "-c", "bash /usr/bin/wait-for-it.sh mongodb:27017; bash /usr/bin/wait-for-it.sh redis:6379; python3 -m app.scheduler"]
 
   # 🗄️ 6. 数据库
   mongodb:
@@ -92,12 +92,9 @@ services:
       - MONGO_INITDB_ROOT_USERNAME=admin
       - MONGO_INITDB_ROOT_PASSWORD=admin
 
-  # 🐇 7. 消息队列
-  rabbitmq:
-    image: rabbitmq:3.13.1-management-alpine
-    container_name: arl_rabbitmq_local
+  # 🔴 7. 消息队列 (Redis)
+  redis:
+    image: redis:alpine
+    container_name: arl_redis_local
     restart: always
-    environment:
-      - RABBITMQ_DEFAULT_PASS=arlpassword
-      - RABBITMQ_DEFAULT_USER=arl
-      - RABBITMQ_DEFAULT_VHOST=arlv2host
+    command: redis-server --appendonly yes
