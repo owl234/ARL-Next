@@ -73,15 +73,92 @@ ARL-Next 采用微服务容器编排设计：
 
 我们为开发者提供了两套部署方案，满足从二次开发到生产环境的不同需求。
 
-### 方案 A：纯本地开发流 (推荐开发者使用)
+### 方案 A：前端本地 + Docker 后端源码部署 (推荐开发者使用)
 
-如果你想对 ARL-Next 进行二次开发、调试接口或修改前端 UI，我们极度推荐你使用这套**无 Docker** 的本地运行方案。支持“保存代码，瞬间生效”的热重载体验。
+**适用场景**：调试前端 UI、修改后端接口逻辑。后端所有服务（API / Worker / 数据库）运行在 Docker 中（**源码卷挂载，修改代码即时生效**），前端在本地以 Vite 开发服务器运行，通过代理透传请求。
 
-📖 **[点此查看：从零开始的本地开发与调试教程 (macOS/Windows)](./docs/local_dev_guide.md)**
+> **前置条件**：已安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 和 [Node.js](https://nodejs.org/)（附带 npm），并全局安装 pnpm：`npm install -g pnpm`
 
-环境准备完毕后，启动开发环境只需在根目录执行：
+---
+
+#### 第一步：构建并启动后端容器
+
 ```bash
-bash start_local.sh
+# 克隆代码
+git clone https://github.com/owl234/arl-next
+cd arl-next
+
+# 首次构建后端镜像（含 MassDNS / Nmap / Nuclei / Chromium，耗时约 10~20 分钟）
+# 后续代码变更无需重复 build，直接 up 即可
+docker-compose -f docker-compose.local.yml build backend
+
+# 启动全部后端服务（backend API、worker、worker-github、scheduler、MongoDB、Redis）
+# 后端 API 将监听在本机的 5003 端口
+docker-compose -f docker-compose.local.yml up -d backend worker worker-github scheduler mongodb redis
+```
+
+> **说明**：`docker-compose.local.yml` 将 `./backend` 目录以卷挂载的方式注入容器，修改后端 Python 代码后 gunicorn 会自动重载，无需重新 build 镜像。
+
+---
+
+#### 第二步：初始化管理员账号（仅首次）
+
+容器启动后，向后端容器内注入默认管理员账号：
+
+```bash
+docker exec arl_backend_local bash -c \
+  "cd /code/backend && python3 inject_user.py"
+```
+
+默认账号密码：`admin` / `arlpass`
+
+---
+
+#### 第三步：配置前端 API 代理
+
+确认 `frontend/vite.config.js` 中的代理地址与 `docker-compose.local.yml` 中 backend 暴露的端口一致：
+
+```js
+// frontend/vite.config.js
+proxy: {
+  '/api': {
+    target: 'http://127.0.0.1:5003',  // 对应 docker-compose.local.yml 的 "5003:5000"
+    changeOrigin: true,
+  }
+}
+```
+
+---
+
+#### 第四步：启动前端开发服务器
+
+```bash
+cd frontend
+
+# 首次安装依赖
+pnpm install
+
+# 启动 Vite 开发服务器（支持热重载）
+pnpm run dev
+```
+
+启动后访问控制台打印的本地地址（默认 `https://localhost:5174`）即可进入系统。
+
+> **HTTPS 证书（可选）**：如需开启 HTTPS 避免浏览器安全拦截，可使用 `mkcert` 生成本地证书并放置于项目根目录 `certs/` 下，Vite 会自动读取。详见 [本地开发教程](./docs/local_dev_guide.md)。
+
+---
+
+#### 常用后端管理命令
+
+```bash
+# 查看所有容器状态
+docker-compose -f docker-compose.local.yml ps
+
+# 实时查看后端日志
+docker-compose -f docker-compose.local.yml logs -f backend
+
+# 停止所有后端容器
+docker-compose -f docker-compose.local.yml down
 ```
 
 ---
