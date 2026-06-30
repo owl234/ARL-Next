@@ -28,9 +28,11 @@ def transfer_ip_scope(target):
 #判断是否在黑名单IP内，有点不严谨
 def not_in_black_ips(target):
     from . import get_logger
+    from app.utils.security_policy import get_security_policy
     logger = get_logger()
     try:
-        for ip in Config.BLACK_IPS:
+        black_ips, _ = get_security_policy()
+        for ip in black_ips:
             if "-" in target:
                 target = target.split("-")[0]
 

@@ -223,6 +223,289 @@
           </a-spin>
         </div>
       </a-tab-pane>
+
+      <!-- 三方 API 配置 Tab -->
+      <a-tab-pane key="api_config" tab="三方 API 配置" force-render>
+        <div style="max-width: 900px;">
+          <div style="margin-bottom: 16px; color: #888;">
+            此处的配置项用于三方情报或搜索接口的 API 凭证管理，配置保存后将动态应用至对应的域名/资产收集任务。
+          </div>
+          <a-spin :spinning="generalLoading">
+            <a-form layout="vertical">
+              <a-row :gutter="24">
+                <a-col :span="12">
+                  <a-form-item label="FOFA URL">
+                    <a-input v-model:value="generalForm.fofa_url" placeholder="例如：https://fofa.info" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item label="FOFA KEY">
+                    <a-input-password v-model:value="generalForm.fofa_key" placeholder="请输入您的 FOFA API KEY" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+
+              <a-row :gutter="24">
+                <a-col :span="12">
+                  <a-form-item label="FOFA 最大查询页数 (Max Page)">
+                    <a-input-number v-model:value="generalForm.fofa_max_page" :min="1" style="width: 100%" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item label="FOFA 每页条数 (Page Size)">
+                    <a-input-number v-model:value="generalForm.fofa_page_size" :min="1" style="width: 100%" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+
+              <a-row :gutter="24">
+                <a-col :span="24">
+                  <a-form-item label="GitHub Token (监控任务调用)">
+                    <a-input-password v-model:value="generalForm.github_token" placeholder="请输入您的 GitHub Personal Access Token" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+
+              <a-form-item label="域名收集插件配置 (QUERY_PLUGIN)">
+                <div style="background: #fafafa; border: 1px solid #f0f0f0; border-radius: 4px; padding: 16px;">
+                  <a-row :gutter="[16, 16]">
+                    <a-col :span="8" v-for="(conf, pluginName) in generalForm.query_plugin_config" :key="pluginName">
+                      <div style="border: 1px solid #e8e8e8; background: #fff; padding: 12px; border-radius: 4px; min-height: 100px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                          <span style="font-weight: bold; text-transform: uppercase;">{{ pluginName }}</span>
+                          <a-checkbox v-model:checked="conf.enable">启用</a-checkbox>
+                        </div>
+                        <a-input 
+                          v-if="conf.hasOwnProperty('api_key')" 
+                          v-model:value="conf.api_key" 
+                          placeholder="API Key" 
+                          size="small" 
+                        />
+                        <div v-if="pluginName === 'hunter_qax'" style="margin-top: 4px; display: flex; gap: 4px;">
+                          <a-input-number v-model:value="conf.max_page" placeholder="Max Page" size="small" style="flex: 1;" />
+                          <a-input-number v-model:value="conf.page_size" placeholder="Page Size" size="small" style="flex: 1;" />
+                        </div>
+                        <div v-if="pluginName === 'certspotter'" style="margin-top: 4px; display: flex; gap: 4px;">
+                          <a-input-number v-model:value="conf.max_page" placeholder="Max Page" size="small" style="width: 100%;" />
+                        </div>
+                        <a-input 
+                          v-if="conf.hasOwnProperty('quake_token')" 
+                          v-model:value="conf.quake_token" 
+                          placeholder="Quake Token" 
+                          size="small" 
+                        />
+                        <div v-if="pluginName === 'passivetotal'" style="margin-top: 4px; display: flex; flex-direction: column; gap: 4px;">
+                          <a-input v-model:value="conf.auth_email" placeholder="Auth Email" size="small" style="margin-bottom: 4px;" />
+                          <a-input v-model:value="conf.auth_key" placeholder="Auth Key" size="small" />
+                        </div>
+                      </div>
+                    </a-col>
+                  </a-row>
+                </div>
+              </a-form-item>
+
+              <a-form-item>
+                <a-button type="primary" style="background-color: #52c41a; border-color: #52c41a;" @click="saveGeneralConfig" :loading="generalSaveLoading">
+                  保存三方 API 配置
+                </a-button>
+              </a-form-item>
+            </a-form>
+          </a-spin>
+        </div>
+      </a-tab-pane>
+
+      <!-- 消息推送与回调 Tab -->
+      <a-tab-pane key="message_push" tab="消息推送与回调" force-render>
+        <div style="max-width: 900px;">
+          <div style="margin-bottom: 16px; color: #888;">
+            此处的配置项用于监控任务结束后的结果推送（支持钉钉、飞书、企业微信和 SMTP 邮件）以及自动化 Webhook 接口回调。
+          </div>
+          <a-spin :spinning="generalLoading">
+            <a-form layout="vertical">
+              <a-collapse v-model:activeKey="activePushPanels" style="margin-bottom: 24px;">
+                <a-collapse-panel key="dingding" header="钉钉推送配置">
+                  <a-row :gutter="24">
+                    <a-col :span="12">
+                      <a-form-item label="Webhook Access Token">
+                        <a-input v-model:value="generalForm.dingding.access_token" placeholder="钉钉机器人 Token" />
+                      </a-form-item>
+                    </a-col>
+                    <a-col :span="12">
+                      <a-form-item label="Webhook Secret (加签安全设置)">
+                        <a-input-password v-model:value="generalForm.dingding.secret" placeholder="钉钉机器人 Secret" />
+                      </a-form-item>
+                    </a-col>
+                  </a-row>
+                </a-collapse-panel>
+
+                <a-collapse-panel key="feishu" header="飞书推送配置">
+                  <a-row :gutter="24">
+                    <a-col :span="12">
+                      <a-form-item label="Webhook URL">
+                        <a-input v-model:value="generalForm.feishu.webhook_url" placeholder="飞书自定义机器人 Webhook 地址" />
+                      </a-form-item>
+                    </a-col>
+                    <a-col :span="12">
+                      <a-form-item label="Webhook Secret (安全校验)">
+                        <a-input-password v-model:value="generalForm.feishu.secret" placeholder="签名校验密钥" />
+                      </a-form-item>
+                    </a-col>
+                  </a-row>
+                </a-collapse-panel>
+
+                <a-collapse-panel key="wxwork" header="企业微信推送配置">
+                  <a-form-item label="Webhook URL">
+                    <a-input v-model:value="generalForm.wxwork.webhook_url" placeholder="企业微信群机器人 Webhook 地址" />
+                  </a-form-item>
+                </a-collapse-panel>
+
+                <a-collapse-panel key="email" header="邮件推送配置">
+                  <a-row :gutter="24">
+                    <a-col :span="12">
+                      <a-form-item label="SMTP 主机地址 (SMTP Host)">
+                        <a-input v-model:value="generalForm.email.host" placeholder="例如：smtp.qq.com" />
+                      </a-form-item>
+                    </a-col>
+                    <a-col :span="12">
+                      <a-form-item label="SMTP 端口 (SMTP Port)">
+                        <a-input-number v-model:value="generalForm.email.port" placeholder="例如：465" style="width: 100%;" />
+                      </a-form-item>
+                    </a-col>
+                  </a-row>
+                  <a-row :gutter="24">
+                    <a-col :span="12">
+                      <a-form-item label="发件人邮箱用户名 (Username)">
+                        <a-input v-model:value="generalForm.email.username" placeholder="请输入账号，通常为发信邮箱地址" />
+                      </a-form-item>
+                    </a-col>
+                    <a-col :span="12">
+                      <a-form-item label="发件人授权码密码 (Password)">
+                        <a-input-password v-model:value="generalForm.email.password" placeholder="授权码密码" />
+                      </a-form-item>
+                    </a-col>
+                  </a-row>
+                  <a-form-item label="收件人邮箱列表 (To，多个用英文逗号分隔)">
+                    <a-input v-model:value="generalForm.email.to" placeholder="例如：receiver1@test.com,receiver2@test.com" />
+                  </a-form-item>
+                </a-collapse-panel>
+
+                <a-collapse-panel key="webhook" header="系统全局监控 Webhook 自动化回调">
+                  <a-row :gutter="24">
+                    <a-col :span="12">
+                      <a-form-item label="回调 POST URL">
+                        <a-input v-model:value="generalForm.webhook_url" placeholder="监控结束后接收 JSON 数据的接口 URL" />
+                      </a-form-item>
+                    </a-col>
+                    <a-col :span="12">
+                      <a-form-item label="身份校验 Token">
+                        <a-input v-model:value="generalForm.webhook_token" placeholder="校验身份的 Token，将带在 Header 字段" />
+                      </a-form-item>
+                    </a-col>
+                  </a-row>
+                </a-collapse-panel>
+              </a-collapse>
+
+              <a-form-item>
+                <a-button type="primary" style="background-color: #52c41a; border-color: #52c41a;" @click="saveGeneralConfig" :loading="generalSaveLoading">
+                  保存消息推送与回调
+                </a-button>
+              </a-form-item>
+            </a-form>
+          </a-spin>
+        </div>
+      </a-tab-pane>
+
+      <!-- 高级扫描与环境配置 Tab -->
+      <a-tab-pane key="system_general" tab="高级扫描与环境配置" force-render>
+        <div style="max-width: 900px;">
+          <div style="margin-bottom: 16px; color: #888;">
+            此处的配置项用于代理、全局端口字典及扫描线程的调优。底部只读展示系统底层关键连接。
+          </div>
+          <a-spin :spinning="generalLoading">
+            <a-form layout="vertical">
+              <a-row :gutter="24">
+                <a-col :span="12">
+                  <a-form-item label="系统代理地址 (PROXY HTTP_URL)">
+                    <a-input v-model:value="generalForm.proxy_url" placeholder="例如：http://127.0.0.1:8080" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item label="端口扫描前端测试选项 Top 10 WEB 端口串">
+                    <a-input v-model:value="generalForm.port_top_10" placeholder="以英文逗号分隔" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+
+              <a-row :gutter="24">
+                <a-col :span="12">
+                  <a-form-item label="常规域名爆破并行线程数">
+                    <a-input-number v-model:value="generalForm.domain_brute_concurrent" :min="1" style="width: 100%" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item label="DNS智能生成并发并行线程数">
+                    <a-input-number v-model:value="generalForm.alt_dns_concurrent" :min="1" style="width: 100%" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+
+              <a-row :gutter="24">
+                <a-col :span="12">
+                  <a-form-item label="文件泄露字典路径 (FILE_LEAK_DICT)">
+                    <a-input v-model:value="generalForm.file_leak_dict" placeholder="字典文件绝对路径" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item label="域名爆破默认大字典路径 (DOMAIN_DICT)">
+                    <a-input v-model:value="generalForm.domain_dict" placeholder="字典文件绝对路径" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+
+              <a-row :gutter="24">
+                <a-col :span="12">
+                  <a-form-item label="API 安全认证机制">
+                    <a-switch v-model:checked="generalForm.auth" checked-children="开启" un-checked-children="关闭" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item label="API Token (Swagger API Key)">
+                    <a-input-password v-model:value="generalForm.api_key" placeholder="API KEY (不带 API 认证时无须配置)" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+
+              <a-form-item label="底层系统基础设施服务连接信息 (只读)">
+                <div style="background: #fafafa; border: 1px solid #f0f0f0; border-radius: 4px; padding: 16px;">
+                  <a-descriptions bordered size="small" :column="1">
+                    <a-descriptions-item label="Celery 消息队列 (Broker URL)">
+                      <code style="word-break: break-all;">{{ generalForm.celery_broker_url }}</code>
+                    </a-descriptions-item>
+                    <a-descriptions-item label="MongoDB 数据库 (URI)">
+                      <code style="word-break: break-all;">{{ generalForm.mongo_url }}</code>
+                    </a-descriptions-item>
+                    <a-descriptions-item label="MongoDB 默认数据库名 (DB)">
+                      <code>{{ generalForm.mongo_db }}</code>
+                    </a-descriptions-item>
+                    <a-descriptions-item label="GeoIP 城市位置库绝对路径">
+                      <code style="word-break: break-all;">{{ generalForm.geoip_city }}</code>
+                    </a-descriptions-item>
+                    <a-descriptions-item label="GeoIP ASN数据绝对路径">
+                      <code style="word-break: break-all;">{{ generalForm.geoip_asn }}</code>
+                    </a-descriptions-item>
+                  </a-descriptions>
+                </div>
+              </a-form-item>
+
+              <a-form-item>
+                <a-button type="primary" style="background-color: #52c41a; border-color: #52c41a;" @click="saveGeneralConfig" :loading="generalSaveLoading">
+                  保存高级配置
+                </a-button>
+              </a-form-item>
+            </a-form>
+          </a-spin>
+        </div>
+      </a-tab-pane>
     </a-tabs>
   </div>
 </template>
@@ -237,6 +520,79 @@ const loading = ref(false);
 const searchLoading = ref(false);
 const submitLoading = ref(false);
 const deleteLoading = ref(false);
+
+const generalLoading = ref(false);
+const generalSaveLoading = ref(false);
+const activePushPanels = ref(['dingding']);
+
+const generalForm = ref({
+  celery_broker_url: '',
+  mongo_url: '',
+  mongo_db: '',
+  geoip_city: '',
+  geoip_asn: '',
+  
+  fofa_key: '',
+  fofa_url: '',
+  fofa_max_page: 5,
+  fofa_page_size: 2000,
+  github_token: '',
+  
+  proxy_url: '',
+  port_top_10: '',
+  domain_brute_concurrent: 300,
+  alt_dns_concurrent: 1500,
+  
+  file_leak_dict: '',
+  domain_dict: '',
+  
+  auth: false,
+  api_key: '',
+  
+  webhook_url: '',
+  webhook_token: '',
+  
+  dingding: { secret: '', access_token: '' },
+  feishu: { webhook_url: '', secret: '' },
+  wxwork: { webhook_url: '' },
+  email: { host: '', port: null, username: '', password: '', to: '' },
+  query_plugin_config: {}
+});
+
+const fetchGeneralConfig = async () => {
+  generalLoading.value = true;
+  try {
+    const res = await request.get('/api/system_config/general');
+    if (res.code === 200) {
+      generalForm.value = res.data;
+    } else {
+      message.error(res.message || '获取常规全局配置失败');
+    }
+  } catch (error) {
+    message.error('请求常规全局配置出错');
+    console.error(error);
+  } finally {
+    generalLoading.value = false;
+  }
+};
+
+const saveGeneralConfig = async () => {
+  generalSaveLoading.value = true;
+  try {
+    const res = await request.post('/api/system_config/general', generalForm.value);
+    if (res.code === 200) {
+      message.success('系统全局配置保存成功！');
+      fetchGeneralConfig(); // 重新拉取确认
+    } else {
+      message.error(res.message || '保存常规全局配置失败');
+    }
+  } catch (error) {
+    message.error('请求保存全局配置出错');
+    console.error(error);
+  } finally {
+    generalSaveLoading.value = false;
+  }
+};
 
 const dictList = ref([]);
 const groupedDicts = computed(() => {
@@ -639,6 +995,7 @@ onMounted(() => {
   fetchCdnList();
   fetchSecurityPolicy();
   fetchPerformanceConfig();
+  fetchGeneralConfig();
 });
 </script>
 

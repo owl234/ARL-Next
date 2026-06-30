@@ -185,6 +185,12 @@ def get_cname(domain, log_flag=True):
 
 
 def domain_parsed(domain, fail_silently=True):
+    """
+    将域名拆分为主域名、域名、子域名
+    :param domain:
+    :param fail_silently:
+    :return:
+    """
     domain = domain.strip()
     try:
         res = get_tld(domain, fix_protocol=True,  as_object=True)

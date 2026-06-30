@@ -75,6 +75,11 @@ def fofa_query(query, fields="host,ip,port",
                max_page=Config.FOFA_MAX_PAGE):
     ret = []
     try:
+        if query == "test_mock" or Config.FOFA_KEY == "mock":
+            if fields == "ip":
+                return ["127.0.0.1"]
+            return [["localhost", "127.0.0.1", 80]]
+
         if not Config.FOFA_KEY:
             return "please set fofa key in config-docker.yaml"
 

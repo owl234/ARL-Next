@@ -31,4 +31,6 @@ backend/*.log
 # Test Cache
 .pytest_cache/
 .coverage
-htmlcov/*graph.md
+*graph.md
+architecture_graphs/
+reference/

@@ -3,7 +3,7 @@
     <a-layout-sider v-model:collapsed="collapsed" collapsible :trigger="null" width="170" style="background: #001529;">
       <div class="logo-container" style="height: 64px; display: flex; align-items: center; justify-content: center; background: #002140;">
         <DeploymentUnitOutlined class="logo-icon" :style="{ color: '#00bcd4', fontSize: '20px' }" />
-        <span class="logo-text" v-show="!collapsed" style="color: #fff; font-size: 16px; margin-left: 8px; font-weight: bold;">资产灯塔系统</span>
+        <span class="logo-text" v-show="!collapsed" style="color: #fff; font-size: 16px; margin-left: 8px; font-weight: bold;">ARL-Next</span>
       </div>
 
       <a-menu v-model:selectedKeys="selectedKeys" theme="dark" mode="inline" @click="handleMenuClick">
@@ -17,7 +17,6 @@
         <a-menu-item key="/pocList"><BugOutlined /><span>PoC信息</span></a-menu-item>
         <a-menu-item key="/planningTasks"><ClockCircleOutlined /><span>计划任务</span></a-menu-item>
         <a-menu-item key="/GitHubTasks/GitHubTasksList"><GithubOutlined /><span>GitHub管理</span></a-menu-item>
-        <a-menu-item key="/GitHubMonitor/GitHubMonitorList"><EyeOutlined /><span>GitHub监控</span></a-menu-item>
         <a-menu-item key="/systemSettings"><SettingOutlined /><span>系统设置</span></a-menu-item>
       </a-menu>
     </a-layout-sider>
@@ -45,7 +44,7 @@
           <router-view></router-view>
         </div>
         <div style="text-align: center; padding: 16px 0; color: rgba(0,0,0,.45); font-size: 12px;">
-          Powered by TCC(Tophant Competence Center) ARL 2.6.2
+          Powered by ARL-Next
         </div>
       </a-layout-content>
     </a-layout>
@@ -122,7 +121,7 @@ const currentPageTitle = computed(() => {
     '/search': '资产搜索',
     // ... 其他映射
   };
-  return titleMap[route.path] || '资产灯塔系统';
+  return titleMap[route.path] || 'ARL-Next';
 });
 /* ---------- 新增：修改密码逻辑 ---------- */
 const showChangePassModal = ref(false);

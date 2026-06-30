@@ -108,17 +108,10 @@ const routes = [
 
 
             {
-                path: '/GitHubTasks/GitHubTasksList', // 请确保这和你菜单配置的路径一致
-                name: 'GithubTasksList',
-                component: () => import('../views/GithubTasksList.vue'),
+                path: '/GitHubTasks/GitHubTasksList',
+                name: 'GithubManage',
+                component: () => import('../views/GithubManage.vue'),
                 meta: { title: 'GitHub管理' }
-            },
-
-            {
-                path: '/GitHubMonitor/GitHubMonitorList', // 请确保这和你菜单配置的路径一致
-                name: 'GithubMonitorList',
-                component: () => import('../views/GithubMonitorList.vue'),
-                meta: { title: 'GitHub监控' }
             },
             {
                 path: '/GitHubTasks/GitHubTasksInfo', // 这个路径必须和列表页跳转时写的一模一样

@@ -208,7 +208,7 @@ def submit_task(task_data):
     }
 
     try:
-        # 5. 【真正的灵魂所在】：调用 .delay() 异步下发任务！
+        # 5. 【真正的灵魂所在】：调用 .delay() 异步下发任务！ƒ
         # 这行代码一执行，任务就被扔进了消息队列（如 RabbitMQ/Redis），Celery 工人会在后台接单执行。
         celery_id = celerytask.arl_task.delay(options=task_options)
 

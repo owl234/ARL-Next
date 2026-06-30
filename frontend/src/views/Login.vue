@@ -1,6 +1,6 @@
 <template>
   <div style="height: 100vh; display: flex; justify-content: center; align-items: center; background-color: #141414;">
-    <a-card title="ARL 资产安全侦察链路系统" style="width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); border-radius: 8px;">
+    <a-card title="ARL-Next" style="width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); border-radius: 8px;">
       <a-form
           :model="formState"
           layout="vertical"

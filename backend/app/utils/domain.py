@@ -38,7 +38,10 @@ def check_domain_black(domain):
 
 
 def is_forbidden_domain(domain):
-    for f_domain in Config.FORBIDDEN_DOMAINS:
+    from app.utils.security_policy import get_security_policy
+    _, forbidden_domains = get_security_policy()
+    
+    for f_domain in forbidden_domains:
         if not f_domain:
             continue
             

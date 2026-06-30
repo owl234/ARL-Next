@@ -127,7 +127,18 @@ def github_client(url, params=None, cnt=0):
         "Accept": "application/vnd.github.v3+json"
     }
     time.sleep(2.5)
-    conn = http_req(url, params=params, headers=headers)
+    
+    try:
+        conn = http_req(url, params=params, headers=headers, timeout=(20.1, 30.1))
+    except Exception as e:
+        if cnt < 3:
+            cnt += 1
+            sleep_time = 5 + 5 * cnt
+            logger.warning("Network/Proxy error on {}, retry {}, time sleep {}: {}".format(url, cnt, sleep_time, e))
+            time.sleep(sleep_time)
+            return github_client(url, params=params, cnt=cnt)
+        raise Exception("Network/Proxy error after retries: {}".format(e))
+        
     data = conn.json()
     if conn.status_code != 200:
         message = data.get("message", "Github 错误")
@@ -138,6 +149,12 @@ def github_client(url, params=None, cnt=0):
                     or "You have exceeded a secondary rate limit" in message:
                 sleep_time = 20 + 15*cnt
                 logger.info("rate-limit retry {} {}, time sleep {}".format(cnt, params, sleep_time))
+                time.sleep(sleep_time)
+                return github_client(url, params=params, cnt=cnt)
+            else:
+                # Retry for other 5xx errors or transient API errors
+                sleep_time = 10 + 10 * cnt
+                logger.info("api error retry {} {}, time sleep {}".format(cnt, params, sleep_time))
                 time.sleep(sleep_time)
                 return github_client(url, params=params, cnt=cnt)
 

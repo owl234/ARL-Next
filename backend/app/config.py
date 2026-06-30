@@ -1,12 +1,70 @@
 import os
 import yaml
 import sys
-
+import shutil
 basedir = os.path.abspath(os.path.dirname(__file__))
 
+import time
 
-class Config(object):
-    CELERY_BROKER_URL = "amqp://arl:arlpassword@localhost:5672/arlv2host"
+_config_cache = {
+    "data": None,
+    "last_update": 0
+}
+CACHE_TTL = 30  # 30 seconds cache
+
+def get_system_config_value(key, default):
+    try:
+        now = time.time()
+        if _config_cache["last_update"] > 0 and now - _config_cache["last_update"] < CACHE_TTL:
+            config_data = _config_cache["data"]
+        else:
+            from app.utils.conn import conn_db
+            doc = conn_db('system_config').find_one({"_id": "general_config"})
+            if doc:
+                config_data = doc
+                _config_cache["data"] = doc
+                _config_cache["last_update"] = now
+            else:
+                config_data = {}
+        
+        return config_data.get(key, default)
+    except Exception:
+        return default
+
+def clear_system_config_cache():
+    _config_cache["last_update"] = 0
+
+DYNAMIC_PROPERTIES = {
+    "FOFA_KEY", "FOFA_URL", "FOFA_MAX_PAGE", "FOFA_PAGE_SIZE",
+    "TOP_10", "FILE_LEAK_TOP_2k", "DOMAIN_DICT_2W",
+    "DINGDING_SECRET", "DINGDING_ACCESS_TOKEN",
+    "FEISHU_WEBHOOK", "FEISHU_SECRET", "WX_WORK_WEBHOOK",
+    "EMAIL_HOST", "EMAIL_PORT", "EMAIL_USERNAME", "EMAIL_PASSWORD", "EMAIL_TO",
+    "GITHUB_TOKEN", "DOMAIN_BRUTE_CONCURRENT", "ALT_DNS_CONCURRENT",
+    "PROXY_URL", "QUERY_PLUGIN_CONFIG", "WEB_HOOK_URL", "WEB_HOOK_TOKEN",
+    "AUTH", "API_KEY"
+}
+
+DYNAMIC_KEYS_MAP = {
+    "TOP_10": "port_top_10",
+    "FILE_LEAK_TOP_2k": "file_leak_dict",
+    "DOMAIN_DICT_2W": "domain_dict",
+    "WX_WORK_WEBHOOK": "wx_work_webhook",
+    "WEB_HOOK_URL": "webhook_url",
+    "WEB_HOOK_TOKEN": "webhook_token"
+}
+
+class ConfigMeta(type):
+    def __getattr__(cls, name):
+        if name in DYNAMIC_PROPERTIES:
+            db_key = DYNAMIC_KEYS_MAP.get(name, name.lower())
+            default_val = getattr(cls, "_" + name, None)
+            return get_system_config_value(db_key, default_val)
+        raise AttributeError(f"type object 'Config' has no attribute '{name}'")
+
+
+class Config(object, metaclass=ConfigMeta):
+    CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
 
     MONGO_DB = 'ARLV2'
     MONGO_URL = 'mongodb://127.0.0.1:27017/'
@@ -14,14 +72,18 @@ class Config(object):
     TMP_PATH = os.path.join(basedir, 'tmp')
     if not os.path.exists(TMP_PATH):
         os.mkdir(TMP_PATH)
-    MASSDNS_BIN = os.path.join(basedir, 'tools/massdns')
+    _system_massdns = shutil.which("massdns")
+    if _system_massdns:
+        MASSDNS_BIN = _system_massdns
+    else:
+        MASSDNS_BIN = os.path.join(basedir, 'tools/massdns')
     SCREENSHOT_JS = os.path.join(basedir, 'tools/screenshot.js')
     SCREENSHOT_DIR = os.path.join(basedir, 'tmp_screenshot')
     SCREENSHOT_FAIL_IMG = os.path.join(basedir, 'dicts/noscreenshot.jpg')
     DRIVER_JS = os.path.join(basedir, 'tools/driver.js')
 
     DOMAIN_DICT_TEST = os.path.join(basedir, 'dicts/domain_dict_test.txt')
-    DOMAIN_DICT_2W = os.path.join(basedir, 'dicts/domain_2w.txt')
+    _DOMAIN_DICT_2W = os.path.join(basedir, 'dicts/domain_2w.txt')
     DNS_SERVER = os.path.join(basedir, 'dicts/dnsserver.txt')
 
     CDN_JSON_PATH = os.path.join(basedir, 'dicts/cdn_info.json')
@@ -43,15 +105,15 @@ class Config(object):
     TOP_100 = "1000,10000,10001,10030,1024,10250,10255,10256,10443,1080,1099,110,111,11211,123,12300,1234,12345,12578,13000,135,137,138,139,14000,143,1433,1434,1443,15000,15001,15002,1515,1521,16030,18001,18080,18081,1883,1988,2000,20000,20121,2049,2080,2081,2082,2083,2086,2087,20880,2096,21,2181,22,2222,22222,2323,25,2525,25672,26,27017,3000,30000,30001,30002,30003,30005,3001,30017,3002,3003,30080,3050,3306,3307,3333,3389,33890,3390,3446,3542,3689,389,4000,40001,4007,4040,443,4430,4433,444,4443,4444,445,465,4848,5000,5001,5002,5003,5005,50050,5006,50060,5007,50070,50075,50090,5050,5060,5222,5357,5432,554,5555,55555,5601,5671,5672,5673,5678,5801,587,5985,5986,6000,6060,6066,6080,6379,6380,6443,6446,6588,666,6665,6666,6699,6780,6868,7000,7001,7002,7003,7005,7010,7019,7070,7071,7080,7180,7443,7547,777,7776,7777,80,800,8000,8001,8002,8003,8005,8006,8008,8009,801,8010,8020,8025,8030,8031,8032,8060,8069,8080,8081,8082,8083,8084,8085,8086,8087,8088,8089,8090,8091,8092,8098,8099,81,8123,8150,8161,8162,8166,8180,8181,8191,82,8288,83,84,8443,8480,85,8686,873,8765,88,880,8800,8848,888,8880,8883,8887,8888,8889,8890,8899,8983,8989,8999,9000,9001,9002,9003,9080,9083,9090,9091,9099,9100,9109,9171,9172,9191,9200,9201,9202,9300,9301,9302,9443,9527,9529,9864,9870,9876,9944,999,9998,9999,8100"
 
     # 常见16个WEB端口
-    TOP_10 = "80,443,8443,8080,8081,8888,8089,5000,5001,8085,800,81,9000,88,8001,8090"
+    _TOP_10 = "80,443,8443,8080,8081,8888,8089,5000,5001,8085,800,81,9000,88,8001,8090"
 
-    FOFA_KEY = ""
-    FOFA_URL = "https://fofa.info"
-    FOFA_MAX_PAGE = 5      # 最大查询页数
-    FOFA_PAGE_SIZE = 2000  # 每页2000条
+    _FOFA_KEY = ""
+    _FOFA_URL = "https://fofa.info"
+    _FOFA_MAX_PAGE = 5      # 最大查询页数
+    _FOFA_PAGE_SIZE = 2000  # 每页2000条
 
-    AUTH = False
-    API_KEY = ""
+    _AUTH = False
+    _API_KEY = ""
 
     # BLACK_IPS = ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "0.0.0.0/8"]
     BLACK_IPS = ["127.0.0.0/8", "0.0.0.0/8"]
@@ -59,42 +121,42 @@ class Config(object):
     GEOIP_ASN = ""
     GEOIP_CITY = ""
 
-    FILE_LEAK_TOP_2k = os.path.join(basedir, 'dicts/file_top_2000.txt')
+    _FILE_LEAK_TOP_2k = os.path.join(basedir, 'dicts/file_top_2000.txt')
     FILE_LEAK_TOP_200 = os.path.join(basedir, 'dicts/file_top_200.txt')
 
     DOMAIN_MAX_LEN = 25  # 不包括下发的目标域名长度，
 
-    DINGDING_SECRET = ""
-    DINGDING_ACCESS_TOKEN = ""
+    _DINGDING_SECRET = ""
+    _DINGDING_ACCESS_TOKEN = ""
 
-    FEISHU_WEBHOOK = ""
-    FEISHU_SECRET = ""
+    _FEISHU_WEBHOOK = ""
+    _FEISHU_SECRET = ""
 
-    WX_WORK_WEBHOOK = ""
+    _WX_WORK_WEBHOOK = ""
 
-    EMAIL_HOST = ""
-    EMAIL_PORT = ""
-    EMAIL_USERNAME = ""
-    EMAIL_PASSWORD = ""
-    EMAIL_TO = ""
+    _EMAIL_HOST = ""
+    _EMAIL_PORT = ""
+    _EMAIL_USERNAME = ""
+    _EMAIL_PASSWORD = ""
+    _EMAIL_TO = ""
     # FORBIDDEN_DOMAINS = ["gov.cn", "edu.cn", "org.cn"]
     FORBIDDEN_DOMAINS = []
 
-    GITHUB_TOKEN = ""
+    _GITHUB_TOKEN = ""
     GITHUB_HASH_FILE = os.path.join(TMP_PATH, 'github.hash')
 
     # 域名爆破并发数
-    DOMAIN_BRUTE_CONCURRENT = 300
+    _DOMAIN_BRUTE_CONCURRENT = 300
     # 组合生成的域名爆破并发数
-    ALT_DNS_CONCURRENT = 1500
+    _ALT_DNS_CONCURRENT = 1500
 
     # 代理地址
-    PROXY_URL = ""
+    _PROXY_URL = ""
 
-    QUERY_PLUGIN_CONFIG = dict()
+    _QUERY_PLUGIN_CONFIG = dict()
 
-    WEB_HOOK_URL = ""
-    WEB_HOOK_TOKEN = ""
+    _WEB_HOOK_URL = ""
+    _WEB_HOOK_TOKEN = ""
 
 
 try:
@@ -107,33 +169,33 @@ try:
     Config.CELERY_BROKER_URL = y["CELERY"]["BROKER_URL"]
 
     # *** Fofa 配置 ***
-    Config.FOFA_KEY = y["FOFA"]["KEY"]
+    Config._FOFA_KEY = y["FOFA"]["KEY"]
     if y["FOFA"].get("URL"):
-        Config.FOFA_URL = y["FOFA"]["URL"]
+        Config._FOFA_URL = y["FOFA"]["URL"]
 
     if y["FOFA"].get("MAX_PAGE"):
-        Config.FOFA_MAX_PAGE = y["FOFA"]["MAX_PAGE"]
+        Config._FOFA_MAX_PAGE = y["FOFA"]["MAX_PAGE"]
 
     if y["FOFA"].get("PAGE_SIZE"):
-        Config.FOFA_PAGE_SIZE = y["FOFA"]["PAGE_SIZE"]
+        Config._FOFA_PAGE_SIZE = y["FOFA"]["PAGE_SIZE"]
 
     # *** GEOIP 配置 ***
     Config.GEOIP_CITY = y["GEOIP"]["CITY"]
     Config.GEOIP_ASN = y["GEOIP"]["ASN"]
 
-    Config.AUTH = y["ARL"]["AUTH"]
-    Config.API_KEY = y["ARL"]["API_KEY"]
+    Config._AUTH = y["ARL"]["AUTH"]
+    Config._API_KEY = y["ARL"]["API_KEY"]
     Config.BLACK_IPS = y["ARL"]["BLACK_IPS"]
 
     # *** TOP 10 端口设置 ***
     if y["ARL"].get("PORT_TOP_10"):
-        Config.TOP_10 = y["ARL"]["PORT_TOP_10"]
+        Config._TOP_10 = y["ARL"]["PORT_TOP_10"]
 
     # *** 文件泄漏字典 ***
     if y["ARL"].get("FILE_LEAK_DICT"):
         file_leak_dict = y["ARL"]["FILE_LEAK_DICT"]
         if os.path.isfile(file_leak_dict):
-            Config.FILE_LEAK_TOP_2k = file_leak_dict
+            Config._FILE_LEAK_TOP_2k = file_leak_dict
         else:
             print("Warning {} is not file".format(file_leak_dict))
 
@@ -141,7 +203,7 @@ try:
     if y["ARL"].get("DOMAIN_DICT"):
         domain_dict = y["ARL"]["DOMAIN_DICT"]
         if os.path.isfile(domain_dict):
-            Config.DOMAIN_DICT_2W = domain_dict
+            Config._DOMAIN_DICT_2W = domain_dict
         else:
             print("Warning {} is not file".format(domain_dict))
 
@@ -160,74 +222,74 @@ try:
     # *** 钉钉配置 ***
     if y.get("DINGDING"):
         if y["DINGDING"].get("SECRET"):
-            Config.DINGDING_SECRET = y["DINGDING"]["SECRET"]
+            Config._DINGDING_SECRET = y["DINGDING"]["SECRET"]
 
         if y["DINGDING"].get("ACCESS_TOKEN"):
-            Config.DINGDING_ACCESS_TOKEN = y["DINGDING"]["ACCESS_TOKEN"]
+            Config._DINGDING_ACCESS_TOKEN = y["DINGDING"]["ACCESS_TOKEN"]
 
     # *** 邮箱配置 ***
     if y.get("EMAIL"):
         if y["EMAIL"].get("HOST"):
-            Config.EMAIL_HOST = y["EMAIL"]["HOST"]
+            Config._EMAIL_HOST = y["EMAIL"]["HOST"]
 
         if y["EMAIL"].get("PORT"):
-            Config.EMAIL_PORT = int(y["EMAIL"]["PORT"])
+            Config._EMAIL_PORT = int(y["EMAIL"]["PORT"])
 
         if y["EMAIL"].get("USERNAME"):
-            Config.EMAIL_USERNAME = y["EMAIL"]["USERNAME"]
+            Config._EMAIL_USERNAME = y["EMAIL"]["USERNAME"]
 
         if y["EMAIL"].get("PASSWORD"):
-            Config.EMAIL_PASSWORD = y["EMAIL"]["PASSWORD"]
+            Config._EMAIL_PASSWORD = y["EMAIL"]["PASSWORD"]
 
         if y["EMAIL"].get("TO"):
-            Config.EMAIL_TO = y["EMAIL"]["TO"]
+            Config._EMAIL_TO = y["EMAIL"]["TO"]
 
     # *** GITHUB TOKEN 配置 ***
     if y.get("GITHUB"):
         if y["GITHUB"].get("TOKEN"):
-            Config.GITHUB_TOKEN = y["GITHUB"]["TOKEN"]
+            Config._GITHUB_TOKEN = y["GITHUB"]["TOKEN"]
 
     # *** 域名爆破并发数 ***
     domain_concurrent = y["ARL"].get("DOMAIN_BRUTE_CONCURRENT")
     if domain_concurrent:
         int(domain_concurrent)
-        Config.DOMAIN_BRUTE_CONCURRENT = domain_concurrent
+        Config._DOMAIN_BRUTE_CONCURRENT = domain_concurrent
 
     # *** 组合生成的域名爆破并发数 ***
     alt_dns_concurrent = y["ARL"].get("ALT_DNS_CONCURRENT")
     if alt_dns_concurrent:
         int(alt_dns_concurrent)
-        Config.ALT_DNS_CONCURRENT = alt_dns_concurrent
+        Config._ALT_DNS_CONCURRENT = alt_dns_concurrent
 
     # *** 代理配置 ***
     if y.get("PROXY"):
         if y["PROXY"].get("HTTP_URL"):
-            Config.PROXY_URL = y["PROXY"]["HTTP_URL"]
+            Config._PROXY_URL = y["PROXY"]["HTTP_URL"]
 
     # *** 域名查询插件配置 ***
     if y.get("QUERY_PLUGIN"):
         query_plugin_conf = y["QUERY_PLUGIN"]
         if isinstance(query_plugin_conf, dict):
-            Config.QUERY_PLUGIN_CONFIG = query_plugin_conf
+            Config._QUERY_PLUGIN_CONFIG = query_plugin_conf
 
     # *** WEBHOOK 配置文件 ***
     if y.get("WEBHOOK"):
         if y["WEBHOOK"].get("URL"):
-            Config.WEB_HOOK_URL = y["WEBHOOK"]["URL"]
+            Config._WEB_HOOK_URL = y["WEBHOOK"]["URL"]
         if y["WEBHOOK"].get("TOKEN"):
-            Config.WEB_HOOK_TOKEN = y["WEBHOOK"]["TOKEN"]
+            Config._WEB_HOOK_TOKEN = y["WEBHOOK"]["TOKEN"]
 
     # *** 飞书消息推送配置 ***
     if y.get("FEISHU"):
         if y["FEISHU"].get("WEBHOOK_URL"):
-            Config.FEISHU_WEBHOOK = y["FEISHU"]["WEBHOOK_URL"]
+            Config._FEISHU_WEBHOOK = y["FEISHU"]["WEBHOOK_URL"]
         if y["FEISHU"].get("SECRET"):
-            Config.FEISHU_SECRET = y["FEISHU"]["SECRET"]
+            Config._FEISHU_SECRET = y["FEISHU"]["SECRET"]
 
     # *** 企业微信推送配置 ***
     if y.get("WXWORK"):
         if y["WXWORK"].get("WEBHOOK_URL"):
-            Config.WX_WORK_WEBHOOK = y["WXWORK"]["WEBHOOK_URL"]
+            Config._WX_WORK_WEBHOOK = y["WXWORK"]["WEBHOOK_URL"]
 
 except Exception as e:
     print("Parse config.yaml error {}".format(e))

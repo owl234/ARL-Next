@@ -34,10 +34,10 @@ class DashboardStats(ARLResource):
         )
         
         # 3. 漏洞分类统计
-        critical = conn('poc').count({"risk": "critical"})
-        high = conn('poc').count({"risk": "high"})
-        medium = conn('poc').count({"risk": "medium"})
-        low = conn('poc').count({"risk": "low"})
+        critical = conn('nuclei_result').count({"vuln_severity": "critical"})
+        high = conn('nuclei_result').count({"vuln_severity": "high"}) + conn('vuln').count({})
+        medium = conn('nuclei_result').count({"vuln_severity": "medium"})
+        low = conn('nuclei_result').count({"vuln_severity": "low"})
         
         # 4. GitHub 监控数
         github_monitors = conn('github_monitor_task').count({})
@@ -73,7 +73,8 @@ class DashboardTrend(ARLResource):
             
             # 当日新增资产和漏洞
             c_assets = conn('asset_domain').count({"update_date": {"$gte": start, "$lte": end}})
-            c_vulns = conn('poc').count({"update_date": {"$gte": start, "$lte": end}})
+            c_vulns = conn('vuln').count({"save_date": {"$gte": start, "$lte": end}}) + \
+                      conn('nuclei_result').count({"save_date": {"$gte": start, "$lte": end}})
             
             days.append(day_str)
             assets.append(c_assets)

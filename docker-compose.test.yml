@@ -2,7 +2,7 @@ version: '3'
 
 volumes:
   arl_db_test:
-  arl_mq_test:
+  arl_redis_test:
   # 👇 新增：用于隔离和持久化系统运行产生的动态数据
   arl_tmp_test:          # 存放报表等临时文件
   arl_screenshot_test:   # 存放截图文件
@@ -29,7 +29,7 @@ services:
     restart: always
     depends_on:
       - mongodb
-      - rabbitmq
+      - redis
     volumes:
       # ✅ 保留并隔离动态数据目录 (使用上方定义的 named volumes)
       - arl_upload_poc_test:/opt/ARL-NPoC/xing/plugins/upload_poc
@@ -40,7 +40,7 @@ services:
       - ./backend/GeoLite2:/data/GeoLite2
       # 将本地安全初始化后的脱敏配置文件，以只读(ro)方式挂载进去
       - ./backend/config-docker.yaml:/code/config.yaml:ro
-    entrypoint: ["sh", "-c", "sh /usr/bin/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh rabbitmq:5672; gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 2" ]
+    entrypoint: ["sh", "-c", "sh /usr/bin/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh redis:6379; gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 2" ]
 
   # 👷 3. 核心扫描节点
   worker:
@@ -49,7 +49,7 @@ services:
     restart: always
     depends_on:
       - mongodb
-      - rabbitmq
+      - redis
     volumes:
       # Worker 也需要相同的动态数据卷
       - arl_upload_poc_test:/opt/ARL-NPoC/xing/plugins/upload_poc
@@ -57,7 +57,7 @@ services:
       - arl_screenshot_test:/code/tmp_screenshot
       - ./backend/GeoLite2:/data/GeoLite2
       - ./backend/config-docker.yaml:/code/config.yaml:ro
-    entrypoint: ["sh", "-c", "sh /usr/bin/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q arltask -n arltask -c 2 -O fair -l info"]
+    entrypoint: ["sh", "-c", "sh /usr/bin/wait-for-it.sh mongodb:27017; sh /usr/bin/wait-for-it.sh redis:6379; celery -A app.celerytask.celery worker -Q arltask -n arltask -c 2 -O fair -l info"]
 
   # 🕵️ 4. GitHub 监控节点
   worker-github:
@@ -66,11 +66,11 @@ services:
     restart: always
     depends_on:
       - mongodb
-      - rabbitmq
+      - redis
     volumes:
       - ./backend/GeoLite2:/data/GeoLite2
       - ./backend/config-docker.yaml:/code/app/config.yaml:ro
-    entrypoint: ["sh", "-c", "wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672; celery -A app.celerytask.celery worker -Q github -n github -c 2"]
+    entrypoint: ["sh", "-c", "wait-for-it.sh mongodb:27017; wait-for-it.sh redis:6379; celery -A app.celerytask.celery worker -Q github -n github -c 2"]
 
   # ⏱️ 5. 定时调度器
   scheduler:
@@ -79,11 +79,11 @@ services:
     restart: always
     depends_on:
       - mongodb
-      - rabbitmq
+      - redis
     volumes:
       - ./backend/GeoLite2:/data/GeoLite2
       - ./backend/config-docker.yaml:/code/config.yaml:ro
-    entrypoint: ["sh", "-c", "wait-for-it.sh mongodb:27017; wait-for-it.sh rabbitmq:5672; python3 -m app.scheduler"]
+    entrypoint: ["sh", "-c", "wait-for-it.sh mongodb:27017; wait-for-it.sh redis:6379; python3 -m app.scheduler"]
 
   # 🗄️ 6. 数据库 (与 local 保持一致，保留初始密码)
   mongodb:
@@ -100,15 +100,11 @@ services:
       # 👇 新增：自动读取 .env 中的强密码变量
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
 
-  # 🐇 7. 消息队列
-  rabbitmq:
-    image: rabbitmq:3.13.1-management-alpine
-    container_name: arl_rabbitmq_test
+  # 🔴 7. 消息队列 (Redis)
+  redis:
+    image: redis:alpine
+    container_name: arl_redis_test
     restart: always
+    command: redis-server --appendonly yes
     volumes:
-      - arl_mq_test:/var/lib/rabbitmq # 👈 2. 新增这行映射
-    environment:
-      # 👇 新增：自动读取 .env 中的强密码变量
-      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}
-      - RABBITMQ_DEFAULT_USER=arl
-      - RABBITMQ_DEFAULT_VHOST=arlv2host
+      - arl_redis_test:/data

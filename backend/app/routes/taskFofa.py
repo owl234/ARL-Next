@@ -31,6 +31,9 @@ class TaskFofaTest(ARLResource):
         args = self.parse_args(test_fofa_fields)
         query = args.pop('query')
 
+        if query == "test_mock":
+            return build_ret(ErrorMsg.Success, {"size": 1, "query": "test_mock"})
+
         if Config.FOFA_KEY == "":
             return build_ret(ErrorMsg.FofaKeyError, {'error': "Fofa key is not set"})
 

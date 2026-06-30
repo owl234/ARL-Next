@@ -54,7 +54,7 @@
         </a-card>
       </a-col>
       <a-col :span="6">
-        <a-card class="clickable-card" @click="router.push('/GitHubMonitor/GitHubMonitorList')">
+        <a-card class="clickable-card" @click="router.push('/GitHubTasks/GitHubTasksList')">
           <a-statistic title="GitHub监控仓库" :value="stats.github_monitors">
             <template #prefix>
               <GithubOutlined style="color: #333" />

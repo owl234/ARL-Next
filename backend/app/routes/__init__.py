@@ -568,3 +568,4 @@ from .dashboard import ns as dashboard_ns
 from .syslog import ns as syslog_ns
 from .dictionary import ns as dictionary_ns
 from .cdn_dict import ns as cdn_dict_ns
+from .system_config import ns as system_config_ns

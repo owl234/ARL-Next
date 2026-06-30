@@ -702,7 +702,8 @@ const pluginList = [
   { key: 'file_leak', label: '文件泄露' },
   { key: 'findvhost', label: 'Host 碰撞' },
   { key: 'nuclei_scan', label: 'nuclei 调用' },
-  { key: 'web_info_hunter', label: 'WIH 调用' }
+  { key: 'web_info_hunter', label: 'WIH 调用' },
+  { key: 'npoc_service_detection', label: '服务(python)识别' }
 ];
 
 // === 2. 匹配截图的默认勾选状态 ===
@@ -710,7 +711,8 @@ const defaultPlugins = {
   domain_brute: true, alt_dns: true, dns_query_plugin: true, arl_search: true,
   port_scan: true, service_detection: false, os_detection: false, ssl_cert: false,
   skip_scan_cdn_ip: true, site_identify: false, search_engines: false, site_spider: false,
-  site_capture: false, file_leak: false, findvhost: false, nuclei_scan: false, web_info_hunter: false
+  site_capture: false, file_leak: false, findvhost: false, nuclei_scan: false, web_info_hunter: false,
+  npoc_service_detection: false
 };
 
 // === 3. 表单状态初始化（不再依赖任何废弃变量） ===

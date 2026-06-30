@@ -19,7 +19,7 @@ class SiteScreenshot(BaseThread):
         file_name = '{}/{}.jpg'.format(self.capture_dir, self.gen_filename(site))
 
         cmd_parameters = ['node',
-                          '/code/app/tools/screenshot_pptr.js',
+                          '/code/backend/app/tools/screenshot_pptr.js',
                           '-u={}'.format(site),
                           '-s={}'.format(file_name),
                           ]

@@ -39,7 +39,7 @@ export default defineConfig(({ command }) => {
       proxy: {
         // 当你请求 /api/user/login 时，Vite会自动帮你把请求转发给后端
         '/api' : {
-          target: 'http://127.0.0.1:5003', // 保持你原有的 5003 端口不变
+          target: 'http://127.0.0.1:5001', // 指向刚刚我们建好的 Docker 后端端口
           changeOrigin: true,
           secure: false, // 忽略本地自签名的HTTPS证书错误
         }

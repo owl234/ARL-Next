@@ -12,9 +12,12 @@ ENV PYTHONUNBUFFERED=1 \
     NODE_PATH=/usr/local/lib/node_modules
 
 # 4. 🚀 [系统级重构] 安装系统依赖 & Nmap 武器库
-# 恢复使用官方默认源 (清华源代理网络下连接失败)
+# 使用阿里云镜像源替换默认源，极大加速 apt 下载 (尤其是 chromium 等大文件)
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    echo "deb http://mirrors.aliyun.com/debian/ bullseye main non-free contrib" > /etc/apt/sources.list && \
+    echo "deb http://mirrors.aliyun.com/debian-security/ bullseye-security main" >> /etc/apt/sources.list && \
+    echo "deb http://mirrors.aliyun.com/debian/ bullseye-updates main non-free contrib" >> /etc/apt/sources.list && \
     apt-get update -o Acquire::Retries=10 && \
     apt-get install -y --no-install-recommends -o Acquire::Retries=10 --fix-missing \
     wget \
@@ -46,17 +49,27 @@ RUN wget https://nmap.org/dist/nmap-7.95.tar.bz2 && \
     bzip2 -cd nmap-7.95.tar.bz2 | tar xvf - && \
     cd nmap-7.95 && \
     ./configure --without-zenmap && \
-    make && \
+    make -j$(nproc) && \
     make install && \
     cd .. && \
     rm -rf nmap-7.95 nmap-7.95.tar.bz2
 
-# 下载并安装 Nuclei v3.3.0 及其漏洞模板 (直接通过宿主机代理下载)
-RUN wget -t 10 --retry-connrefused https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/nuclei_3.3.0_linux_amd64.zip && \
+
+# 下载并安装 Nuclei v3.3.0 及其漏洞模板 (通过 ghproxy 加速下载)
+RUN wget -t 10 --retry-connrefused https://mirror.ghproxy.com/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/nuclei_3.3.0_linux_amd64.zip && \
     unzip nuclei_3.3.0_linux_amd64.zip && \
     mv nuclei /usr/local/bin/ && \
     rm -rf nuclei_3.3.0_linux_amd64.zip README* LICENSE.md && \
     nuclei -update-templates
+
+# 下载并安装 wih (Web Info Hunter) 自动适配架构，通过 ghproxy 加速
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then \
+        wget -t 10 --retry-connrefused -O /usr/local/bin/wih https://mirror.ghproxy.com/https://raw.githubusercontent.com/adysec/ARL/master/tools/wih/wih_linux_amd64; \
+    elif [ "$ARCH" = "arm64" ]; then \
+        wget -t 10 --retry-connrefused -O /usr/local/bin/wih https://mirror.ghproxy.com/https://raw.githubusercontent.com/adysec/ARL/master/tools/wih/wih_linux_arm64; \
+    fi && \
+    chmod +x /usr/local/bin/wih
 
 RUN npm config set registry https://registry.npmmirror.com/ && \
     npm install -g puppeteer-core@10.4.0

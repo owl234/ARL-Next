@@ -1,20 +1,22 @@
-# Design Philosophy: Simplicity
+# 设计理念：极简主义
 
-*   **Focus**: Do one thing well.
-*   **Clarity**: Code should explain itself.
-*   **Restraint**: Less is more.
+*   **专注**：做好一件事。
+*   **清晰**：代码应该能自我解释。
+*   **克制**：少即是多 (Less is more)。
 
-## Guidelines
+## 编码准则
 
-1.  **Readability over cleverness**: Write code for humans first.
-2.  **Minimal dependencies**: Rely on the standard library where possible.
-3.  **Elegant error handling**: Fail gracefully and explicitly.
+1.  **可读性优于取巧**：首先为人类读懂而编写代码。
+2.  **最少依赖**：尽可能依赖语言自带的标准库。
+3.  **优雅的错误处理**：显式且优雅地处理运行失败。
 
-> "Simplicity is the ultimate sophistication."
+> "简单是终极的复杂。" (Simplicity is the ultimate sophistication.)
 
-## UI Design
+## UI 设计准则
 
-1.  **Minimize Clicks**: Prefer flat, one-click layouts (e.g., expanded side menus or tabbed lists) over nested structures (like dropdowns) to reduce user interaction cost.
+1.  **最小化点击次数**：相比嵌套结构（如多级下拉菜单），优先选择扁平化、一步直达的布局（如展开的侧边栏菜单或标签页列表），以降低用户的交互成本。
 
+## AI 交互与输出规范
 
-
+1.  **工件使用中文**：所有的 artifacts（如设计方案、总结文档、任务列表等）必须全部使用中文编写。
+2.  **放慢思考步伐**：放慢思考和分析的步骤，不要一次性进行跨度太大的思考和跳跃式决策，保持逻辑连贯、稳步推进。
