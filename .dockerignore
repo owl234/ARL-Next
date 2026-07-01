@@ -1,0 +1,8 @@
+frontend/node_modules
+frontend/dist
+backend/.venv-docker
+backend/app/__pycache__
+test/ICP_Query_temp/venv
+test/ICP_Query_temp/.git
+.git
+.idea

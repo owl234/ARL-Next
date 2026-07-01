@@ -187,7 +187,7 @@ docker-compose -f docker-compose.local.yml down
 
 <div align="center">
 
-![WeChat Contact](./img/wecaht.png)
+<img src="./img/wecaht.png" alt="WeChat Contact" width="500">
 
 </div>
 
