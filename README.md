@@ -32,6 +32,22 @@
 
 ---
 
+## 📸 界面预览
+
+* **全局仪表盘**：直观展示资产与任务状态分布、近期日志,掌控全局安全态势。
+  <br><img src="./img/dashboard.png" alt="仪表盘" width="800"><br>
+
+* **ICP 备案查询**：内置ICP网站、APP、小程序、快应用查询工具，快速获取企业资产边界信息,支持一键同步资产自动下发资产采集策略。
+  <br><img src="./img/icp-query.png" alt="ICP备案查询" width="800"><br>
+
+* **任务管理**：精细化的任务下发与状态追踪，支持多维度过滤。
+  <br><img src="./img/task-management.png" alt="任务管理" width="800"><br>
+
+* **系统设置**：支持热更扫描配置、调整并发与通知推送。
+  <br><img src="./img/system-settings.png" alt="系统设置" width="800"><br>
+
+---
+
 ## ✨ 核心特性
 
 * **Nuclei v3 漏洞引擎**：内置 Nuclei v3.3.0 及最新漏洞模板，支持分类扫描，并对接 FOFA 等第三方资产引擎，实现自动化漏洞探测。
@@ -159,6 +175,12 @@ docker-compose -f docker-compose.local.yml down
 * **Host:** `127.0.0.1`
 * **Port:** `5672`
 * **认证:** `admin` / `admin`
+
+---
+
+## 📅 未来计划 (Roadmap)
+
+* [ ] **撰写完整使用手册**：提供详细的从部署到实战的操作指南。
 
 ---
 

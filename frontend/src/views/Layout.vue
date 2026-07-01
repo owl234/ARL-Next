@@ -28,7 +28,7 @@
           <span class="trigger" @click="() => (collapsed = !collapsed)" style="font-size: 18px; cursor: pointer; margin-right: 24px;">
             <menu-unfold-outlined v-if="collapsed" /><menu-fold-outlined v-else />
           </span>
-          <span style="font-size: 16px; font-weight: 500; color: rgba(0,0,0,.85);">任务管理</span>
+          <span style="font-size: 16px; font-weight: 500; color: rgba(0,0,0,.85);">{{ currentPageTitle }}</span>
         </div>
 
         <div style="display: flex; align-items: center; color: #555;">
@@ -121,10 +121,17 @@ const currentPageTitle = computed(() => {
   if (route.path.includes('icpQuery/assetDetail')) return 'ICP 备案资产详情'; // ICP详情页
   const titleMap = {
     '/dashboard': '仪表盘',
-    '/taskList': '任务管理',
-    '/search': '资产搜索',
     '/icpQuery': 'ICP 备案查询',
-    // ... 其他映射
+    '/group': '资产分组',
+    '/taskList': '任务管理',
+    '/asset-search': '资产搜索',
+    '/assetsMonitor': '资产监控',
+    '/policy': '策略配置',
+    '/fingerprint': '指纹管理',
+    '/pocList': 'PoC信息',
+    '/planningTasks': '计划任务',
+    '/GitHubTasks/GitHubTasksList': 'GitHub管理',
+    '/systemSettings': '系统设置',
   };
   return titleMap[route.path] || 'ARL-Next';
 });
