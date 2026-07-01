@@ -46,7 +46,7 @@ RUN cd /tmp && \
 # 下载 Nuclei
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then NUCLEI_ZIP="nuclei_3.3.0_linux_amd64.zip"; else NUCLEI_ZIP="nuclei_3.3.0_linux_arm64.zip"; fi && \
-    wget -t 10 "https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/$NUCLEI_ZIP" -O $NUCLEI_ZIP || wget -t 10 "https://ghproxy.cn/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/$NUCLEI_ZIP" -O $NUCLEI_ZIP && \
+    wget -t 10 "https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/$NUCLEI_ZIP" -O $NUCLEI_ZIP || wget -t 10 "https://gh-proxy.com/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/$NUCLEI_ZIP" -O $NUCLEI_ZIP && \
     unzip $NUCLEI_ZIP && mv nuclei /usr/local/bin/ && chmod +x /usr/local/bin/nuclei && /usr/local/bin/nuclei -update-templates || true
 
 WORKDIR /code

@@ -1,9 +1,9 @@
 CELERY:
-  BROKER_URL : "amqp://guest:guest@rabbitmq:5672/"
+  BROKER_URL : "amqp://admin:admin@127.0.0.1:5673/"
 
 
 MONGO:
-  URI : 'mongodb://admin:admin@mongodb:27017/'
+  URI : 'mongodb://admin:admin@127.0.0.1:27018/'
   DB : 'arl'
 
 #GeoIP 数据库文件配置项

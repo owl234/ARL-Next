@@ -15,5 +15,4 @@ if not db_user.find_one(query):
     db_user.insert_one({"username": username, "password": gen_md5(salt + password)})
     print("✅ admin inserted!")
 else:
-    db_user.update_one(query, {"$set": {"password": gen_md5(salt + password)}})
-    print("✅ admin updated!")
+    print("ℹ️ admin already exists, skipping password reset.")

@@ -24,11 +24,8 @@ fi
 # 这样你原本的代码完全不用改！
 # 确保应用读到正确的配置文件
 cp /code/backend/config.yaml /code/backend/app/config.yaml
-sed -i 's/127.0.0.1:27017/mongodb:27017/g' /code/backend/app/config.yaml
-sed -i 's/127.0.0.1:5672/rabbitmq:5672/g' /code/backend/app/config.yaml
-# 处理 admin 密码的 auth 和 rabbitmq auth
-sed -i 's/mongodb:\/\/mongodb:27017/mongodb:\/\/admin:admin@mongodb:27017/g' /code/backend/app/config.yaml
-sed -i 's/guest:guest@rabbitmq:5672/admin:admin@rabbitmq:5672/g' /code/backend/app/config.yaml
+sed -i 's/127.0.0.1:27018/mongodb:27017/g' /code/backend/app/config.yaml
+sed -i 's/127.0.0.1:5673/rabbitmq:5672/g' /code/backend/app/config.yaml
 
 echo "🚀 正在后台拉起 Celery 任务处理器..."
 # 尝试获取系统的最佳并发数配置
@@ -41,6 +38,8 @@ python3 inject_user.py
 celery -A app.celerytask.celery worker -Q arltask -n arltask -c ${CONC:-2} -l info &
 # 后台启动 GitHub 扫描 Celery worker
 celery -A app.celerytask.celery worker -Q arlgithub -n arlgithub -c 2 -l info &
+# 后台启动 Celery 定时任务调度器 (Scheduler)
+celery -A app.celerytask.celery beat -l info &
 
 echo "🚀 正在前台拉起 Web Backend API..."
 gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 2 --reload

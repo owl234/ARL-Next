@@ -56,7 +56,7 @@ RUN wget https://nmap.org/dist/nmap-7.95.tar.bz2 && \
 
 
 # 下载并安装 Nuclei v3.3.0 及其漏洞模板 (通过 ghproxy 加速下载)
-RUN wget -t 10 --retry-connrefused https://mirror.ghproxy.com/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/nuclei_3.3.0_linux_amd64.zip && \
+RUN wget -t 10 --retry-connrefused https://gh-proxy.com/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/nuclei_3.3.0_linux_amd64.zip && \
     unzip nuclei_3.3.0_linux_amd64.zip && \
     mv nuclei /usr/local/bin/ && \
     rm -rf nuclei_3.3.0_linux_amd64.zip README* LICENSE.md && \
@@ -65,9 +65,9 @@ RUN wget -t 10 --retry-connrefused https://mirror.ghproxy.com/https://github.com
 # 下载并安装 wih (Web Info Hunter) 自动适配架构，通过 ghproxy 加速
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then \
-        wget -t 10 --retry-connrefused -O /usr/local/bin/wih https://mirror.ghproxy.com/https://raw.githubusercontent.com/adysec/ARL/master/tools/wih/wih_linux_amd64; \
+        wget -t 10 --retry-connrefused -O /usr/local/bin/wih https://gh-proxy.com/https://raw.githubusercontent.com/adysec/ARL/master/tools/wih/wih_linux_amd64; \
     elif [ "$ARCH" = "arm64" ]; then \
-        wget -t 10 --retry-connrefused -O /usr/local/bin/wih https://mirror.ghproxy.com/https://raw.githubusercontent.com/adysec/ARL/master/tools/wih/wih_linux_arm64; \
+        wget -t 10 --retry-connrefused -O /usr/local/bin/wih https://gh-proxy.com/https://raw.githubusercontent.com/adysec/ARL/master/tools/wih/wih_linux_arm64; \
     fi && \
     chmod +x /usr/local/bin/wih
 

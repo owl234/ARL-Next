@@ -74,54 +74,43 @@ ARL-Next 采用清晰的微服务架构设计，各模块职责明确：
 
 ### 方案 A：前端本地 + Docker 后端源码部署 (推荐开发者使用)
 
-**适用场景**：调试前端 UI、修改后端接口逻辑。后端所有服务（API / Worker / 数据库）运行在 Docker 中（**源码卷挂载，修改代码即时生效**），前端在本地以 Vite 开发服务器运行，通过代理透传请求。
+**适用场景**：调试前端 UI、修改后端接口逻辑。后端所有服务（核心 API / Celery Worker / Scheduler / 数据库 / 消息队列）运行在 Docker 中（**整库卷挂载，修改代码即时生效**），前端在本地以 Vite 开发服务器运行，通过代理透传请求。
 
 > **前置条件**：已安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 和 [Node.js](https://nodejs.org/)（附带 npm），并全局安装 pnpm：`npm install -g pnpm`
 
 ---
 
-#### 第一步：构建并启动后端容器
+#### 第一步：构建并启动后端开发环境
 
 ```bash
 # 克隆代码
-git clone https://github.com/owl234/arl-next
-cd arl-next
+git clone https://github.com/owl234/ARL-Next
+cd ARL-Next
 
-# 首次构建后端镜像（含 MassDNS / Nmap / Nuclei / Chromium，耗时约 10~20 分钟）
-# 后续代码变更无需重复 build，直接 up 即可
-docker-compose -f docker-compose.local.yml build backend
+# 首次构建后端开发镜像（内置所需底层引擎，耗时约 10~20 分钟）
+# 此后只要 Dockerfile.dev 不变，无需重复 build
+docker-compose -f docker-compose.dev.yml build arl-dev
 
-# 启动全部后端服务（backend API、worker、worker-github、scheduler、MongoDB、RabbitMQ、icp_query）
-# 后端 API 将监听在本机的 5003 端口
-docker-compose -f docker-compose.local.yml up -d backend worker worker-github scheduler mongodb rabbitmq icp_query
+# 一键启动全部后台服务
+docker-compose -f docker-compose.dev.yml up -d
 ```
 
-> **说明**：`docker-compose.local.yml` 将 `./backend` 目录以卷挂载的方式注入容器，修改后端 Python 代码后 gunicorn 会自动重载，无需重新 build 镜像。
+> **说明**：
+> 1. `docker-compose.dev.yml` 会将本地项目目录挂载入容器，修改后端 Python 代码后，服务会自动热重载。
+> 2. 容器启动时会自动重置/注入默认管理员账号，账号密码为：`admin` / `arlpass`。
+> 3. 容器内的服务已为您自动映射好宿主机端口（API -> `5001`，Mongo -> `27018`，RabbitMQ -> `5673`），完全不影响本地环境。
 
 ---
 
-#### 第二步：初始化管理员账号（仅首次）
+#### 第二步：确认前端 API 代理配置
 
-容器启动后，向后端容器内注入默认管理员账号：
-
-```bash
-docker exec arl_backend_local bash -c \
-  "cd /code/backend && python3 inject_user.py"
-```
-
-默认账号密码：`admin` / `arlpass`
-
----
-
-#### 第三步：配置前端 API 代理
-
-确认 `frontend/vite.config.js` 中的代理地址与 `docker-compose.local.yml` 中 backend 暴露的端口一致：
+后端 API 默认映射到宿主机 `5001` 端口。请确认 `frontend/vite.config.js` 中的代理指向正确：
 
 ```js
 // frontend/vite.config.js
 proxy: {
   '/api': {
-    target: 'http://127.0.0.1:5003',  // 对应 docker-compose.local.yml 的 "5003:5000"
+    target: 'http://127.0.0.1:5001', 
     changeOrigin: true,
   }
 }
@@ -129,7 +118,7 @@ proxy: {
 
 ---
 
-#### 第四步：启动前端开发服务器
+#### 第三步：启动前端开发服务器
 
 ```bash
 cd frontend
@@ -141,22 +130,23 @@ pnpm install
 pnpm run dev
 ```
 
-启动后访问控制台打印的本地地址（默认 `https://localhost:5174`）即可进入系统。
+启动后访问控制台打印的本地地址（默认 `http://localhost:5173`，若端口占用则顺延）即可登录系统。
 
-> **HTTPS 证书（可选）**：如需开启 HTTPS 避免浏览器安全拦截，可使用 `mkcert` 生成本地证书并放置于项目根目录 `certs/` 下，Vite 会自动读取。
+> **HTTPS 证书（可选）**：如需开启 HTTPS 以避免浏览器的各种安全拦截（如 Web Worker 限制等），可使用 `mkcert localhost` 生成本地证书，并将 `localhost.pem` 与 `localhost-key.pem` 放置于项目根目录 `certs/` 下，Vite 开发服务器检测到后会自动读取并开启 HTTPS (`https://localhost:5173`)。
+
 ---
 
-#### 常用后端管理命令
+#### 常用开发管理命令
 
 ```bash
 # 查看所有容器状态
-docker-compose -f docker-compose.local.yml ps
+docker-compose -f docker-compose.dev.yml ps
 
-# 实时查看后端日志
-docker-compose -f docker-compose.local.yml logs -f backend
+# 实时查看后端主服务（API、Worker、定时任务）的混合日志
+docker-compose -f docker-compose.dev.yml logs -f arl-dev
 
-# 停止所有后端容器
-docker-compose -f docker-compose.local.yml down
+# 停止开发环境（不丢失数据）
+docker-compose -f docker-compose.dev.yml down
 ```
 
 ---
@@ -167,13 +157,13 @@ docker-compose -f docker-compose.local.yml down
 
 **MongoDB 核心数据库**
 * **Host:** `127.0.0.1`
-* **Port:** `27017`
+* **Port:** `27018`
 * **认证库 (Database):** `admin`
-*(业务数据均存储在 `ARLV2` 数据库中)*
+*(业务数据均存储在 `arl` 数据库中)*
 
 **RabbitMQ 消息队列**
 * **Host:** `127.0.0.1`
-* **Port:** `5672`
+* **Port:** `5673`
 * **认证:** `admin` / `admin`
 
 ---

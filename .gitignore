@@ -34,3 +34,6 @@ backend/*.log
 *graph.md
 architecture_graphs/
 reference/
+
+# Celery Beat persistent db
+backend/celerybeat-schedule.db
