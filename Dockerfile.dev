@@ -1,0 +1,52 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+ENV NODE_PATH=/usr/local/lib/node_modules
+
+# 替换源，处理架构判断 (如果是arm64则使用ubuntu-ports)
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "armhf" ]; then \
+        UBUNTU_REPO="mirrors.aliyun.com/ubuntu-ports"; \
+    else \
+        UBUNTU_REPO="mirrors.aliyun.com/ubuntu"; \
+    fi && \
+    echo "deb http://${UBUNTU_REPO}/ jammy main restricted universe multiverse" > /etc/apt/sources.list && \
+    echo "deb http://${UBUNTU_REPO}/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list && \
+    echo "deb http://${UBUNTU_REPO}/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
+    apt-get update -o Acquire::Retries=10 && \
+    apt-get install -y --no-install-recommends \
+    wget unzip bzip2 git curl tzdata \
+    gcc g++ make automake autoconf libtool \
+    libffi-dev libssl-dev python3 python3-dev python3-pip python3-venv \
+    libxml2-dev libxslt1-dev zlib1g-dev \
+    fontconfig nodejs npm fonts-wqy-zenhei fonts-wqy-microhei
+
+# 安装原生非 snap 的 Chromium (从 Debian Bullseye 源下载，避开 snapd 限制)
+RUN echo "deb [trusted=yes] http://deb.debian.org/debian bullseye main" > /etc/apt/sources.list.d/debian.list && \
+    apt-get update && \
+    apt-get install -y -t bullseye chromium
+
+RUN npm config set registry https://registry.npmmirror.com/ && \
+    npm install -g puppeteer-core@10.4.0
+
+# 编译 MassDNS
+RUN cd /tmp && \
+    wget https://github.com/blechschmidt/massdns/archive/refs/tags/v1.1.0.tar.gz && \
+    tar xvf v1.1.0.tar.gz && cd massdns-1.1.0 && make -j$(nproc) && \
+    cp bin/massdns /usr/local/bin/massdns && chmod +x /usr/local/bin/massdns && \
+    cd /tmp && rm -rf massdns*
+
+# 编译 Nmap
+RUN cd /tmp && \
+    wget https://nmap.org/dist/nmap-7.95.tar.bz2 && \
+    bzip2 -cd nmap-7.95.tar.bz2 | tar xvf - && cd nmap-7.95 && \
+    ./configure --without-zenmap && make -j$(nproc) && make install &&        cd /tmp && rm -rf nmap* && wget -O /usr/local/share/nmap/nmap-service-probes https://raw.githubusercontent.com/nmap/nmap/master/nmap-service-probes
+
+# 下载 Nuclei
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then NUCLEI_ZIP="nuclei_3.3.0_linux_amd64.zip"; else NUCLEI_ZIP="nuclei_3.3.0_linux_arm64.zip"; fi && \
+    wget -t 10 "https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/$NUCLEI_ZIP" -O $NUCLEI_ZIP || wget -t 10 "https://ghproxy.cn/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/$NUCLEI_ZIP" -O $NUCLEI_ZIP && \
+    unzip $NUCLEI_ZIP && mv nuclei /usr/local/bin/ && chmod +x /usr/local/bin/nuclei && /usr/local/bin/nuclei -update-templates || true
+
+WORKDIR /code

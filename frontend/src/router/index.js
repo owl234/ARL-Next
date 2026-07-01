@@ -130,6 +130,18 @@ const routes = [
                 name: 'SystemSettings',
                 component: () => import('../views/SystemSettings.vue'),
                 meta: { title: '系统设置' }
+            },
+            {
+                path: '/icpQuery',
+                name: 'ICPQuery',
+                component: () => import('../views/ICPQuery.vue'),
+                meta: { title: 'ICP 备案查询' }
+            },
+            {
+                path: '/icpQuery/assetDetail',
+                name: 'ICPAssetDetail',
+                component: () => import('../views/ICPAssetDetail.vue'),
+                meta: { title: 'ICP 备案资产详情' }
             }
         ]
 

@@ -8,10 +8,11 @@
 
       <a-menu v-model:selectedKeys="selectedKeys" theme="dark" mode="inline" @click="handleMenuClick">
         <a-menu-item key="/dashboard"><DashboardOutlined /><span>仪表盘</span></a-menu-item>
+        <a-menu-item key="/icpQuery"><SearchOutlined /><span>ICP 备案查询</span></a-menu-item>
+        <a-menu-item key="/group"><AppstoreOutlined /><span>资产分组</span></a-menu-item>
         <a-menu-item key="/taskList"><GlobalOutlined /><span>任务管理</span></a-menu-item>
         <a-menu-item key="/asset-search"><SearchOutlined /><span>资产搜索</span></a-menu-item>
         <a-menu-item key="/assetsMonitor"><DesktopOutlined /><span>资产监控</span></a-menu-item>
-        <a-menu-item key="/group"><AppstoreOutlined /><span>资产分组</span></a-menu-item>
         <a-menu-item key="/policy"><SettingOutlined /><span>策略配置</span></a-menu-item>
         <a-menu-item key="/fingerprint"><TagsOutlined /><span>指纹管理</span></a-menu-item>
         <a-menu-item key="/pocList"><BugOutlined /><span>PoC信息</span></a-menu-item>
@@ -107,6 +108,8 @@ watch(() => route.path, (newPath) => {
   // 如果当前在详情页，依然让“任务管理”菜单亮起
   if (newPath.startsWith('/taskList')) {
     selectedKeys.value = ['/taskList'];
+  } else if (newPath.startsWith('/icpQuery')) {
+    selectedKeys.value = ['/icpQuery'];
   } else {
     selectedKeys.value = [newPath];
   }
@@ -115,10 +118,12 @@ watch(() => route.path, (newPath) => {
 // 动态计算页面标题
 const currentPageTitle = computed(() => {
   if (route.path.includes('taskDetail')) return '任务详情'; // 详情页标题
+  if (route.path.includes('icpQuery/assetDetail')) return 'ICP 备案资产详情'; // ICP详情页
   const titleMap = {
     '/dashboard': '仪表盘',
     '/taskList': '任务管理',
     '/search': '资产搜索',
+    '/icpQuery': 'ICP 备案查询',
     // ... 其他映射
   };
   return titleMap[route.path] || 'ARL-Next';

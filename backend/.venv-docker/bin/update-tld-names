@@ -1,0 +1,6 @@
+#!/code/backend/.venv-docker/bin/python3
+import sys
+from tld.utils import update_tld_names_cli
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(update_tld_names_cli())

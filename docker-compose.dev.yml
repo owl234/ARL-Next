@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  arl-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: arl-dev-env
+    # 自动执行自启脚本，拉起整个后端环境
+    command: bash -c "/code/backend/start_dev_backend.sh"
+    working_dir: /code
+    volumes:
+      - ./:/code
+    ports:
+      # 映射后端和前端常见的端口 (避开常用的本地冲突端口如5000, 80)
+      - "5001:5000"
+      - "8081:8080"
+      - "8082:80"
+    environment:
+      - TZ=Asia/Shanghai
+      - DEBIAN_FRONTEND=noninteractive
+    depends_on:
+      - mongodb
+      - rabbitmq
+
+  mongodb:
+    image: mongo:4.0.27
+    container_name: arl_mongodb_dev
+    restart: always
+    ports:
+      - "27018:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=arl
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=admin
+      - TZ=Asia/Shanghai
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: arl_rabbitmq_dev
+    restart: always
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin
+      - TZ=Asia/Shanghai
+
+  icp_query:
+    build: ./test/ICP_Query_temp
+    container_name: arl_icp_query_dev
+    restart: always
+    ports:
+      - "16182:16181"
+

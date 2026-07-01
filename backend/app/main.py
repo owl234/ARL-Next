@@ -59,7 +59,7 @@ api.add_namespace(routes.syslog_ns)
 api.add_namespace(routes.dictionary_ns)
 api.add_namespace(routes.cdn_dict_ns)
 api.add_namespace(routes.system_config_ns)
-
+api.add_namespace(routes.icp_ns)
 
 arl_update()
 

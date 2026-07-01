@@ -86,8 +86,11 @@ class MongoSyslogHandler(logging.Handler):
                 elif current_task.request.kwargs and "options" in current_task.request.kwargs:
                     options = current_task.request.kwargs["options"]
                     
-                if isinstance(options, dict) and "data" in options:
-                    task_id = options["data"].get("task_id", "global")
+                if isinstance(options, dict):
+                    if "data" in options:
+                        task_id = options["data"].get("task_id", "global")
+                    elif "task_id" in options:
+                        task_id = options.get("task_id", "global")
 
             level = record.levelname.lower()
             if level == 'warn':

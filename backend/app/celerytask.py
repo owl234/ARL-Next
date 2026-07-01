@@ -89,6 +89,13 @@ def arl_github(options):
     run_task(options)
 
 
+@celery.task(queue=CeleryRoutingKey.ASSET_TASK)
+def icp_query_task(options):
+    from app.tasks.icp import run_icp_task
+    run_icp_task(options)
+
+
+
 def domain_exec(options):
     """域名监测任务"""
     scope_id = options.get("scope_id")

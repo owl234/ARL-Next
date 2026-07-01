@@ -569,3 +569,5 @@ from .syslog import ns as syslog_ns
 from .dictionary import ns as dictionary_ns
 from .cdn_dict import ns as cdn_dict_ns
 from .system_config import ns as system_config_ns
+from .icp import ns as icp_ns
+
