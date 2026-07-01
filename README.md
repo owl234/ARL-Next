@@ -127,8 +127,7 @@ pnpm run dev
 
 启动后访问控制台打印的本地地址（默认 `https://localhost:5174`）即可进入系统。
 
-> **HTTPS 证书（可选）**：如需开启 HTTPS 避免浏览器安全拦截，可使用 `mkcert` 生成本地证书并放置于项目根目录 `certs/` 下，Vite 会自动读取。详见 [本地开发教程](./docs/local_dev_guide.md)。
-
+> **HTTPS 证书（可选）**：如需开启 HTTPS 避免浏览器安全拦截，可使用 `mkcert` 生成本地证书并放置于项目根目录 `certs/` 下，Vite 会自动读取。
 ---
 
 #### 常用后端管理命令
