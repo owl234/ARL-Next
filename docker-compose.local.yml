@@ -107,7 +107,7 @@ services:
 
   # 🔍 8. ICP 备案查询微服务
   icp_query:
-    image: yiminger/ymicp
+    build: ./test/ICP_Query_temp
     container_name: arl_icp_query_local
     ports:
       - "16181:16181"

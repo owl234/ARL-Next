@@ -4,14 +4,10 @@
   **自动化资产侦察与漏洞监控平台**
 
   <p>
-    <a href="https://github.com/owl234/arl-next/actions"><img src="https://img.shields.io/github/actions/workflow/status/owl234/arl-next/ci.yml?style=flat-square&logo=github&label=Build" alt="build"></a>
     <a href="https://hub.docker.com/"><img src="https://img.shields.io/badge/docker-ready-blue.svg?style=flat-square&logo=docker" alt="Docker"></a>
-    <a href="https://github.com/owl234/arl-next/releases"><img src="https://img.shields.io/github/v/release/owl234/arl-next?style=flat-square&color=success" alt="Release"></a>
     <img src="https://img.shields.io/badge/python-3.8%2B-blue?style=flat-square&logo=python" alt="Python">
     <img src="https://img.shields.io/badge/vue-3.x-4fc08d?style=flat-square&logo=vuedotjs" alt="Vue">
   </p>
-
-  [**English**](./README_EN.md) | [**本地开发教程**](./docs/local_dev_guide.md) | [**更新日志**](./CHANGELOG.md) | [**在线文档**](https://your-doc-link.com)
 </div>
 
 <br/>
@@ -20,54 +16,45 @@
 
 ## 💡 什么是 ARL-Next？
 
-ARL-Next 旨在为安全团队及红蓝对抗工程师提供一套开箱即用的资产监控与漏洞发现平台。它将资产发现、端口扫描、指纹识别到漏洞探测融为一体，并通过 Vue 3 控制台呈现全局安全态势。
+**ARL-Next** 是一款专为企业安全团队与红蓝对抗工程师打造的**下一代自动化资产侦察与漏洞监控平台**。
 
-## 🤝 致谢与声明
+通过全栈容器化与现代化重构，它彻底告别了传统安全工具环境配置繁琐、部署困难的历史包袱。从资产拓扑发现、指纹识别到漏洞打点，ARL-Next 致力于提供**开箱即用、丝滑流畅**的全局安全态势感知体验。
 
-**ARL-Next** 是基于开源项目 [ARL (Asset Reconnaissance Lighthouse) 资产侦察灯塔](https://github.com/TophantTechnology/ARL) 进行重构与二次开发的增强版本。
 
-我们对原 ARL 开发团队为信息安全开源社区做出的巨大贡献表示最诚挚的感谢！本着开源互助的精神，ARL-Next 将继续遵循开源精神。
 
 ### 🌟 为什么要重构 ARL-Next？
 
-随着网络环境的演变，我们对原项目进行了现代化改造，以解决部分历史痛点：
+核心驱动力是**打造一个现代化、低门槛的二次开发 Baseline**：
 
-* **前端栈升级**：重构前端，基于 Vue 3 + 现代 UI 框架构建，提供更流畅的交互体验。
-* **部署架构解耦**：引入全面的 Docker 化构建流程，支持自动化部署与数据卷解耦持久化。
+* **极简二开与 AI 友好（前端重构为主）**：全面拥抱 Vue 3。清晰解耦的代码结构，极大地降低了二次开发门槛，**非常适合直接由 AI 辅助进行功能魔改与研究**。
+* **底层引擎换代**：彻底淘汰已停更的 PhantomJS 等老旧组件，平滑迁移至 Chromium + Puppeteer，并升级最新漏洞引擎。
+* **开发环境解耦**：后端与中间件全面 Docker 化，前端本地独立运行。告别繁琐的依赖配置，开发者可 100% 聚焦业务逻辑本身。
 
 ---
 
 ## ✨ 核心特性
 
-* **前后端分离架构**
-  前端基于 Vue 3 + Vite + Ant Design Vue 构建 SPA 面板，后端依托 Python 3.8+ 与 Flask 提供 RESTful API，提高交互体验和二次开发扩展性。
-* **现代 Web 无头渲染**
-  重构底层截图与指纹探测引擎，使用 Chromium 与 Puppeteer 替代 PhantomJS。支持 React、Vue 等 SPA（单页面应用）截图和 Wappalyzer 指纹解析，内置中文字库解决乱码问题。
-* **Nuclei v3 漏洞引擎**
-  内置 Nuclei v3.3.0 及最新漏洞模板，支持 `-tags` 分类扫描。PoC 武器库持续更新，并对接 FOFA 等第三方资产引擎，实现自动化资产收集与漏洞探测。
-* **可视化仪表盘**
-  新增 Dashboard 统计面板，一览资产总量（域名 / IP / 站点）、任务执行状态及系统实时负载，支持系统日志自动轮转（30 天 TTL）。
-* **系统设置中心**
-  全新系统设置页面，支持在 Web 界面直接管理：扫描字典（预览 / 搜索 / 追加 / 删除条目）、自定义端口扫描范围（内置 Top 100 / Top 1000 / 全端口字典）、FOFA / GitHub Token / 代理等全局参数，以及钉钉 / 飞书 / 企业微信 / Email 消息推送配置。
-* **GitHub 管理整合**
-  将 GitHub 任务列表与监控列表合并为统一的管理界面，减少导航层级，操作更直接。
+* **Nuclei v3 漏洞引擎**：内置 Nuclei v3.3.0 及最新漏洞模板，支持分类扫描，并对接 FOFA 等第三方资产引擎，实现自动化漏洞探测。
+* **ICP 备案资产查询**：新增专属查询模块，在平台内即可直接查询目标企业 ICP 备案信息并落库，打通资产发现的起始环。
+* **全局可视化仪表盘**：全景监控资产总量（域名 / IP / 站点）、任务执行状态及系统实时负载，支持系统日志自动轮转。
+* **高度自定义系统设置**：支持在 Web 界面直接热更扫描字典、自定义端口探测范围，并可配置钉钉、飞书、企业微信等即时消息推送。
+* **统一 GitHub 监控面板**：将 GitHub 任务列表与监控列表合并为统一的管理界面，操作更直接高效。
 
 ---
 
 ## 🏗️ 架构设计
 
-ARL-Next 采用微服务容器编排设计：
+ARL-Next 采用清晰的微服务架构设计，各模块职责明确：
 
-1. **安全网关与展示层 (Frontend)**：基于 Vite 构建前端代理与静态资源托管。
-2. **业务逻辑层 (Backend)**：基于 Flask，负责接收前端指令、操作 MongoDB 数据库。
-3. **异步执行层 (Workers)**：核心节点 (worker)、GitHub 监控节点 (worker-github) 与定时调度器 (scheduler) 协同处理高耗时扫描任务。
-4. **持久化存储 (Database)**：MongoDB 负责海量扫描结果与资产数据的落地。
+1. **展示层 (Frontend)**：基于 Vue 3 + Vite 构建，负责用户交互与数据可视化。
+2. **业务 API 层 (Backend)**：基于 Flask，负责接收前端指令、鉴权，并调度底层任务。
+3. **消息中间件 (Broker)**：采用 **RabbitMQ**，负责高效可靠地分发并解耦庞大的异步扫描任务。
+4. **异步执行层 (Workers)**：Celery 分布式集群（含普通 worker、github 监控、定时调度器），专门执行耗时的漏洞扫描和资产收集。
+5. **持久化存储 (Database)**：使用 **MongoDB**，承载海量扫描结果与大宽表资产数据的落地。
 
 ---
 
 ## 🚀 部署指南
-
-我们为开发者提供了两套部署方案，满足从二次开发到生产环境的不同需求。
 
 ### 方案 A：前端本地 + Docker 后端源码部署 (推荐开发者使用)
 
@@ -88,9 +75,9 @@ cd arl-next
 # 后续代码变更无需重复 build，直接 up 即可
 docker-compose -f docker-compose.local.yml build backend
 
-# 启动全部后端服务（backend API、worker、worker-github、scheduler、MongoDB、RabbitMQ）
+# 启动全部后端服务（backend API、worker、worker-github、scheduler、MongoDB、RabbitMQ、icp_query）
 # 后端 API 将监听在本机的 5003 端口
-docker-compose -f docker-compose.local.yml up -d backend worker worker-github scheduler mongodb rabbitmq
+docker-compose -f docker-compose.local.yml up -d backend worker worker-github scheduler mongodb rabbitmq icp_query
 ```
 
 > **说明**：`docker-compose.local.yml` 将 `./backend` 目录以卷挂载的方式注入容器，修改后端 Python 代码后 gunicorn 会自动重载，无需重新 build 镜像。
@@ -159,8 +146,6 @@ docker-compose -f docker-compose.local.yml down
 
 ---
 
-
-
 ## 🗄️ 数据库直连指引 (可选)
 
 开发期间如需直连数据库查看数据，可使用以下参数（如果是通过 Docker 启动，需确保暴露了相应端口）：
@@ -178,6 +163,15 @@ docker-compose -f docker-compose.local.yml down
 
 ---
 
+## 🤝 致谢
+
+* **ARL-Next** 是基于开源项目 [ARL (Asset Reconnaissance Lighthouse) 资产侦察灯塔](https://github.com/TophantTechnology/ARL) 进行重构与二次开发的增强版本。
+* 本项目集成的 **ICP 备案资产查询** 模块，是基于优秀的开源项目 [ICP_Query](https://github.com/HG-ha/ICP_Query) 进行的二次开发。
+
+我们对原 ARL 开发团队以及 ICP_Query 作者为信息安全开源社区做出的巨大贡献表示最诚挚的感谢！本着开源互助的精神，ARL-Next 将继续遵循开源精神。
+
+---
+
 ## ⚠️ 声明与免责
 
 本工具仅面向合法授权的企业安全建设、SRC 漏洞挖掘以及安全研究学术交流。
@@ -185,7 +179,23 @@ docker-compose -f docker-compose.local.yml down
 
 ---
 
+## 💬 问题反馈与交流
+
+在使用过程中如遇到 Bug、有新的功能建议，或是想探讨安全开发与红蓝对抗技术，欢迎通过 GitHub Issues 提交反馈。
+
+同时也欢迎通过以下微信与我联系交流：
+
+<div align="center">
+
+![WeChat Contact](./img/wecaht.png)
+
+</div>
+
+---
+
 ## 🌟 Star History
+
+**⭐ 如果本项目为你的安全工作带来了便利，不妨点个 Star 支持一下！**
 
 <div align="center">
 
