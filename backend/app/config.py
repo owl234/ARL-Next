@@ -42,7 +42,7 @@ DYNAMIC_PROPERTIES = {
     "EMAIL_HOST", "EMAIL_PORT", "EMAIL_USERNAME", "EMAIL_PASSWORD", "EMAIL_TO",
     "GITHUB_TOKEN", "DOMAIN_BRUTE_CONCURRENT", "ALT_DNS_CONCURRENT",
     "PROXY_URL", "QUERY_PLUGIN_CONFIG", "WEB_HOOK_URL", "WEB_HOOK_TOKEN",
-    "AUTH", "API_KEY"
+    "AUTH", "API_KEY", "TYC_ID", "TYC_TOKEN"
 }
 
 DYNAMIC_KEYS_MAP = {
@@ -51,7 +51,9 @@ DYNAMIC_KEYS_MAP = {
     "DOMAIN_DICT_2W": "domain_dict",
     "WX_WORK_WEBHOOK": "wx_work_webhook",
     "WEB_HOOK_URL": "webhook_url",
-    "WEB_HOOK_TOKEN": "webhook_token"
+    "WEB_HOOK_TOKEN": "webhook_token",
+    "TYC_ID": "tyc_id",
+    "TYC_TOKEN": "tyc_token"
 }
 
 class ConfigMeta(type):
@@ -114,6 +116,9 @@ class Config(object, metaclass=ConfigMeta):
 
     _AUTH = False
     _API_KEY = ""
+
+    _TYC_ID = ""
+    _TYC_TOKEN = ""
 
     # BLACK_IPS = ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "0.0.0.0/8"]
     BLACK_IPS = ["127.0.0.0/8", "0.0.0.0/8"]
@@ -178,6 +183,13 @@ try:
 
     if y["FOFA"].get("PAGE_SIZE"):
         Config._FOFA_PAGE_SIZE = y["FOFA"]["PAGE_SIZE"]
+
+    # *** TYC 配置 ***
+    if y.get("TYC"):
+        if y["TYC"].get("ID"):
+            Config._TYC_ID = y["TYC"]["ID"]
+        if y["TYC"].get("TOKEN"):
+            Config._TYC_TOKEN = y["TYC"]["TOKEN"]
 
     # *** GEOIP 配置 ***
     Config.GEOIP_CITY = y["GEOIP"]["CITY"]

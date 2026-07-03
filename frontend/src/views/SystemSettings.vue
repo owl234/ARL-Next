@@ -266,6 +266,19 @@
                 </a-col>
               </a-row>
 
+              <a-row :gutter="24">
+                <a-col :span="12">
+                  <a-form-item label="天眼查 ID (X-Tycid)">
+                    <a-input v-model:value="generalForm.tyc_id" placeholder="请输入天眼查 ID" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="12">
+                  <a-form-item label="天眼查 Token (X-Auth-Token)">
+                    <a-input-password v-model:value="generalForm.tyc_token" placeholder="请输入 JWT Token" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+
               <a-form-item label="域名收集插件配置 (QUERY_PLUGIN)">
                 <div style="background: #fafafa; border: 1px solid #f0f0f0; border-radius: 4px; padding: 16px;">
                   <a-row :gutter="[16, 16]">
@@ -537,6 +550,8 @@ const generalForm = ref({
   fofa_max_page: 5,
   fofa_page_size: 2000,
   github_token: '',
+  tyc_id: '',
+  tyc_token: '',
   
   proxy_url: '',
   port_top_10: '',

@@ -1,7 +1,11 @@
 <template>
   <div style="background-color: #fff; padding: 24px; min-height: calc(100vh - 64px);">
-    <div style="margin-bottom: 24px;">
-      <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4; margin-right: 12px;" @click="showModal">新建 ICP 查询</a-button>
+    <div style="margin-bottom: 24px; display: flex; align-items: center; gap: 12px;">
+      <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="showTycModal">新建企业信息查询</a-button>
+      <a-button style="background-color: #00bcd4; color: #fff; border-color: #00bcd4;" @click="showModal">新建 ICP 查询</a-button>
+      <a-popconfirm title="确定要批量删除选中的任务吗？" @confirm="handleBatchDelete">
+        <a-button danger :disabled="selectedRowKeys.length === 0">批量删除</a-button>
+      </a-popconfirm>
     </div>
 
     <div style="margin-bottom: 16px;">
@@ -30,6 +34,7 @@
         :loading="loading"
         :pagination="false"
         :scroll="{ x: 'max-content' }"
+        :rowSelection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange }"
         :rowKey="(record) => record._id"
         bordered
         style="margin-bottom: 16px;"
@@ -99,6 +104,84 @@
       </a-form-item>
     </a-form>
   </a-modal>
+
+  <a-modal
+      v-model:open="tycVisible"
+      title="新建企业信息查询"
+      @ok="handleTycOk"
+      :confirmLoading="tycSubmitLoading"
+      width="560px"
+      wrapClassName="arl-theme-modal"
+      okText="确 定"
+      cancelText="取 消"
+  >
+    <a-form
+        ref="tycFormRef"
+        :model="tycFormState"
+        :label-col="{ style: { width: '90px' } }"
+        :wrapper-col="{ style: { width: 'calc(100% - 90px)' } }"
+    >
+      <a-form-item label="任务名称" name="name" :rules="[{ required: true, message: '请输入任务名称' }]">
+        <a-input v-model:value="tycFormState.name" placeholder="请输入任务名称" />
+      </a-form-item>
+
+      <a-form-item label="公司 ID" name="gid" :rules="[{ required: true, message: '请输入天眼查公司 ID' }]">
+        <a-input v-model:value="tycFormState.gid" placeholder="例如：25174642" />
+      </a-form-item>
+
+      <a-form-item label="查询层数" name="depth">
+        <a-input-number v-model:value="tycFormState.depth" :min="0" :max="5" style="width: 100%;" />
+      </a-form-item>
+
+      <a-form-item label="查询类型" name="query_type" :rules="[{ required: true, message: '请至少选择一种查询类型' }]">
+        <a-checkbox-group v-model:value="tycFormState.query_type">
+          <a-checkbox value="invest">对外投资</a-checkbox>
+          <a-checkbox value="trademark">商标信息</a-checkbox>
+          <a-checkbox value="web">备案网站</a-checkbox>
+          <a-checkbox value="app">APP</a-checkbox>
+          <a-checkbox value="mapp">小程序</a-checkbox>
+          <a-checkbox value="wechat">微信公众号</a-checkbox>
+          <a-checkbox value="weibo">微博</a-checkbox>
+        </a-checkbox-group>
+      </a-form-item>
+    </a-form>
+  </a-modal>
+
+  <a-modal
+      v-model:open="syncModalVisible"
+      title="同步资产"
+      @ok="submitSync"
+      wrapClassName="arl-theme-modal"
+      okText="同 步"
+      cancelText="取 消"
+      :confirmLoading="syncLoading"
+  >
+    <a-form :label-col="{ style: { width: '100px' } }" :wrapper-col="{ style: { width: 'calc(100% - 100px)' } }">
+      <a-form-item label="同步方式">
+        <a-radio-group v-model:value="syncFormState.mode">
+          <a-radio value="existing">关联已有资产</a-radio>
+          <a-radio value="new">新建资产</a-radio>
+        </a-radio-group>
+      </a-form-item>
+
+      <a-form-item v-if="syncFormState.mode === 'existing'" label="选择资产组" :rules="[{ required: true, message: '请选择资产组' }]">
+        <a-select
+          v-model:value="syncFormState.scope_id"
+          placeholder="请选择资产组"
+          show-search
+          option-filter-prop="label"
+        >
+          <a-select-option v-for="scope in assetScopes" :key="scope._id" :value="scope._id" :label="scope.name">
+            {{ scope.name }}
+          </a-select-option>
+        </a-select>
+      </a-form-item>
+
+      <a-form-item v-if="syncFormState.mode === 'new'" label="资产组名称" :rules="[{ required: true, message: '请输入资产组名称' }]">
+        <a-input v-model:value="syncFormState.target_name" placeholder="请输入资产组名称" />
+      </a-form-item>
+    </a-form>
+  </a-modal>
 </template>
 
 <script setup>
@@ -112,6 +195,21 @@ const router = useRouter();
 const taskList = ref([]);
 const loading = ref(false);
 const pagination = reactive({ current: 1, pageSize: 10, total: 0 });
+
+const selectedRowKeys = ref([]);
+const onSelectChange = (keys) => {
+  selectedRowKeys.value = keys;
+};
+
+const syncModalVisible = ref(false);
+const syncLoading = ref(false);
+const currentSyncTask = ref(null);
+const assetScopes = ref([]);
+const syncFormState = reactive({
+  mode: 'existing',
+  scope_id: undefined,
+  target_name: ''
+});
 
 const columns = [
   { title: '任务名', dataIndex: 'name', key: 'name', width: 180 },
@@ -199,38 +297,143 @@ const handleOk = async () => {
   }
 };
 
+const tycVisible = ref(false);
+const tycSubmitLoading = ref(false);
+const tycFormRef = ref();
+
+const tycFormState = reactive({
+  name: "",
+  gid: "",
+  depth: 0,
+  query_type: []
+});
+
+const showTycModal = () => { tycVisible.value = true; };
+
+const handleTycOk = async () => {
+  try {
+    await tycFormRef.value.validate();
+    tycSubmitLoading.value = true;
+    const res = await request.post('/icp/tyc_task', tycFormState);
+    if (res.code === 200) {
+      message.success('企业信息查询任务创建成功');
+      tycVisible.value = false;
+      fetchTasks(1, pagination.pageSize);
+    } else {
+      message.error(res.message || '创建失败');
+    }
+  } catch (error) {
+    console.error(error);
+  } finally {
+    tycSubmitLoading.value = false;
+  }
+};
+
 const viewTask = (record) => {
   const stats = record.statistic || {};
-  router.push({ 
-    path: '/icpQuery/assetDetail', 
-    query: { 
-      task_id: record._id, 
+  router.push({
+    path: '/icpQuery/assetDetail',
+    query: {
+      task_id: record._id,
       name: record.name,
+      task_type: record.task_type || 'icp',
       web_cnt: stats.web_cnt || 0,
       app_cnt: stats.app_cnt || 0,
       mapp_cnt: stats.mapp_cnt || 0,
-      kapp_cnt: stats.kapp_cnt || 0
-    } 
+      kapp_cnt: stats.kapp_cnt || 0,
+      invest_cnt: stats.invest_cnt || 0,
+      trademark_cnt: stats.trademark_cnt || 0,
+      wechat_cnt: stats.wechat_cnt || 0,
+      weibo_cnt: stats.weibo_cnt || 0,
+    }
   });
 };
 
-const handleExport = (record) => {
-  // 直接在新窗口打开导出链接，依靠浏览器的下载机制
-  window.open(`/api/icp/export/${record._id}`);
+const handleExport = async (record) => {
+  try {
+    message.loading({ content: '正在导出...', key: 'export', duration: 0 });
+    const res = await request.get(`/icp/export/${record._id}`, { responseType: 'blob' });
+
+    const blob = new Blob([res.data || res]);
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${record.name || 'icp_export'}.xlsx`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    message.success({ content: '导出成功', key: 'export', duration: 2 });
+  } catch (error) {
+    console.error('导出失败', error);
+    message.error({ content: '导出失败', key: 'export', duration: 2 });
+  }
 };
 
 const handleSync = async (record) => {
+  currentSyncTask.value = record;
+  syncFormState.mode = 'existing';
+  syncFormState.scope_id = undefined;
+  syncFormState.target_name = record.target || record.name;
+
   try {
-    message.loading({ content: '正在同步资产...', key: 'syncIcp', duration: 0 });
-    const res = await request.get(`/icp/sync/${record._id}`);
+    const res = await request.get('/asset_scope/', { params: { size: 1000 } });
+    if (res.code === 200) {
+      assetScopes.value = res.items || res.data?.items || [];
+    }
+  } catch (error) {
+    console.error('获取资产分组失败', error);
+  }
+
+  syncModalVisible.value = true;
+};
+
+const submitSync = async () => {
+  if (syncFormState.mode === 'existing' && !syncFormState.scope_id) {
+    message.error('请选择关联的资产组');
+    return;
+  }
+  if (syncFormState.mode === 'new' && !syncFormState.target_name) {
+    message.error('请输入资产组名称');
+    return;
+  }
+
+  try {
+    syncLoading.value = true;
+    const payload = {
+      mode: syncFormState.mode,
+      target_name: syncFormState.target_name,
+      scope_id: syncFormState.scope_id
+    };
+    const res = await request.post(`/icp/sync/${currentSyncTask.value._id}`, payload);
     if (res.code === 200) {
       message.success({ content: res.message || '同步成功', key: 'syncIcp', duration: 2 });
+      syncModalVisible.value = false;
     } else {
       message.error({ content: res.message || '同步失败', key: 'syncIcp', duration: 2 });
     }
   } catch (error) {
     console.error('同步失败', error);
     message.error({ content: '网络错误，同步失败', key: 'syncIcp', duration: 2 });
+  } finally {
+    syncLoading.value = false;
+  }
+};
+
+const handleBatchDelete = async () => {
+  if (!selectedRowKeys.value.length) return;
+  try {
+    message.loading({ content: '正在批量删除...', key: 'batchDelete', duration: 0 });
+    const res = await request.post('/icp/delete/', { task_ids: selectedRowKeys.value });
+    if (res.code === 200) {
+      message.success({ content: '批量删除成功', key: 'batchDelete', duration: 2 });
+      selectedRowKeys.value = [];
+      fetchTasks(pagination.current, pagination.pageSize);
+    } else {
+      message.error({ content: res.message || '批量删除失败', key: 'batchDelete', duration: 2 });
+    }
+  } catch (error) {
+    console.error('批量删除失败', error);
+    message.error({ content: '网络错误，批量删除失败', key: 'batchDelete', duration: 2 });
   }
 };
 

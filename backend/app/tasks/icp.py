@@ -6,6 +6,41 @@ import time
 
 logger = utils.get_logger()
 
+
+def _fetch_icp_assets(url, timeout=30):
+    response = requests.get(url, timeout=timeout)
+    data = response.json()
+
+    if data.get("code") != 200:
+        return data, []
+
+    params = data.get("params", {})
+    asset_list = params.get("list", []) if isinstance(params, dict) else params
+    all_assets = list(asset_list) if isinstance(asset_list, list) else []
+
+    pages = params.get("pages", 1) if isinstance(params, dict) else 1
+    try:
+        pages = int(pages or 1)
+    except (TypeError, ValueError):
+        pages = 1
+
+    if pages <= 1:
+        return data, all_assets
+
+    for page_num in range(2, pages + 1):
+        page_response = requests.get(f"{url}&pageNum={page_num}", timeout=timeout)
+        page_data = page_response.json()
+        if page_data.get("code") != 200:
+            logger.error(f"ICP Query page fetch failed page={page_num}: {page_data}")
+            break
+
+        page_params = page_data.get("params", {})
+        page_assets = page_params.get("list", []) if isinstance(page_params, dict) else page_params
+        if isinstance(page_assets, list):
+            all_assets.extend(page_assets)
+
+    return data, all_assets
+
 def run_icp_task(options):
     task_id = options.get("task_id")
     target = options.get("target")
@@ -27,13 +62,9 @@ def run_icp_task(options):
         logger.info(f"Start ICP query for {target} on {url}")
         
         try:
-            response = requests.get(url, timeout=30)
-            data = response.json()
+            data, asset_list = _fetch_icp_assets(url)
             
             if data.get("code") == 200:
-                params = data.get("params", {})
-                asset_list = params.get("list", []) if isinstance(params, dict) else params
-                
                 # 3. 存储资产
                 if asset_list and isinstance(asset_list, list):
                     for item in asset_list:

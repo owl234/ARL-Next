@@ -27,6 +27,7 @@ backend/*.log
 # IDE & OS files
 .idea/
 .DS_Store
+.vscode/
 
 # Test Cache
 .pytest_cache/
