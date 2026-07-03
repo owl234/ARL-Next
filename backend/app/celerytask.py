@@ -95,6 +95,12 @@ def icp_query_task(options):
     run_icp_task(options)
 
 
+@celery.task(queue=CeleryRoutingKey.ASSET_TASK)
+def tyc_query_task(options):
+    from app.tasks.tyc import run_tyc_task
+    run_tyc_task(options)
+
+
 
 def domain_exec(options):
     """域名监测任务"""

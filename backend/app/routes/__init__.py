@@ -16,7 +16,11 @@ base_query_fields = {
 }
 
 # 只能用等号进行mongo查询的字段
-EQUAL_FIELDS = ["task_id", "task_tag", "ip_type", "scope_id", "type"]
+EQUAL_FIELDS = [
+    "task_id", "task_tag", "ip_type", "scope_id", "type", "query_type",
+    "status", "schedule_status", "schedule_type", "source",
+    "plg_type", "plugin_type", "vuln_severity", "port_scan_type"
+]
 
 
 class ARLResource(Resource):
@@ -112,6 +116,20 @@ class ARLResource(Resource):
                     "$lt": datetime.strptime(args[key],
                                              "%Y-%m-%d %H:%M:%S")
                 })
+                query_args[real_key] = raw_value
+
+            # __ngt 代表 numeric greater than (数字大于)
+            elif key.endswith("__ngt"):
+                real_key = key.split('__ngt')[0]
+                raw_value = query_args.get(real_key, {})
+                raw_value.update({"$gt": float(args[key])})
+                query_args[real_key] = raw_value
+
+            # __nlt 代表 numeric less than (数字小于)
+            elif key.endswith("__nlt"):
+                real_key = key.split('__nlt')[0]
+                raw_value = query_args.get(real_key, {})
+                raw_value.update({"$lt": float(args[key])})
                 query_args[real_key] = raw_value
 
             # __neq 代表 not equal (不等于)

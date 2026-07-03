@@ -6,6 +6,20 @@ import time
 
 logger = utils.get_logger()
 
+
+def _fetch_icp_assets(url, timeout=30):
+    response = requests.get(url, timeout=timeout, proxies={"http": None, "https": None})
+    data = response.json()
+
+    if data.get("code") != 200:
+        return data, []
+
+    params = data.get("params", {})
+    asset_list = params.get("list", []) if isinstance(params, dict) else params
+    all_assets = list(asset_list) if isinstance(asset_list, list) else []
+
+    return data, all_assets
+
 def run_icp_task(options):
     task_id = options.get("task_id")
     target = options.get("target")
@@ -27,13 +41,9 @@ def run_icp_task(options):
         logger.info(f"Start ICP query for {target} on {url}")
         
         try:
-            response = requests.get(url, timeout=30)
-            data = response.json()
+            data, asset_list = _fetch_icp_assets(url)
             
             if data.get("code") == 200:
-                params = data.get("params", {})
-                asset_list = params.get("list", []) if isinstance(params, dict) else params
-                
                 # 3. 存储资产
                 if asset_list and isinstance(asset_list, list):
                     for item in asset_list:

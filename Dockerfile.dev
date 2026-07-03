@@ -1,22 +1,15 @@
-FROM ubuntu:22.04
+FROM debian:bookworm
 
-ARG CHROME_VERSION=126.0.6478.126
 ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
 ENV NODE_PATH=/usr/local/lib/node_modules
 
-# 替换源，处理架构判断 (如果是arm64则使用ubuntu-ports)
-RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "armhf" ]; then \
-        UBUNTU_REPO="mirrors.aliyun.com/ubuntu-ports"; \
-    else \
-        UBUNTU_REPO="mirrors.aliyun.com/ubuntu"; \
-    fi && \
-    echo "deb http://${UBUNTU_REPO}/ jammy main restricted universe multiverse" > /etc/apt/sources.list && \
-    echo "deb http://${UBUNTU_REPO}/ jammy-security main restricted universe multiverse" >> /etc/apt/sources.list && \
-    echo "deb http://${UBUNTU_REPO}/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
+# 替换源为阿里云镜像 (Debian 源不区分 arm64/amd64 的域名，维护更简单)
+RUN echo "deb http://mirrors.aliyun.com/debian/ bookworm main non-free contrib" > /etc/apt/sources.list && \
+    echo "deb http://mirrors.aliyun.com/debian-security/ bookworm-security main" >> /etc/apt/sources.list && \
+    echo "deb http://mirrors.aliyun.com/debian/ bookworm-updates main non-free contrib" >> /etc/apt/sources.list && \
     apt-get update -o Acquire::Retries=10 && \
     apt-get install -y --no-install-recommends \
     wget unzip bzip2 git curl tzdata \
@@ -26,19 +19,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
     ca-certificates libnss3 libatk-bridge2.0-0 libgtk-3-0 libx11-xcb1 \
     libxcb-dri3-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
     libasound2 libxshmfence1 libdrm2 libxkbcommon0 libatspi2.0-0 libcups2 \
-    fontconfig nodejs npm fonts-wqy-zenhei fonts-wqy-microhei
-
-# Chrome for Testing 官方 Linux 包只提供 amd64，避免混用 Debian 源安装 Chromium。
-RUN ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" && \
-    if [ "$ARCH" != "amd64" ]; then \
-        echo "Chrome for Testing only provides linux64. Build this image with --platform=linux/amd64."; \
-        exit 1; \
-    fi && \
-    wget -O /tmp/chrome-linux64.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chrome-linux64.zip" && \
-    unzip /tmp/chrome-linux64.zip -d /opt/chrome-for-testing && \
-    ln -sf /opt/chrome-for-testing/chrome-linux64/chrome /usr/bin/chromium && \
-    /usr/bin/chromium --version && \
-    rm -f /tmp/chrome-linux64.zip
+    fontconfig nodejs npm fonts-wqy-zenhei fonts-wqy-microhei chromium
 
 RUN npm config set registry https://registry.npmmirror.com/ && \
     npm install -g puppeteer-core@10.4.0
