@@ -19,9 +19,11 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - DEBIAN_FRONTEND=noninteractive
+      - NO_PROXY=localhost,127.0.0.1,icp_query,mongodb,rabbitmq
     depends_on:
       - mongodb
       - rabbitmq
+      - icp_query
 
   mongodb:
     image: mongo:4.0.27

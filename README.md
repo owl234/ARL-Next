@@ -75,7 +75,7 @@ cd ARL-Next
 
 # 首次构建后端开发镜像（内置所需底层引擎，耗时约 10~20 分钟）
 # 此后只要 Dockerfile.dev 不变，无需重复 build
-docker-compose -f docker-compose.dev.yml build arl-dev
+docker-compose -f docker-compose.dev.yml build
 
 # 一键启动全部后台服务
 docker-compose -f docker-compose.dev.yml up -d

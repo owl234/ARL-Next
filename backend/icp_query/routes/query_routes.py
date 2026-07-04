@@ -130,6 +130,11 @@ async def geturl(request):
 
         if data.get("code", 500) == 200:
             return wj(data)
+    
+    logger.error(f"END OF LOOP. data={data}")
+    res = wj(data)
+    logger.error(f"RETURNING {res}")
+    return res
 
 
 def setup_query_routes(app):

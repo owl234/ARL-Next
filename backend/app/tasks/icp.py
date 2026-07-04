@@ -8,7 +8,7 @@ logger = utils.get_logger()
 
 
 def _fetch_icp_assets(url, timeout=30):
-    response = requests.get(url, timeout=timeout)
+    response = requests.get(url, timeout=timeout, proxies={"http": None, "https": None})
     data = response.json()
 
     if data.get("code") != 200:
@@ -17,27 +17,6 @@ def _fetch_icp_assets(url, timeout=30):
     params = data.get("params", {})
     asset_list = params.get("list", []) if isinstance(params, dict) else params
     all_assets = list(asset_list) if isinstance(asset_list, list) else []
-
-    pages = params.get("pages", 1) if isinstance(params, dict) else 1
-    try:
-        pages = int(pages or 1)
-    except (TypeError, ValueError):
-        pages = 1
-
-    if pages <= 1:
-        return data, all_assets
-
-    for page_num in range(2, pages + 1):
-        page_response = requests.get(f"{url}&pageNum={page_num}", timeout=timeout)
-        page_data = page_response.json()
-        if page_data.get("code") != 200:
-            logger.error(f"ICP Query page fetch failed page={page_num}: {page_data}")
-            break
-
-        page_params = page_data.get("params", {})
-        page_assets = page_params.get("list", []) if isinstance(page_params, dict) else page_params
-        if isinstance(page_assets, list):
-            all_assets.extend(page_assets)
 
     return data, all_assets
 
