@@ -244,14 +244,16 @@
       </a-form-item>
 
       <a-form-item :wrapper-col="{ offset: 3, span: 21 }" style="margin-top: 16px; margin-bottom: 0;">
-        <a-row :gutter="[16, 12]">
-          <a-col :span="12" v-for="(item, index) in pluginList" :key="item.key"
-                 :style="{ marginBottom: (index === 3 || index === 8) ? '16px' : '0' }">
-            <a-checkbox v-model:checked="formState[item.key]">
-              <span style="color: #666; font-size: 13px;">{{ item.label }}</span>
-            </a-checkbox>
-          </a-col>
-        </a-row>
+        <div v-for="(category, catIndex) in pluginCategories" :key="catIndex" style="margin-bottom: 16px;">
+          <div style="font-size: 14px; font-weight: 500; color: #333; margin-bottom: 8px;">{{ category.title }}</div>
+          <a-row :gutter="[16, 12]">
+            <a-col :span="12" v-for="item in category.plugins" :key="item.key">
+              <a-checkbox v-model:checked="formState[item.key]">
+                <span style="color: #666; font-size: 13px;">{{ item.label }}</span>
+              </a-checkbox>
+            </a-col>
+          </a-row>
+        </div>
       </a-form-item>
     </a-form>
   </a-modal>
@@ -683,28 +685,45 @@ const visible = ref(false);
 const submitLoading = ref(false);
 const formRef = ref();
 
-// 完全对齐原版截图的插件名称和左/右两列的顺序
-// === 1. 纯净的插件字典（严格按照截图双列排序） ===
-const pluginList = [
-  { key: 'domain_brute', label: '域名爆破' },
-  { key: 'alt_dns', label: 'DNS字典智能生成' },
-  { key: 'dns_query_plugin', label: '域名查询插件' },
-  { key: 'arl_search', label: 'ARL 历史查询' },
-  { key: 'port_scan', label: '端口扫描' },
-  { key: 'service_detection', label: '服务识别' },
-  { key: 'os_detection', label: '操作系统识别' },
-  { key: 'ssl_cert', label: 'SSL 证书获取' },
-  { key: 'skip_scan_cdn_ip', label: '跳过CDN' },
-  { key: 'site_identify', label: '站点识别' },
-  { key: 'search_engines', label: '搜索引擎调用' },
-  { key: 'site_spider', label: '站点爬虫' },
-  { key: 'site_capture', label: '站点截图' },
-  { key: 'file_leak', label: '文件泄露' },
-  { key: 'findvhost', label: 'Host 碰撞' },
-  { key: 'nuclei_scan', label: 'nuclei 调用' },
-  { key: 'web_info_hunter', label: 'WIH 调用' },
-  { key: 'npoc_service_detection', label: '服务(python)识别' }
+// === 1. 结构化的插件分类数据模型 ===
+const pluginCategories = [
+  {
+    title: '🌐 基础资产侦查',
+    plugins: [
+      { key: 'dns_query_plugin', label: '域名查询插件' },
+      { key: 'domain_brute', label: '域名爆破' },
+      { key: 'alt_dns', label: 'DNS字典智能生成' },
+      { key: 'arl_search', label: 'ARL 历史查询' }
+    ]
+  },
+  {
+    title: '⚡️ 端口与服务发现',
+    plugins: [
+      { key: 'skip_scan_cdn_ip', label: '跳过CDN' },
+      { key: 'port_scan', label: '端口扫描' },
+      { key: 'service_detection', label: '服务识别' },
+      { key: 'os_detection', label: '操作系统识别' },
+      { key: 'ssl_cert', label: 'SSL 证书获取' }
+    ]
+  },
+  {
+    title: '🕷️ Web 深度探测',
+    plugins: [
+      { key: 'site_identify', label: '站点识别' },
+      { key: 'site_capture', label: '站点截图' },
+      { key: 'search_engines', label: '搜索引擎调用' },
+      { key: 'site_spider', label: '站点爬虫' },
+      { key: 'web_info_hunter', label: 'WIH 调用' },
+      { key: 'file_leak', label: '文件泄露' },
+      { key: 'findvhost', label: 'Host 碰撞' },
+      { key: 'npoc_service_detection', label: '服务(python)识别' },
+      { key: 'nuclei_scan', label: 'nuclei 调用' }
+    ]
+  }
 ];
+
+// 为了兼容原有数据结构，利用 flatMap 动态计算出扁平的 pluginList
+const pluginList = pluginCategories.flatMap(cat => cat.plugins);
 
 // === 2. 匹配截图的默认勾选状态 ===
 const defaultPlugins = {
