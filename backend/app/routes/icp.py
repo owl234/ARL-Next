@@ -94,7 +94,7 @@ class TycTask(ARLResource):
     @ns.expect(add_tyc_task_fields)
     def post(self):
         """
-        新建企业信息查询任务(TYC)
+        新建企业资产查询任务(TYC)
         """
         args = self.parse_args(add_tyc_task_fields)
         name = args.get('name')

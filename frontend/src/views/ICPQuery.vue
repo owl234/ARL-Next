@@ -1,7 +1,7 @@
 <template>
   <div style="background-color: #fff; padding: 24px; min-height: calc(100vh - 64px);">
     <div style="margin-bottom: 24px; display: flex; align-items: center; gap: 12px;">
-      <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="showTycModal">新建企业信息查询</a-button>
+      <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="showTycModal">新建企业资产查询</a-button>
       <a-button style="background-color: #00bcd4; color: #fff; border-color: #00bcd4;" @click="showModal">新建 ICP 查询</a-button>
       <a-popconfirm title="确定要批量删除选中的任务吗？" @confirm="handleBatchDelete">
         <a-button danger :disabled="selectedRowKeys.length === 0">批量删除</a-button>
@@ -107,7 +107,7 @@
 
   <a-modal
       v-model:open="tycVisible"
-      title="新建企业信息查询"
+      title="新建企业资产查询"
       @ok="handleTycOk"
       :confirmLoading="tycSubmitLoading"
       width="560px"
@@ -316,7 +316,7 @@ const handleTycOk = async () => {
     tycSubmitLoading.value = true;
     const res = await request.post('/icp/tyc_task', tycFormState);
     if (res.code === 200) {
-      message.success('企业信息查询任务创建成功');
+      message.success('企业资产查询任务创建成功');
       tycVisible.value = false;
       fetchTasks(1, pagination.pageSize);
     } else {
