@@ -36,7 +36,7 @@
 
 * **任务管理**：精细化的任务调度与状态追踪，支持多维度过滤；新增优化的插件分类与资产分组视图，交互更直观。
 <br><img src="./img/task-new.png" alt="任务新建" width="800"><br>
-  <br><img src="./img/task-management.png" alt="任务管理" width="800"><br>
+  <br><img src="./img/task-management1.png" alt="任务管理" width="800"><br>
 
 * **系统设置**：支持 Web 端热更新扫描字典、灵活调整任务并发，以及配置多渠道（钉钉/飞书/企微）告警推送。
   <br><img src="./img/system-settings.png" alt="系统设置" width="800"><br>
