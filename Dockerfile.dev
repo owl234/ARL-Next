@@ -1,5 +1,8 @@
 FROM ubuntu:22.04
 
+ARG CHROME_VERSION=126.0.6478.126
+ARG TARGETARCH
+
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
 ENV NODE_PATH=/usr/local/lib/node_modules
@@ -20,12 +23,22 @@ RUN ARCH=$(dpkg --print-architecture) && \
     gcc g++ make automake autoconf libtool \
     libffi-dev libssl-dev python3 python3-dev python3-pip python3-venv \
     libxml2-dev libxslt1-dev zlib1g-dev \
+    ca-certificates libnss3 libatk-bridge2.0-0 libgtk-3-0 libx11-xcb1 \
+    libxcb-dri3-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
+    libasound2 libxshmfence1 libdrm2 libxkbcommon0 libatspi2.0-0 libcups2 \
     fontconfig nodejs npm fonts-wqy-zenhei fonts-wqy-microhei
 
-# 安装原生非 snap 的 Chromium (从 Debian Bullseye 源下载，避开 snapd 限制)
-RUN echo "deb [trusted=yes] http://deb.debian.org/debian bullseye main" > /etc/apt/sources.list.d/debian.list && \
-    apt-get update && \
-    apt-get install -y -t bullseye chromium
+# Chrome for Testing 官方 Linux 包只提供 amd64，避免混用 Debian 源安装 Chromium。
+RUN ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" && \
+    if [ "$ARCH" != "amd64" ]; then \
+        echo "Chrome for Testing only provides linux64. Build this image with --platform=linux/amd64."; \
+        exit 1; \
+    fi && \
+    wget -O /tmp/chrome-linux64.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chrome-linux64.zip" && \
+    unzip /tmp/chrome-linux64.zip -d /opt/chrome-for-testing && \
+    ln -sf /opt/chrome-for-testing/chrome-linux64/chrome /usr/bin/chromium && \
+    /usr/bin/chromium --version && \
+    rm -f /tmp/chrome-linux64.zip
 
 RUN npm config set registry https://registry.npmmirror.com/ && \
     npm install -g puppeteer-core@10.4.0
@@ -41,7 +54,7 @@ RUN cd /tmp && \
 RUN cd /tmp && \
     wget https://nmap.org/dist/nmap-7.95.tar.bz2 && \
     bzip2 -cd nmap-7.95.tar.bz2 | tar xvf - && cd nmap-7.95 && \
-    ./configure --without-zenmap && make -j$(nproc) && make install &&        cd /tmp && rm -rf nmap* && wget -O /usr/local/share/nmap/nmap-service-probes https://raw.githubusercontent.com/nmap/nmap/master/nmap-service-probes
+    ./configure --without-zenmap && make && make install &&        cd /tmp && rm -rf nmap* && wget -O /usr/local/share/nmap/nmap-service-probes https://fastly.jsdelivr.net/gh/nmap/nmap@master/nmap-service-probes
 
 # 下载 Nuclei
 RUN ARCH=$(dpkg --print-architecture) && \

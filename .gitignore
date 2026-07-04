@@ -38,3 +38,4 @@ reference/
 
 # Celery Beat persistent db
 backend/celerybeat-schedule.db
+backend/.venv-docker/
