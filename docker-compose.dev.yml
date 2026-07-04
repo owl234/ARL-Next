@@ -48,7 +48,7 @@ services:
       - TZ=Asia/Shanghai
 
   icp_query:
-    build: ./test/ICP_Query_temp
+    build: ./backend/icp_query
     container_name: arl_icp_query_dev
     restart: always
     ports:

@@ -1,0 +1,29 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# build directories
+*.build
+*.dist
+logs/
+
+# vscode settings
+.vscode/
+
+# data files
+batch_results/
+slider_debug/
+model_data/
+*.db
+
+# other
+打包/
+nuitka-crash-report.xml
+icpApi.exe
