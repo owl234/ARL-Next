@@ -349,6 +349,9 @@
                       </a-form-item>
                     </a-col>
                   </a-row>
+                  <div style="margin-top: 16px; text-align: right;">
+                    <a-button @click="handleTestPush('dingding')" :loading="testPushLoading.dingding">测试发送</a-button>
+                  </div>
                 </a-collapse-panel>
 
                 <a-collapse-panel key="feishu" header="飞书推送配置">
@@ -364,12 +367,18 @@
                       </a-form-item>
                     </a-col>
                   </a-row>
+                  <div style="margin-top: 16px; text-align: right;">
+                    <a-button @click="handleTestPush('feishu')" :loading="testPushLoading.feishu">测试发送</a-button>
+                  </div>
                 </a-collapse-panel>
 
                 <a-collapse-panel key="wxwork" header="企业微信推送配置">
                   <a-form-item label="Webhook URL">
                     <a-input v-model:value="generalForm.wxwork.webhook_url" placeholder="企业微信群机器人 Webhook 地址" />
                   </a-form-item>
+                  <div style="margin-top: 16px; text-align: right;">
+                    <a-button @click="handleTestPush('wxwork')" :loading="testPushLoading.wxwork">测试发送</a-button>
+                  </div>
                 </a-collapse-panel>
 
                 <a-collapse-panel key="email" header="邮件推送配置">
@@ -400,6 +409,9 @@
                   <a-form-item label="收件人邮箱列表 (To，多个用英文逗号分隔)">
                     <a-input v-model:value="generalForm.email.to" placeholder="例如：receiver1@test.com,receiver2@test.com" />
                   </a-form-item>
+                  <div style="margin-top: 16px; text-align: right;">
+                    <a-button @click="handleTestPush('email')" :loading="testPushLoading.email">测试发送</a-button>
+                  </div>
                 </a-collapse-panel>
 
                 <a-collapse-panel key="webhook" header="系统全局监控 Webhook 自动化回调">
@@ -415,6 +427,9 @@
                       </a-form-item>
                     </a-col>
                   </a-row>
+                  <div style="margin-top: 16px; text-align: right;">
+                    <a-button @click="handleTestPush('webhook')" :loading="testPushLoading.webhook">测试发送</a-button>
+                  </div>
                 </a-collapse-panel>
               </a-collapse>
 
@@ -537,6 +552,45 @@ const deleteLoading = ref(false);
 const generalLoading = ref(false);
 const generalSaveLoading = ref(false);
 const activePushPanels = ref(['dingding']);
+
+const testPushLoading = ref({
+  dingding: false,
+  feishu: false,
+  wxwork: false,
+  email: false,
+  webhook: false
+});
+
+const handleTestPush = async (type) => {
+  let config = {};
+  if (type === 'webhook') {
+    config = {
+      webhook_url: generalForm.value.webhook_url,
+      webhook_token: generalForm.value.webhook_token
+    };
+  } else {
+    config = generalForm.value[type];
+  }
+  
+  testPushLoading.value[type] = true;
+  try {
+    const res = await request.post('/api/system_config/test_push', {
+      push_type: type,
+      config: config
+    });
+    
+    if (res.code === 200) {
+      message.success(res.message || '测试推送成功');
+    } else {
+      message.error(res.message || '测试推送失败');
+    }
+  } catch (error) {
+    message.error('测试请求发生异常，请检查网络');
+    console.error(error);
+  } finally {
+    testPushLoading.value[type] = false;
+  }
+};
 
 const generalForm = ref({
   celery_broker_url: '',
