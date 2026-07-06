@@ -200,10 +200,20 @@ class GeneralConfig(ARLResource):
         if "webhook_token" in req_data: doc["webhook_token"] = req_data["webhook_token"]
 
         # 消息推送
-        if "dingding" in req_data: doc["dingding"] = req_data["dingding"]
-        if "feishu" in req_data: doc["feishu"] = req_data["feishu"]
-        if "wxwork" in req_data: doc["wxwork"] = req_data["wxwork"]
-        if "email" in req_data: doc["email"] = req_data["email"]
+        if "dingding" in req_data:
+            doc["dingding_secret"] = req_data["dingding"].get("secret")
+            doc["dingding_access_token"] = req_data["dingding"].get("access_token")
+        if "feishu" in req_data:
+            doc["feishu_webhook"] = req_data["feishu"].get("webhook_url")
+            doc["feishu_secret"] = req_data["feishu"].get("secret")
+        if "wxwork" in req_data:
+            doc["wx_work_webhook"] = req_data["wxwork"].get("webhook_url")
+        if "email" in req_data:
+            doc["email_host"] = req_data["email"].get("host")
+            doc["email_port"] = req_data["email"].get("port")
+            doc["email_username"] = req_data["email"].get("username")
+            doc["email_password"] = req_data["email"].get("password")
+            doc["email_to"] = req_data["email"].get("to")
         if "query_plugin_config" in req_data: doc["query_plugin_config"] = req_data["query_plugin_config"]
 
         conn_db('system_config').update_one(
@@ -219,3 +229,97 @@ class GeneralConfig(ARLResource):
             "code": 200,
             "message": "全局配置更新成功"
         }
+
+@ns.route('/test_push')
+class TestPush(ARLResource):
+    @auth
+    def post(self):
+        """
+        测试消息推送配置
+        """
+        from flask import request
+        from app.utils.push import dingding_send, feishu_send, wx_work_send, send_email
+        from app.utils import http_req
+
+        req_data = request.json
+        if not req_data:
+            return {"code": 400, "message": "请求体为空"}
+
+        push_type = req_data.get("push_type")
+        config = req_data.get("config", {})
+        
+        test_msg = "*【ARL-Next 系统通知】这是一条测试消息，您的推送配置一切正常。*"
+        test_html = f"<div><b>【ARL-Next 系统通知】</b>这是一条测试消息，您的推送配置一切正常。</div>"
+
+        try:
+            if push_type == "dingding":
+                access_token = config.get("access_token")
+                secret = config.get("secret")
+                if not access_token or not secret:
+                    return {"code": 400, "message": "钉钉测试失败：Token 或 Secret 不能为空"}
+                res = dingding_send(msg=test_msg, access_token=access_token, secret=secret, msgtype="markdown")
+                if res.get("errcode") != 0:
+                    return {"code": 500, "message": f"钉钉推送失败: {res}"}
+                return {"code": 200, "message": "钉钉测试推送成功"}
+
+            elif push_type == "feishu":
+                webhook_url = config.get("webhook_url")
+                secret = config.get("secret")
+                if not webhook_url or not secret:
+                    return {"code": 400, "message": "飞书测试失败：Webhook URL 或 Secret 不能为空"}
+                res = feishu_send(msg=test_msg, webhook_url=webhook_url, secret=secret)
+                if res.get("code") != 0:
+                    return {"code": 500, "message": f"飞书推送失败: {res}"}
+                return {"code": 200, "message": "飞书测试推送成功"}
+
+            elif push_type == "wxwork":
+                webhook_url = config.get("webhook_url")
+                if not webhook_url:
+                    return {"code": 400, "message": "企业微信测试失败：Webhook URL 不能为空"}
+                res = wx_work_send(msg=test_msg, webhook_url=webhook_url)
+                if res.get("errcode") != 0:
+                    return {"code": 500, "message": f"企业微信推送失败: {res}"}
+                return {"code": 200, "message": "企业微信测试推送成功"}
+
+            elif push_type == "email":
+                host = config.get("host")
+                port = config.get("port")
+                username = config.get("username")
+                password = config.get("password")
+                to = config.get("to")
+                if not all([host, port, username, password, to]):
+                    return {"code": 400, "message": "邮件测试失败：所有邮件配置字段均不能为空"}
+                try:
+                    port = int(port)
+                except ValueError:
+                    return {"code": 400, "message": "邮件测试失败：端口必须为数字"}
+                
+                send_email(host=host, port=port, mail=username, password=password, to=to, title="[ARL-Next] 邮件测试推送", html=test_html)
+                return {"code": 200, "message": "邮件测试推送成功"}
+
+            elif push_type == "webhook":
+                webhook_url = config.get("webhook_url")
+                webhook_token = config.get("webhook_token")
+                if not webhook_url:
+                    return {"code": 400, "message": "Webhook 测试失败：回调 URL 不能为空"}
+                
+                headers = {}
+                if webhook_token:
+                    headers["Token"] = webhook_token
+                
+                payload = {
+                    "type": "test_push",
+                    "message": "这是一条 ARL-Next 系统的 Webhook 测试数据",
+                    "timestamp": __import__('time').time()
+                }
+                conn = http_req(webhook_url, method='post', json=payload, headers=headers, timeout=10)
+                if conn.status_code >= 400:
+                    return {"code": 500, "message": f"Webhook 请求失败，状态码: {conn.status_code}, 响应: {conn.text[:200]}"}
+                return {"code": 200, "message": "Webhook 测试回调成功"}
+            
+            else:
+                return {"code": 400, "message": "不支持的测试推送类型"}
+
+        except Exception as e:
+            return {"code": 500, "message": f"测试推送过程中发生异常: {str(e)}"}
+
