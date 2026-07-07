@@ -121,6 +121,13 @@
         :label-col="{ style: { width: '90px' } }"
         :wrapper-col="{ style: { width: 'calc(100% - 90px)' } }"
     >
+      <a-alert
+          v-if="!tycConfigCheck.valid && !tycConfigCheck.loading"
+          :message="tycConfigCheck.message"
+          type="warning"
+          show-icon
+          style="margin-bottom: 16px;"
+      />
       <a-form-item label="任务名称" name="name" :rules="[{ required: true, message: '请输入任务名称' }]">
         <a-input v-model:value="tycFormState.name" placeholder="请输入任务名称" />
       </a-form-item>
@@ -186,7 +193,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue';
-import { message } from 'ant-design-vue';
+import { message, Modal } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import { SearchOutlined } from '@ant-design/icons-vue';
 import request from '../utils/request';
@@ -308,11 +315,43 @@ const tycFormState = reactive({
   query_type: []
 });
 
-const showTycModal = () => { tycVisible.value = true; };
+const tycConfigCheck = reactive({
+  loading: false,
+  valid: true,
+  message: ''
+});
+
+const showTycModal = async () => {
+  tycVisible.value = true;
+  tycConfigCheck.loading = true;
+  tycConfigCheck.valid = true;
+  tycConfigCheck.message = '';
+  try {
+    const res = await request.get('/icp/tyc_check');
+    if (res.code === 200) {
+      tycConfigCheck.valid = res.data.valid;
+      tycConfigCheck.message = res.data.message;
+    }
+  } catch (error) {
+    console.error(error);
+  } finally {
+    tycConfigCheck.loading = false;
+  }
+};
 
 const handleTycOk = async () => {
   try {
     await tycFormRef.value.validate();
+
+    if (!tycConfigCheck.valid) {
+      Modal.warning({
+        title: '天眼查配置无效',
+        content: tycConfigCheck.message || '未配置天眼查 ID 或 Token，请在系统设置中配置后再试。',
+        okText: '知道了'
+      });
+      return;
+    }
+
     tycSubmitLoading.value = true;
     const res = await request.post('/icp/tyc_task', tycFormState);
     if (res.code === 200) {

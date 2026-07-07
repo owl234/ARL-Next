@@ -20,7 +20,7 @@
 
 针对传统安全工具环境配置繁琐、代码高度耦合、二次开发困难等历史包袱，ARL-Next 进行了彻底的底层重构，其核心亮点在于：
 
-* **底层引擎全面换代**：淘汰已停更的老旧组件（如 PhantomJS），平滑迁移至 Chromium + Puppeteer，并全面升级至最新的 Nuclei 漏洞引擎。
+* **底层引擎全面换代**：淘汰已停更的老旧组件（如 PhantomJS），平滑迁移至 Chrome for Testing + Puppeteer，并全面升级至最新的 Nuclei 漏洞引擎。
 * **一站式业务闭环**：打通从“**企业边界查询 (ICP/TYC) ➔ 资产拓扑发现 ➔ 指纹识别 ➔ 自动化漏洞打点**”的全链路。
 * **极简部署与 AI 友好二开**：后端与中间件全栈容器化，前端彻底解耦（Vue 3）。告别环境依赖地狱，实现极低门槛的二次开发，非常适合由 AI 辅助进行功能魔改。
 
@@ -38,7 +38,7 @@
 <br><img src="./img/task-new.png" alt="任务新建" width="800"><br>
   <br><img src="./img/task-management1.png" alt="任务管理" width="800"><br>
 
-* **系统设置**：支持 Web 端热更新扫描字典、灵活调整任务并发，以及配置多渠道（钉钉/飞书/企微）告警推送。
+* **系统设置**：支持 Web 端热更新扫描字典、灵活调整任务并发，以及配置多渠道（钉钉/飞书/企微/邮件/Webhook）告警推送，并提供一键连通性测试。
   <br><img src="./img/system-settings.png" alt="系统设置" width="800"><br>
 
 ---
@@ -60,7 +60,7 @@ ARL-Next 采用清晰的微服务架构设计，各模块职责明确：
 ### 推荐部署方案：前端本地 + Docker 后端源码
 
 **适用对象**：二次开发者、安全研究人员。
-**方案优势**：后端全套服务（API / Worker / 数据库 / MQ）运行在 Docker 容器中，且**通过代码卷挂载实现修改即时生效**。前端在本地 Vite 环境独立运行并代理请求，彻底解耦，体验丝滑。
+**方案优势**：后端全套服务（API / Worker / ICP 服务 / 数据库 / MQ）运行在 Docker 容器中，且**通过代码卷挂载实现修改即时生效**。前端在本地 Vite 环境独立运行并代理请求，彻底解耦，体验丝滑。
 
 > **前置条件**：已安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/) 和 [Node.js](https://nodejs.org/)（附带 npm），并全局安装 pnpm：`npm install -g pnpm`
 
@@ -84,7 +84,7 @@ docker-compose -f docker-compose.dev.yml up -d
 > **说明**：
 > 1. `docker-compose.dev.yml` 会将本地项目目录挂载入容器，修改后端 Python 代码后，服务会自动热重载。
 > 2. 容器启动时会自动重置/注入默认管理员账号，账号密码为：`admin` / `arlpass`。
-> 3. 容器内的服务已为您自动映射好宿主机端口（API -> `5001`，Mongo -> `27018`，RabbitMQ -> `5673`），完全不影响本地环境。
+> 3. 容器内的服务已为您自动映射好宿主机端口（API -> `5001`，Mongo -> `27018`，RabbitMQ -> `5673`，ICP 查询 -> `16182`），完全不影响本地环境。
 
 ---
 
@@ -128,8 +128,8 @@ pnpm run dev
 # 查看所有容器状态
 docker-compose -f docker-compose.dev.yml ps
 
-# 实时查看后端主服务（API、Worker、定时任务）的混合日志
-docker-compose -f docker-compose.dev.yml logs -f arl-dev
+# 实时查看后端主服务（API、Worker）的混合日志
+docker-compose -f docker-compose.dev.yml logs -f arl-web arl-worker
 
 # 停止开发环境（不丢失数据）
 docker-compose -f docker-compose.dev.yml down

@@ -7,23 +7,23 @@
     />
 
     <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs">
-      <a-tab-pane key="site" :tab="`站点 - ${queryCounts.site}`"></a-tab-pane>
-      <a-tab-pane key="domain" :tab="`子域名 - ${queryCounts.domain}`"></a-tab-pane>
-      <a-tab-pane key="ip" :tab="`IP - ${queryCounts.ip}`"></a-tab-pane>
-      <a-tab-pane key="cert" :tab="`SSL证书 - ${queryCounts.cert}`"></a-tab-pane>
-      <a-tab-pane key="service" :tab="`服务 - ${queryCounts.service}`"></a-tab-pane>
-      <a-tab-pane key="fileleak" :tab="`文件泄露 - ${queryCounts.fileleak}`"></a-tab-pane>
-      <a-tab-pane key="url" :tab="`URL信息 - ${queryCounts.url}`"></a-tab-pane>
-      <a-tab-pane key="vuln" :tab="`风险 - ${queryCounts.vuln}`"></a-tab-pane>
-      <a-tab-pane key="npoc_service" :tab="`服务（python） - ${queryCounts.npoc_service}`"></a-tab-pane>
-      <a-tab-pane key="cip" :tab="`C段 - ${queryCounts.cip}`"></a-tab-pane>
-      <a-tab-pane key="nuclei_result" :tab="`nuclei - ${queryCounts.nuclei_result}`"></a-tab-pane>
-      <a-tab-pane key="stat_finger" :tab="`指纹统计 - ${queryCounts.stat_finger}`"></a-tab-pane>
-      <a-tab-pane key="wih" :tab="`WIH - ${queryCounts.wih}`"></a-tab-pane>
-      <a-tab-pane key="syslog" tab="任务日志"></a-tab-pane>
+      <a-tab-pane key="site" :tab="query.task_id ? `站点 - ${queryCounts.site}` : '站点'"></a-tab-pane>
+      <a-tab-pane key="domain" :tab="query.task_id ? `子域名 - ${queryCounts.domain}` : '子域名'"></a-tab-pane>
+      <a-tab-pane key="ip" :tab="query.task_id ? `IP - ${queryCounts.ip}` : 'IP'"></a-tab-pane>
+      <a-tab-pane key="cert" :tab="query.task_id ? `SSL证书 - ${queryCounts.cert}` : 'SSL证书'"></a-tab-pane>
+      <a-tab-pane key="service" :tab="query.task_id ? `服务 - ${queryCounts.service}` : '服务'"></a-tab-pane>
+      <a-tab-pane key="fileleak" :tab="query.task_id ? `文件泄露 - ${queryCounts.fileleak}` : '文件泄露'"></a-tab-pane>
+      <a-tab-pane key="url" :tab="query.task_id ? `URL信息 - ${queryCounts.url}` : 'URL信息'"></a-tab-pane>
+      <a-tab-pane key="vuln" :tab="query.task_id ? `风险 - ${queryCounts.vuln}` : '风险'"></a-tab-pane>
+      <a-tab-pane key="npoc_service" :tab="query.task_id ? `服务（python） - ${queryCounts.npoc_service}` : '服务（python）'"></a-tab-pane>
+      <a-tab-pane key="cip" :tab="query.task_id ? `C段 - ${queryCounts.cip}` : 'C段'"></a-tab-pane>
+      <a-tab-pane key="nuclei_result" :tab="query.task_id ? `nuclei - ${queryCounts.nuclei_result}` : 'nuclei'"></a-tab-pane>
+      <a-tab-pane key="stat_finger" :tab="query.task_id ? `指纹统计 - ${queryCounts.stat_finger}` : '指纹统计'"></a-tab-pane>
+      <a-tab-pane key="wih" :tab="query.task_id ? `WIH - ${queryCounts.wih}` : 'WIH'"></a-tab-pane>
+      <a-tab-pane v-if="query.task_id" key="syslog" tab="任务日志"></a-tab-pane>
     </a-tabs>
 
-    <div v-if="tabConfig[activeTab]?.searchFields" class="search-row" style="margin-bottom: 16px;">
+    <div v-if="tabConfig[activeTab]?.searchFields && activeTab !== 'syslog'" class="search-row" style="margin-bottom: 16px;">
       <div v-for="field in tabConfig[activeTab].searchFields" :key="field.key" class="search-item">
         <span class="label">{{ field.label }}：</span>
 
@@ -82,7 +82,7 @@
       </div>
     </div>
 
-    <div style="margin-bottom: 16px;">
+    <div v-show="activeTab !== 'syslog'" style="margin-bottom: 16px;">
       <a-button :disabled="!hasSelected" style="margin-right: 16px;" @click="handleBatchDelete">批量删除</a-button>
       <a-button style="margin-right: 16px;" @click="resetSearch">清 除</a-button>
       <a-button v-if="tabConfig[activeTab]?.exportName" type="primary" style="background-color: #00bcd4; border-color: #00bcd4; margin-right: 16px;" @click="handleExport">导出{{ tabConfig[activeTab].exportName }}</a-button>
@@ -90,6 +90,7 @@
     </div>
 
     <a-table
+        v-show="activeTab !== 'syslog'"
         :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange }"
         :loading="loading"
         :dataSource="dataSource"
@@ -321,25 +322,27 @@
           </div>
         </template>
 
-        <!-- 💡 新增：日志相关渲染 -->
-        <template v-else-if="column.key === 'syslog_level'">
-          <a-tag :color="record.level === 'error' ? 'red' : record.level === 'warning' ? 'orange' : record.level === 'success' ? 'green' : 'blue'">
-            {{ record.level || 'info' }}
-          </a-tag>
-        </template>
-        
-        <template v-else-if="column.key === 'syslog_message'">
-          <div style="background: #f5f5f5; padding: 8px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word; font-size: 13px;">
-            {{ record.message || '-' }}
-          </div>
-        </template>
-
       </template>
     </a-table>
 
-    <div v-if="tabConfig[activeTab]" style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px;">
+    <div v-if="tabConfig[activeTab] && activeTab !== 'syslog'" style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px;">
       <div style="color: rgba(0,0,0,.65);">共 {{ Math.ceil(pagination.total / pagination.pageSize) || 1 }} 页 / {{ pagination.total }} 条数据</div>
       <a-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" show-size-changer @change="handleTableChange" @showSizeChange="handleTableChange" />
+    </div>
+
+    <div v-show="activeTab === 'syslog'">
+      <div style="border: 1px solid #e8e8e8; border-radius: 4px; padding: 8px; background-color: #fafafa;">
+        <div ref="terminalContainer" style="background-color: #001529; color: #e6f7ff; font-family: 'Fira Code', Consolas, 'Courier New', monospace; padding: 16px; border-radius: 4px; height: 60vh; overflow-y: auto; font-size: 13px; line-height: 1.6; box-shadow: inset 0 2px 8px rgba(0,0,0,0.2);" @mouseenter="pauseScroll = true" @mouseleave="pauseScroll = false">
+          <div v-for="(log, idx) in dataSource" :key="log._id || log.id || idx" style="margin-bottom: 6px; word-break: break-all; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 4px;">
+            <span style="color: #00bcd4; margin-right: 8px;">[{{ log.create_time }}]</span>
+            <span :style="{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warning' ? '#faad14' : '#52c41a', fontWeight: 'bold', marginRight: '8px' }">[{{ (log.level || 'info').toUpperCase() }}]</span>
+            <span style="color: #1890ff; margin-right: 8px;" v-if="log.title">[{{ log.title }}]</span>
+            <span style="color: #e6f7ff;">{{ log.message }}</span>
+          </div>
+          <div v-if="dataSource.length === 0 && !loading" style="color: rgba(255,255,255,0.45); font-style: italic;">[System] 暂无日志记录... (等待日志生成)</div>
+          <div v-if="loading" style="color: rgba(255,255,255,0.45); font-style: italic;">[System] 正在拉取日志...</div>
+        </div>
+      </div>
     </div>
 
     <a-modal v-model:open="previewVisible" :footer="null" width="85vw" centered @cancel="previewVisible = false" :bodyStyle="{ padding: '16px' }">
@@ -384,7 +387,7 @@
 
 <script setup>
 // 💥 核心修改 2：引入 createVNode 和 Modal、ExclamationCircleOutlined
-import { ref, onMounted, reactive, watch, computed, createVNode, onUnmounted } from 'vue';
+import { ref, onMounted, reactive, watch, computed, createVNode, onUnmounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
@@ -397,6 +400,9 @@ const targetName = ref(query.targetName || '未知目标');
 const activeTab = ref('site');
 const loading = ref(false);
 const dataSource = ref([]);
+
+const terminalContainer = ref(null);
+const pauseScroll = ref(false);
 
 // 弹窗状态
 const previewVisible = ref(false);
@@ -779,6 +785,14 @@ const fetchData = async (isPolling = false) => {
       dataSource.value = res.items || [];
       pagination.total = res.total || 0;
       selectedRowKeys.value = [];
+      
+      if (activeTab.value === 'syslog' && !pauseScroll.value) {
+        nextTick(() => {
+          if (terminalContainer.value) {
+            terminalContainer.value.scrollTop = terminalContainer.value.scrollHeight;
+          }
+        });
+      }
     }
   } catch (error) {
     if (!isPolling) {
@@ -790,36 +804,6 @@ const fetchData = async (isPolling = false) => {
     }
   }
 };
-
-// 💡 新增：任务日志自动刷新机制
-let syslogTimer = null;
-
-const startSyslogTimer = () => {
-  if (syslogTimer) clearInterval(syslogTimer);
-  syslogTimer = setInterval(() => {
-    fetchData(true);
-  }, 3000); // 每 3 秒拉取一次最新日志
-};
-
-const stopSyslogTimer = () => {
-  if (syslogTimer) {
-    clearInterval(syslogTimer);
-    syslogTimer = null;
-  }
-};
-
-watch(activeTab, (newVal) => {
-  if (newVal === 'syslog') {
-    startSyslogTimer();
-  } else {
-    stopSyslogTimer();
-  }
-});
-
-// 其他生命周期与清理工作
-onUnmounted(() => {
-  stopSyslogTimer();
-});
 
 // ==========================================
 // 💥 导出站点：1:1 对齐导出纯文本文件流
@@ -929,19 +913,48 @@ const handleTableChange = (page, pageSize) => {
   fetchData();
 };
 
+// 💡 新增：任务日志自动刷新机制
+let syslogTimer = null;
+
+const startSyslogTimer = () => {
+  if (syslogTimer) clearInterval(syslogTimer);
+  syslogTimer = setInterval(() => {
+    fetchData(true);
+  }, 3000); // 每 3 秒拉取一次最新日志
+};
+
+const stopSyslogTimer = () => {
+  if (syslogTimer) {
+    clearInterval(syslogTimer);
+    syslogTimer = null;
+  }
+};
+
 watch(activeTab, (newVal) => {
   if (tabConfig[newVal]) {
     columns.value = tabConfig[newVal].cols;
     searchForm.value = {};
     pagination.current = 1;
+    if (newVal === 'syslog') {
+      pagination.pageSize = 500;
+      startSyslogTimer();
+    } else {
+      pagination.pageSize = 10;
+      stopSyslogTimer();
+    }
     fetchData();
   } else {
     dataSource.value = [];
     columns.value = [];
+    stopSyslogTimer();
   }
 });
 
 onMounted(fetchData);
+
+onUnmounted(() => {
+  stopSyslogTimer();
+});
 
 // ==========================================
 // 💥 风险任务下发：生成临时集合、拉取策略、下发任务

@@ -7,7 +7,11 @@ logger = utils.get_logger()
 
 class SyncAsset(object):
     def __init__(self, task_id, scope_id, update_flag=False,  category=None, task_name=""):
-        self.available_category = ["site", "domain", "ip", "wih"]
+        self.available_category = [
+            "site", "domain", "ip", "wih",
+            "cert", "service", "fileleak", "url", "vuln", 
+            "npoc_service", "cip", "nuclei_result", "stat_finger"
+        ]
 
         if category is None:
             self.category_list = self.available_category
@@ -24,15 +28,19 @@ class SyncAsset(object):
             "domain": [],
             "ip": [],
             "task_name": task_name,
-            "wih": []
+            "wih": [],
+            "cert": [],
+            "service": [],
+            "fileleak": [],
+            "url": [],
+            "vuln": [],
+            "npoc_service": [],
+            "cip": [],
+            "nuclei_result": [],
+            "stat_finger": []
         }
 
-        self.new_asset_counter = {
-            "site": 0,
-            "domain": 0,
-            "ip": 0,
-            "wih": 0
-        }
+        self.new_asset_counter = {k: 0 for k in self.available_category}
         self.max_record_asset_count = 10
 
     def site_in_asset_site(self, site: str) -> bool:
@@ -60,6 +68,33 @@ class SyncAsset(object):
             if category == "wih":
                 query = {"scope_id": self.scope_id, "fnv_hash": data["fnv_hash"]}
                 data_content = data["fnv_hash"]
+            elif category == "cert":
+                query = {"scope_id": self.scope_id, "ip": data.get("ip"), "cert.fingerprint.sha256": data.get("cert", {}).get("fingerprint", {}).get("sha256")}
+                data_content = f"{data.get('ip')}_{data.get('cert', {}).get('fingerprint', {}).get('sha256')}"
+            elif category == "service":
+                query = {"scope_id": self.scope_id, "service_name": data.get("service_name")}
+                data_content = data.get("service_name")
+            elif category == "fileleak":
+                query = {"scope_id": self.scope_id, "url": data.get("url")}
+                data_content = data.get("url")
+            elif category == "url":
+                query = {"scope_id": self.scope_id, "url": data.get("url")}
+                data_content = data.get("url")
+            elif category == "vuln":
+                query = {"scope_id": self.scope_id, "target": data.get("target"), "vul_name": data.get("vul_name")}
+                data_content = f"{data.get('target')}_{data.get('vul_name')}"
+            elif category == "npoc_service":
+                query = {"scope_id": self.scope_id, "host": data.get("host"), "port": data.get("port")}
+                data_content = f"{data.get('host')}:{data.get('port')}"
+            elif category == "cip":
+                query = {"scope_id": self.scope_id, "cidr_ip": data.get("cidr_ip")}
+                data_content = data.get("cidr_ip")
+            elif category == "nuclei_result":
+                query = {"scope_id": self.scope_id, "target": data.get("target"), "template_id": data.get("template_id")}
+                data_content = f"{data.get('target')}_{data.get('template_id')}"
+            elif category == "stat_finger":
+                query = {"scope_id": self.scope_id, "name": data.get("name")}
+                data_content = data.get("name")
 
             del data["_id"]
             data["scope_id"] = self.scope_id
@@ -91,6 +126,14 @@ class SyncAsset(object):
                     if data.get("domain") and old.get("domain"):
                         old["domain"].extend(data["domain"])
                         data["domain"] = list(set(old["domain"]))
+                elif category == 'service':
+                    if data.get("service_info") and old.get("service_info"):
+                        # Merge list of dicts based on ip and port
+                        existing_keys = {f"{item['ip']}:{item['port_id']}" for item in old["service_info"] if 'ip' in item and 'port_id' in item}
+                        for new_item in data["service_info"]:
+                            if f"{new_item.get('ip')}:{new_item.get('port_id')}" not in existing_keys:
+                                old["service_info"].append(new_item)
+                        data["service_info"] = old["service_info"]
 
                 logger.debug("sync {}, replace {}  {} -> {}".format(
                     category, data_content, self.task_id, self.scope_id))

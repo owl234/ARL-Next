@@ -257,7 +257,10 @@ def stop_task(task_id):
     # 4. 获取后台真正干活的工人的编号 (celery_id)
     celery_id = task_data.get("celery_id")
     if not celery_id:
-        return utils.build_ret(ErrorMsg.CeleryIdNotFound, {"task_id": task_id})
+        # 僵尸任务柔性退出：直接标记为已停止
+        update_data = {"$set": {"status": TaskStatus.STOP, "end_time": utils.curr_date()}}
+        utils.conn_db('task').update_one({'_id': ObjectId(task_id)}, update_data)
+        return utils.build_ret(ErrorMsg.Success, {"task_id": task_id})
 
     # 5. 【核心杀手锏】：连接到 Celery 的控制台
     control = celerytask.celery.control
@@ -542,8 +545,8 @@ class TaskByPolicy(ARLResource):
 # ==========================================
 # 接口 C：重启任务 (POST /restart/)
 # ==========================================
-# 【注意】：原作者复制粘贴忘了改名字，这里 model 名字还是 'DeleteTask'，但内部字段没写错。
-restart_task_fields = ns.model('DeleteTask',  {
+# 【注意】：原作者复制粘贴忘了改名字，这里 model 名字已修正为 'RestartTask'
+restart_task_fields = ns.model('RestartTask',  {
     'task_id': fields.List(fields.String(required=True, description="任务ID"))
 })
 

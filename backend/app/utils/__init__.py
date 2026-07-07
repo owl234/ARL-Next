@@ -79,18 +79,24 @@ class MongoSyslogHandler(logging.Handler):
         try:
             task_id = "global"
             # 尝试从 celery 运行上下文中提取 task_id
-            if current_task and current_task.request:
-                options = None
-                if current_task.request.args:
-                    options = current_task.request.args[0]
-                elif current_task.request.kwargs and "options" in current_task.request.kwargs:
-                    options = current_task.request.kwargs["options"]
-                    
-                if isinstance(options, dict):
-                    if "data" in options:
-                        task_id = options["data"].get("task_id", "global")
-                    elif "task_id" in options:
-                        task_id = options.get("task_id", "global")
+            if current_task:
+                task_obj = current_task._get_current_object()
+                if task_obj and hasattr(task_obj, 'arl_task_id'):
+                    task_id = task_obj.arl_task_id
+                elif current_task.request:
+                    options = None
+                    if current_task.request.args:
+                        options = current_task.request.args[0]
+                    elif current_task.request.kwargs and "options" in current_task.request.kwargs:
+                        options = current_task.request.kwargs["options"]
+                        
+                    if isinstance(options, dict):
+                        if "data" in options:
+                            task_id = options["data"].get("task_id") or options["data"].get("job_id", "global")
+                        elif "task_id" in options:
+                            task_id = options.get("task_id", "global")
+                        elif "job_id" in options:
+                            task_id = options.get("job_id", "global")
 
             level = record.levelname.lower()
             if level == 'warn':
@@ -299,3 +305,20 @@ from .user import user_login, user_login_header, auth, user_logout, change_pass
 from .push import message_push
 from .fingerprint import parse_human_rule, transform_rule_map
 
+
+def clean_task_data(task_id):
+    """
+    清理指定任务运行过程中产生的各表数据，用于任务无副作用的重新执行
+    """
+    logger = get_logger()
+    logger.info(f"Cleaning existing data for task {task_id}")
+    table_list = [
+        "cert", "domain", "fileleak", "ip", "service",
+        "site", "url", "vuln", "cip", "npoc_service", 
+        "wih", "nuclei_result", "stat_finger"
+    ]
+    for table_name in table_list:
+        try:
+            conn_db(table_name).delete_many({'task_id': task_id})
+        except Exception as e:
+            logger.error(f"Error cleaning {table_name} for task {task_id}: {e}")

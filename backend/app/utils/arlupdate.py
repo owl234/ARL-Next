@@ -34,6 +34,15 @@ def create_index():
         "github_result": "github_task_id",
         "github_monitor_result": "github_scheduler_id",
         "wih": ["task_id", "record_type", "fnv_hash"],
+        "asset_cert": ["scope_id", "ip"],
+        "asset_service": "scope_id",
+        "asset_fileleak": "scope_id",
+        "asset_url": "scope_id",
+        "asset_vuln": ["scope_id", "vul_name"],
+        "asset_npoc_service": "scope_id",
+        "asset_cip": "scope_id",
+        "asset_nuclei_result": "scope_id",
+        "asset_stat_finger": "scope_id",
     }
     for table in index_map:
         if isinstance(index_map[table], list):

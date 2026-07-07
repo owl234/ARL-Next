@@ -100,8 +100,8 @@ class TycClient:
 
             try:
                 data = self._request(method, path, json_data=json_data, params=params)
-            except (TycTokenExpiredException, TycRiskControlException) as e:
-                # 遇到风控或过期直接向上抛出
+            except TycException as e:
+                # 遇到风控、过期、或者配置错误，直接向上抛出
                 raise e
             except Exception as e:
                 logger.error(f"分页获取失败 (页码: {page_num}): {e}")
@@ -184,3 +184,30 @@ class TycClient:
         """微博"""
         return self.fetch_all_pages("GET", "/cloud-business-state/weibo/list",
                                   total_key="total", list_key="result", gid_field="graphId", gid_val=gid)
+
+    def check_token(self):
+        """
+        校验天眼查 ID 与 Token 是否有效
+        通过发送一个最简请求来检测
+        """
+        if not self.gid or not self.token:
+            return False, "未配置天眼查 ID 或 Token，请在系统设置 -> 三方API配置中完善信息。"
+
+        path = "/cloud-business-state/weibo/list"
+        params = {
+            "pageSize": 1,
+            "pageNum": 1,
+            "graphId": self.gid
+        }
+        try:
+            self._request("GET", path, params=params)
+            return True, "天眼查 ID & Token 校验成功，有效"
+        except TycTokenExpiredException as e:
+            return False, str(e)
+        except TycRiskControlException as e:
+            return False, str(e)
+        except TycException as e:
+            return False, f"天眼查 API 异常: {e}"
+        except Exception as e:
+            return False, f"天眼查连接异常: {e}"
+

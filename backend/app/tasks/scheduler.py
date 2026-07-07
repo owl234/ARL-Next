@@ -62,7 +62,8 @@ def wrap_domain_executors(base_domain=None, job_id=None, scope_id=None, options=
             'fofa_search': False,
             'dns_query_plugin': False,
             'web_info_hunter': False,
-            'scope_id': scope_id
+            'scope_id': scope_id,
+            'job_id': job_id
         },
         'celery_id': celery_id
     }
@@ -72,6 +73,10 @@ def wrap_domain_executors(base_domain=None, job_id=None, scope_id=None, options=
 
     conn('task').insert_one(task_data)
     task_id = str(task_data.pop("_id"))
+    
+    if current_task._get_current_object():
+        current_task._get_current_object().arl_task_id = task_id
+        
     domain_executor = DomainExecutor(base_domain, task_id, task_data["options"])
     try:
         update_job_run(job_id)
@@ -200,10 +205,11 @@ class DomainExecutor(DomainTask):
 
 # ***IP监控任务　＊＊＊
 class IPExecutor(IPTask):
-    def __init__(self, target, scope_id, task_name,  options):
+    def __init__(self, target, scope_id, task_name, job_id, options):
         super().__init__(ip_target=target, task_id=None, options=options)
         self.scope_id = scope_id
         self.task_name = task_name
+        self.job_id = job_id
         self.task_tag = "monitor"  # 标记为监控任务
 
     def insert_task_data(self):
@@ -230,7 +236,8 @@ class IPExecutor(IPTask):
                 "site_spider": False,
                 "ssl_cert": False,
                 'web_info_hunter': False,
-                'scope_id': self.scope_id
+                'scope_id': self.scope_id,
+                'job_id': self.job_id
             },
             'celery_id': celery_id
         }
@@ -241,6 +248,10 @@ class IPExecutor(IPTask):
         task_data["options"].update(self.options)
         conn('task').insert_one(task_data)
         self.task_id = str(task_data.pop("_id"))
+        
+        if current_task._get_current_object():
+            current_task._get_current_object().arl_task_id = self.task_id
+            
         # base_update_task 初始化在前，再设置回task_id
         self.base_update_task.task_id = self.task_id
 
@@ -336,7 +347,7 @@ def ip_executor(target, scope_id, task_name, job_id, options):
         logger.exception(e)
         return
 
-    executor = IPExecutor(target, scope_id, task_name,  options)
+    executor = IPExecutor(target, scope_id, task_name, job_id, options)
     try:
         executor.insert_task_data()
         executor.run()

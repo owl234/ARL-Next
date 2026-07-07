@@ -4,7 +4,7 @@ from app.utils import conn_db as conn
 from app import utils
 from app import celerytask
 import time
-from app.modules import CeleryAction, SchedulerStatus, AssetScopeType
+from app.modules import CeleryAction, SchedulerStatus, AssetScopeType, TaskStatus
 from app.helpers import task_schedule, asset_site_monitor, asset_wih_monitor
 
 logger = utils.get_logger()
@@ -242,9 +242,48 @@ def asset_monitor_scheduler():
             logger.exception(e)
 
 
+def cleanup_zombie_tasks():
+    non_running_statuses = [TaskStatus.DONE, TaskStatus.WAITING, TaskStatus.ERROR, TaskStatus.STOP]
+    zombie_tasks = conn('task').find({"status": {"$nin": non_running_statuses}})
+    count = 0
+    
+    for task in zombie_tasks:
+        task_id = str(task["_id"])
+        logger.info(f"Cleanup zombie task: {task_id}, status: {task.get('status')}")
+        
+        # 清理残余数据
+        utils.clean_task_data(task_id)
+        
+        if task.get("task_tag") == "monitor":
+            # 对于监控任务，删除残余记录
+            conn('task').delete_one({"_id": task["_id"]})
+            
+            # 找到对应的 job_id，将其 next_run_time 设置为当前时间
+            options = task.get("options", {})
+            job_id = options.get("job_id")
+            if job_id:
+                logger.info(f"Re-scheduling monitor job: {job_id}")
+                conn('scheduler').update_one(
+                    {"_id": ObjectId(job_id)},
+                    {"$set": {"next_run_time": int(time.time())}}
+                )
+        else:
+            # 普通任务直接报错
+            conn('task').update_one({"_id": task["_id"]}, {"$set": {"status": TaskStatus.ERROR}})
+            
+        count += 1
+        
+    if count > 0:
+        logger.info(f"Cleaned up {count} zombie tasks on startup.")
+
+
 def run_forever():
     from app.utils.github_task import github_task_scheduler
     logger.info("start scheduler server ")
+    
+    # 启动时先清理僵尸任务并恢复
+    cleanup_zombie_tasks()
+    
     while True:
         # 资产监控任务调度
         asset_monitor_scheduler()
