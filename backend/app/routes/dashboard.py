@@ -126,6 +126,10 @@ class DashboardSysInfo(ARLResource):
         # Also check github tasks
         running_tasks += conn('github_task').count({"status": {"$nin": non_running_statuses}})
         waiting_tasks += conn('github_task').count({"status": TaskStatus.WAITING})
+
+        # Also check icp tasks
+        running_tasks += conn('icp_task').count({"status": {"$nin": non_running_statuses}})
+        waiting_tasks += conn('icp_task').count({"status": TaskStatus.WAITING})
         
         data = {
             "cpu_percent": cpu_percent,

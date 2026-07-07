@@ -1,0 +1,18 @@
+FROM node:20-alpine
+WORKDIR /app
+
+# 安装 pnpm
+RUN npm install -g pnpm@9
+
+# 利用缓存层安装依赖
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+# 复制源码
+COPY . .
+
+# 暴露 Vite 默认端口
+EXPOSE 5173
+
+# 以 host 模式启动，允许外部流量连入容器内的 Vite
+CMD ["pnpm", "run", "dev", "--host"]
