@@ -26,7 +26,7 @@
       <a-button :disabled="!hasSelected" @click="handleBatchAction('delete')">批量删除</a-button>
       <a-button :disabled="!hasSelected" @click="handleBatchAction('stop')">批量停止</a-button>
       <a-button :disabled="!hasSelected" @click="handleBatchAction('recover')">批量恢复</a-button>
-
+      <a-button :disabled="!hasSelected" @click="handleBatchAction('run')">批量下发</a-button>
     </div>
 
     <a-table
@@ -65,6 +65,7 @@
           <div style="display: flex; gap: 8px;">
             <a-button size="small" :disabled="record.status === 'stop'" @click="handleSingleAction('stop', record)">暂停</a-button>
             <a-button size="small" :disabled="record.status !== 'stop'" @click="handleSingleAction('resume', record)">恢复</a-button>
+            <a-button size="small" @click="handleSingleAction('run', record)">立即下发</a-button>
             <a-button size="small" @click="handleSingleAction('delete', record)">删除</a-button>
           </div>
         </template>
@@ -117,7 +118,7 @@ const columns = [
   { title: '上一次运行日期', dataIndex: 'last_run_date', key: 'last_run_date', width: 180 },
   { title: '下一次运行日期', dataIndex: 'next_run_date', key: 'next_run_date', width: 180 },
   { title: '运行次数', key: 'run_number', width: 100, align: 'center' },
-  { title: '操作', key: 'action', width: 200 }
+  { title: '操作', key: 'action', width: 260 }
 ];
 
 // 💡 核心逻辑：秒数转直观时间 (86400 -> 24 小时)
@@ -157,8 +158,9 @@ const handleTableChange = (page, pageSize) => { pagination.current = page; pagin
 // ==========================================
 const apiMap = {
   delete: '/scheduler/delete/',
-  stop: '/scheduler/stop/',     // 猜测的暂停接口
-  resume: '/scheduler/run/'     // 猜测的恢复接口 (有可能是 /start/ 或 /resume/)
+  stop: '/scheduler/stop/',
+  resume: '/scheduler/recover/',
+  run: '/scheduler/run/'
 };
 
 const executeAction = async (actionType, ids) => {
@@ -166,7 +168,13 @@ const executeAction = async (actionType, ids) => {
   if (!url) return;
 
   try {
-    const res = await request.post(url, { _id: ids });
+    let payload = {};
+    if (actionType === 'delete') {
+      payload = { job_id: ids };
+    } else {
+      payload = { job_id: ids[0] };
+    }
+    const res = await request.post(url, payload);
     if (res.code === 200) {
       message.success('操作成功！');
       fetchData();
@@ -180,8 +188,8 @@ const executeAction = async (actionType, ids) => {
 
 // 单行操作
 const handleSingleAction = (actionType, record) => {
-  const actionName = actionType === 'delete' ? '删除' : actionType === 'stop' ? '暂停' : '恢复';
-  if (actionType === 'delete') {
+  const actionName = actionType === 'delete' ? '删除' : actionType === 'stop' ? '暂停' : actionType === 'resume' ? '恢复' : '立即下发';
+  if (actionType === 'delete' || actionType === 'run') {
     Modal.confirm({
       title: '操作确认',
       icon: createVNode(ExclamationCircleOutlined),
@@ -201,7 +209,8 @@ const handleBatchAction = (action) => {
   const actionMap = {
     delete:  { title: '批量删除', text: '删除', url: '/scheduler/delete/', type: 'danger' },
     stop:    { title: '批量停止', text: '停止', url: '/scheduler/stop/batch', type: 'danger' },
-    recover: { title: '批量恢复', text: '恢复', url: '/scheduler/recover/batch', type: 'primary' }
+    recover: { title: '批量恢复', text: '恢复', url: '/scheduler/recover/batch', type: 'primary' },
+    run:     { title: '批量下发', text: '下发', url: '/scheduler/run/batch', type: 'primary' }
   };
 
   const current = actionMap[action];

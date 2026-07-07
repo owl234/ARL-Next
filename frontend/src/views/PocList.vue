@@ -10,7 +10,7 @@
           cancel-text="取消"
           @confirm="handleClear"
       >
-        <a-button :loading="clearLoading">清空</a-button>
+        <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" :loading="clearLoading">清空</a-button>
       </a-popconfirm>
     </div>
 

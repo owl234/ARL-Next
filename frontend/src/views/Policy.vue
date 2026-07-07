@@ -1,7 +1,19 @@
 <template>
   <div style="background-color: #fff; padding: 24px; min-height: calc(100vh - 64px);">
-    <div style="margin-bottom: 24px; display: flex; gap: 8px;">
+    <div style="margin-bottom: 16px;">
       <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="goToDetail">新建策略</a-button>
+    </div>
+
+    <div class="search-row" style="margin-bottom: 20px; background-color: #f9f9f9; padding: 16px; border-radius: 4px;">
+      <div class="search-item">
+        <span class="label">策略名称：</span>
+        <a-input v-model:value="searchForm.name" placeholder="请输入策略名称进行搜索" style="width: 220px;" allowClear @pressEnter="onSearch">
+          <template #suffix><search-outlined @click="onSearch" style="cursor: pointer; color: rgba(0,0,0,0.25);" /></template>
+        </a-input>
+      </div>
+    </div>
+
+    <div style="margin-bottom: 16px;">
       <a-popconfirm
           title="确认批量删除选中的数据吗？"
           ok-text="确认"
@@ -11,15 +23,6 @@
       >
         <a-button danger :disabled="selectedRowKeys.length === 0">批量删除</a-button>
       </a-popconfirm>
-    </div>
-
-    <div class="search-row" style="margin-bottom: 16px;">
-      <div class="search-item">
-        <span class="label">策略名称：</span>
-        <a-input v-model:value="searchForm.name" placeholder="请输入策略名称进行搜索" style="width: 220px;" allowClear @pressEnter="onSearch">
-          <template #suffix><search-outlined @click="onSearch" style="cursor: pointer; color: rgba(0,0,0,0.25);" /></template>
-        </a-input>
-      </div>
     </div>
 
     <a-table :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: keys => selectedRowKeys = keys }" :loading="loading" :dataSource="dataSource" :columns="columns" :pagination="false" size="middle" :rowKey="(record) => record._id">
