@@ -7,8 +7,22 @@ import fs from 'node:fs'
 export default defineConfig(({ command }) => {
   let httpsConfig = false;
 
-  // 核心逻辑：只有在本地开发环境 (执行 vite dev 时) 才尝试读取证书
-  if (command === 'serve') {
+  // 1. 动态加载 HTTPS 证书
+  if (process.env.VITE_HTTPS === 'true') {
+    // 生产环境：读取 Docker 挂载的公网真实 SSL 证书
+    const keyPath = '/certs/arl.key';
+    const certPath = '/certs/arl.crt';
+    if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+      httpsConfig = {
+        key: fs.readFileSync(keyPath),
+        cert: fs.readFileSync(certPath),
+      };
+      console.log("🔒 生产环境：已成功加载公网 SSL 证书，启用 HTTPS。");
+    } else {
+      console.error("❌ 错误：生产环境未在 /certs 目录下找到 arl.key 或 arl.crt 证书！");
+    }
+  } else if (command === 'serve') {
+    // 开发环境：读取本地自签名证书
     const keyPath = fileURLToPath(new URL('../certs/localhost-key.pem', import.meta.url));
     const certPath = fileURLToPath(new URL('../certs/localhost.pem', import.meta.url));
 
@@ -23,6 +37,10 @@ export default defineConfig(({ command }) => {
     }
   }
 
+  // 2. 动态加载 API 反代目标 (生产环境转发给 Docker 内的后端服务名)
+  const apiTarget = process.env.VITE_API_TARGET || 'http://127.0.0.1:5001';
+  console.log(`📡 API 转发目标设置为: ${apiTarget}`);
+
   return {
     plugins: [vue()],
 
@@ -33,15 +51,15 @@ export default defineConfig(({ command }) => {
     },
 
     server: {
-      // 动态赋值：开发时如果有证书就是 https 对象，否则/或打包时就是 false
+      // 动态赋值：开发或生产环境的 HTTPS 配置
       https: httpsConfig,
 
       proxy: {
-        // 当你请求 /api/user/login 时，Vite会自动帮你把请求转发给后端
+        // 当您请求 /api/user/login 时，Vite 会自动帮您把请求转发给后端
         '/api' : {
-          target: 'http://127.0.0.1:5001', // 指向刚刚我们建好的 Docker 后端端口
+          target: apiTarget,
           changeOrigin: true,
-          secure: false, // 忽略本地自签名的HTTPS证书错误
+          secure: false, // 忽略自签名的 HTTPS 证书错误
         }
       }
     }

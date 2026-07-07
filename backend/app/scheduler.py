@@ -144,6 +144,10 @@ def run_job(job_id):
     if not item:
         return False
 
+    if item.get("status") == SchedulerStatus.STOP:
+        recover_job(job_id)
+        item = find_job(job_id)
+
     domain = item["domain"]
     scope_id = item["scope_id"]
     options = item["monitor_options"]

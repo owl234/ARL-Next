@@ -35,7 +35,7 @@ RUN cd /tmp && \
 RUN cd /tmp && \
     wget https://nmap.org/dist/nmap-7.95.tar.bz2 && \
     bzip2 -cd nmap-7.95.tar.bz2 | tar xvf - && cd nmap-7.95 && \
-    ./configure --without-zenmap && make && make install &&        cd /tmp && rm -rf nmap* && wget -O /usr/local/share/nmap/nmap-service-probes https://fastly.jsdelivr.net/gh/nmap/nmap@master/nmap-service-probes
+    ./configure --without-zenmap && make && make install && cd /tmp && rm -rf nmap* && wget -O /usr/local/share/nmap/nmap-service-probes https://fastly.jsdelivr.net/gh/nmap/nmap@master/nmap-service-probes
 
 # 下载 Nuclei
 RUN ARCH=$(dpkg --print-architecture) && \
@@ -43,4 +43,19 @@ RUN ARCH=$(dpkg --print-architecture) && \
     wget -t 10 "https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/$NUCLEI_ZIP" -O $NUCLEI_ZIP || wget -t 10 "https://gh-proxy.com/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/$NUCLEI_ZIP" -O $NUCLEI_ZIP && \
     unzip $NUCLEI_ZIP && mv nuclei /usr/local/bin/ && chmod +x /usr/local/bin/nuclei && /usr/local/bin/nuclei -update-templates || true
 
+# 设置工作目录并拷贝后端源码到容器
 WORKDIR /code
+COPY ./backend /code/backend
+
+# 在构建镜像时就创建好虚拟环境并安装好依赖，使生产环境自包含
+RUN python3 -m venv /code/backend/.venv-docker && \
+    /code/backend/.venv-docker/bin/pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    /code/backend/.venv-docker/bin/pip install -r /code/backend/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    /code/backend/.venv-docker/bin/pip install -e /code/backend/ARL-NPoC/
+
+# 拷贝待用脚本并赋予权限
+RUN cp /code/backend/wait-for-it.sh /usr/bin/wait-for-it.sh && \
+    chmod +x /usr/bin/wait-for-it.sh
+
+# 赋予 ARL 自带工具执行权限
+RUN chmod +x /code/backend/app/tools/massdns /code/backend/app/tools/phantomjs || true

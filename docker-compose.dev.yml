@@ -1,3 +1,4 @@
+name: arl-next-dev
 version: '3.8'
 
 services:
@@ -8,6 +9,10 @@ services:
     container_name: arl-web
     command: bash -c "/code/backend/start_web.sh"
     working_dir: /code
+    dns:
+      - 223.5.5.5
+      - 119.29.29.29
+      - 114.114.114.114
     volumes:
       - ./:/code
     ports:
@@ -30,6 +35,10 @@ services:
     container_name: arl-worker
     command: bash -c "/code/backend/start_worker.sh"
     working_dir: /code
+    dns:
+      - 223.5.5.5
+      - 119.29.29.29
+      - 114.114.114.114
     volumes:
       - ./:/code
     environment:

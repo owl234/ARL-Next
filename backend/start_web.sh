@@ -26,7 +26,8 @@ fi
 cp /code/backend/config.yaml /tmp/config.yaml.tmp
 sed -i 's/127.0.0.1:27018/mongodb:27017/g' /tmp/config.yaml.tmp
 sed -i 's/127.0.0.1:5673/rabbitmq:5672/g' /tmp/config.yaml.tmp
-mv /tmp/config.yaml.tmp /code/backend/app/config.yaml
+cp -f /tmp/config.yaml.tmp /code/backend/app/config.yaml
+rm -f /tmp/config.yaml.tmp
 
 echo "🛡️ 正在确保默认管理员账号存在..."
 python3 inject_user.py
