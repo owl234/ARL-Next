@@ -176,11 +176,12 @@ docker compose -f docker-compose.prod.yml down
 
 * **ARL-Next** 核心引擎是基于开源项目 [ARL (Asset Reconnaissance Lighthouse) 资产侦察灯塔](https://github.com/TophantTechnology/ARL) 进行现代化重构的增强版本。
 * 本项目集成的 **企业资产查询 (ICP 等)** 模块，其核心逻辑基于优秀的开源项目 [ICP_Query](https://github.com/HG-ha/ICP_Query) 进行二次开发。
+* **威零安全实验室** (<img src="img/weiling.jpg" width="18" height="18" align="absmiddle" /> 微信公众号)：提供了 16,985 条指纹数据，极大丰富了本项目的资产指纹识别维度。
 * 在二次开发和重构的过程中，本项目也参考并借鉴了以下优秀的 ARL 衍生开源项目：
   * [Aabyss-Team/ARL](https://github.com/Aabyss-Team/ARL)
   * [adysec/ARL](https://github.com/adysec/ARL)
 
-我们对原 ARL 团队及 ICP_Query 作者为开源安全社区做出的巨大贡献表示最诚挚的感谢！ARL-Next 也将秉持开源互助的初心，持续为信息安全社区贡献力量。
+我们对上述开源项目作者、安全团队及社区贡献者表示最诚挚的感谢！ARL-Next 也将秉持开源互助的初心，持续为信息安全社区贡献力量。
 
 ---
 

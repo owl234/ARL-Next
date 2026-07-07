@@ -12,7 +12,8 @@
         <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;">上传指纹</a-button>
       </a-upload>
 
-      <a-button @click="handleSync" type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" :loading="syncLoading">同步到webapp.json</a-button>
+      <a-button @click="handleSync" type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" :loading="syncLoading">存储指纹</a-button>
+      <a-button @click="handleSyncFromJSON" type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" :loading="syncFromJsonLoading">加载指纹</a-button>
       <a-button @click="handleExport" type="primary" style="background-color: #00bcd4; border-color: #00bcd4;">一键导出</a-button>
     </div>
 
@@ -112,6 +113,7 @@ const dataSource = ref([]);
 const searchForm = reactive({ name: '', rule: '' });
 const pagination = reactive({ current: 1, pageSize: 10, total: 0 });
 const syncLoading = ref(false);
+const syncFromJsonLoading = ref(false);
 
 // 表格多选逻辑
 const selectedRowKeys = ref([]);
@@ -274,6 +276,25 @@ const handleSync = async () => {
     message.error('请求异常，同步失败');
   } finally {
     syncLoading.value = false;
+  }
+};
+// ================= 从 webapp.json 同步到 MongoDB =================
+const handleSyncFromJSON = async () => {
+  syncFromJsonLoading.value = true;
+  try {
+    const res = await request.post('/fingerprint/sync_from_json/');
+    if (res.code === 200) {
+      message.success(res.data?.msg || '同步成功！');
+      // 同步成功后自动重置到第一页并重新加载列表
+      pagination.current = 1;
+      fetchData();
+    } else {
+      message.error('同步失败: ' + res.message);
+    }
+  } catch (error) {
+    message.error('请求异常，同步失败');
+  } finally {
+    syncFromJsonLoading.value = false;
   }
 };
 // ================= 上传指纹逻辑 =================
