@@ -66,6 +66,8 @@ services:
       - RABBITMQ_DEFAULT_USER=admin
       - RABBITMQ_DEFAULT_PASS=admin
       - TZ=Asia/Shanghai
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbit consumer_timeout 36000000
+
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 

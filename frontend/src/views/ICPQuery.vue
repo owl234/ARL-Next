@@ -1,14 +1,11 @@
 <template>
   <div style="background-color: #fff; padding: 24px; min-height: calc(100vh - 64px);">
-    <div style="margin-bottom: 24px; display: flex; align-items: center; gap: 12px;">
+    <div style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
       <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="showTycModal">新建企业资产查询</a-button>
       <a-button style="background-color: #00bcd4; color: #fff; border-color: #00bcd4;" @click="showModal">新建 ICP 查询</a-button>
-      <a-popconfirm title="确定要批量删除选中的任务吗？" @confirm="handleBatchDelete">
-        <a-button danger :disabled="selectedRowKeys.length === 0">批量删除</a-button>
-      </a-popconfirm>
     </div>
 
-    <div style="margin-bottom: 16px;">
+    <div class="search-row" style="margin-bottom: 20px; background-color: #f9f9f9; padding: 16px; border-radius: 4px;">
       <a-form :model="searchForm" layout="inline" style="row-gap: 16px;">
         <a-form-item label="任务名:">
           <a-input v-model:value="searchForm.name" placeholder="请输入任务名" style="width: 230px;" allowClear @pressEnter="onSearch">
@@ -26,6 +23,12 @@
           </a-input>
         </a-form-item>
       </a-form>
+    </div>
+
+    <div style="margin-bottom: 16px;">
+      <a-popconfirm title="确定要批量删除选中的任务吗？" @confirm="handleBatchDelete">
+        <a-button danger :disabled="selectedRowKeys.length === 0">批量删除</a-button>
+      </a-popconfirm>
     </div>
 
     <a-table

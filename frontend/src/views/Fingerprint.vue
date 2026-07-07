@@ -1,10 +1,23 @@
 <template>
   <div style="background-color: #fff; padding: 24px; min-height: calc(100vh - 64px);">
 
-    <div class="search-row" style="margin-bottom: 20px;">
+    <div style="margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap;">
       <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="openAddModal">添加指纹</a-button>
+      <a-upload
+          name="file"
+          :show-upload-list="false"
+          :customRequest="handleUpload"
+          accept=".json,.yaml,.yml"
+      >
+        <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;">上传指纹</a-button>
+      </a-upload>
 
-      <div class="search-item" style="margin-left: 16px;">
+      <a-button @click="handleSync" type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" :loading="syncLoading">同步到webapp.json</a-button>
+      <a-button @click="handleExport" type="primary" style="background-color: #00bcd4; border-color: #00bcd4;">一键导出</a-button>
+    </div>
+
+    <div class="search-row" style="margin-bottom: 20px; background-color: #f9f9f9; padding: 16px; border-radius: 4px;">
+      <div class="search-item">
         <span class="label">名称：</span>
         <a-input v-model:value="searchForm.name" placeholder="请输入名称进行搜索" style="width: 220px;" allowClear @pressEnter="onSearch">
           <template #suffix><search-outlined @click="onSearch" style="cursor: pointer; color: rgba(0,0,0,0.25);" /></template>
@@ -19,8 +32,7 @@
       </div>
     </div>
 
-    <div style="margin-bottom: 16px; display: flex; gap: 8px;">
-
+    <div style="margin-bottom: 16px;">
       <a-popconfirm
           title="确认删除所选数据吗？"
           ok-text="确认"
@@ -30,17 +42,6 @@
       >
         <a-button :disabled="!hasSelected">批量删除</a-button>
       </a-popconfirm>
-
-      <a-button @click="handleExport" type="primary" style="background-color: #52c41a; border-color: #52c41a;">一键全部导出</a-button>
-      <a-upload
-          name="file"
-          :show-upload-list="false"
-          :customRequest="handleUpload"
-          accept=".json,.yaml,.yml"
-      >
-        <a-button>上传指纹</a-button>
-      </a-upload>
-      <a-button @click="handleSync" type="primary" style="background-color: #faad14; border-color: #faad14;" :loading="syncLoading">同步到webapp.json</a-button>
     </div>
 
     <a-table

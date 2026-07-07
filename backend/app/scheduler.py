@@ -139,6 +139,38 @@ def recover_job(job_id):
     return ret
 
 
+def run_job(job_id):
+    item = find_job(job_id)
+    if not item:
+        return False
+
+    domain = item["domain"]
+    scope_id = item["scope_id"]
+    options = item["monitor_options"]
+    name = item["name"]
+    scope_type = item.get("scope_type")
+
+    if not scope_type:
+        scope_type = AssetScopeType.DOMAIN
+
+    if scope_type == "site_update_monitor":
+        asset_site_monitor.submit_asset_site_monitor_job(scope_id=scope_id,
+                                                         name=name,
+                                                         scheduler_id=str(item["_id"]))
+
+    elif scope_type == "wih_update_monitor":
+        asset_wih_monitor.submit_asset_wih_monitor_job(scope_id=scope_id,
+                                                       name=name,
+                                                       scheduler_id=str(item["_id"]))
+
+    else:
+        submit_job(domain=domain, job_id=str(item["_id"]),
+                   scope_id=scope_id, options=options,
+                   name=name, scope_type=scope_type)
+
+    return True
+
+
 def find_job(job_id):
     query = {"_id": ObjectId(job_id)}
     item = conn('scheduler').find_one(query)

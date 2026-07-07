@@ -369,3 +369,56 @@ class AddWihScheduler(ARLResource):
                                                       interval=interval)
 
         return utils.build_ret(ErrorMsg.Success, {"schedule_id": _id})
+
+
+run_scheduler_fields = ns.model('runScheduler', {
+    "job_id": fields.String(required=True, description="监控任务ID")
+})
+
+
+@ns.route('/run/')
+class RunARLScheduler(ARLResource):
+
+    @auth
+    @ns.expect(run_scheduler_fields)
+    def post(self):
+        """
+        立即执行监控周期任务
+        """
+        args = self.parse_args(run_scheduler_fields)
+        job_id = args.get("job_id")
+
+        item = app_scheduler.find_job(job_id)
+        if not item:
+            return utils.build_ret(ErrorMsg.JobNotFound, {"job_id": job_id})
+
+        app_scheduler.run_job(job_id)
+
+        return utils.build_ret(ErrorMsg.Success, {"job_id": job_id})
+
+
+batch_run_scheduler_fields = ns.model('batchRunScheduler', {
+    "job_id": fields.List(fields.String(required=True, description="监控任务ID列表"))
+})
+
+
+@ns.route('/run/batch')
+class BatchRunARLScheduler(ARLResource):
+
+    @auth
+    @ns.expect(batch_run_scheduler_fields)
+    def post(self):
+        """
+        批量立即执行监控周期任务
+        """
+        args = self.parse_args(batch_run_scheduler_fields)
+        job_id_list = args.get("job_id", [])
+        for job_id in job_id_list:
+            item = app_scheduler.find_job(job_id)
+            if not item:
+                return utils.build_ret(ErrorMsg.JobNotFound, {"job_id": job_id})
+
+            app_scheduler.run_job(job_id)
+
+        return utils.build_ret(ErrorMsg.Success, {"job_id": job_id_list})
+
