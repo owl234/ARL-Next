@@ -46,3 +46,4 @@ backend/app/tmp/
 backend/app/tmp_screenshot/
 ssl-certs/
 fingerprint_new/
+.agents/

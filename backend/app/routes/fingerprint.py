@@ -256,3 +256,53 @@ class UploadARLFinger(ARLResource):
             return utils.build_ret(ErrorMsg.Error, {'msg': str(e)})
 
 
+@ns.route('/sync_from_json/')
+class SyncFromJSON(ARLResource):
+
+    @auth
+    def post(self):
+        """
+        从本地 webapp.json 同步到 MongoDB 数据库并刷新内存缓存
+        """
+        import os
+        import json
+        from app.config import Config
+        webapp_file = Config.web_app_rule
+        if not os.path.exists(webapp_file):
+            return utils.build_ret(ErrorMsg.Error, {'msg': "未找到本地 webapp.json 文件"})
+
+        try:
+            with open(webapp_file, 'r', encoding='utf-8') as f:
+                web_app_rules = json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load webapp.json: {e}")
+            return utils.build_ret(ErrorMsg.Error, {'msg': f"加载 webapp.json 失败: {e}"})
+
+        try:
+            db = utils.conn_db('fingerprint')
+            # 1. 清空原有数据库指纹
+            db.delete_many({})
+            
+            # 2. 构造文档集写入
+            docs = []
+            for rule_name, rule_detail in web_app_rules.items():
+                if "fofa_rule" in rule_detail and rule_detail["fofa_rule"]:
+                    docs.append({
+                        "name": rule_name,
+                        "human_rule": rule_detail["fofa_rule"],
+                        "update_date": utils.curr_date_obj()
+                    })
+            if docs:
+                db.insert_many(docs)
+            
+            # 3. 强制重载内存中的缓存单例，使最新指纹立即在后端生效
+            from app.services.fingerprint_cache import finger_db_cache
+            finger_db_cache.update_cache(force=True)
+            
+            return utils.build_ret(ErrorMsg.Success, {'msg': f"成功同步并生效了 {len(docs)} 条规则到数据库"})
+        except Exception as e:
+            logger.error(f"Failed to sync webapp.json to MongoDB: {e}")
+            return utils.build_ret(ErrorMsg.Error, {'msg': f"同步到数据库失败: {e}"})
+
+
+
