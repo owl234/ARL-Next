@@ -39,3 +39,8 @@ reference/
 # Celery Beat persistent db
 backend/celerybeat-schedule.db
 backend/.venv-docker/
+
+
+#系统临时生成文件
+backend/app/tmp/
+backend/app/tmp_screenshot/
