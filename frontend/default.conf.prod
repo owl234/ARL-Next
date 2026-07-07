@@ -1,0 +1,29 @@
+server {
+    listen       5173 ssl;
+    server_name  localhost;
+
+    ssl_certificate      /certs/arl.crt;
+    ssl_certificate_key  /certs/arl.key;
+
+    ssl_session_cache    shared:SSL:1m;
+    ssl_session_timeout  5m;
+
+    ssl_ciphers  HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers  on;
+
+    # 1. 静态文件代理
+    location / {
+        root   /usr/share/nginx/html;
+        index  index.html index.htm;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 2. 动态 API 反向代理
+    location /api/ {
+        proxy_pass http://arl-web:5000/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

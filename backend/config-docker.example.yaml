@@ -137,7 +137,12 @@ ARL:
   #文件泄漏字典
   FILE_LEAK_DICT: "/code/app/dicts/file_top_2000.txt"
 
-  #域名爆破并发�?
+  #域名爆破并发?
   DOMAIN_BRUTE_CONCURRENT: 300
   #组合生成的域名爆破并发数
   ALT_DNS_CONCURRENT: 1500
+
+# 天眼查 API 配置（用于企业边界查询）
+TYC:
+  ID: ""
+  TOKEN: ""
