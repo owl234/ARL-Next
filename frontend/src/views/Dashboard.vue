@@ -12,16 +12,17 @@
         </a-card>
       </a-col>
       <a-col :span="6">
-        <a-card class="clickable-card" :bodyStyle="{ padding: '16px 20px' }" @click="router.push('/taskList')">
+        <a-card :bodyStyle="{ padding: '16px 20px' }">
           <div style="font-size: 14px; color: rgba(0, 0, 0, 0.45); margin-bottom: 8px;">
             <SyncOutlined style="color: #52c41a; margin-right: 4px;" /> 今日动态
           </div>
           <div style="display: flex; justify-content: space-around; align-items: flex-end; margin-top: 4px;">
-            <div style="text-align: center;">
+            <div class="interactive-item" @click="router.push('/taskList')" style="text-align: center; cursor: pointer; flex: 1;">
               <div style="font-size: 20px; color: #333; font-weight: 500;">{{ stats.today_tasks }}</div>
               <div style="font-size: 12px; color: #999;">新增任务</div>
             </div>
-            <div style="text-align: center;">
+            <div style="width: 1px; height: 32px; background: #f0f0f0; margin-bottom: 4px;"></div>
+            <div class="interactive-item" @click="router.push('/asset-search')" style="text-align: center; cursor: pointer; flex: 1;">
               <div style="font-size: 20px; color: #1890ff; font-weight: 500;">{{ stats.today_new_assets }}</div>
               <div style="font-size: 12px; color: #999;">新增资产</div>
             </div>
@@ -412,5 +413,12 @@ onUnmounted(() => {
   white-space: pre-wrap;
   word-wrap: break-word;
   color: #333;
+}
+.interactive-item {
+  transition: transform 0.2s, opacity 0.2s;
+}
+.interactive-item:hover {
+  transform: scale(1.05);
+  opacity: 0.85;
 }
 </style>

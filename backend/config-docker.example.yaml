@@ -1,5 +1,5 @@
 CELERY:
-  BROKER_URL : "redis://redis:6379/0"
+  BROKER_URL : "amqp://admin:admin@rabbitmq:5672/"
 
 
 MONGO:
@@ -8,8 +8,8 @@ MONGO:
 
 #GeoIP 数据库文件配置项
 GEOIP:
-  CITY: '/data/GeoLite2/GeoLite2-City.mmdb'
-  ASN: '/data/GeoLite2/GeoLite2-ASN.mmdb'
+  CITY: '/code/GeoLite2/GeoLite2-City.mmdb'
+  ASN: '/code/GeoLite2/GeoLite2-ASN.mmdb'
 
 
 #Fofa API 配置�?

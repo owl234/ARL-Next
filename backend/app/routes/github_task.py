@@ -132,7 +132,10 @@ class StopARLGithubTask(ARLResource):
 
             celery_id = task_data.get("celery_id")
             if not celery_id:
-                return utils.build_ret(ErrorMsg.CeleryIdNotFound, {"_id": task_id})
+                # 僵尸任务柔性退出：直接标记为已停止
+                update_data = {"$set": {"status": TaskStatus.STOP, "end_time": utils.curr_date()}}
+                utils.conn_db('github_task').update_one({'_id': ObjectId(task_id)}, update_data)
+                continue
 
             control = celerytask.celery.control
 

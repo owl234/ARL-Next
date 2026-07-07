@@ -1,10 +1,20 @@
 <template>
   <div style="background-color: #fff; padding: 24px; min-height: calc(100vh - 64px);">
 
-    <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs">
+        <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs">
       <a-tab-pane key="site" tab="站点"></a-tab-pane>
       <a-tab-pane key="domain" tab="子域名"></a-tab-pane>
       <a-tab-pane key="ip" tab="IP"></a-tab-pane>
+      <a-tab-pane key="cert" tab="SSL证书"></a-tab-pane>
+      <a-tab-pane key="service" tab="服务"></a-tab-pane>
+      <a-tab-pane key="fileleak" tab="文件泄露"></a-tab-pane>
+      <a-tab-pane key="url" tab="URL信息"></a-tab-pane>
+      <a-tab-pane key="vuln" tab="风险"></a-tab-pane>
+      <a-tab-pane key="npoc_service" tab="服务（python）"></a-tab-pane>
+      <a-tab-pane key="cip" tab="C段"></a-tab-pane>
+      <a-tab-pane key="nuclei_result" tab="nuclei"></a-tab-pane>
+      <a-tab-pane key="stat_finger" tab="指纹统计"></a-tab-pane>
+      <a-tab-pane key="wih" tab="WIH"></a-tab-pane>
     </a-tabs>
 
     <div v-if="tabConfig[activeTab]?.searchFields" class="search-row" style="margin-bottom: 16px;">
@@ -23,6 +33,33 @@
             {{ opt.label }}
           </a-select-option>
         </a-select>
+
+        <div
+            v-else-if="field.hasOperatorSelect"
+            style="display: flex; align-items: center; border: 1px solid #d9d9d9; border-radius: 2px; width: 280px; background: #fff;"
+        >
+          <a-input
+              v-model:value="searchForm[field.key]"
+              :placeholder="`请输入${field.label}`"
+              :bordered="false"
+              style="flex: 1; box-shadow: none;"
+              allowClear
+              @pressEnter="onSearch"
+          >
+            <template #suffix>
+              <search-outlined @click="onSearch" style="cursor: pointer; color: rgba(0,0,0,0.25);" />
+            </template>
+          </a-input>
+          <div style="width: 1px; height: 16px; background-color: #d9d9d9;"></div>
+          <a-select
+              v-model:value="field.operator"
+              :bordered="false"
+              style="width: 90px; box-shadow: none;"
+              @change="onSearch"
+          >
+            <a-select-option v-for="op in field.operators" :key="op" :value="op">{{ op }}</a-select-option>
+          </a-select>
+        </div>
 
         <a-input
             v-else
@@ -54,55 +91,33 @@
         size="middle"
         :rowKey="(record) => record._id || record.id"
     >
-      <template #bodyCell="{ column, record, index }">
+            <template #bodyCell="{ column, record, index }">
         <template v-if="column.key === 'index'">
           <span style="color: #00bcd4;">{{ (pagination.current - 1) * pagination.pageSize + index + 1 }}</span>
         </template>
-
-
-        <template v-else-if="column.key === 'record'">
-          <div v-if="record.record && record.record.length">
-            <div v-for="(r, i) in record.record" :key="i">{{ r }}</div>
-          </div>
-          <span v-else-if="typeof record.record === 'string'">{{ record.record }}</span>
-          <span v-else>-</span>
-        </template>
-
-        <template v-else-if="column.key === 'ips'">
-          <div v-if="record.ips && record.ips.length">
-            <a-tooltip v-if="record.ips.length > 5" placement="top" :overlayInnerStyle="{ maxHeight: '400px', overflowY: 'auto' }">
-              <template #title>
-                <div v-for="(ip, i) in record.ips" :key="'all-ip-'+i">{{ ip }}</div>
-              </template>
-              <div style="cursor: pointer;">
-                <div v-for="(ip, i) in record.ips.slice(0, 5)" :key="i">{{ ip }}</div>
-                <div style="color: #999; margin-top: 2px;">...等 {{ record.ips.length }} 个</div>
-              </div>
-            </a-tooltip>
-            <div v-else>
-              <div v-for="(ip, i) in record.ips" :key="i">{{ ip }}</div>
-            </div>
-          </div>
-          <span v-else>-</span>
-        </template>
-
-
+<!--表格-站点列-->
         <template v-else-if="column.key === 'site'">
           <div class="site-header">
             <a :href="record.site || record.url" target="_blank" style="color: #00bcd4; font-weight: 500;">
               <img v-if="record.favicon && record.favicon.data" :src="`data:image/png;base64,${record.favicon.data}`" class="site-img" />
               <img v-else-if="typeof record.favicon === 'string'" :src="`data:image/png;base64,${record.favicon}`" class="site-img" />
+
               {{ record.site || record.url }}
             </a>
+
             <p v-if="record.favicon && record.favicon.hash" class="site-word">Favicon Hash: {{ record.favicon.hash }}</p>
             <p v-else-if="record.favicon_hash" class="site-word">Favicon Hash: {{ record.favicon_hash }}</p>
+
             <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+
               <a-tag v-if="record.is_entry || record.isEntry" closable style="background: #fafafa; color: #666; border-color: #d9d9d9;">入口</a-tag>
+
               <template v-for="(t, idx) in (record.tags || record.tag || [])" :key="idx">
                 <a-tag closable style="background: #fafafa; color: #666; border-color: #d9d9d9;">
                   {{ typeof t === 'string' ? t : (t.name || t.tag_name || t) }}
                 </a-tag>
               </template>
+
               <span class="add-tag">添加标签</span>
             </div>
           </div>
@@ -112,38 +127,192 @@
           <div class="scroll-x"><pre>{{ record.headers }}</pre></div>
         </template>
 
+
+
         <template v-else-if="column.key === 'finger'">
           <div v-if="record.finger">
             <p v-for="f in record.finger" :key="f.name" style="margin-bottom: 4px; color: rgba(0,0,0,0.65);">{{ f.name }}</p>
           </div>
         </template>
 
+
         <template v-else-if="column.key === 'screenshot'">
           <img v-if="record.screenshot" :src="`/api${record.screenshot}`" style="width: 280px; cursor: pointer; border: 1px solid #f0f0f0;" @click="handlePreview(`/api${record.screenshot}`)" />
           <span v-else>-</span>
         </template>
+<!--        插槽-->
+        <template v-else-if="column.key === 'record'">
+          <div v-if="record.record && record.record.length">
+            <div v-for="(r, i) in record.record" :key="i">{{ r }}</div>
+          </div>
+          <span v-else>-</span>
+        </template>
 
+        <template v-else-if="column.key === 'ips'">
+          <div v-if="record.ips && record.ips.length">
+
+            <a-tooltip
+                v-if="record.ips.length > 5"
+                placement="top"
+                :overlayInnerStyle="{ maxHeight: '400px', overflowY: 'auto' }"
+            >
+              <template #title>
+                <div v-for="(ip, i) in record.ips" :key="'all-'+i">{{ ip }}</div>
+              </template>
+
+              <div style="cursor: pointer;">
+                <div v-for="(ip, i) in record.ips.slice(0, 5)" :key="i">{{ ip }}</div>
+                <div style="color: #999; margin-top: 2px;">...等 {{ record.ips.length }} 个</div>
+              </div>
+            </a-tooltip>
+
+            <div v-else>
+              <div v-for="(ip, i) in record.ips" :key="i">{{ ip }}</div>
+            </div>
+
+          </div>
+          <span v-else>-</span>
+        </template>
+        <template v-else-if="column.key === 'os_info'">
+          <span>{{ record.os_info?.name || '-' }}</span>
+        </template>
+        <template v-else-if="column.key === 'port_info'">
+          <span>{{ record.port_info && record.port_info.length ? record.port_info.map(p => p.port_id).join(', ') : '-' }}</span>
+        </template>
         <template v-else-if="column.key === 'domain'">
+
           <div v-if="Array.isArray(record.domain) && record.domain.length">
             <a-tooltip v-if="record.domain.length > 5" placement="top" :overlayInnerStyle="{ maxHeight: '400px', overflowY: 'auto' }">
-              <template #title><div v-for="(dom, i) in record.domain" :key="'all-dom-'+i">{{ dom }}</div></template>
+              <template #title>
+                <div v-for="(dom, i) in record.domain" :key="'all-dom-'+i">{{ dom }}</div>
+              </template>
               <div style="cursor: pointer;">
                 <div v-for="(dom, i) in record.domain.slice(0, 5)" :key="i">{{ dom }}</div>
                 <div style="color: #999; margin-top: 2px;">...等 {{ record.domain.length }} 个</div>
               </div>
             </a-tooltip>
-            <div v-else><div v-for="(dom, i) in record.domain" :key="i">{{ dom }}</div></div>
+            <div v-else>
+              <div v-for="(dom, i) in record.domain" :key="i">{{ dom }}</div>
+            </div>
           </div>
+
           <span v-else-if="typeof record.domain === 'string'">{{ record.domain }}</span>
+
+          <span v-else>-</span>
+        </template>
+        <template v-else-if="column.key === 'geo_city'">
+          <span>{{ record.geo_city ? `${record.geo_city.country_name || 'null'} / ${record.geo_city.city || 'null'}` : '-' }}</span>
+        </template>
+        <template v-else-if="column.key === 'geo_asn'">
+          <span>{{ record.geo_asn?.organization || '-' }}</span>
+        </template>
+
+        <template v-else-if="column.key === 'host'">
+          <span>{{ record.ip }}:{{ record.port }}</span>
+        </template>
+        <template v-else-if="column.key === 'cert_detail'">
+          <div v-if="record.cert" style="font-size: 13px; line-height: 1.8; color: #333; padding: 12px 0;">
+
+            <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">基本信息</div>
+
+            <div style="display: flex; margin-bottom: 6px;">
+              <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">主题名称</div>
+              <div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.subject_dn || '-' }}</div>
+            </div>
+
+            <div style="display: flex; margin-bottom: 6px;">
+              <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">签发者名称</div>
+              <div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.issuer_dn || '-' }}</div>
+            </div>
+
+            <div style="display: flex; margin-bottom: 6px;">
+              <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">使用者备用名称</div>
+              <div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.extensions?.subjectAltName || '-' }}</div>
+            </div>
+
+            <div style="display: flex; margin-bottom: 6px;">
+              <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">序列号</div>
+              <div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.serial_number || '-' }}</div>
+            </div>
+
+            <div style="display: flex; margin-bottom: 16px;">
+              <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">时间</div>
+              <div style="flex: 1; color: #555;">{{ record.cert.validity?.start || '-' }} 至 {{ record.cert.validity?.end || '-' }}</div>
+            </div>
+
+            <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">指纹</div>
+
+            <div style="display: flex; margin-bottom: 6px;">
+              <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">SHA-256</div>
+              <div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.fingerprint?.sha256 || '-' }}</div>
+            </div>
+
+            <div style="display: flex; margin-bottom: 6px;">
+              <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">SHA-1</div>
+              <div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.fingerprint?.sha1 || '-' }}</div>
+            </div>
+
+            <div style="display: flex; margin-bottom: 6px;">
+              <div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">MD5</div>
+              <div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.fingerprint?.md5 || '-' }}</div>
+            </div>
+
+          </div>
           <span v-else>-</span>
         </template>
 
-        <template v-else-if="column.key === 'port_info'">
-          <span>{{ record.port_info && record.port_info.length ? record.port_info.map(p => p.port_id).join(', ') : '-' }}</span>
+        <template v-else-if="column.key === 'ip_port'">
+          <div v-if="record.service_info && record.service_info.length">
+            <div v-for="(info, i) in record.service_info" :key="i" style="line-height: 1.8;">
+              {{ info.ip }}:{{ info.port_id }}
+            </div>
+          </div>
+          <span v-else>-</span>
         </template>
-        <template v-else-if="column.key === 'os_info'"><span>{{ record.os_info?.name || '-' }}</span></template>
-        <template v-else-if="column.key === 'geo_city'"><span>{{ record.geo_city ? `${record.geo_city.country_name || 'null'} / ${record.geo_city.city || 'null'}` : '-' }}</span></template>
-        <template v-else-if="column.key === 'geo_asn'"><span>{{ record.geo_asn?.organization || '-' }}</span></template>
+        <template v-else-if="column.key === 'product'">
+          <div v-if="record.service_info && record.service_info.length">
+            <div v-for="(info, i) in record.service_info" :key="i" style="line-height: 1.8;">
+              {{ info.product || '-' }}
+            </div>
+          </div>
+          <span v-else>-</span>
+        </template>
+
+        <template v-else-if="column.key === 'fileleak_url' || column.key === 'url_link' || column.key === 'nuclei_vuln_url'">
+          <a :href="record.url || record.vuln_url" target="_blank" style="color: #00bcd4; word-break: break-all;">
+            {{ record.url || record.vuln_url || '-' }}
+          </a>
+        </template>
+
+        <template v-else-if="column.key === 'verify_data'">
+          <div style="max-height: 100px; overflow-y: auto; color: #d93026; font-family: monospace; font-size: 12px; word-break: break-all;">
+            {{ record.verify_data || record.proof || '-' }}
+          </div>
+        </template>
+
+        <template v-else-if="column.key === 'ip_count_col'">
+          <span style="color: #00bcd4; cursor: pointer;">{{ record.ip_count || 0 }}</span>
+        </template>
+
+        <template v-else-if="column.key === 'domain_count_col'">
+          <span style="color: #00bcd4; cursor: pointer;">{{ record.domain_count || 0 }}</span>
+        </template>
+
+        <template v-else-if="column.key === 'verify_command'">
+          <div style="max-height: 100px; overflow-y: auto; background: #f5f5f5; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 12px; word-break: break-all;">
+            {{ record.verify_command || record.curl_command || '-' }}
+          </div>
+        </template>
+
+        <template v-else-if="column.key === 'finger_name'">
+          <span style="color: #00bcd4; cursor: pointer;">{{ record.name || '-' }}</span>
+        </template>
+
+        <template v-else-if="column.key === 'wih_source'">
+          <div style="word-break: break-all; color: #333; line-height: 1.6;">
+            {{ record.source || '-' }}
+          </div>
+        </template>
 
       </template>
     </a-table>
@@ -173,7 +342,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, watch } from 'vue';
+import { ref, onMounted, reactive, watch , onUnmounted } from 'vue';
 import request from '../utils/request';
 import { message } from 'ant-design-vue';
 import { SearchOutlined } from '@ant-design/icons-vue';
@@ -192,29 +361,29 @@ const handlePreview = (url) => { previewImage.value = url; previewVisible.value 
 const tabConfig = {
   site: {
     url: '/site/',
-    exportUrl: '/site/export/',
-    exportName: '站点',
     searchFields: [
       { label: '站点', key: 'site', operator: '=' },
       { label: '主机名', key: 'hostname', operator: '=' },
       { label: '标题', key: 'title', operator: '=' },
-      // 🚨 以下 4 个字段已根据抓包数据完美修正
-      { label: 'Web Server', key: 'http_server', operator: '=' },
-      { label: '状态码', key: 'status', operator: '=' },
+      { label: 'Web Server', key: 'server', operator: '=' },
+      { label: '状态码', key: 'status_code', operator: '=' },
       { label: '标头', key: 'headers', operator: '=' },
-      { label: '指纹', key: 'finger.name', operator: '=' },
-      { label: 'favicon hash', key: 'favicon.hash', operator: '=' },
+      { label: '指纹', key: 'finger', operator: '=' },
+      { label: 'favicon hash', key: 'favicon_hash', operator: '=' },
       { label: '标签', key: 'tag', operator: '=' }
     ],
+    // 💥 修复：删除了瞎加的 IP、端口和操作列，完全对齐原版站点表格！表格控制
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
       { title: '站点', key: 'site', width: 250 },
       { title: '标题', dataIndex: 'title', key: 'title', width: 200 },
-      { title: 'headers', key: 'headers', width: 500 },
+      // 删除了你加的 server 和 status 列
+      { title: 'headers', key: 'headers',width: 500},
       { title: 'finger', key: 'finger', width: 50 },
-      { title: '截图', key: 'screenshot', width: 280 }
+      { title: '截图', key: 'screenshot', width: 280 } // 保持宽度给图片留足空间
     ]
   },
+  // 💡 新增：子域名 Tab 的 1:1 配置
   domain: {
     url: '/domain/',
     exportUrl: '/domain/export/',
@@ -235,18 +404,34 @@ const tabConfig = {
       { title: '来源', dataIndex: 'source', key: 'source', width: 150 }
     ]
   },
+
+  // 💡 新增：IP Tab 的 1:1 配置
+// 💡 新增：IP Tab 的 1:1 配置
   ip: {
     url: '/ip/',
+    deleteUrl: '/ip/delete/', // 视上一轮测试情况，如果删不掉请改回 '/site/delete/'
     exportUrl: '/ip/export/',
     exportName: ' IP 端口',
     searchFields: [
       { label: 'IP', key: 'ip', operator: '=' },
+      // 🚨 核心修复：对齐后端的嵌套对象查询字段
       { label: '端口', key: 'port_info.port_id', operator: '=' },
       { label: '操作系统', key: 'os_info.name', operator: '=' },
       { label: '域名', key: 'domain', operator: '=' },
       { label: 'CDN', key: 'cdn_name', operator: '=' },
+      {
+        label: 'IP类别',
+        key: 'ip_type',
+        operator: '=',
+        type: 'select',
+        options: [
+          { label: 'PUBLIC (公网)', value: 'PUBLIC' },
+          { label: 'PRIVATE (内网)', value: 'PRIVATE' }
+        ]
+      }
     ],
     cols: [
+      // ... 列配置保持不变 ...
       { title: '序号', key: 'index', width: 60, align: 'center' },
       { title: 'IP', dataIndex: 'ip', key: 'ip', width: 160 },
       { title: '操作系统', key: 'os_info', width: 150 },
@@ -255,6 +440,205 @@ const tabConfig = {
       { title: 'CDN', dataIndex: 'cdn_name', key: 'cdn_name', width: 150 },
       { title: 'Geo', key: 'geo_city', width: 180 },
       { title: 'AS', key: 'geo_asn', width: 280 }
+    ]
+  },
+  // 💡 重新构建：1:1 对齐截图的 SSL证书 配置
+  cert: {
+    url: '/cert/',
+    searchFields: [
+      { label: 'IP字段', key: 'ip', operator: '=' },
+      { label: '签发者名称', key: 'cert.issuer_dn', operator: '=' },
+      { label: '主题名称', key: 'cert.subject_dn', operator: '=' },
+      { label: 'SHA-1', key: 'cert.fingerprint.sha1', operator: '=' },
+      { label: '使用者备用名称', key: 'cert.extensions.subjectAltName', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: 'HOST', key: 'host', width: 180 },
+      { title: 'CERT', key: 'cert_detail', width: 900 } // 留出巨大的空间给卡片
+    ]
+  },
+
+  // 💡 新增：服务 Tab 的 1:1 配置
+  service: {
+    url: '/service/',
+    // 🚨 故意不写 exportUrl，完美对齐原版不带导出功能的 UI
+    searchFields: [
+      { label: '服务', key: 'service_name', operator: '=' },
+      { label: 'IP', key: 'service_info.ip', operator: '=' },
+      { label: '端口', key: 'service_info.port_id', operator: '=' },
+      { label: '产品', key: 'service_info.product', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: '服务', dataIndex: 'service_name', key: 'service_name', width: 150, align: 'center' },
+      { title: 'IP端口', key: 'ip_port', width: 300 },
+      { title: 'Product', key: 'product', width: 250 }
+    ]
+  },
+
+  // 💡 新增：文件泄露 Tab 的 1:1 配置
+  fileleak: {
+    url: '/fileleak/',
+    // 🚨 同样不配置 exportUrl，隐身导出按钮
+    searchFields: [
+      { label: 'URL', key: 'url', operator: '=' },
+      { label: '标题', key: 'title', operator: '=' },
+      { label: '状态码', key: 'status_code', operator: '=' },
+      { label: 'body 长度', key: 'content_length', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: 'URL', key: 'fileleak_url', width: 500 }, // 用专属 key 渲染超链接
+      { title: '标题', dataIndex: 'title', key: 'title', width: 250 },
+      { title: '状态码', dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
+      { title: 'body 长度', dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' }
+    ]
+  },
+
+  // 💡 新增：URL信息 Tab 的 1:1 配置
+  url: {
+    url: '/url/',
+    exportUrl: '/url/export/', // 恢复导出接口
+    exportName: 'URL信息',     // 自动生成“导出URL信息”按钮
+    searchFields: [
+      { label: 'URL', key: 'url', operator: '=' },
+      { label: '标题', key: 'title', operator: '=' },
+      { label: '状态码', key: 'status_code', operator: '=' },
+      { label: 'body 长度', key: 'content_length', operator: '=' },
+      { label: '来源', key: 'source', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: 'URL', key: 'url_link', width: 450 }, // 专用 key 渲染超链接
+      { title: '标题', dataIndex: 'title', key: 'title', width: 200 },
+      { title: '状态码', dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
+      { title: 'body 长度', dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' },
+      { title: '来源', dataIndex: 'source', key: 'source', width: 150 }
+    ]
+  },
+
+  // 💡 新增：风险 Tab 的 1:1 配置
+  vuln: {
+    url: '/vuln/',
+    // 🚨 截图显示无导出按钮，所以不配置 exportUrl
+    searchFields: [
+      { label: '漏洞名称', key: 'vul_name', operator: '=' },
+      { label: '类别', key: 'vul_category', operator: '=' }, // ARL 常用的类别字段名
+      { label: '应用名', key: 'app_name', operator: '=' },
+      { label: '目标', key: 'target', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: '漏洞名称', dataIndex: 'vul_name', key: 'vul_name', width: 250 },
+      { title: '类别', dataIndex: 'vul_category', key: 'vul_category', width: 120 },
+      { title: '应用名', dataIndex: 'app_name', key: 'app_name', width: 150 },
+      { title: '目标', dataIndex: 'target', key: 'target', width: 200 },
+      { title: '凭证', key: 'verify_data', width: 350 }, // 凭证通常较长，用插槽渲染
+      { title: '发现时间', dataIndex: 'insert_time', key: 'insert_time', width: 160 }
+    ]
+  },
+
+  // 💡 新增：服务(python) Tab 的 1:1 配置
+  npoc_service: {
+    url: '/npoc_service/',
+    // 🚨 截图显示无导出按钮，不配置 exportUrl
+    searchFields: [
+      { label: '协议', key: 'protocol', operator: '=' },
+      { label: '主机', key: 'host', operator: '=' },
+      { label: '端口', key: 'port', operator: '=' },
+      { label: '目标', key: 'target', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: '协议', dataIndex: 'protocol', key: 'protocol', width: 150 },
+      { title: '主机', dataIndex: 'host', key: 'host', width: 200 },
+      { title: '端口', dataIndex: 'port', key: 'port', width: 100, align: 'center' },
+      { title: '目标', dataIndex: 'target', key: 'target', width: 250 },
+      { title: '保存时间', dataIndex: 'insert_time', key: 'insert_time', width: 180 }
+    ]
+  },
+
+  // 💡 新增：C段 Tab 的 1:1 配置
+  cip: {
+    url: '/cip/',
+    exportUrl: '/cip/export/', // 恢复导出接口
+    exportName: 'C段',         // 自动生成“导出C段”按钮
+    searchFields: [
+      { label: 'C段', key: 'cidr_ip', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: 'C段', dataIndex: 'cidr_ip', key: 'cidr_ip', width: 300 },
+      { title: 'IP数', key: 'ip_count_col', width: 150, align: 'center' },
+      { title: '域名数', key: 'domain_count_col', width: 150, align: 'center' }
+    ]
+  },
+
+  // 💡 新增：nuclei Tab 的 1:1 配置
+  nuclei_result: {
+    url: '/nuclei_result/',
+    deleteUrl: '/nuclei_result/delete/', // 视后端情况，如果报错可改为 '/site/delete/'
+    // 🚨 截图显示无导出按钮，不配置 exportUrl
+    searchFields: [
+      { label: '模版ID', key: 'template_id', operator: '=' },
+      { label: '目标', key: 'target', operator: '=' },
+      { label: '漏洞URL', key: 'vuln_url', operator: '=' },
+      { label: '漏洞名称', key: 'vuln_name', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: '模版ID', dataIndex: 'template_id', key: 'template_id', width: 180 },
+      { title: '目标', dataIndex: 'target', key: 'target', width: 200 },
+      { title: '漏洞URL', key: 'nuclei_vuln_url', width: 300 }, // 用专用 key 渲染超链接
+      { title: '漏洞名称', dataIndex: 'vuln_name', key: 'vul_name', width: 200 },
+      { title: '漏洞等级', dataIndex: 'vuln_severity', key: 'vuln_severity', width: 100, align: 'center' },
+      { title: '保存时间', dataIndex: 'insert_time', key: 'insert_time', width: 160 },
+      { title: '验证命令', key: 'verify_command', width: 350 } // 命令可能很长，用插槽防撑破
+    ]
+  },
+
+  // 💡 新增：指纹统计 Tab 的 1:1 配置
+  stat_finger: {
+    url: '/stat_finger/',
+    deleteUrl: '/site/delete/', // 视后端情况，如果报错可改为 '/site/delete/'
+    // 🚨 截图显示无导出按钮
+    searchFields: [
+      { label: 'finger', key: 'name', operator: '=' } // 后端字段是 name
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 80, align: 'center' },
+      { title: 'finger', key: 'finger_name', width: 500 }, // 用专用 key 渲染青蓝字体
+      { title: '数量', dataIndex: 'cnt', key: 'cnt', width: 200 }
+    ]
+  },
+
+
+  // 💡 新增：WIH (Web Info Hunter) Tab 的 1:1 配置
+// 💡 修复：WIH (Web Info Hunter) Tab 配置
+  wih: {
+    url: '/wih/',
+    exportUrl: '/wih/export/',
+    exportName: 'WIH',
+    searchFields: [
+      {
+        label: '记录类型',
+        key: 'record_type',
+        // 🚨 核心修改：移除 type: 'select'，加入这三个属性触发高级组合框
+        operator: '包含',
+        hasOperatorSelect: true,
+        operators: ['包含', '不包含', '不等于']
+      },
+      { label: '内容', key: 'content', operator: '=' },
+      { label: '来源 JS', key: 'source', operator: '=' },
+      { label: '来源站点', key: 'site', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: '记录类型', dataIndex: 'record_type', key: 'record_type', width: 120 },
+      { title: '内容', dataIndex: 'content', key: 'content', width: 250 },
+      { title: '来源 JS', key: 'wih_source', width: 450 },
+      { title: '来源站点', dataIndex: 'site', key: 'site', width: 250 }
     ]
   }
 };
@@ -328,6 +712,8 @@ watch(activeTab, (newVal) => {
 });
 
 onMounted(fetchData);
+
+
 
 // 风险任务下发 (全局模式)
 const riskVisible = ref(false);

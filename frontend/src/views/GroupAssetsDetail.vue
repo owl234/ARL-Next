@@ -3,11 +3,20 @@
 
     <h2 style="font-size: 20px; font-weight: 500; margin-bottom: 24px;">{{ targetName }}相关资产</h2>
 
-    <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs">
+        <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs">
       <a-tab-pane key="site" tab="站点"></a-tab-pane>
       <a-tab-pane key="domain" tab="域名"></a-tab-pane>
       <a-tab-pane key="ip" tab="IP"></a-tab-pane>
       <a-tab-pane key="wih" tab="WIH"></a-tab-pane>
+      <a-tab-pane key="cert" tab="SSL证书"></a-tab-pane>
+      <a-tab-pane key="service" tab="服务"></a-tab-pane>
+      <a-tab-pane key="fileleak" tab="文件泄露"></a-tab-pane>
+      <a-tab-pane key="url" tab="URL信息"></a-tab-pane>
+      <a-tab-pane key="vuln" tab="风险"></a-tab-pane>
+      <a-tab-pane key="npoc_service" tab="服务（python）"></a-tab-pane>
+      <a-tab-pane key="cip" tab="C段"></a-tab-pane>
+      <a-tab-pane key="nuclei_result" tab="nuclei"></a-tab-pane>
+      <a-tab-pane key="stat_finger" tab="指纹统计"></a-tab-pane>
     </a-tabs>
 
     <div v-if="tabConfig[activeTab]?.searchFields" class="search-row" style="margin-bottom: 16px;">
@@ -131,6 +140,56 @@
               {{ record.source || '-' }}
             </a>
           </div>
+        </template>
+
+      
+        <template v-else-if="column.key === 'cert_detail'">
+          <div v-if="record.cert" style="font-size: 13px; line-height: 1.8; color: #333; padding: 12px 0;">
+            <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">基本信息</div>
+            <div style="display: flex; margin-bottom: 6px;"><div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">主题名称</div><div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.subject_dn || '-' }}</div></div>
+            <div style="display: flex; margin-bottom: 6px;"><div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">签发者名称</div><div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.issuer_dn || '-' }}</div></div>
+            <div style="display: flex; margin-bottom: 6px;"><div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">使用者备用名称</div><div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.extensions?.subjectAltName || '-' }}</div></div>
+            <div style="display: flex; margin-bottom: 6px;"><div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">序列号</div><div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.serial_number || '-' }}</div></div>
+            <div style="display: flex; margin-bottom: 16px;"><div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">时间</div><div style="flex: 1; color: #555;">{{ record.cert.validity?.start || '-' }} 至 {{ record.cert.validity?.end || '-' }}</div></div>
+            <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">指纹</div>
+            <div style="display: flex; margin-bottom: 6px;"><div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">SHA-256</div><div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.fingerprint?.sha256 || '-' }}</div></div>
+            <div style="display: flex; margin-bottom: 6px;"><div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">SHA-1</div><div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.fingerprint?.sha1 || '-' }}</div></div>
+            <div style="display: flex; margin-bottom: 6px;"><div style="width: 120px; text-align: right; margin-right: 12px; font-weight: 500;">MD5</div><div style="flex: 1; word-break: break-all; color: #555;">{{ record.cert.fingerprint?.md5 || '-' }}</div></div>
+          </div>
+          <span v-else>-</span>
+        </template>
+        <template v-else-if="column.key === 'ip_port'">
+          <div v-if="record.service_info && record.service_info.length">
+            <div v-for="(info, i) in record.service_info" :key="i" style="line-height: 1.8;">{{ info.ip }}:{{ info.port_id }}</div>
+          </div>
+          <span v-else>-</span>
+        </template>
+        <template v-else-if="column.key === 'product'">
+          <div v-if="record.service_info && record.service_info.length">
+            <div v-for="(info, i) in record.service_info" :key="i" style="line-height: 1.8;">{{ info.product || '-' }}</div>
+          </div>
+          <span v-else>-</span>
+        </template>
+        <template v-else-if="column.key === 'fileleak_url' || column.key === 'url_link' || column.key === 'nuclei_vuln_url'">
+          <a :href="record.url || record.vuln_url" target="_blank" style="color: #00bcd4; word-break: break-all;">{{ record.url || record.vuln_url || '-' }}</a>
+        </template>
+        <template v-else-if="column.key === 'verify_data'">
+          <div style="max-height: 100px; overflow-y: auto; color: #d93026; font-family: monospace; font-size: 12px; word-break: break-all;">{{ record.verify_data || record.proof || '-' }}</div>
+        </template>
+        <template v-else-if="column.key === 'ip_count_col'">
+          <span style="color: #00bcd4; cursor: pointer;">{{ record.ip_count || 0 }}</span>
+        </template>
+        <template v-else-if="column.key === 'domain_count_col'">
+          <span style="color: #00bcd4; cursor: pointer;">{{ record.domain_count || 0 }}</span>
+        </template>
+        <template v-else-if="column.key === 'verify_command'">
+          <div style="max-height: 100px; overflow-y: auto; background: #f5f5f5; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 12px; word-break: break-all;">{{ record.verify_command || record.curl_command || '-' }}</div>
+        </template>
+        <template v-else-if="column.key === 'finger_name'">
+          <span style="color: #00bcd4; cursor: pointer;">{{ record.name || '-' }}</span>
+        </template>
+        <template v-else-if="column.key === 'host'">
+          <span>{{ record.ip }}:{{ record.port }}</span>
         </template>
 
       </template>
@@ -323,6 +382,159 @@ const tabConfig = {
       { title: '来源站点', dataIndex: 'site', key: 'site', width: 250 },
       { title: '更新时间', dataIndex: 'update_date', key: 'update_date', width: 180 }
     ]
+  },
+  cert: {
+    url: '/asset_cert/',
+    exportUrl: '/asset_cert/export/',
+    tabName: 'SSL证书',
+    searchFields: [
+      { label: 'IP字段', key: 'ip', operator: '=' },
+      { label: '签发者名称', key: 'cert.issuer_dn', operator: '=' },
+      { label: '主题名称', key: 'cert.subject_dn', operator: '=' },
+      { label: 'SHA-1', key: 'cert.fingerprint.sha1', operator: '=' },
+      { label: '使用者备用名称', key: 'cert.extensions.subjectAltName', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: 'HOST', key: 'host', width: 180 },
+      { title: 'CERT', key: 'cert_detail', width: 900 }
+    ]
+  },
+  service: {
+    url: '/asset_service/',
+    tabName: '服务',
+    searchFields: [
+      { label: '服务', key: 'service_name', operator: '=' },
+      { label: 'IP', key: 'service_info.ip', operator: '=' },
+      { label: '端口', key: 'service_info.port_id', operator: '=' },
+      { label: '产品', key: 'service_info.product', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: '服务', dataIndex: 'service_name', key: 'service_name', width: 150, align: 'center' },
+      { title: 'IP端口', key: 'ip_port', width: 300 },
+      { title: 'Product', key: 'product', width: 250 }
+    ]
+  },
+  fileleak: {
+    url: '/asset_fileleak/',
+    tabName: '文件泄露',
+    searchFields: [
+      { label: 'URL', key: 'url', operator: '=' },
+      { label: '标题', key: 'title', operator: '=' },
+      { label: '状态码', key: 'status_code', operator: '=' },
+      { label: 'body 长度', key: 'content_length', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: 'URL', key: 'fileleak_url', width: 500 },
+      { title: '标题', dataIndex: 'title', key: 'title', width: 250 },
+      { title: '状态码', dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
+      { title: 'body 长度', dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' }
+    ]
+  },
+  url: {
+    url: '/asset_url/',
+    exportUrl: '/asset_url/export/',
+    tabName: 'URL信息',
+    searchFields: [
+      { label: 'URL', key: 'url', operator: '=' },
+      { label: '标题', key: 'title', operator: '=' },
+      { label: '状态码', key: 'status_code', operator: '=' },
+      { label: 'body 长度', key: 'content_length', operator: '=' },
+      { label: '来源', key: 'source', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: 'URL', key: 'url_link', width: 450 },
+      { title: '标题', dataIndex: 'title', key: 'title', width: 200 },
+      { title: '状态码', dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
+      { title: 'body 长度', dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' },
+      { title: '来源', dataIndex: 'source', key: 'source', width: 150 }
+    ]
+  },
+  vuln: {
+    url: '/asset_vuln/',
+    tabName: '风险',
+    searchFields: [
+      { label: '漏洞名称', key: 'vul_name', operator: '=' },
+      { label: '类别', key: 'vul_category', operator: '=' },
+      { label: '应用名', key: 'app_name', operator: '=' },
+      { label: '目标', key: 'target', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: '漏洞名称', dataIndex: 'vul_name', key: 'vul_name', width: 250 },
+      { title: '类别', dataIndex: 'vul_category', key: 'vul_category', width: 120 },
+      { title: '应用名', dataIndex: 'app_name', key: 'app_name', width: 150 },
+      { title: '目标', dataIndex: 'target', key: 'target', width: 200 },
+      { title: '凭证', key: 'verify_data', width: 350 },
+      { title: '发现时间', dataIndex: 'insert_time', key: 'insert_time', width: 160 }
+    ]
+  },
+  npoc_service: {
+    url: '/asset_npoc_service/',
+    tabName: '服务(python)',
+    searchFields: [
+      { label: '协议', key: 'protocol', operator: '=' },
+      { label: '主机', key: 'host', operator: '=' },
+      { label: '端口', key: 'port', operator: '=' },
+      { label: '目标', key: 'target', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: '协议', dataIndex: 'protocol', key: 'protocol', width: 150 },
+      { title: '主机', dataIndex: 'host', key: 'host', width: 200 },
+      { title: '端口', dataIndex: 'port', key: 'port', width: 100, align: 'center' },
+      { title: '目标', dataIndex: 'target', key: 'target', width: 250 },
+      { title: '保存时间', dataIndex: 'insert_time', key: 'insert_time', width: 180 }
+    ]
+  },
+  cip: {
+    url: '/asset_cip/',
+    exportUrl: '/asset_cip/export/',
+    tabName: 'C段',
+    searchFields: [
+      { label: 'C段', key: 'cidr_ip', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: 'C段', dataIndex: 'cidr_ip', key: 'cidr_ip', width: 300 },
+      { title: 'IP数', key: 'ip_count_col', width: 150, align: 'center' },
+      { title: '域名数', key: 'domain_count_col', width: 150, align: 'center' }
+    ]
+  },
+  nuclei_result: {
+    url: '/asset_nuclei_result/',
+    tabName: 'nuclei',
+    searchFields: [
+      { label: '模版ID', key: 'template_id', operator: '=' },
+      { label: '目标', key: 'target', operator: '=' },
+      { label: '漏洞URL', key: 'vuln_url', operator: '=' },
+      { label: '漏洞名称', key: 'vuln_name', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 60, align: 'center' },
+      { title: '模版ID', dataIndex: 'template_id', key: 'template_id', width: 180 },
+      { title: '目标', dataIndex: 'target', key: 'target', width: 200 },
+      { title: '漏洞URL', key: 'nuclei_vuln_url', width: 300 },
+      { title: '漏洞名称', dataIndex: 'vuln_name', key: 'vul_name', width: 200 },
+      { title: '漏洞等级', dataIndex: 'vuln_severity', key: 'vul_severity', width: 100, align: 'center' },
+      { title: '保存时间', dataIndex: 'insert_time', key: 'insert_time', width: 160 },
+      { title: '验证命令', key: 'verify_command', width: 350 }
+    ]
+  },
+  stat_finger: {
+    url: '/asset_stat_finger/',
+    tabName: '指纹统计',
+    searchFields: [
+      { label: 'finger', key: 'name', operator: '=' }
+    ],
+    cols: [
+      { title: '序号', key: 'index', width: 80, align: 'center' },
+      { title: 'finger', key: 'finger_name', width: 500 },
+      { title: '数量', dataIndex: 'cnt', key: 'cnt', width: 200 }
+    ]
   }
 };
 
@@ -436,7 +648,7 @@ const handleExport = async () => {
     message.loading({ content: `正在生成导出文件...`, key: 'export_data' });
 
     // 🚨 动态映射真实的 tabIndex
-    const tabIndexMap = { site: 0, domain: 1, ip: 2, wih: 3 };
+    const tabIndexMap = { site: 0, domain: 1, ip: 2, wih: 3, cert: 4, service: 5, fileleak: 6, url: 7, vuln: 8, npoc_service: 9, cip: 10, nuclei_result: 11, stat_finger: 12 };
 
     // 🚨 完美对齐 WIH 抓包：size 扩大到十万级 100000，并带上动态的 tabIndex
     const params = {

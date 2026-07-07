@@ -1,8 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Login from '../views/Login.vue'
 import Layout from '../views/Layout.vue'
-import Task from "../views/TaskList.vue";
-import TaskDetail from '../views/TaskDetail.vue' // 新增引入
+
 
 
 
@@ -38,13 +37,13 @@ const routes = [
             {
                 path: 'taskList',
                 name: 'TaskList',
-                component: Task
+                component: () => import('../views/TaskList.vue')
             },
             {
                 // 新增详情页路由
                 path: 'taskList/taskDetail',
                 name: 'TaskDetail',
-                component: TaskDetail
+                component: () => import('../views/TaskDetail.vue')
             },
 
             {

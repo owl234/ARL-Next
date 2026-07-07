@@ -88,6 +88,22 @@ class IcpTask(ARLResource):
         return build_ret(ErrorMsg.Success, {"task_id": task_id})
 
 
+@ns.route('/tyc_check')
+class TycCheck(ARLResource):
+    @auth
+    def get(self):
+        """
+        校验天眼查配置是否有效
+        """
+        from app.services.tycClient import TycClient
+        try:
+            client = TycClient()
+            success, msg = client.check_token()
+            return build_ret(ErrorMsg.Success, {"valid": success, "message": msg})
+        except Exception as e:
+            return build_ret(ErrorMsg.Success, {"valid": False, "message": f"校验异常: {e}"})
+
+
 @ns.route('/tyc_task')
 class TycTask(ARLResource):
     @auth
@@ -102,7 +118,18 @@ class TycTask(ARLResource):
         depth = args.get('depth', 1)
         query_type = args.get('query_type')
 
+        # 校验天眼查配置是否有效
+        from app.services.tycClient import TycClient
+        try:
+            client = TycClient()
+            success, msg = client.check_token()
+            if not success:
+                return build_ret(msg, {})
+        except Exception as e:
+            return build_ret(f"校验天眼查配置异常: {e}", {})
+
         task_data = {
+
             "name": name,
             "target": f"TYC_{gid}",
             "gid": gid,

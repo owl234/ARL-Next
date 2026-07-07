@@ -23,23 +23,13 @@ fi
 # (可选) 在启动前用 sed 临时将 config.yaml 中的 127.0.0.1 替换为容器内部的网络别名
 # 这样你原本的代码完全不用改！
 # 确保应用读到正确的配置文件
-cp /code/backend/config.yaml /code/backend/app/config.yaml
-sed -i 's/127.0.0.1:27018/mongodb:27017/g' /code/backend/app/config.yaml
-sed -i 's/127.0.0.1:5673/rabbitmq:5672/g' /code/backend/app/config.yaml
-
-echo "🚀 正在后台拉起 Celery 任务处理器..."
-# 尝试获取系统的最佳并发数配置
-CONC=$(python3 -c "from app.utils.performance_config import get_performance_config; print(get_performance_config())" 2>/dev/null | tail -n 1)
+cp /code/backend/config.yaml /tmp/config.yaml.tmp
+sed -i 's/127.0.0.1:27018/mongodb:27017/g' /tmp/config.yaml.tmp
+sed -i 's/127.0.0.1:5673/rabbitmq:5672/g' /tmp/config.yaml.tmp
+mv /tmp/config.yaml.tmp /code/backend/app/config.yaml
 
 echo "🛡️ 正在确保默认管理员账号存在..."
 python3 inject_user.py
-
-# 后台启动 Celery
-celery -A app.celerytask.celery worker -Q arltask -n arltask -c ${CONC:-2} -l info &
-# 后台启动 GitHub 扫描 Celery worker
-celery -A app.celerytask.celery worker -Q arlgithub -n arlgithub -c 2 -l info &
-# 后台启动 Celery 定时任务调度器 (Scheduler)
-celery -A app.celerytask.celery beat -l info &
 
 echo "🚀 正在前台拉起 Web Backend API..."
 gunicorn -b 0.0.0.0:5000 app.main:arl_app -w 2 --reload

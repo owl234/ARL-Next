@@ -12,7 +12,8 @@ logger = utils.get_logger()
 celery = Celery('task', broker=Config.CELERY_BROKER_URL)
 
 celery.conf.update(
-    task_acks_late=False,
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
     broker_transport_options={"max_retries": 3, "interval_start": 0, "interval_step": 0.2, "interval_max": 0.5},
 )
@@ -33,16 +34,8 @@ def sigterm_handler(signum, frame):
     logger.info(f"Caught signal {signum}, celery_id:{celery_id} terminating {routing_key}...")
 
     logger.info(f"{current_task.request}")
-
-    try:
-        query = {'celery_id': celery_id}
-        update_data = {"$set": {"status": TaskStatus.STOP, "end_time": utils.curr_date()}}
-        if routing_key == CeleryRoutingKey.ASSET_TASK:
-            utils.conn_db('task').update_one(query, update_data)
-        elif routing_key == CeleryRoutingKey.GITHUB_TASK:
-            utils.conn_db('github_task').update_one(query, update_data)
-    except Exception as e:
-        logger.error(f"update celery_id:{celery_id} status error: {e}")
+    # Removed writing TaskStatus.STOP to database so that interrupted tasks remain RUNNING
+    # and can be automatically resumed/re-executed when RabbitMQ requeues them.
 
     utils.exit_gracefully(signum, frame)
 
@@ -70,6 +63,25 @@ def run_task(options):
     logger.info("run_task action:{} time: {}".format(action, start_time))
     logger.info("name:{}, target:{}, task_id:{}".format(
         data.get("name"), data.get("target"), data.get("task_id")))
+        
+    task_id = data.get("task_id")
+    if task_id:
+        try:
+            # 校验任务是否已被人工主动停止或已结束
+            item = utils.conn_db('task').find_one({"_id": ObjectId(task_id)})
+            if not item:
+                item = utils.conn_db('github_task').find_one({"_id": ObjectId(task_id)})
+                
+            if item and item.get("status") in [TaskStatus.STOP, TaskStatus.ERROR, TaskStatus.DONE]:
+                logger.info(f"Task {task_id} has been stopped or ended manually, skip execution")
+                return
+
+            # 如果任务被系统中断后重试，清除上次产生的残余数据
+            if action in [CeleryAction.DOMAIN_TASK, CeleryAction.IP_TASK, CeleryAction.RUN_RISK_CRUISING, CeleryAction.FOFA_TASK]:
+                utils.clean_task_data(task_id)
+        except Exception as e:
+            logger.error(f"Error checking or cleaning task {task_id}: {e}")
+
     try:
         fun = action_map.get(action)
         if fun:

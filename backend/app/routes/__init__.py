@@ -589,3 +589,14 @@ from .cdn_dict import ns as cdn_dict_ns
 from .system_config import ns as system_config_ns
 from .icp import ns as icp_ns
 
+
+from .assetCert import ns as asset_cert_ns
+from .assetService import ns as asset_service_ns
+from .assetFileleak import ns as asset_fileleak_ns
+from .assetUrl import ns as asset_url_ns
+from .assetVuln import ns as asset_vuln_ns
+from .assetNpocService import ns as asset_npoc_service_ns
+from .assetCip import ns as asset_cip_ns
+from .assetNucleiResult import ns as asset_nuclei_result_ns
+from .assetStatFinger import ns as asset_stat_finger_ns
+

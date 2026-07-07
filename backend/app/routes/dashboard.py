@@ -27,11 +27,9 @@ class DashboardStats(ARLResource):
         # 2. 今日执行任务数与今日新增资产
         today_str = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
         today_tasks = conn('task').count({"start_time": {"$gte": today_str}})
-        today_new_assets = (
-            conn('asset_domain').count({"update_date": {"$gte": today_str}}) +
-            conn('asset_ip').count({"update_date": {"$gte": today_str}}) +
-            conn('asset_site').count({"update_date": {"$gte": today_str}})
-        )
+        
+        today_start_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_new_assets = conn('asset_domain').count({"update_date": {"$gte": today_start_dt}})
         
         # 3. 漏洞分类统计
         critical = conn('nuclei_result').count({"vuln_severity": "critical"})
@@ -68,13 +66,13 @@ class DashboardTrend(ARLResource):
         for i in range(6, -1, -1):
             target_date = datetime.now() - timedelta(days=i)
             day_str = target_date.strftime("%m-%d")
-            start = target_date.strftime("%Y-%m-%d 00:00:00")
-            end = target_date.strftime("%Y-%m-%d 23:59:59")
+            start_dt = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_dt = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
             
             # 当日新增资产和漏洞
-            c_assets = conn('asset_domain').count({"update_date": {"$gte": start, "$lte": end}})
-            c_vulns = conn('vuln').count({"save_date": {"$gte": start, "$lte": end}}) + \
-                      conn('nuclei_result').count({"save_date": {"$gte": start, "$lte": end}})
+            c_assets = conn('asset_domain').count({"update_date": {"$gte": start_dt, "$lte": end_dt}})
+            c_vulns = conn('vuln').count({"save_date": {"$gte": start_dt, "$lte": end_dt}}) + \
+                      conn('nuclei_result').count({"save_date": {"$gte": start_dt, "$lte": end_dt}})
             
             days.append(day_str)
             assets.append(c_assets)
