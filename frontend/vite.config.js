@@ -51,8 +51,9 @@ export default defineConfig(({ command }) => {
     },
 
     server: {
-      // 动态赋值：开发或生产环境的 HTTPS 配置
-      https: httpsConfig,
+      host: '0.0.0.0', // 允许局域网访问
+
+      https: httpsConfig,// 动态赋值：开发或生产环境的 HTTPS 配置
 
       proxy: {
         // 当您请求 /api/user/login 时，Vite 会自动帮您把请求转发给后端
