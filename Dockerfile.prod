@@ -8,7 +8,7 @@ ENV NODE_PATH=/usr/local/lib/node_modules
 
 # 替换源为阿里云镜像 (Debian 源不区分 arm64/amd64 的域名，维护更简单)
 # 使用默认的 Debian 源（因为在 GitHub Actions 海外节点编译，默认源最快）
-    apt-get update -o Acquire::Retries=10 && \
+RUN apt-get update -o Acquire::Retries=10 && \
     apt-get install -y --no-install-recommends \
     wget unzip bzip2 git curl tzdata \
     gcc g++ make automake autoconf libtool \
@@ -19,8 +19,7 @@ ENV NODE_PATH=/usr/local/lib/node_modules
     libasound2 libxshmfence1 libdrm2 libxkbcommon0 libatspi2.0-0 libcups2 \
     fontconfig nodejs npm fonts-wqy-zenhei fonts-wqy-microhei chromium=147.0.7727.137-1~deb12u1 chromium-common=147.0.7727.137-1~deb12u1
 
-RUN npm config set registry https://registry.npmmirror.com/ && \
-    npm install -g puppeteer-core@10.4.0
+RUN npm install -g puppeteer-core@10.4.0
 
 # 编译 MassDNS
 RUN cd /tmp && \
@@ -46,7 +45,8 @@ RUN ARCH=$(dpkg --print-architecture) && \
 WORKDIR /code
 COPY ./backend /code/backend
 
-# 在构建镜像时就创建好虚拟环境并安装好依赖，使生产环境自包含# 全局安装必备组件（默认海外源）
+# 在构建镜像时就创建好虚拟环境并安装好依赖，使生产环境自包含
+# 全局安装必备组件（默认海外源）
 RUN python3 -m venv /code/backend/.venv-docker && \
     npm install -g pnpm pm2 && \
     /code/backend/.venv-docker/bin/pip install --upgrade pip && \
