@@ -98,40 +98,34 @@ docker compose -f docker-compose.dev.yml down
 
 ---
 
-### 生产环境部署方案：公网极简 HTTPS 部署
+### 生产环境部署方案：公网极速一键部署
 
-**适用**：公网生产部署、单机轻量化运行。  
-**优势**：
-1. **强安全边界**：公网仅暴露前端 **5173 端口**。API 后端、MongoDB、RabbitMQ 等敏感服务端口全部对外关闭，实现网络隐形。
-2. **零配置 SSL**：前端 Nginx 容器直接挂载宿主机证书，原生提供高并发的公网 HTTPS/SSL 安全防护。
-3. **内核态转发**：各容器处于 Docker 网桥 `arl-net` 隔离区。脚本自动关闭宿主机 `userland-proxy` 代理，容器间通信绕过用户态直接由 Linux 内核转发，网络性能近乎原生。
+**适用场景**：国内云服务器、企业内网。
 
-#### 🚀 部署步骤
+> ⏱️ **裸机实测基准 (Benchmark)**：基于低配公网服务器（京东云 2核4G，5Mbps 带宽）进行**从零部署**（包含自动安装 Docker 环境与全量拉取镜像），总耗时仅 **13分 27秒**。若服务器已自带 Docker 环境，部署耗时将进一步压缩至 **2分钟** 内。
+
+**核心优势**：
+* **国内满速**：直连阿里云公开镜像库，告别下载卡顿。
+* **极致轻量**：剔除冗余编译链，镜像硬核减重超 700MB。
+* **免密零配置**：免账号登录、免环境配置、免 `docker login`。
+* **开箱即安全**：自动签发 10年期 SSL，核心组件全内网隔离。
+
+#### 🚀 极速部署 (仅需两步)
 
 ```bash
-# 1. 克隆项目并创建证书目录
-git clone https://github.com/owl234/ARL-Next && cd ARL-Next
-mkdir -p ssl-certs
+# 1. 获取最新源码（使用浅克隆拉取最新代码）
+git clone --depth 1 https://github.com/owl234/ARL-Next.git && cd ARL-Next
 
-# 2. 准备您的 SSL 证书（将证书与私钥命名并放入下方路径）
-# 证书位置：./ssl-certs/arl.crt
-# 私钥位置：./ssl-certs/arl.key
-
-# 3. 运行一键构建与性能调优脚本（自动补全 Docker/Compose 依赖、调优系统配置并拉起容器）
+# 2. 一键拉起环境（自动拉取超小镜像与配置 SSL）
 sudo bash start-prod.sh
 ```
-部署完成后，直接通过浏览器访问 `https://your-server-ip:5173` 即可登录使用。
+部署成功后，通过浏览器访问 `https://your-server-ip:5173` 即可登录。
 
-> 💡 **快速获取免费公网 SSL 证书 (Let's Encrypt)**
-> ```bash
-> sudo apt update && sudo apt install -y certbot
-> sudo certbot certonly --standalone -d yourdomain.com
-> cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem ./ssl-certs/arl.crt
-> cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ./ssl-certs/arl.key
-> ```
+*(注：首次访问由于是自签名证书会提示“不安全”，点击浏览器“高级 -> 继续访问”即可)*
 
-> ⚙️ **HTTPS 与反代微调**：
-> 默认自动完成 HTTPS 及对后端 `arl-web` 服务的反向代理。如有特殊路由或证书更改需求，请直接编辑 Nginx 配置文件 [frontend/default.conf.prod](./frontend/default.conf.prod)，修改后执行 `sudo bash start-prod.sh` 重新构建生效。
+> ⚙️ **自定义受信任证书**：如有商业 SSL 证书，将其改名为 `arl.crt` 和 `arl.key` 放入 `./ssl-certs/` 目录，再执行一遍 `start-prod.sh` 即可生效。
+
+
 
 #### 常用生产管理命令
 ```bash

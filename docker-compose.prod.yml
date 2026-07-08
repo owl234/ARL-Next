@@ -1,0 +1,114 @@
+name: arl-next-prod
+version: '3.8'
+
+services:
+  # 前端 Nginx 容器：作为系统唯一的 HTTPS 流量网关与静态资源服务
+  arl-frontend:
+    image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-frontend:latest
+    container_name: arl-frontend-prod
+    restart: always
+    ports:
+      # 映射公网 5173 端口直连 Nginx 服务
+      - "5173:5173"
+    volumes:
+      # 挂载您的 SSL 证书到容器中
+      - ./ssl-certs:/certs:ro
+    depends_on:
+      - arl-web
+    networks:
+      - arl-net
+
+  # 后端 Python Web 容器 (去除了 5000/5001 端口的公网暴露)
+  arl-web:
+    image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest
+    container_name: arl-web-prod
+    restart: always
+    command: bash -c "/code/backend/start_web.sh"
+    working_dir: /code
+    volumes:
+      - arl_screenshots:/code/backend/app/tmp_screenshot
+    dns:
+      - 223.5.5.5
+      - 119.29.29.29
+      - 114.114.114.114
+    environment:
+      - TZ=Asia/Shanghai
+      - DEBIAN_FRONTEND=noninteractive
+      - NO_PROXY=localhost,127.0.0.1,icp_query,mongodb,rabbitmq
+    depends_on:
+      - mongodb
+      - rabbitmq
+      - icp_query
+    networks:
+      - arl-net
+
+  # 后台扫描任务 Worker
+  arl-worker:
+    image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-worker:latest
+    container_name: arl-worker-prod
+    restart: always
+    command: bash -c "/code/backend/start_worker.sh"
+    working_dir: /code
+    volumes:
+      - arl_screenshots:/code/backend/app/tmp_screenshot
+    dns:
+      - 223.5.5.5
+      - 119.29.29.29
+      - 114.114.114.114
+    environment:
+      - TZ=Asia/Shanghai
+      - DEBIAN_FRONTEND=noninteractive
+      - NO_PROXY=localhost,127.0.0.1,icp_query,mongodb,rabbitmq
+    depends_on:
+      - mongodb
+      - rabbitmq
+      - icp_query
+    networks:
+      - arl-net
+
+  # MongoDB 数据库 (去除了 ports "27018:27017" 的外网暴露)
+  mongodb:
+    image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/mongo:4.0.27
+    container_name: arl-mongodb-prod
+    restart: always
+    environment:
+      - MONGO_INITDB_DATABASE=arl
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=admin
+      - TZ=Asia/Shanghai
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - arl-net
+
+  # RabbitMQ 队列 (去除了 ports "5673:5672" 和 "15673:15672" 的外网暴露)
+  rabbitmq:
+    image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/rabbitmq:3-management
+    container_name: arl-rabbitmq-prod
+    restart: always
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin
+      - TZ=Asia/Shanghai
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbit consumer_timeout 36000000
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - arl-net
+
+  # 备案查询微服务 (去除了 ports 暴露)
+  icp_query:
+    image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/icp_query:latest
+    container_name: arl-icp-query-prod
+    restart: always
+    networks:
+      - arl-net
+
+networks:
+  arl-net:
+    driver: bridge
+
+volumes:
+  mongo_data:
+  rabbitmq_data:
+  arl_screenshots:

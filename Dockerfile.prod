@@ -7,10 +7,8 @@ ENV TZ=Asia/Shanghai
 ENV NODE_PATH=/usr/local/lib/node_modules
 
 # 替换源为阿里云镜像 (Debian 源不区分 arm64/amd64 的域名，维护更简单)
-RUN echo "deb http://mirrors.aliyun.com/debian/ bookworm main non-free contrib" > /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/debian-security/ bookworm-security main" >> /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/debian/ bookworm-updates main non-free contrib" >> /etc/apt/sources.list && \
-    apt-get update -o Acquire::Retries=10 && \
+# 使用默认的 Debian 源（因为在 GitHub Actions 海外节点编译，默认源最快）
+RUN apt-get update -o Acquire::Retries=10 && \
     apt-get install -y --no-install-recommends \
     wget unzip bzip2 git curl tzdata \
     gcc g++ make automake autoconf libtool \
@@ -19,14 +17,14 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ bookworm main non-free contrib" 
     ca-certificates libnss3 libatk-bridge2.0-0 libgtk-3-0 libx11-xcb1 \
     libxcb-dri3-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
     libasound2 libxshmfence1 libdrm2 libxkbcommon0 libatspi2.0-0 libcups2 \
-    fontconfig nodejs npm fonts-wqy-zenhei fonts-wqy-microhei chromium=147.0.7727.137-1~deb12u1 chromium-common=147.0.7727.137-1~deb12u1
+    fontconfig nodejs npm fonts-wqy-zenhei fonts-wqy-microhei chromium=147.0.7727.137-1~deb12u1 chromium-common=147.0.7727.137-1~deb12u1 && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN npm config set registry https://registry.npmmirror.com/ && \
-    npm install -g puppeteer-core@10.4.0
+RUN npm install -g puppeteer-core@10.4.0 && npm cache clean --force
 
 # 编译 MassDNS
 RUN cd /tmp && \
-    wget https://github.com/blechschmidt/massdns/archive/refs/tags/v1.1.0.tar.gz && \
+    (wget -t 10 https://github.com/blechschmidt/massdns/archive/refs/tags/v1.1.0.tar.gz || wget -t 10 https://gh-proxy.com/https://github.com/blechschmidt/massdns/archive/refs/tags/v1.1.0.tar.gz) && \
     tar xvf v1.1.0.tar.gz && cd massdns-1.1.0 && make -j$(nproc) && \
     cp bin/massdns /usr/local/bin/massdns && chmod +x /usr/local/bin/massdns && \
     cd /tmp && rm -rf massdns*
@@ -35,7 +33,8 @@ RUN cd /tmp && \
 RUN cd /tmp && \
     wget https://nmap.org/dist/nmap-7.95.tar.bz2 && \
     bzip2 -cd nmap-7.95.tar.bz2 | tar xvf - && cd nmap-7.95 && \
-    ./configure --without-zenmap && make && make install && cd /tmp && rm -rf nmap* && wget -O /usr/local/share/nmap/nmap-service-probes https://fastly.jsdelivr.net/gh/nmap/nmap@master/nmap-service-probes
+    ./configure --without-zenmap && make && make install && cd /tmp && rm -rf nmap* && \
+    (wget -O /usr/local/share/nmap/nmap-service-probes https://fastly.jsdelivr.net/gh/nmap/nmap@master/nmap-service-probes || wget -O /usr/local/share/nmap/nmap-service-probes https://gh-proxy.com/https://raw.githubusercontent.com/nmap/nmap/master/nmap-service-probes)
 
 # 下载 Nuclei
 RUN ARCH=$(dpkg --print-architecture) && \
@@ -48,10 +47,14 @@ WORKDIR /code
 COPY ./backend /code/backend
 
 # 在构建镜像时就创建好虚拟环境并安装好依赖，使生产环境自包含
+# 全局安装必备组件（默认海外源）
 RUN python3 -m venv /code/backend/.venv-docker && \
-    /code/backend/.venv-docker/bin/pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    /code/backend/.venv-docker/bin/pip install -r /code/backend/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    /code/backend/.venv-docker/bin/pip install -e /code/backend/ARL-NPoC/
+    npm install -g pnpm pm2 && npm cache clean --force && \
+    /code/backend/.venv-docker/bin/pip install --no-cache-dir --upgrade pip && \
+    /code/backend/.venv-docker/bin/pip install --no-cache-dir -r /code/backend/requirements.txt && \
+    /code/backend/.venv-docker/bin/pip install --no-cache-dir -e /code/backend/ARL-NPoC/ && \
+    apt-get purge -y gcc g++ make automake autoconf libtool python3-dev libxml2-dev libxslt1-dev zlib1g-dev libffi-dev libssl-dev && \
+    apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 # 拷贝待用脚本并赋予权限
 RUN cp /code/backend/wait-for-it.sh /usr/bin/wait-for-it.sh && \

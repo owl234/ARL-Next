@@ -84,6 +84,25 @@ class ConnMongo(object):
 
 
 def conn_db(collection, db_name = None):
+    # 将 asset_ 系列表重定向到常规表（排除 asset_scope）
+    asset_mapping = {
+        'asset_site': 'site',
+        'asset_domain': 'domain',
+        'asset_ip': 'ip',
+        'asset_cert': 'cert',
+        'asset_service': 'service',
+        'asset_fileleak': 'fileleak',
+        'asset_url': 'url',
+        'asset_vuln': 'vuln',
+        'asset_npoc_service': 'npoc_service',
+        'asset_cip': 'cip',
+        'asset_nuclei_result': 'nuclei_result',
+        'asset_stat_finger': 'stat_finger',
+        'asset_wih': 'wih',
+    }
+    if collection in asset_mapping:
+        collection = asset_mapping[collection]
+
     conn = ConnMongo().conn
     if db_name:
         return conn[db_name][collection]

@@ -1,0 +1,77 @@
+name: Build and Push to Aliyun ACR
+
+on:
+  push:
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  ALIYUN_REGISTRY: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com
+  ALIYUN_NAMESPACE: owl234-arl-prod
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Aliyun Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ALIYUN_REGISTRY }}
+          username: ${{ secrets.ALIYUN_REGISTRY_USER }}
+          password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+
+      - name: Pull and Push Official Images
+        run: |
+          # Pull official images, tag them for Aliyun, and push
+          docker pull mongo:4.0.27
+          docker tag mongo:4.0.27 ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/mongo:4.0.27
+          docker push ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/mongo:4.0.27
+          
+          docker pull rabbitmq:3-management
+          docker tag rabbitmq:3-management ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/rabbitmq:3-management
+          docker push ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/rabbitmq:3-management
+
+      - name: Build and push Frontend
+        uses: docker/build-push-action@v4
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile.prod
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/arl-frontend:latest
+
+      - name: Build and push Web
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.prod
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/arl-web:latest
+
+      - name: Build and push Worker
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.prod
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/arl-worker:latest
+
+      - name: Build and push ICP Query
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend/icp_query
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/icp_query:latest
