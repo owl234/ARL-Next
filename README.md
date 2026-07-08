@@ -98,40 +98,31 @@ docker compose -f docker-compose.dev.yml down
 
 ---
 
-### 生产环境部署方案：公网极简 HTTPS 部署
+### 生产环境部署方案：极简 HTTPS 部署
 
-**适用**：公网生产部署、单机轻量化运行。  
+**适用**：本地开发测试、单机极简运行。  
 **优势**：
-1. **强安全边界**：公网仅暴露前端 **5173 端口**。API 后端、MongoDB、RabbitMQ 等敏感服务端口全部对外关闭，实现网络隐形。
-2. **零配置 SSL**：前端 Nginx 容器直接挂载宿主机证书，原生提供高并发的公网 HTTPS/SSL 安全防护。
-3. **内核态转发**：各容器处于 Docker 网桥 `arl-net` 隔离区。脚本自动关闭宿主机 `userland-proxy` 代理，容器间通信绕过用户态直接由 Linux 内核转发，网络性能近乎原生。
+1. **一键免交互拉起**：部署脚本 [start-prod.sh](./start-prod.sh) 会自动检测并一键免交互生成 10 年期的本地自签名 SSL 证书，无需任何手动输入或外部申请。
+2. **强安全边界**：公网仅暴露前端 **5173 端口**。API 后端、MongoDB、RabbitMQ 等敏感服务端口全部对外关闭，实现网络隐形。
+3. **零配置 SSL**：前端 Nginx 容器直接挂载自动生成的自签名证书，原生提供高并发的 HTTPS/SSL 安全防护。
 
 #### 🚀 部署步骤
 
 ```bash
-# 1. 克隆项目并创建证书目录
+# 1. 克隆项目
 git clone https://github.com/owl234/ARL-Next && cd ARL-Next
-mkdir -p ssl-certs
 
-# 2. 准备您的 SSL 证书（将证书与私钥命名并放入下方路径）
-# 证书位置：./ssl-certs/arl.crt
-# 私钥位置：./ssl-certs/arl.key
-
-# 3. 运行一键构建与性能调优脚本（自动补全 Docker/Compose 依赖、调优系统配置并拉起容器）
+# 2. 运行一键部署脚本（自动生成 10 年期自签名 SSL 证书并拉起容器）
 sudo bash start-prod.sh
 ```
-部署完成后，直接通过浏览器访问 `https://your-server-ip:5173` 即可登录使用。
+部署完成后，通过浏览器访问 `https://your-server-ip:5173` 即可登录使用。
 
-> 💡 **快速获取免费公网 SSL 证书 (Let's Encrypt)**
-> ```bash
-> sudo apt update && sudo apt install -y certbot
-> sudo certbot certonly --standalone -d yourdomain.com
-> cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem ./ssl-certs/arl.crt
-> cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ./ssl-certs/arl.key
-> ```
+> 🛡️ **自签名证书警告提示**
+> 
+> 首次通过浏览器访问时会遇到“证书不受信任”的红色警告。这并非安全漏洞（数据传输依然是强加密的），只需在浏览器中点击 **“高级” (Advanced) -> “继续访问/忽略警告” (Continue)** 即可正常进入系统。
 
-> ⚙️ **HTTPS 与反代微调**：
-> 默认自动完成 HTTPS 及对后端 `arl-web` 服务的反向代理。如有特殊路由或证书更改需求，请直接编辑 Nginx 配置文件 [frontend/default.conf.prod](./frontend/default.conf.prod)，修改后执行 `sudo bash start-prod.sh` 重新构建生效。
+> ⚙️ **证书与反代微调**：
+> 默认自动完成证书生成与反向代理。若您有自备的公网受信任 SSL 证书，只需将证书与私钥命名为 `arl.crt` 和 `arl.key` 放入 `./ssl-certs/` 目录下即可，脚本会自动识别并挂载。如有特殊路由需求，请直接编辑 Nginx 配置文件 [frontend/default.conf.prod](./frontend/default.conf.prod)，修改后执行 `sudo bash start-prod.sh` 重新构建。
 
 #### 常用生产管理命令
 ```bash

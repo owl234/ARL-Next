@@ -26,7 +26,7 @@ RUN npm config set registry https://registry.npmmirror.com/ && \
 
 # 编译 MassDNS
 RUN cd /tmp && \
-    wget https://github.com/blechschmidt/massdns/archive/refs/tags/v1.1.0.tar.gz && \
+    (wget -t 10 https://github.com/blechschmidt/massdns/archive/refs/tags/v1.1.0.tar.gz || wget -t 10 https://gh-proxy.com/https://github.com/blechschmidt/massdns/archive/refs/tags/v1.1.0.tar.gz) && \
     tar xvf v1.1.0.tar.gz && cd massdns-1.1.0 && make -j$(nproc) && \
     cp bin/massdns /usr/local/bin/massdns && chmod +x /usr/local/bin/massdns && \
     cd /tmp && rm -rf massdns*
@@ -35,7 +35,8 @@ RUN cd /tmp && \
 RUN cd /tmp && \
     wget https://nmap.org/dist/nmap-7.95.tar.bz2 && \
     bzip2 -cd nmap-7.95.tar.bz2 | tar xvf - && cd nmap-7.95 && \
-    ./configure --without-zenmap && make && make install && cd /tmp && rm -rf nmap* && wget -O /usr/local/share/nmap/nmap-service-probes https://fastly.jsdelivr.net/gh/nmap/nmap@master/nmap-service-probes
+    ./configure --without-zenmap && make && make install && cd /tmp && rm -rf nmap* && \
+    (wget -O /usr/local/share/nmap/nmap-service-probes https://fastly.jsdelivr.net/gh/nmap/nmap@master/nmap-service-probes || wget -O /usr/local/share/nmap/nmap-service-probes https://gh-proxy.com/https://raw.githubusercontent.com/nmap/nmap/master/nmap-service-probes)
 
 # 下载 Nuclei
 RUN ARCH=$(dpkg --print-architecture) && \

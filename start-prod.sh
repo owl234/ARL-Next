@@ -10,6 +10,34 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# ==================== 通用加载动画指示器 ====================
+run_with_spinner() {
+    local msg="$1"
+    shift
+    # 执行命令并在后台静默运行
+    "$@" > /tmp/arl_deploy_step.log 2>&1 &
+    local pid=$!
+    
+    local spin='-\|/'
+    local i=0
+    
+    printf "  ⚙️  %-60s" "$msg"
+    while kill -0 $pid 2>/dev/null; do
+        i=$(( (i+1) % 4 ))
+        printf "\r  ⚙️  %-60s [%c]" "$msg" "${spin:$i:1}"
+        sleep 0.1
+    done
+    
+    wait $pid
+    local status=$?
+    if [ $status -eq 0 ]; then
+        printf "\r  ✅ %-60s [完成]\n" "$msg"
+    else
+        printf "\r  ⚠️  %-60s [失败]\n" "$msg"
+    fi
+    return $status
+}
+
 # ==================== 依赖检查与自动安装函数 ====================
 
 # 1. 识别操作系统与包管理器
@@ -56,8 +84,8 @@ check_and_install_python3() {
     fi
 
     echo "📦 正在使用 $PKG_MANAGER 安装 python3..."
-    $UPDATE_CMD
-    $INSTALL_CMD python3
+    run_with_spinner "更新系统软件包列表" $UPDATE_CMD
+    run_with_spinner "自动安装 Python 3" $INSTALL_CMD python3
 
     if command -v python3 &>/dev/null; then
         echo "✅ Python 3 安装成功！"
@@ -80,9 +108,9 @@ check_and_install_docker() {
     if command -v curl &>/dev/null || command -v wget &>/dev/null; then
         echo "🌐 正在通过 Docker 官方脚本下载并安装 Docker..."
         if command -v curl &>/dev/null; then
-            curl -fsSL https://get.docker.com | sh
+            run_with_spinner "下载并运行 Docker 安装脚本" sh -c "curl -fsSL https://get.docker.com | sh"
         else
-            wget -qO- https://get.docker.com | sh
+            run_with_spinner "下载并运行 Docker 安装脚本" sh -c "wget -qO- https://get.docker.com | sh"
         fi
         
         # 启动并使能 Docker 服务
@@ -99,11 +127,11 @@ check_and_install_docker() {
         
         echo "📦 正在通过 $PKG_MANAGER 尝试安装 docker..."
         if [ "$PKG_MANAGER" = "apt-get" ]; then
-            $UPDATE_CMD
-            $INSTALL_CMD docker.io
+            run_with_spinner "更新系统软件包列表" $UPDATE_CMD
+            run_with_spinner "安装 Docker" $INSTALL_CMD docker.io
         else
-            $UPDATE_CMD
-            $INSTALL_CMD docker
+            run_with_spinner "更新系统软件包列表" $UPDATE_CMD
+            run_with_spinner "安装 Docker" $INSTALL_CMD docker
         fi
     fi
 
@@ -127,12 +155,9 @@ check_and_install_compose() {
     detect_os_and_pkg_manager
 
     if [ "$PKG_MANAGER" = "apt-get" ]; then
-        echo "📦 正在通过 apt-get 安装 docker-compose-plugin..."
-        $UPDATE_CMD
-        $INSTALL_CMD docker-compose-plugin || $INSTALL_CMD docker-compose
+        run_with_spinner "通过 apt-get 安装 docker-compose-plugin" $INSTALL_CMD docker-compose-plugin
     elif [ "$PKG_MANAGER" = "yum" ] || [ "$PKG_MANAGER" = "dnf" ]; then
-        echo "📦 正在通过 $PKG_MANAGER 安装 docker-compose-plugin..."
-        $INSTALL_CMD docker-compose-plugin || $INSTALL_CMD docker-compose
+        run_with_spinner "通过 $PKG_MANAGER 安装 docker-compose-plugin" $INSTALL_CMD docker-compose-plugin
     else
         # 兜底：如果无法通过包管理器安装，尝试从 GitHub 下载二进制包到 Docker 插件目录
         echo "🌐 尝试从 GitHub 下载 docker-compose 独立二进制包..."
@@ -142,9 +167,9 @@ check_and_install_compose() {
         
         mkdir -p /usr/local/lib/docker/cli-plugins
         if command -v curl &>/dev/null; then
-            curl -SL "$COMPOSE_URL" -o /usr/local/lib/docker/cli-plugins/docker-compose
+            run_with_spinner "下载 docker-compose 二进制包" curl -SL "$COMPOSE_URL" -o /usr/local/lib/docker/cli-plugins/docker-compose
         elif command -v wget &>/dev/null; then
-            wget -O /usr/local/lib/docker/cli-plugins/docker-compose "$COMPOSE_URL"
+            run_with_spinner "下载 docker-compose 二进制包" wget -O /usr/local/lib/docker/cli-plugins/docker-compose "$COMPOSE_URL"
         fi
         chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
         
@@ -166,6 +191,12 @@ check_and_install_compose() {
         exit 1
     fi
 }
+
+# ==================== 极简生产化不再需要民间镜像代理 ====================
+# 由于所有的镜像（包含 mongo、rabbitmq）现均由 GitHub Actions 自动推送到阿里云高可用个人私有库
+# 因此直接让 docker-compose 从国内的阿里云仓库 pull，享受极限满速下载。
+
+# ==================== 执行部署流程 ====================
 
 echo "🚀 开始执行 ARL-Next 生产一键部署与调优..."
 
@@ -217,21 +248,49 @@ else
     echo "✅ 宿主机 Docker 性能参数已是最佳状态，无需修改。"
 fi
 
-# 2. 准备证书存放目录
-echo "📁 正在检查证书存放目录..."
+# 2. 准备证书存放目录与配置权限
+echo "📁 正在检查证书存放目录与权限..."
 mkdir -p ./ssl-certs
+chmod 755 ./ssl-certs
 
 if [ ! -f "./ssl-certs/arl.crt" ] || [ ! -f "./ssl-certs/arl.key" ]; then
     echo "⚠️ 提示：未在 ./ssl-certs/ 目录下检测到 arl.crt 或 arl.key。"
-    echo "👉 请在容器拉起后，将公网 SSL 证书与私钥放入其中以启用 HTTPS。"
+    echo "⚙️ 正在自动生成临时自签名 SSL 证书以确保 Nginx 服务能正常启动..."
+    openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 \
+        -subj "/C=CN/ST=GD/L=SZ/O=ARL/CN=localhost" \
+        -keyout ./ssl-certs/arl.key \
+        -out ./ssl-certs/arl.crt
 fi
 
-# 3. 一键构建并拉起生产服务
-echo "🐳 正在一键构建并拉起生产多服务容器组..."
-docker compose -f docker-compose.prod.yml up -d --build
+# 确保 Nginx 容器内的非 root 用户有权限读取证书
+if [ -f "./ssl-certs/arl.key" ]; then
+    chmod 644 ./ssl-certs/arl.key
+fi
+if [ -f "./ssl-certs/arl.crt" ]; then
+    chmod 644 ./ssl-certs/arl.crt
+fi
+echo "✅ 证书目录与文件权限已配置完毕！"
 
-# 4. 获取本地与公网真实 IP 并展示
-LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || ip route get 1.1.1.1 2>/dev/null | awk '{print $7}' || echo "127.0.0.1")
+# （旧版镜像预拉取函数已废除，转为基于阿里云仓库全量拉取）
+
+# 4. 从阿里云镜像仓库极速拉取并启动生产服务
+echo "🐳 正在从阿里云镜像库极速拉取最新构建..."
+docker compose -f docker-compose.prod.yml pull
+
+echo "🚀 正在启动生产多服务容器组..."
+docker compose -f docker-compose.prod.yml up -d
+
+# 5. 获取本地与公网真实 IP 并展示
+LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+if [ -z "$LOCAL_IP" ]; then
+    LOCAL_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7}')
+fi
+if [ -z "$LOCAL_IP" ]; then
+    LOCAL_IP=$(ifconfig 2>/dev/null | awk '/inet / && !/127.0.0.1/ {print $2; exit}')
+fi
+if [ -z "$LOCAL_IP" ]; then
+    LOCAL_IP="127.0.0.1"
+fi
 LOCAL_IP=$(echo "$LOCAL_IP" | xargs)
 
 PUBLIC_IP=$(curl -s --max-time 1.5 ifconfig.me 2>/dev/null || echo "")

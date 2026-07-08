@@ -68,12 +68,9 @@
         <a-button v-if="activeTab === 'site'" type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="openRiskModal">风险任务下发</a-button>
       </div>
 
-      <div v-if="activeTab === 'ip' || activeTab === 'wih'" style="margin-left: auto;">
-        <a-button :disabled="!hasSelected" @click="handleBatchDelete">批量删除</a-button>
-      </div>
     </div>
 
-    <div v-if="activeTab === 'site' || activeTab === 'domain'" style="margin-bottom: 16px; display: flex; gap: 8px;">
+    <div style="margin-bottom: 16px; display: flex; gap: 8px;">
       <a-button :disabled="!hasSelected" @click="handleBatchDelete">批量删除</a-button>
       <a-button v-if="activeTab === 'site'" type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="openAddSiteModal">添加站点</a-button>
       <a-button v-if="activeTab === 'domain'" type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="openAddDomainModal">添加子域名</a-button>

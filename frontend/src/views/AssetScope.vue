@@ -55,10 +55,7 @@
       <template #bodyCell="{ column, record }">
 
         <template v-if="column.key === 'name'">
-          <span
-              style="color: #00bcd4; cursor: pointer; font-weight: 500;"
-              @click="goToDetailByName(record)"
-          >
+          <span>
             {{ record.name }}
           </span>
         </template>
@@ -506,16 +503,7 @@ const goToDetail = (record) => {
   });
 };
 
-// 🚨 专门处理点击“资产组名称”的跳转，传真实名称
-const goToDetailByName = (record) => {
-  router.push({
-    path: '/groupAssetsManagement/groupAssetsDetail',
-    query: {
-      scope_id: record._id, // 范围 ID 保持不变
-      targetName: record.name // 核心区别：这里传的是真实的中文名称！
-    }
-  });
-};
+
 
 // ================= 添加监控任务 =================
 const addMonitorVisible = ref(false);

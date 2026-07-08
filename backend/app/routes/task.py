@@ -325,8 +325,17 @@ class DeleteTask(ARLResource):
             # 如果用户勾选了“连带删除扫描数据”
             if del_task_data_flag:
                 for name in table_list:
-                    # 去每一个结果表里，把归属于这个 task_id 的数据全部清空
-                    utils.conn_db(name).delete_many({'task_id': task_id})
+                    # 🚨 保护性修改（核心）：由于资产表已做逻辑分区合并，
+                    # 任务删除只能清理“不属于任何资产组（即 scope_id 为空/不存在）”的资产，防止误删已同步到资产组的资产
+                    delete_query = {
+                        'task_id': task_id,
+                        '$or': [
+                            {'scope_id': {'$exists': False}},
+                            {'scope_id': ''},
+                            {'scope_id': None}
+                        ]
+                    }
+                    utils.conn_db(name).delete_many(delete_query)
 
         return utils.build_ret(ErrorMsg.Success, {"task_id": task_id_list})
 
