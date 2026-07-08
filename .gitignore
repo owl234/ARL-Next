@@ -13,8 +13,6 @@ mkcert.exe
 backend/config-docker.yaml
 backend/app/config.yaml
 
-# 如果未来有专门的生产环境配置，也一并忽略
-docker-compose.prod.yml
 
 # Python cache files
 __pycache__/
