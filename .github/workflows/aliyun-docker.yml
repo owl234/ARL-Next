@@ -7,7 +7,7 @@ on:
   workflow_dispatch: # Allow manual trigger
 
 env:
-  ALIYUN_REGISTRY: registry.cn-beijing.aliyuncs.com
+  ALIYUN_REGISTRY: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com
   ALIYUN_NAMESPACE: owl234-arl-prod
 
 jobs:
