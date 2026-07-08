@@ -7,9 +7,7 @@ ENV TZ=Asia/Shanghai
 ENV NODE_PATH=/usr/local/lib/node_modules
 
 # 替换源为阿里云镜像 (Debian 源不区分 arm64/amd64 的域名，维护更简单)
-RUN echo "deb http://mirrors.aliyun.com/debian/ bookworm main non-free contrib" > /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/debian-security/ bookworm-security main" >> /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/debian/ bookworm-updates main non-free contrib" >> /etc/apt/sources.list && \
+# 使用默认的 Debian 源（因为在 GitHub Actions 海外节点编译，默认源最快）
     apt-get update -o Acquire::Retries=10 && \
     apt-get install -y --no-install-recommends \
     wget unzip bzip2 git curl tzdata \
@@ -48,10 +46,11 @@ RUN ARCH=$(dpkg --print-architecture) && \
 WORKDIR /code
 COPY ./backend /code/backend
 
-# 在构建镜像时就创建好虚拟环境并安装好依赖，使生产环境自包含
+# 在构建镜像时就创建好虚拟环境并安装好依赖，使生产环境自包含# 全局安装必备组件（默认海外源）
 RUN python3 -m venv /code/backend/.venv-docker && \
-    /code/backend/.venv-docker/bin/pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    /code/backend/.venv-docker/bin/pip install -r /code/backend/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    npm install -g pnpm pm2 && \
+    /code/backend/.venv-docker/bin/pip install --upgrade pip && \
+    /code/backend/.venv-docker/bin/pip install -r /code/backend/requirements.txt && \
     /code/backend/.venv-docker/bin/pip install -e /code/backend/ARL-NPoC/
 
 # 拷贝待用脚本并赋予权限

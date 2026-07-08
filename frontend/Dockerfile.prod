@@ -3,9 +3,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # 安装 pnpm
-RUN npm config set registry https://registry.npmmirror.com/ && \
-    npm install -g pnpm@9 && \
-    pnpm config set registry https://registry.npmmirror.com/
+RUN npm install -g pnpm
 
 # 利用 Docker 缓存层安装依赖
 COPY package.json pnpm-lock.yaml ./
