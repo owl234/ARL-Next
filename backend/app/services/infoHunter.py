@@ -23,7 +23,7 @@ class InfoHunter(object):
         # wih 结果文件
         self.wih_result_path = os.path.join(tmp_path, "wih_result_{}.json".format(rand_str))
 
-        self.wih_bin_path = "wih"
+        self.wih_bin_path = Config.WIH_BIN_PATH
 
     def _get_target_file(self):
         with open(self.wih_target_path, "w") as f:

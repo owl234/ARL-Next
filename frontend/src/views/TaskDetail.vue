@@ -1004,6 +1004,55 @@ const stopSyslogTimer = () => {
   }
 };
 
+// 💡 新增：全局任务状态轮询，用于实时更新 Tab 栏计数值
+let taskStatusTimer = null;
+
+const fetchTaskStats = async () => {
+  const taskId = query.task_id;
+  if (!taskId) return;
+  try {
+    const res = await request.get('/task/', { params: { _id: taskId } });
+    if (res.code === 200 && res.data && res.data.items && res.data.items.length > 0) {
+      const task = res.data.items[0];
+      queryCounts.site = task.site_cnt || 0;
+      queryCounts.domain = task.domain_cnt || 0;
+      queryCounts.ip = task.ip_cnt || 0;
+      queryCounts.cert = task.cert_cnt || 0;
+      queryCounts.service = task.service_cnt || 0;
+      queryCounts.fileleak = task.fileleak_cnt || 0;
+      queryCounts.url = task.url_cnt || 0;
+      queryCounts.vuln = task.vuln_cnt || 0;
+      queryCounts.npoc_service = task.npoc_service_cnt || 0;
+      queryCounts.cip = task.cip_cnt || 0;
+      queryCounts.nuclei_result = task.nuclei_result_cnt || 0;
+      queryCounts.stat_finger = task.stat_finger_cnt || 0;
+      queryCounts.wih = task.wih_cnt || 0;
+
+      // 如果任务已结束，停止轮询
+      if (task.status === 'done' || task.status === 'error' || task.status === 'stop') {
+        stopTaskStatusTimer();
+      }
+    }
+  } catch (err) {
+    console.error('拉取任务全局状态失败:', err);
+  }
+};
+
+const startTaskStatusTimer = () => {
+  if (!query.task_id) return;
+  fetchTaskStats(); // 初始拉取一次
+  taskStatusTimer = setInterval(() => {
+    fetchTaskStats();
+  }, 5000); // 每 5 秒更新一次导航栏计数
+};
+
+const stopTaskStatusTimer = () => {
+  if (taskStatusTimer) {
+    clearInterval(taskStatusTimer);
+    taskStatusTimer = null;
+  }
+};
+
 watch(activeTab, (newVal) => {
   if (tabConfig[newVal]) {
     columns.value = tabConfig[newVal].cols;
@@ -1024,10 +1073,14 @@ watch(activeTab, (newVal) => {
   }
 });
 
-onMounted(fetchData);
+onMounted(() => {
+  fetchData();
+  startTaskStatusTimer();
+});
 
 onUnmounted(() => {
   stopSyslogTimer();
+  stopTaskStatusTimer();
 });
 
 // ==========================================

@@ -92,6 +92,7 @@ class Config(object, metaclass=ConfigMeta):
 
     # WebInfoHunter 规则文件
     WIH_RULE_PATH = os.path.join(basedir, "dicts/wih_rules.yml")
+    WIH_BIN_PATH = os.path.join(basedir, "tools/wih/wih")
 
     black_domain_path = os.path.join(basedir, 'dicts/blackdomain.txt')
     black_hexie_path = os.path.join(basedir, 'dicts/blackhexie.txt')
