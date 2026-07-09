@@ -28,9 +28,13 @@ async function main() {
         const page = await browser.newPage();
         await page.setViewport({ width: 1280, height: 1024 });
 
-        // Go to URL and wait until there are no more than 2 network connections for at least 500 ms.
-        // This gives SPA (React/Vue) time to load.
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+        // Go to URL and wait until load event
+        // Wrap in try-catch so if it times out, we still take a screenshot of whatever rendered!
+        try {
+            await page.goto(url, { waitUntil: 'load', timeout: 30000 });
+        } catch (gotoErr) {
+            console.error("Goto warning (timeout/network):", gotoErr.message);
+        }
         
         // Wait an extra second for any rendering/animations to settle
         await new Promise(r => setTimeout(r, 1000));

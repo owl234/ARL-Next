@@ -4,7 +4,7 @@ import { message } from 'ant-design-vue';
 // 创建 axios 实例
 const request = axios.create({
    // baseURL: '/api', // 根据你的代理配置调整
-    timeout: 10000,
+    timeout: 60000,
 });
 // 2. 🚀 请求拦截器：自动加 /api 前缀 & 携带 Token
 request.interceptors.request.use(

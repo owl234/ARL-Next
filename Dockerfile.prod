@@ -61,4 +61,5 @@ RUN cp /code/backend/wait-for-it.sh /usr/bin/wait-for-it.sh && \
     chmod +x /usr/bin/wait-for-it.sh
 
 # 赋予 ARL 自带工具执行权限
-RUN chmod +x /code/backend/app/tools/massdns || true
+RUN chmod +x /code/backend/app/tools/massdns || true && \
+    chmod +x /code/backend/app/tools/wih/wih || true

@@ -46,3 +46,4 @@ ssl-certs/
 fingerprint_new/
 .agents/
 server.txt
+lab/

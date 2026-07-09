@@ -138,8 +138,16 @@
 
 
         <template v-else-if="column.key === 'finger'">
-          <div v-if="record.finger">
-            <p v-for="f in record.finger" :key="f.name" style="margin-bottom: 4px; color: rgba(0,0,0,0.65);">{{ f.name }}</p>
+          <div v-if="record.finger && record.finger.length > 0" style="display: flex; flex-wrap: wrap; gap: 4px;">
+            <a-tag v-for="f in record.finger.slice(0, 3)" :key="f.name" color="blue" style="margin: 0; white-space: normal; height: auto; text-align: left;">{{ f.name }}</a-tag>
+            <a-popover v-if="record.finger.length > 3" placement="top">
+              <template #content>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; max-width: 300px; max-height: 200px; overflow-y: auto;">
+                  <a-tag v-for="f in record.finger" :key="f.name" color="blue" style="margin: 0; white-space: normal; height: auto; text-align: left;">{{ f.name }}</a-tag>
+                </div>
+              </template>
+              <a-tag style="margin: 0; cursor: pointer; border-style: dashed;">+{{ record.finger.length - 3 }}</a-tag>
+            </a-popover>
           </div>
         </template>
 
@@ -313,7 +321,7 @@
         </template>
 
         <template v-else-if="column.key === 'finger_name'">
-          <span style="color: #00bcd4; cursor: pointer;">{{ record.name || '-' }}</span>
+          <span style="color: #00bcd4; cursor: pointer; text-decoration: underline;" @click="openFingerModal(record.name)">{{ record.name || '-' }}</span>
         </template>
 
         <template v-else-if="column.key === 'wih_source'">
@@ -324,6 +332,26 @@
 
       </template>
     </a-table>
+
+    <!-- 指纹统计关联站点弹窗 -->
+    <a-modal v-model:open="fingerModalVisible" :title="`指纹关联站点：${currentFingerName}`" :footer="null" width="800px">
+      <a-table
+        :dataSource="fingerModalData"
+        :columns="fingerModalColumns"
+        :loading="fingerModalLoading"
+        :pagination="false"
+        size="small"
+        rowKey="_id"
+        :scroll="{ y: 400 }"
+      >
+        <template #bodyCell="{ column, record, index }">
+          <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+          <template v-else-if="column.key === 'site'">
+            <a :href="record.site || record.url" target="_blank" style="color: #00bcd4;">{{ record.site || record.url }}</a>
+          </template>
+        </template>
+      </a-table>
+    </a-modal>
 
     <div v-if="tabConfig[activeTab] && activeTab !== 'syslog'" style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px;">
       <div style="color: rgba(0,0,0,.65);">共 {{ Math.ceil(pagination.total / pagination.pageSize) || 1 }} 页 / {{ pagination.total }} 条数据</div>
@@ -396,6 +424,52 @@ import { SearchOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue
 const route = useRoute();
 const router = useRouter();
 const query = route?.query || {};
+
+// 弹窗状态与方法
+const fingerModalVisible = ref(false);
+const currentFingerName = ref('');
+const fingerModalData = ref([]);
+const fingerModalLoading = ref(false);
+
+const fingerModalColumns = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: '站点 URL', key: 'site', width: 300 },
+  { title: '标题', key: 'title', dataIndex: 'title', width: 200 },
+  { title: '状态码', key: 'status_code', dataIndex: 'status_code', width: 100 }
+];
+
+const openFingerModal = async (fingerName) => {
+  currentFingerName.value = fingerName;
+  fingerModalVisible.value = true;
+  fingerModalLoading.value = true;
+  fingerModalData.value = [];
+  try {
+    const res = await request.get('/site/', {
+      params: {
+        task_id: query.task_id,
+        finger: fingerName,
+        page: 1,
+        size: 100
+      }
+    });
+    const rawItems = res.items || res.data?.items || [];
+    const uniqueItems = [];
+    const siteSet = new Set();
+    for (const item of rawItems) {
+      const siteUrl = item.site || item.url;
+      if (!siteSet.has(siteUrl)) {
+        siteSet.add(siteUrl);
+        uniqueItems.push(item);
+      }
+    }
+    fingerModalData.value = uniqueItems;
+  } catch (error) {
+    console.error('Fetch finger sites failed:', error);
+    message.error('获取关联站点失败');
+  } finally {
+    fingerModalLoading.value = false;
+  }
+};
 const targetName = ref(query.targetName || '未知目标');
 const activeTab = ref('site');
 const loading = ref(false);
@@ -460,7 +534,7 @@ const tabConfig = {
       { title: '标题', dataIndex: 'title', key: 'title', width: 200 },
       // 删除了你加的 server 和 status 列
       { title: 'headers', key: 'headers',width: 500},
-      { title: 'finger', key: 'finger', width: 50 },
+      { title: 'finger', key: 'finger', width: 150 },
       { title: '截图', key: 'screenshot', width: 280 } // 保持宽度给图片留足空间
     ]
   },

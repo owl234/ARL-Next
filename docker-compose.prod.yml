@@ -27,10 +27,6 @@ services:
     working_dir: /code
     volumes:
       - arl_screenshots:/code/backend/app/tmp_screenshot
-    dns:
-      - 223.5.5.5
-      - 119.29.29.29
-      - 114.114.114.114
     environment:
       - TZ=Asia/Shanghai
       - DEBIAN_FRONTEND=noninteractive
@@ -51,10 +47,6 @@ services:
     working_dir: /code
     volumes:
       - arl_screenshots:/code/backend/app/tmp_screenshot
-    dns:
-      - 223.5.5.5
-      - 119.29.29.29
-      - 114.114.114.114
     environment:
       - TZ=Asia/Shanghai
       - DEBIAN_FRONTEND=noninteractive

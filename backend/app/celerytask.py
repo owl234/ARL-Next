@@ -73,9 +73,16 @@ def run_task(options):
                 item = utils.conn_db('github_task').find_one({"_id": ObjectId(task_id)})
                 
             if item and item.get("status") in [TaskStatus.STOP, TaskStatus.ERROR, TaskStatus.DONE]:
-                logger.info(f"Task {task_id} has been stopped or ended manually, skip execution")
-                return
-
+                # 允许在任务完成后执行的后续操作（如同步资产、更新资产）
+                allow_after_done = [
+                    CeleryAction.DOMAIN_TASK_SYNC_TASK,
+                    CeleryAction.ASSET_SITE_UPDATE,
+                    CeleryAction.ASSET_WIH_UPDATE,
+                    CeleryAction.ADD_ASSET_SITE_TASK
+                ]
+                if action not in allow_after_done:
+                    logger.info(f"Task {task_id} has been stopped or ended manually, skip execution")
+                    return
             # 如果任务被系统中断后重试，清除上次产生的残余数据
             if action in [CeleryAction.DOMAIN_TASK, CeleryAction.IP_TASK, CeleryAction.RUN_RISK_CRUISING, CeleryAction.FOFA_TASK]:
                 utils.clean_task_data(task_id)

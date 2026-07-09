@@ -100,7 +100,19 @@
         </template>
 
         <template v-else-if="column.key === 'headers'"><div class="scroll-x"><pre>{{ record.headers }}</pre></div></template>
-        <template v-else-if="column.key === 'finger'"><div v-if="record.finger"><p v-for="f in record.finger" :key="f.name" style="margin-bottom: 4px; color: rgba(0,0,0,0.65);">{{ f.name }}</p></div></template>
+        <template v-else-if="column.key === 'finger'">
+          <div v-if="record.finger && record.finger.length > 0" style="display: flex; flex-wrap: wrap; gap: 4px;">
+            <a-tag v-for="f in record.finger.slice(0, 3)" :key="f.name" color="blue" style="margin: 0; white-space: normal; height: auto; text-align: left;">{{ f.name }}</a-tag>
+            <a-popover v-if="record.finger.length > 3" placement="top">
+              <template #content>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; max-width: 300px; max-height: 200px; overflow-y: auto;">
+                  <a-tag v-for="f in record.finger" :key="f.name" color="blue" style="margin: 0; white-space: normal; height: auto; text-align: left;">{{ f.name }}</a-tag>
+                </div>
+              </template>
+              <a-tag style="margin: 0; cursor: pointer; border-style: dashed;">+{{ record.finger.length - 3 }}</a-tag>
+            </a-popover>
+          </div>
+        </template>
 
         <template v-else-if="column.key === 'record'">
           <div v-if="record.record && record.record.length"><div v-for="(r, i) in record.record" :key="i">{{ r }}</div></div>
@@ -183,7 +195,7 @@
           <div style="max-height: 100px; overflow-y: auto; background: #f5f5f5; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 12px; word-break: break-all;">{{ record.verify_command || record.curl_command || '-' }}</div>
         </template>
         <template v-else-if="column.key === 'finger_name'">
-          <span style="color: #00bcd4; cursor: pointer;">{{ record.name || '-' }}</span>
+          <span style="color: #00bcd4; cursor: pointer;" @click="openFingerModal(record.name)">{{ record.name || '-' }}</span>
         </template>
         <template v-else-if="column.key === 'host'">
           <span>{{ record.ip }}:{{ record.port }}</span>
@@ -191,6 +203,27 @@
 
       </template>
     </a-table>
+
+    <!-- 指纹统计关联站点弹窗 -->
+    <a-modal v-model:open="fingerModalVisible" :title="`指纹关联站点：${currentFingerName}`" :footer="null" width="800px">
+      <a-table
+        :dataSource="fingerModalData"
+        :columns="fingerModalColumns"
+        :loading="fingerModalLoading"
+        :pagination="false"
+        size="small"
+        rowKey="_id"
+        :scroll="{ y: 400 }"
+      >
+        <template #bodyCell="{ column, record, index }">
+          <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+          <template v-else-if="column.key === 'site'">
+            <a :href="record.site || record.url" target="_blank" style="color: #00bcd4;">{{ record.site || record.url }}</a>
+          </template>
+        </template>
+      </a-table>
+    </a-modal>
+
 
     <div v-if="tabConfig[activeTab]" style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px; margin-top: 16px;">
       <div style="color: rgba(0,0,0,.65);">共 {{ Math.ceil(pagination.total / pagination.pageSize) || 1 }} 页 / {{ pagination.total }} 条数据</div>
@@ -270,6 +303,43 @@ const selectedRowKeys = ref([]);
 const hasSelected = computed(() => selectedRowKeys.value.length > 0);
 const onSelectChange = (keys) => { selectedRowKeys.value = keys; };
 
+// 指纹统计弹窗状态与方法
+const fingerModalVisible = ref(false);
+const currentFingerName = ref('');
+const fingerModalData = ref([]);
+const fingerModalLoading = ref(false);
+
+const fingerModalColumns = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: '站点 URL', key: 'site', width: 300 },
+  { title: '标题', key: 'title', dataIndex: 'title', width: 200 },
+  { title: '状态码', key: 'status', dataIndex: 'status', width: 100 }
+];
+
+const openFingerModal = async (fingerName) => {
+  currentFingerName.value = fingerName;
+  fingerModalVisible.value = true;
+  fingerModalLoading.value = true;
+  fingerModalData.value = [];
+  try {
+    const res = await request.get('/asset_site/', {
+      params: {
+        scope_id: scope_id.value,
+        finger: fingerName,
+        page: 1,
+        size: 100
+      }
+    });
+    fingerModalData.value = res.items || res.data?.items || [];
+  } catch (error) {
+    console.error('Fetch finger sites failed:', error);
+    message.error('获取关联站点失败');
+  } finally {
+    fingerModalLoading.value = false;
+  }
+};
+
+
 // 💡 针对分组详情定制的 Config (以站点为例，去掉了截图，加了更新时间)
 // 💡 完整版的 Config：涵盖站点、域名、IP、WIH
 // 💡 修复版 Config：使用 asset_ 前缀的专属接口，并修正日期字段
@@ -286,7 +356,7 @@ const tabConfig = {
       { label: '状态码', key: 'status', operator: '=' },
       // 🚨 补充丢失的 4 个字段
       { label: '标头', key: 'headers', operator: '=' },
-      { label: '指纹', key: 'finger.name', operator: '=' },
+      { label: '指纹', key: 'finger', operator: '=' },
       { label: 'favicon hash', key: 'favicon.hash', operator: '=' },
       { label: '标签', key: 'tag', operator: '=' },
       { label: '更新时间', key: 'update_date', type: 'dateRange' }

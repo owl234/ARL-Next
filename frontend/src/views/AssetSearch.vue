@@ -130,8 +130,16 @@
 
 
         <template v-else-if="column.key === 'finger'">
-          <div v-if="record.finger">
-            <p v-for="f in record.finger" :key="f.name" style="margin-bottom: 4px; color: rgba(0,0,0,0.65);">{{ f.name }}</p>
+          <div v-if="record.finger && record.finger.length > 0" style="display: flex; flex-wrap: wrap; gap: 4px;">
+            <a-tag v-for="f in record.finger.slice(0, 3)" :key="f.name" color="blue" style="margin: 0; white-space: normal; height: auto; text-align: left;">{{ f.name }}</a-tag>
+            <a-popover v-if="record.finger.length > 3" placement="top">
+              <template #content>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; max-width: 300px; max-height: 200px; overflow-y: auto;">
+                  <a-tag v-for="f in record.finger" :key="f.name" color="blue" style="margin: 0; white-space: normal; height: auto; text-align: left;">{{ f.name }}</a-tag>
+                </div>
+              </template>
+              <a-tag style="margin: 0; cursor: pointer; border-style: dashed;">+{{ record.finger.length - 3 }}</a-tag>
+            </a-popover>
           </div>
         </template>
 
@@ -379,7 +387,7 @@ const tabConfig = {
       { title: '标题', dataIndex: 'title', key: 'title', width: 200 },
       // 删除了你加的 server 和 status 列
       { title: 'headers', key: 'headers',width: 500},
-      { title: 'finger', key: 'finger', width: 50 },
+      { title: 'finger', key: 'finger', width: 150 },
       { title: '截图', key: 'screenshot', width: 280 } // 保持宽度给图片留足空间
     ]
   },

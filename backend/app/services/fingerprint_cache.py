@@ -2,6 +2,8 @@ from .fingerprint import FingerPrint
 from app.utils import get_logger, conn_db, load_file, curr_date_obj
 import time
 import json
+import pymongo
+from pymongo.errors import BulkWriteError
 from app.config import Config
 
 logger = get_logger()
@@ -27,6 +29,7 @@ class FingerPrintCache:
 
     def _auto_seed_if_empty(self):
         db = conn_db('fingerprint')
+        db.create_index("name", unique=True)
         if db.count_documents({}) == 0:
             logger.info("Fingerprint collection is empty. Auto-seeding from webapp.json...")
             try:
@@ -40,8 +43,10 @@ class FingerPrintCache:
                             "update_date": curr_date_obj()
                         })
                 if docs:
-                    db.insert_many(docs)
+                    db.insert_many(docs, ordered=False)
                     logger.info(f"Successfully seeded {len(docs)} fingerprints.")
+            except BulkWriteError:
+                logger.info("Auto-seed concurrency detected: duplicate fingerprints safely ignored.")
             except Exception as e:
                 logger.error(f"Failed to auto-seed fingerprints: {e}")
 
