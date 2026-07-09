@@ -20,4 +20,5 @@ crontab==0.23.0
 pyparsing==3.1.1
 pycryptodome
 requests_ntlm
-dnslibpycryptodomex
+dnslib
+pycryptodomex

@@ -1014,19 +1014,20 @@ const fetchTaskStats = async () => {
     const res = await request.get('/task/', { params: { _id: taskId } });
     if (res.code === 200 && res.data && res.data.items && res.data.items.length > 0) {
       const task = res.data.items[0];
-      queryCounts.site = task.site_cnt || 0;
-      queryCounts.domain = task.domain_cnt || 0;
-      queryCounts.ip = task.ip_cnt || 0;
-      queryCounts.cert = task.cert_cnt || 0;
-      queryCounts.service = task.service_cnt || 0;
-      queryCounts.fileleak = task.fileleak_cnt || 0;
-      queryCounts.url = task.url_cnt || 0;
-      queryCounts.vuln = task.vuln_cnt || 0;
-      queryCounts.npoc_service = task.npoc_service_cnt || 0;
-      queryCounts.cip = task.cip_cnt || 0;
-      queryCounts.nuclei_result = task.nuclei_result_cnt || 0;
-      queryCounts.stat_finger = task.stat_finger_cnt || 0;
-      queryCounts.wih = task.wih_cnt || 0;
+      const stat = task.statistic || {};
+      queryCounts.site = stat.site_cnt ?? task.site_cnt ?? 0;
+      queryCounts.domain = stat.domain_cnt ?? task.domain_cnt ?? 0;
+      queryCounts.ip = stat.ip_cnt ?? task.ip_cnt ?? 0;
+      queryCounts.cert = stat.cert_cnt ?? task.cert_cnt ?? 0;
+      queryCounts.service = stat.service_cnt ?? task.service_cnt ?? 0;
+      queryCounts.fileleak = stat.fileleak_cnt ?? task.fileleak_cnt ?? 0;
+      queryCounts.url = stat.url_cnt ?? task.url_cnt ?? 0;
+      queryCounts.vuln = stat.vuln_cnt ?? task.vuln_cnt ?? 0;
+      queryCounts.npoc_service = stat.npoc_service_cnt ?? task.npoc_service_cnt ?? 0;
+      queryCounts.cip = stat.cip_cnt ?? task.cip_cnt ?? 0;
+      queryCounts.nuclei_result = stat.nuclei_result_cnt ?? task.nuclei_result_cnt ?? 0;
+      queryCounts.stat_finger = stat.stat_finger_cnt ?? task.stat_finger_cnt ?? 0;
+      queryCounts.wih = stat.wih_cnt ?? task.wih_cnt ?? 0;
 
       // 如果任务已结束，停止轮询
       if (task.status === 'done' || task.status === 'error' || task.status === 'stop') {
