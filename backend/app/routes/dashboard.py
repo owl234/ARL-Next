@@ -5,6 +5,7 @@ from app.modules import ErrorMsg, TaskStatus
 from . import ARLResource
 from datetime import datetime, timedelta
 import psutil
+from bson.objectid import ObjectId
 
 ns = Namespace('dashboard', description="仪表盘接口")
 logger = get_logger()
@@ -21,15 +22,16 @@ class DashboardStats(ARLResource):
     @auth
     def get(self):
         """获取顶部统计卡片数据"""
-        # 1. 总资产数量 (domain + ip + site)
-        total_assets = conn('asset_domain').count({}) + conn('asset_ip').count({}) + conn('asset_site').count({})
+        # 1. 总站点数量
+        total_assets = conn('asset_site').count({})
         
-        # 2. 今日执行任务数与今日新增资产
+        # 2. 今日执行任务数与今日新增站点
         today_str = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
         today_tasks = conn('task').count({"start_time": {"$gte": today_str}})
         
         today_start_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_new_assets = conn('asset_domain').count({"update_date": {"$gte": today_start_dt}})
+        today_start_oid = ObjectId.from_datetime(today_start_dt)
+        today_new_assets = conn('asset_site').count({"_id": {"$gte": today_start_oid}})
         
         # 3. 漏洞分类统计
         critical = conn('nuclei_result').count({"vuln_severity": "critical"})
@@ -69,8 +71,10 @@ class DashboardTrend(ARLResource):
             start_dt = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
             end_dt = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
             
-            # 当日新增资产和漏洞
-            c_assets = conn('asset_domain').count({"update_date": {"$gte": start_dt, "$lte": end_dt}})
+            # 当日新增站点和漏洞
+            start_oid = ObjectId.from_datetime(start_dt)
+            end_oid = ObjectId.from_datetime(end_dt)
+            c_assets = conn('asset_site').count({"_id": {"$gte": start_oid, "$lte": end_oid}})
             c_vulns = conn('vuln').count({"save_date": {"$gte": start_dt, "$lte": end_dt}}) + \
                       conn('nuclei_result').count({"save_date": {"$gte": start_dt, "$lte": end_dt}})
             

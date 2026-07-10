@@ -1,9 +1,17 @@
 name: arl-next-prod
 version: '3.8'
 
+x-logging: &default-logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "100m"
+      max-file: "3"
+
 services:
   # 前端 Nginx 容器：作为系统唯一的 HTTPS 流量网关与静态资源服务
   arl-frontend:
+    <<: *default-logging
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-frontend:latest
     container_name: arl-frontend-prod
     restart: always
@@ -20,13 +28,15 @@ services:
 
   # 后端 Python Web 容器 (去除了 5000/5001 端口的公网暴露)
   arl-web:
+    <<: *default-logging
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest
     container_name: arl-web-prod
     restart: always
-    command: bash -c "/code/backend/start_web.sh"
+    command: bash -c "/code/backend/start_web_prod.sh"
     working_dir: /code
     volumes:
       - arl_screenshots:/code/backend/app/tmp_screenshot
+      - arl_poc_plugins:/code/backend/ARL-NPoC/xing/plugins
     environment:
       - TZ=Asia/Shanghai
       - DEBIAN_FRONTEND=noninteractive
@@ -40,13 +50,15 @@ services:
 
   # 后台扫描任务 Worker
   arl-worker:
+    <<: *default-logging
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-worker:latest
     container_name: arl-worker-prod
     restart: always
-    command: bash -c "/code/backend/start_worker.sh"
+    command: bash -c "/code/backend/start_worker_prod.sh"
     working_dir: /code
     volumes:
       - arl_screenshots:/code/backend/app/tmp_screenshot
+      - arl_poc_plugins:/code/backend/ARL-NPoC/xing/plugins
     environment:
       - TZ=Asia/Shanghai
       - DEBIAN_FRONTEND=noninteractive
@@ -60,6 +72,7 @@ services:
 
   # MongoDB 数据库 (去除了 ports "27018:27017" 的外网暴露)
   mongodb:
+    <<: *default-logging
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/mongo:4.0.27
     container_name: arl-mongodb-prod
     restart: always
@@ -75,6 +88,7 @@ services:
 
   # RabbitMQ 队列 (去除了 ports "5673:5672" 和 "15673:15672" 的外网暴露)
   rabbitmq:
+    <<: *default-logging
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/rabbitmq:3-management
     container_name: arl-rabbitmq-prod
     restart: always
@@ -90,6 +104,7 @@ services:
 
   # 备案查询微服务 (去除了 ports 暴露)
   icp_query:
+    <<: *default-logging
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/icp_query:latest
     container_name: arl-icp-query-prod
     restart: always
@@ -104,3 +119,4 @@ volumes:
   mongo_data:
   rabbitmq_data:
   arl_screenshots:
+  arl_poc_plugins:

@@ -4,7 +4,7 @@
     <a-row :gutter="16" class="stat-row">
       <a-col :span="6">
         <a-card class="clickable-card" @click="router.push('/asset-search')">
-          <a-statistic title="总资产数量" :value="stats.total_assets" style="margin-right: 50px">
+          <a-statistic title="总站点数量" :value="stats.total_assets" style="margin-right: 50px">
             <template #prefix>
               <DatabaseOutlined style="color: #1890ff" />
             </template>
@@ -24,7 +24,7 @@
             <div style="width: 1px; height: 32px; background: #f0f0f0; margin-bottom: 4px;"></div>
             <div class="interactive-item" @click="router.push('/asset-search')" style="text-align: center; cursor: pointer; flex: 1;">
               <div style="font-size: 20px; color: #1890ff; font-weight: 500;">{{ stats.today_new_assets }}</div>
-              <div style="font-size: 12px; color: #999;">新增资产</div>
+              <div style="font-size: 12px; color: #999;">新增站点</div>
             </div>
           </div>
         </a-card>
@@ -109,7 +109,7 @@
     <a-row :gutter="16" style="margin-top: 16px;">
       <!-- 左侧：趋势图表区域 -->
       <a-col :span="16">
-        <a-card title="近7天资产与风险趋势" style="height: 100%;">
+        <a-card title="近7天站点与风险趋势" style="height: 100%;">
           <div ref="chartRef" style="width: 100%; height: 300px;"></div>
         </a-card>
       </a-col>
@@ -263,7 +263,7 @@ const fetchTrendAndRender = async () => {
           textStyle: { color: '#333' }
         },
         legend: {
-          data: ['新增资产', '高危漏洞'],
+          data: ['新增站点', '高危漏洞'],
           top: 0
         },
         grid: {
@@ -285,7 +285,7 @@ const fetchTrendAndRender = async () => {
         yAxis: [
           {
             type: 'value',
-            name: '资产数量',
+            name: '站点数量',
             nameTextStyle: { color: '#666', padding: [0, 0, 0, 20] },
             axisLabel: { color: '#666' },
             splitLine: { lineStyle: { type: 'dashed', color: '#f0f0f0' } }
@@ -300,7 +300,7 @@ const fetchTrendAndRender = async () => {
         ],
         series: [
           {
-            name: '新增资产',
+            name: '新增站点',
             type: 'line',
             smooth: true,
             symbolSize: 8,

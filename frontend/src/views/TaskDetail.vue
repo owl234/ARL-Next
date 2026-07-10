@@ -153,7 +153,7 @@
 
 
         <template v-else-if="column.key === 'screenshot'">
-          <img v-if="record.screenshot" :src="`/api${record.screenshot}`" style="width: 280px; cursor: pointer; border: 1px solid #f0f0f0;" @click="handlePreview(`/api${record.screenshot}`)" />
+          <img v-if="record.screenshot" :src="`/api${record.screenshot}`" style="width: 280px; height: 160px; object-fit: cover; object-position: top; cursor: pointer; border: 1px solid #f0f0f0; border-radius: 4px;" @click="handlePreview(`/api${record.screenshot}`)" />
           <span v-else>-</span>
         </template>
 <!--        插槽-->

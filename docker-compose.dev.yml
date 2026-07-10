@@ -7,7 +7,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     container_name: arl-web
-    command: bash -c "/code/backend/start_web.sh"
+    command: bash -c "/code/backend/start_web_dev.sh"
     working_dir: /code
     dns:
       - 223.5.5.5
@@ -33,7 +33,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     container_name: arl-worker
-    command: bash -c "/code/backend/start_worker.sh"
+    command: bash -c "/code/backend/start_worker_dev.sh"
     working_dir: /code
     dns:
       - 223.5.5.5

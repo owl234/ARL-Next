@@ -3,6 +3,8 @@
 
     <div style="display: flex; align-items: center; margin-bottom: 20px; gap: 16px;">
       <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" :loading="syncLoading" @click="handleSync">更新</a-button>
+      <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="isImportModalVisible = true">导入 PoC</a-button>
+      <a-button type="primary" style="background-color: #00bcd4; border-color: #00bcd4;" @click="downloadTemplate">下载模板</a-button>
 
       <a-popconfirm
           title="确认清空所有 PoC 数据吗？"
@@ -67,6 +69,22 @@
       <a-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" show-size-changer @change="handleTableChange" />
     </div>
 
+    <!-- 导入 PoC 弹窗 -->
+    <a-modal v-model:open="isImportModalVisible" title="导入 PoC 文件" :footer="null">
+      <a-upload-dragger
+        name="file"
+        :multiple="true"
+        action="/api/poc/import/"
+        :headers="uploadHeaders"
+        accept=".yml, .yaml, .py"
+        @change="handleUploadChange"
+      >
+        <p class="ant-upload-drag-icon"><inbox-outlined /></p>
+        <p class="ant-upload-text">点击或将文件拖拽到这里上传</p>
+        <p class="ant-upload-hint">支持单文件或多文件批量上传，仅支持 .yml, .yaml, .py 格式</p>
+      </a-upload-dragger>
+    </a-modal>
+
   </div>
 </template>
 
@@ -80,6 +98,67 @@ const loading = ref(false);
 const syncLoading = ref(false);
 const clearLoading = ref(false);
 const dataSource = ref([]);
+
+const isImportModalVisible = ref(false);
+const uploadHeaders = {
+  Token: localStorage.getItem('token') || ''
+};
+
+const handleUploadChange = (info) => {
+  const status = info.file.status;
+  if (status === 'done') {
+    const res = info.file.response;
+    if (res.code === 200) {
+      if (res.data.fail_count > 0) {
+         message.warning(`${info.file.name} 导入存在失败：${res.data.fail_details[0].reason}`);
+      } else {
+         message.success(`${info.file.name} 导入并同步成功`);
+      }
+      onSearch();
+    } else {
+      message.error(`${info.file.name} 导入失败: ${res.message}`);
+    }
+  } else if (status === 'error') {
+    message.error(`${info.file.name} 上传异常`);
+  }
+};
+
+const downloadTemplate = () => {
+  const templateStr = `from xing.core.BasePlugin import BasePlugin
+from xing.utils import http_req
+from xing.core import PluginType, SchemeType
+
+class Plugin(BasePlugin):
+    def __init__(self):
+        super(Plugin, self).__init__()
+        self.plugin_type = PluginType.POC
+        self.vul_name = "【必填】此处填写漏洞名称"
+        self.app_name = "【必填】应用名称"
+        self.scheme = [SchemeType.HTTPS, SchemeType.HTTP]
+
+    def verify(self, target):
+        # 1. 构造漏洞验证 URL
+        url = target + "/vuln_path"
+        
+        # 2. 发送请求
+        conn = http_req(url)
+        content = conn.content
+        
+        # 3. 判断是否触发漏洞
+        if conn.status_code == 200 and b"vuln_keyword" in content:
+            self.logger.success("发现漏洞 {}".format(self.target))
+            return url
+`;
+  const blob = new Blob([templateStr], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'poc_template.py';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
 
 const searchForm = reactive({ vul_name: '', app_name: '', category: '', scheme: '' });
 const pagination = reactive({ current: 1, pageSize: 10, total: 0 });

@@ -1,4 +1,7 @@
 from bson import ObjectId
+import os
+from flask import request
+from xing.conf import Conf as npoc_conf
 from flask_restx import Resource, Api, reqparse, fields, Namespace
 from app.utils import get_logger, auth
 from . import base_query_fields, ARLResource, get_arl_parser
@@ -71,3 +74,62 @@ class ARLPoCDelete(ARLResource):
         return utils.build_ret(ErrorMsg.Success, {"delete_cnt": delete_cnt})
 
 
+
+@ns.route('/import/')
+class ARLPoCImport(ARLResource):
+
+    @auth
+    def post(self):
+        """
+        导入 PoC 文件 (支持单文件和多文件)
+        """
+        if 'file' not in request.files:
+            return utils.build_ret(ErrorMsg.ParamError, {'error': 'No file part'})
+
+        files = request.files.getlist('file')
+        if not files or len(files) == 0:
+            return utils.build_ret(ErrorMsg.ParamError, {'error': 'No selected file'})
+
+        plugins_dir = npoc_conf.SYSTEM_PLUGINS_DIR
+        
+        success_count = 0
+        fail_count = 0
+        fail_details = []
+        
+        for file in files:
+            if file.filename == '':
+                continue
+                
+            # 只支持 .py, .yml, .yaml
+            ext = os.path.splitext(file.filename)[1].lower()
+            if ext not in ['.py', '.yml', '.yaml']:
+                fail_count += 1
+                fail_details.append({"filename": file.filename, "reason": "不支持的文件格式，仅支持 .py, .yml, .yaml"})
+                continue
+                
+            try:
+                # 简单防止路径穿越
+                safe_filename = os.path.basename(file.filename)
+                save_path = os.path.join(plugins_dir, safe_filename)
+                file.save(save_path)
+                success_count += 1
+            except Exception as e:
+                fail_count += 1
+                fail_details.append({"filename": file.filename, "reason": str(e)})
+
+        # 文件保存后，触发一次同步操作
+        n = NPoC()
+        plugin_cnt_before = len(n.plugin_name_list)
+        
+        try:
+            n.sync_to_db()
+            n.delete_db()
+        except Exception as e:
+            logger.error(f"PoC 同步失败: {e}")
+            return utils.build_ret(ErrorMsg.Error, {'error': f'PoC 保存成功，但同步到数据库时失败: {e}'})
+
+        return utils.build_ret(ErrorMsg.Success, {
+            "success_count": success_count,
+            "fail_count": fail_count,
+            "fail_details": fail_details
+        })

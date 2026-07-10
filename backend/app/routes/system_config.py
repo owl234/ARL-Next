@@ -74,20 +74,45 @@ class Performance(ARLResource):
     @ns.expect(performance_model)
     def post(self):
         """
-        更新性能配置
+        更新性能配置 (支持热扩缩容)
         """
         args = self.get_parser(performance_model).parse_args()
-        celery_concurrency = args.get('celery_concurrency', 2)
+        new_concurrency = args.get('celery_concurrency', 2)
 
-        # 简单校验
-        if celery_concurrency < 1:
-            celery_concurrency = 1
+        if new_concurrency < 1:
+            new_concurrency = 1
 
-        update_performance_config(celery_concurrency)
+        old_concurrency = get_performance_config()
+        diff = new_concurrency - old_concurrency
+
+        update_performance_config(new_concurrency)
+
+        msg = "性能配置更新成功，"
+        if diff != 0:
+            try:
+                from app.celerytask import celery as celery_app
+                active_nodes = celery_app.control.inspect().ping()
+                if active_nodes:
+                    target_nodes = [node for node in active_nodes.keys() if node.startswith('celery@arltask')]
+                    if target_nodes:
+                        if diff > 0:
+                            celery_app.control.broadcast('pool_grow', n=diff, destination=target_nodes)
+                            msg += f"已热扩容 {diff} 个并发进程！"
+                        else:
+                            celery_app.control.broadcast('pool_shrink', n=abs(diff), destination=target_nodes)
+                            msg += f"已热回收 {abs(diff)} 个并发进程！"
+                    else:
+                        msg += "未找到存活的 arltask 节点，指令将在下次重启生效。"
+                else:
+                    msg += "Celery服务未响应，指令将在下次重启生效。"
+            except Exception as e:
+                msg += f"尝试热扩缩容失败，请手动重启容器。"
+        else:
+            msg += "并发数未发生改变。"
 
         return {
             "code": 200,
-            "message": "性能配置更新成功，请手动重启Celery服务以生效"
+            "message": msg
         }
 
 
