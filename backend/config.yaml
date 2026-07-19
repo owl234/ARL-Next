@@ -3,7 +3,7 @@ CELERY:
 
 
 MONGO:
-  URI : 'mongodb://admin:admin@127.0.0.1:27018/'
+  URI : 'mongodb://admin:admin@127.0.0.1:27018/?authSource=admin'
   DB : 'arl'
 
 #GeoIP 数据库文件配置项
@@ -12,7 +12,7 @@ GEOIP:
   ASN: '/code/backend/GeoLite2/GeoLite2-ASN.mmdb'
 
 
-#Fofa API 配置�?
+#Fofa API 配置项
 FOFA:
   URL: "https://fofa.info"
   EMAIL: "已经不需要配置了"
@@ -33,8 +33,7 @@ QUERY_PLUGIN:
     enable: true
   crtsh:
     enable: true
-  fofa:  # fofa 的key配置在上�?
-  fofa:  # fofa 的key配置在上?
+  fofa:  # fofa 的key配置在上面
     enable: true
   hunter_qax: # 网站 https://hunter.qianxin.com/
     api_key: ""
@@ -62,18 +61,18 @@ QUERY_PLUGIN:
     enable: false
 
 
-#*** 监控任务消息推送配�?****
-#监控任务消息推送配置，支持钉钉，飞书，企业微信，邮�?
-#如果不需要推送，可以将所有配置项都留�?
+#*** 监控任务消息推送配置 ****
+#监控任务消息推送配置，支持钉钉，飞书，企业微信，邮件
+#如果不需要推送，可以将所有配置项都留空
 #文档：https://tophanttechnology.github.io/ARL-doc/config_option/?h=%E6%B6%88%E6%81%AF#_1
-#钉钉消息推送配�?
-#钉钉添加机器人，请查�?
+#钉钉消息推送配置
+#钉钉添加机器人，请查看
 #https://github.com/TophantTechnology/ARL/wiki/ARL%202.3%20%E6%96%B0%E6%B7%BB%E5%8A%A0%E5%8A%9F%E8%83%BD%E8%AF%B4%E6%98%8E
 DINGDING:
   SECRET: ""
   ACCESS_TOKEN: ""
 
-#邮件推送配�?
+#邮件推送配置
 EMAIL:
   HOST: ""
   PORT: ""
@@ -81,14 +80,14 @@ EMAIL:
   PASSWORD: ""
   TO: ""
 
-#飞书消息推送配�? 需要设置签名校�?
+#飞书消息推送配置 需要设置签名校验
 #https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot
 FEISHU:
   WEBHOOK_URL: ""
   SECRET: ""
 
 
-#企业微信消息推送配�?
+#企业微信消息推送配置
 #https://open.work.weixin.qq.com/help2/pc/14931
 WXWORK:
   WEBHOOK_URL: ""
@@ -107,7 +106,7 @@ WEBHOOK:
 GITHUB:
   TOKEN: ""
 
-#代理配置项，�?http://127.0.0.1:8080", 端口扫描不会走代�?
+#代理配置项，"http://127.0.0.1:8080", 端口扫描不会走代理
 PROXY:
   HTTP_URL: ""
 
@@ -122,7 +121,7 @@ ARL:
     - 100.64.0.0/10
     #- 10.0.0.0/8
     #- 192.168.0.0/16
-  ## 禁止域名，不可为空数�?
+  ## 禁止域名，不可为空数组
   FORBIDDEN_DOMAINS:
     - xxx.xx
   #端口对应前端测试选项
@@ -132,7 +131,7 @@ ARL:
   #文件泄漏字典
   FILE_LEAK_DICT: "/code/backend/app/dicts/file_top_2000.txt"
 
-  #域名爆破并发?
+  #域名爆破并发数
   DOMAIN_BRUTE_CONCURRENT: 300
   #组合生成的域名爆破并发数
   ALT_DNS_CONCURRENT: 1500

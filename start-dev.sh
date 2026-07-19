@@ -15,6 +15,8 @@ cd frontend
 if ! command -v pnpm &> /dev/null; then
     echo "⚠️ 提示：本地未检测到 pnpm 包管理器，尝试通过 npm 自动安装..."
     npm install -g pnpm || sudo npm install -g pnpm
+    # 确保 npm 全局 bin 目录在 PATH 中
+    export PATH="$(npm config get prefix)/bin:$PATH"
 fi
 
 echo "📥 正在安装前端 node_modules 依赖包 (首次运行较慢)..."

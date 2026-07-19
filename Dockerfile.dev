@@ -19,7 +19,7 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ bookworm main non-free contrib" 
     ca-certificates libnss3 libatk-bridge2.0-0 libgtk-3-0 libx11-xcb1 \
     libxcb-dri3-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
     libasound2 libxshmfence1 libdrm2 libxkbcommon0 libatspi2.0-0 libcups2 \
-    fontconfig nodejs npm fonts-wqy-zenhei fonts-wqy-microhei chromium=147.0.7727.137-1~deb12u1 chromium-common=147.0.7727.137-1~deb12u1
+    fontconfig nodejs npm fonts-wqy-zenhei fonts-wqy-microhei chromium chromium-common
 
 RUN npm config set registry https://registry.npmmirror.com/ && \
     npm install -g puppeteer-core@10.4.0
