@@ -66,8 +66,8 @@ class SyncAsset(object):
             query = {"scope_id": self.scope_id, category: data_content}
 
             if category == "wih":
-                query = {"scope_id": self.scope_id, "fnv_hash": data["fnv_hash"]}
-                data_content = data["fnv_hash"]
+                query = {"scope_id": self.scope_id, "site": data.get("site"), "fnv_hash": data["fnv_hash"]}
+                data_content = f"{data.get('site')}_{data['fnv_hash']}"
             elif category == "cert":
                 query = {"scope_id": self.scope_id, "ip": data.get("ip"), "cert.fingerprint.sha256": data.get("cert", {}).get("fingerprint", {}).get("sha256")}
                 data_content = f"{data.get('ip')}_{data.get('cert', {}).get('fingerprint', {}).get('sha256')}"
@@ -99,9 +99,6 @@ class SyncAsset(object):
             del data["_id"]
             data["scope_id"] = self.scope_id
 
-            # 如果site存在就先粗暴跳过
-            if category == "site" and self.site_in_asset_site(data["site"]):
-                continue
 
             old = conn(dist_collection).find_one(query)
             if old is None:

@@ -22,6 +22,43 @@ celery.conf.update(
 )
 platforms.C_FORCE_ROOT = True
 
+from celery.signals import task_prerun, task_postrun
+from app.utils import arl_task_id_var
+import threading
+_token_local = threading.local()
+
+@task_prerun.connect
+def setup_task_context(task_id, task, args, kwargs, **kw):
+    try:
+        options = None
+        if args and len(args) > 0:
+            options = args[0]
+        elif kwargs and 'options' in kwargs:
+            options = kwargs.get('options')
+            
+        business_task_id = "global"
+        if isinstance(options, dict):
+            if "data" in options:
+                business_task_id = options["data"].get("task_id") or options["data"].get("job_id", "global")
+            elif "task_id" in options:
+                business_task_id = options.get("task_id", "global")
+            elif "job_id" in options:
+                business_task_id = options.get("job_id", "global")
+                
+        token = arl_task_id_var.set(business_task_id)
+        _token_local.token = token
+    except Exception:
+        pass
+
+@task_postrun.connect
+def teardown_task_context(**kw):
+    token = getattr(_token_local, 'token', None)
+    if token:
+        try:
+            arl_task_id_var.reset(token)
+        except ValueError:
+            pass
+        _token_local.token = None
 
 @celery.task(queue=CeleryRoutingKey.ASSET_TASK)
 def arl_task(options):

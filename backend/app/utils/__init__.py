@@ -7,7 +7,18 @@ import os
 import re
 import sys
 import hashlib
+import threading
+import contextvars
+import concurrent.futures
 from celery.utils.log import get_task_logger
+
+arl_task_id_var = contextvars.ContextVar('arl_task_id', default='global')
+
+class ContextAwareThreadPoolExecutor(concurrent.futures.ThreadPoolExecutor):
+    def submit(self, fn, *args, **kwargs):
+        context = contextvars.copy_context()
+        return super().submit(context.run, fn, *args, **kwargs)
+
 import colorlog
 import logging
 import dns.resolver
@@ -20,7 +31,7 @@ except ImportError:
 
 from .conn import http_req, conn_db
 from .http import get_title, get_headers
-from .domain import check_domain_black, is_valid_domain, is_in_scope, is_in_scopes, is_valid_fuzz_domain
+from .domain import check_domain_black, is_valid_domain, is_in_scope, is_in_scopes, is_valid_fuzz_domain, is_forbidden_domain
 from .ip import is_vaild_ip_target, not_in_black_ips, get_ip_asn, get_ip_city, get_ip_type
 from .arl import arl_domain, get_asset_domain_by_id
 from .time import curr_date, time2date, curr_date_obj
@@ -77,26 +88,7 @@ def gen_md5(s):
 class MongoSyslogHandler(logging.Handler):
     def emit(self, record):
         try:
-            task_id = "global"
-            # 尝试从 celery 运行上下文中提取 task_id
-            if current_task:
-                task_obj = current_task._get_current_object()
-                if task_obj and hasattr(task_obj, 'arl_task_id'):
-                    task_id = task_obj.arl_task_id
-                elif current_task.request:
-                    options = None
-                    if current_task.request.args:
-                        options = current_task.request.args[0]
-                    elif current_task.request.kwargs and "options" in current_task.request.kwargs:
-                        options = current_task.request.kwargs["options"]
-                        
-                    if isinstance(options, dict):
-                        if "data" in options:
-                            task_id = options["data"].get("task_id") or options["data"].get("job_id", "global")
-                        elif "task_id" in options:
-                            task_id = options.get("task_id", "global")
-                        elif "job_id" in options:
-                            task_id = options.get("job_id", "global")
+            task_id = arl_task_id_var.get()
 
             level = record.levelname.lower()
             if level == 'warn':
@@ -109,7 +101,7 @@ class MongoSyslogHandler(logging.Handler):
                 "level": level,
                 "title": getattr(record, 'funcName', '系统运行'),
                 "message": str(record.getMessage()),
-                "create_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "create_time": datetime.now().replace(microsecond=0)
             }
             conn_db('syslog').insert_one(log_doc)
         except Exception:

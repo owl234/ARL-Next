@@ -17,7 +17,7 @@ def check_domain_black(domain):
 
     for item in blackdomain_list:
         item = item.strip()
-        if item and domain.endswith(item):
+        if item and (domain == item or domain.endswith("." + item)):
             return True
 
     if blackhexie_list is None:
@@ -32,7 +32,7 @@ def check_domain_black(domain):
                 return True
     except Exception as e:
         logger.warning("Error on: {}, {}".format(domain, e))
-        return True
+        return False
 
     return False
 

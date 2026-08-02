@@ -213,9 +213,21 @@
         </template>
 
         <template v-else-if="column.key === 'wih_site'">
-          <a :href="record.site" target="_blank" style="word-break: break-all;">
-            {{ record.site || '-' }}
-          </a>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <a :href="record.site" target="_blank" style="word-break: break-all;">
+              {{ record.site || '-' }}
+            </a>
+            <a-popover v-if="record.sites && record.sites.length > 1" placement="topLeft">
+              <template #content>
+                <div style="max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+                  <a v-for="(s, idx) in record.sites.slice(1)" :key="idx" :href="s" target="_blank" style="word-break: break-all;">
+                    {{ s }}
+                  </a>
+                </div>
+              </template>
+              <a-badge :count="`+${record.sites.length - 1} 站点`" :number-style="{ backgroundColor: '#1890ff', color: '#fff', cursor: 'pointer', borderRadius: '4px', padding: '0 6px', fontSize: '12px' }" />
+            </a-popover>
+          </div>
         </template>
 
       
@@ -252,11 +264,14 @@
         <template v-else-if="column.key === 'verify_data'">
           <div style="max-height: 100px; overflow-y: auto; color: #e57373; font-family: monospace; font-size: 12px; word-break: break-all;">{{ record.verify_data || record.proof || '-' }}</div>
         </template>
+        <template v-else-if="column.key === 'cidr_ip'">
+          <a style="cursor: pointer; font-family: monospace; font-size: 14px;" @click="openCidrDetail(record)">{{ record.cidr_ip || '-' }}</a>
+        </template>
         <template v-else-if="column.key === 'ip_count_col'">
-          <a style="cursor: pointer;">{{ record.ip_count || 0 }}</a>
+          <span>{{ record.ip_count || 0 }}</span>
         </template>
         <template v-else-if="column.key === 'domain_count_col'">
-          <a style="cursor: pointer;">{{ record.domain_count || 0 }}</a>
+          <span>{{ record.domain_count || 0 }}</span>
         </template>
         <template v-else-if="column.key === 'verify_command'">
           <div style="max-height: 100px; overflow-y: auto; background: var(--arl-bg-light); padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 12px; word-break: break-all;">{{ record.verify_command || record.curl_command || '-' }}</div>
@@ -302,6 +317,9 @@
         </template>
       </a-table>
     </a-modal>
+
+    <!-- 综合C段详情弹窗 (提取为组件) -->
+    <CidrDetailModal v-model:open="cipDetailModalVisible" :record="currentCidrRecord" />
 
     <!-- 图片预览组件 -->
     <a-modal v-model:open="previewVisible" :footer="null" width="85vw" centered @cancel="previewVisible = false" :bodyStyle="{ padding: '16px' }">
@@ -373,10 +391,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, watch, computed, createVNode } from 'vue';
+import { ref, onMounted, reactive, watch, computed, createVNode, onUnmounted, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
+import * as echarts from 'echarts';
+import CidrDetailModal from '../components/CidrDetailModal.vue';
 import { SearchOutlined , ExclamationCircleOutlined} from '@ant-design/icons-vue';
 
 const route = useRoute();
@@ -468,6 +488,15 @@ const openFingerModal = async (fingerName) => {
   } finally {
     fingerModalLoading.value = false;
   }
+};
+
+// C段详情弹窗 (提取为组件)
+const cipDetailModalVisible = ref(false);
+const currentCidrRecord = ref(null);
+
+const openCidrDetail = (record) => {
+  currentCidrRecord.value = record;
+  cipDetailModalVisible.value = true;
 };
 
 

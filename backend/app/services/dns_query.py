@@ -2,6 +2,7 @@ import logging
 import time
 import concurrent.futures
 from app import utils
+from app.utils import ContextAwareThreadPoolExecutor
 from app.config import Config
 
 
@@ -143,7 +144,7 @@ def run_query_plugin(target, sources=None):
 
     logger.debug(f"load plugins len:{len(plugins)} sources: {sources}")
 
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    with ContextAwareThreadPoolExecutor() as executor:
         futures = {executor.submit(run_plugin, p, target): p for p in plugins}
         for future in concurrent.futures.as_completed(futures):
             source_name, results = future.result()

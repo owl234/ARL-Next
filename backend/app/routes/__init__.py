@@ -24,6 +24,12 @@ EQUAL_FIELDS = [
 
 
 class ARLResource(Resource):
+    # 字段查询映射配置，子类可覆盖以实现特定字段的转换
+    query_field_map = {
+        "finger": "finger.name",
+        "record_type": "recordType"
+    }
+
     def get_parser(self, model, location='json'):
         """
         根据传入的模型（model）自动生成一个请求参数解析器（pareser）。
@@ -88,22 +94,12 @@ class ARLResource(Resource):
 
             # 2. 特殊处理 MongoDB 的主键 _id:必须把字符串转换成专属的 ObjectID 类型
             if key == '_id':
-                if args[key]:
+                if args[key] and len(args[key]) == 24:
                     try:
-                        # 如果长度刚好 24 位，尝试精确匹配
-                        if len(args[key]) == 24:
-                            query_args[key] = ObjectId(args[key])
-                        else:
-                            # 支持模糊匹配，利用 MongoDB 4.0+ 的 $expr, $indexOfCP 和 $toString
-                            query_args["$expr"] = {
-                                "$gte": [
-                                    {"$indexOfCP": [{"$toString": "$_id"}, args[key].lower()]},
-                                    0
-                                ]
-                            }
+                        query_args[key] = ObjectId(args[key])
                     except Exception:
-                        # 如果不是合法的 ObjectId，直接存原字符串，MongoDB查不到即可
-                        query_args[key] = args[key]
+                        pass
+                # 强制要求24位精确查询，丢弃非24位的不合法查询（禁止低效模糊匹配引发COLLSCAN）
                 continue
 
 
@@ -149,24 +145,26 @@ class ARLResource(Resource):
             # __neq 代表 not equal (不等于)
             elif key.endswith("__neq"):
                 real_key = key.split('__neq')[0]
+                actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
                 raw_value = {
                     "$ne": args[key]
                 }
-                query_args[real_key] = raw_value
+                query_args[actual_key] = raw_value
 
             # __eq 代表 completely equal (完全等于/精确匹配)
             elif key.endswith("__eq"):
                 real_key = key.split('__eq')[0]
-                actual_key = "finger.name" if real_key == "finger" else real_key
+                actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
                 query_args[actual_key] = args[key]
 
             # __not 代表正则不匹配
             elif key.endswith("__not"):
                 real_key = key.split('__not')[0]
+                actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
                 raw_value = {
                     "$not": re.compile(re.escape(args[key]))
                 }
-                query_args[real_key] = raw_value
+                query_args[actual_key] = raw_value
 
             # __gt 代表数字大于 (greater than)
             elif key.endswith("__gt") and isinstance(args[key], int):
@@ -186,7 +184,7 @@ class ARLResource(Resource):
 
             # 5. 普通字符串处理（如果没有上面那些花里胡哨的后缀）
             elif isinstance(args[key], str):
-                actual_key = "finger.name" if key == "finger" else key
+                actual_key = getattr(self, "query_field_map", {}).get(key, key)
                 
                 # 如果是设定好的必须绝对相等的字段（比如 task_id），直接赋值
                 if key in EQUAL_FIELDS:
@@ -217,8 +215,8 @@ class ARLResource(Resource):
 
         # 定义一张“特殊重点关照名单”
         # _id 是 MongoDB 专属的 ObjectId 类型
-        # save_date, update_date 可能是 Python 的 datetime 时间对象
-        special_keys = ["_id", "save_date", "update_date"]
+        # save_date, update_date, create_time 可能是 Python 的 datetime 时间对象
+        special_keys = ["_id", "save_date", "update_date", "create_time"]
 
         # 第一层循环：遍历查出来的每一条数据（每一行记录）
         for item in data:
@@ -274,7 +272,7 @@ class ARLResource(Resource):
 
         # 6. 【扫尾工作】：把查询条件 query 里的特殊对象也变成普通字符串
         # 为什么要搞这一步？因为 ARL 习惯把查询条件原封不动地返回给前端，方便调试或展示
-        special_keys = ["_id", "save_date", "update_date"]
+        special_keys = ["_id", "save_date", "update_date", "create_time"]
         for key in query:
             if key in special_keys:
                 query[key] = str(query[key])
@@ -412,7 +410,14 @@ class ARLResource(Resource):
                         # 把 IP 和 端口 拼起来，格式化成 "IP:Port" (比如 192.168.1.1:80)，扔进篮子
                         items_set.add("{}:{}".format(curr_ip, port_info["port_id"]))
 
-                # 6. 【常规处理】如果是其他类型（比如域名、URL）
+                # 6. 【特殊处理】WIH 信息导出需保留业务上下文
+                elif _type in ("wih", "asset_wih"):
+                    record_type = item.get("recordType", "unknown")
+                    site = item.get("site", "unknown_site")
+                    content = item.get(filed_name, "")
+                    items_set.add(f"{site} [{record_type}] {content}")
+
+                # 7. 【常规处理】如果是其他类型（比如域名、URL）
                 else:
                     # 直接把对应的值扔进篮子即可
                     items_set.add(item[filed_name])
@@ -460,6 +465,43 @@ class ARLResource(Resource):
         # 文件名的前缀会根据表名和字段名自动生成，比如 f"user_email"
         return self.send_file(items_set, f"{collection}_{field}")
 
+    def _extract_items_to_set(self, _type, query, filed_name, items_set):
+        """
+        统一的数据抽取引擎 (解决不一致性与内存溢出问题)
+        """
+        if not filed_name:
+            return
+
+        # 1. 复杂类型：需要业务上下文，使用 find + 精确投影(Projection) 防止内存溢出
+        if _type in ("ip", "asset_ip"):
+            # 仅投影所需的字段
+            cursor = conn(_type).find(query, {"ip": 1, "port_info.port_id": 1, "_id": 0})
+            for item in cursor:
+                curr_ip = item.get("ip")
+                if not curr_ip:
+                    continue
+                port_infos = item.get("port_info", [])
+                if port_infos:
+                    for port_info in port_infos:
+                        items_set.add("{}:{}".format(curr_ip, port_info.get("port_id", "")))
+                else:
+                    items_set.add(curr_ip)
+
+        elif _type in ("wih", "asset_wih"):
+            cursor = conn(_type).find(query, {"site": 1, "recordType": 1, filed_name: 1, "_id": 0})
+            for item in cursor:
+                if not item.get(filed_name):
+                    continue
+                record_type = item.get("recordType", "unknown")
+                site = item.get("site", "unknown_site")
+                content = item.get(filed_name, "")
+                items_set.add(f"{site} [{record_type}] {content}")
+
+        # 2. 简单类型：无业务上下文，直接使用数据库级别的 distinct 高效去重
+        else:
+            items = conn(_type).distinct(filed_name, query)
+            items_set |= set(items)
+
     def send_batch_export_file(self, task_id_list, _type):
         """
         批量导出核心逻辑:根据传入的多个任务ID,把它们的数据合并去重后,打包成文件发给前端.
@@ -481,27 +523,18 @@ class ARLResource(Resource):
         items_set = set()
 
         # 3. 去说明书里查一下当前要提取哪个字段
-        # （原作者在这里拼写错了，把 field 拼成了 filed，不过不影响代码运行，咱们心里清楚就行）
         filed_name = _type_map_field_name.get(_type, "")
 
         # 4. 遍历前端传过来的每一个任务 ID
         for task_id in task_id_list:
-            # 【安全防御】：如果这类型的数据不在说明书里，或者遇到个空的 task_id，直接跳过，看下一个
-            if not filed_name:
-                continue
-            if not task_id:
+            if not filed_name or not task_id:
                 continue
 
-            # 5. 组装查询条件：我要查归属于当前这个 task_id 的数据
+            # 5. 组装查询条件
             query = {"task_id": task_id}
 
-            # 6. 【核心高阶操作】：直接让 MongoDB 数据库帮我们去重提取！
-            # conn(_type) 是连接到对应的表
-            # .distinct(字段名, 查询条件) 的意思是：去数据库里把符合条件的指定字段全拿出来，并且数据库层面直接去重！
-            items = conn(_type).distinct(filed_name, query)
-
-            # 7. 把从数据库拿回来的结果（已经是一个列表了），倒进我们的总草稿本里，合并去重
-            items_set |= set(items)
+            # 6. 调用统一抽取引擎提取数据
+            self._extract_items_to_set(_type, query, filed_name, items_set)
 
         # 8. 循环结束，所有的任务数据都合并完了，交给发货员去打包下载
         return self.send_file(items_set, _type)
@@ -516,7 +549,6 @@ class ARLResource(Resource):
         """
 
         # 1. 专门针对“资产库(asset)”的提取说明书
-        # 和之前的任务导出不同，这里查的都是 asset_ 开头的表
         _type_map_field_name = {
             "asset_site": "site",       # 如果导资产站点，提取 site 字段
             "asset_domain": "domain",   # 如果导资产域名，提取 domain 字段
@@ -527,25 +559,19 @@ class ARLResource(Resource):
         # 2. 准备全局去重草稿本 (Set)
         items_set = set()
 
-        # 3. 查说明书，拿到要提取的字段名（作者依然保留了 filed_name 的拼写错误）
+        # 3. 查说明书，拿到要提取的字段名
         filed_name = _type_map_field_name.get(_type, "")
 
         # 4. 遍历前端选中的每一个资产组 ID
         for scope_id in scope_id_list:
-            # 安全拦截：如果没有查到要提取的字段，或者资产组 ID 为空，直接跳过
-            if not filed_name:
-                continue
-            if not scope_id:
+            if not filed_name or not scope_id:
                 continue
 
-            # 5. 组装查询条件：这次是查归属于当前 scope_id 的数据
+            # 5. 组装查询条件
             query = {"scope_id": scope_id}
 
-            # 6. 高阶查库：让 MongoDB 数据库直接吐出当前资产组下，去重后的干干净净的数据列表
-            items = conn(_type).distinct(filed_name, query)
-
-            # 7. 将当前资产组的数据合并进总草稿本，利用 Set(集合) 自动去除跨资产组的重复数据
-            items_set |= set(items)
+            # 6. 调用统一抽取引擎提取数据
+            self._extract_items_to_set(_type, query, filed_name, items_set)
 
         # 8. 全部合并完毕，调用发货程序打包成 txt 下载
         return self.send_file(items_set, _type)

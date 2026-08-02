@@ -87,8 +87,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             assetType: {
               type: "string",
-              description: "要搜索的资产类型。可选值：'site' (网站), 'ip' (IP地址), 'domain' (域名), 'cert' (证书), 'service' (开放端口/服务)",
-              enum: ["site", "ip", "domain", "cert", "service"]
+              description: "要搜索的资产类型。可选值：'site' (网站), 'ip' (IP地址), 'domain' (域名), 'cert' (证书), 'service' (开放端口/服务), 'asset_wih' (WIH信息)",
+              enum: ["site", "ip", "domain", "cert", "service", "asset_wih"]
             },
             query: {
               type: "string",
@@ -193,7 +193,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     if (name === "search_assets") {
       const { assetType, query, page = 1, size = 10 } = args;
-      const allowedAssets = ["site", "ip", "domain", "cert", "service"];
+      const allowedAssets = ["site", "ip", "domain", "cert", "service", "asset_wih"];
       if (!allowedAssets.includes(assetType)) {
         return { content: [{ type: "text", text: `Error: Invalid assetType '${assetType}'` }], isError: true };
       }

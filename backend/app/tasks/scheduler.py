@@ -1,6 +1,6 @@
 from celery import current_task
 from bson import ObjectId
-from app.utils import conn_db as conn
+from app.utils import conn_db as conn, arl_task_id_var
 from .domain import DomainTask
 from .ip import IPTask
 from app import utils
@@ -74,8 +74,7 @@ def wrap_domain_executors(base_domain=None, job_id=None, scope_id=None, options=
     conn('task').insert_one(task_data)
     task_id = str(task_data.pop("_id"))
     
-    if current_task._get_current_object():
-        current_task._get_current_object().arl_task_id = task_id
+    arl_task_id_var.set(task_id)
         
     domain_executor = DomainExecutor(base_domain, task_id, task_data["options"])
     try:
@@ -249,8 +248,7 @@ class IPExecutor(IPTask):
         conn('task').insert_one(task_data)
         self.task_id = str(task_data.pop("_id"))
         
-        if current_task._get_current_object():
-            current_task._get_current_object().arl_task_id = self.task_id
+        arl_task_id_var.set(self.task_id)
             
         # base_update_task 初始化在前，再设置回task_id
         self.base_update_task.task_id = self.task_id

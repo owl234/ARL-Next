@@ -14,7 +14,7 @@ def find_site_info_by_scope_id(scope_id):
     query = {
         "scope_id": scope_id
     }
-    fields = ["site", "title", "status"]
+    fields = ["site", "title", "status", "body_length"]
     show_map = build_show_filed_map(fields)
     items = utils.conn_db('asset_site').find(query, show_map)
     return list(items)

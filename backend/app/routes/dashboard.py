@@ -10,13 +10,6 @@ from bson.objectid import ObjectId
 ns = Namespace('dashboard', description="仪表盘接口")
 logger = get_logger()
 
-# 在模块加载时确保 syslog 拥有 30 天 TTL 索引
-try:
-    # 2592000 秒 = 30天
-    conn('syslog').create_index([("create_time", 1)], expireAfterSeconds=2592000, background=True)
-except Exception as e:
-    logger.error("syslog ttl index error: {}".format(e))
-
 @ns.route('/stats')
 class DashboardStats(ARLResource):
     @auth
@@ -110,7 +103,11 @@ class DashboardLogs(ARLResource):
         """获取系统最新动态"""
         # 取最新的10条 syslog
         cursor = conn('syslog').find({}, {"_id": 0}).sort("create_time", -1).limit(10)
-        logs = list(cursor)
+        logs = []
+        for log in cursor:
+            if "create_time" in log:
+                log["create_time"] = str(log["create_time"])
+            logs.append(log)
         
         # 如果表是空的，预置一条启动日志方便前端展示
         if not logs:

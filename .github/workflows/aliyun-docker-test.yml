@@ -5,16 +5,16 @@ on:
     branches:
       - 'main'
     tags:
-      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+      - 'v*'
   workflow_dispatch: # Allow manual trigger
 
 env:
   ALIYUN_REGISTRY: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com
-  ALIYUN_NAMESPACE: owl234-arl-prod
+  ALIYUN_NAMESPACE: owl234-arl-prod-test
 
 jobs:
   push-official-images:
-    if: github.repository == 'owl234/ARL-Next'
+    if: github.repository == 'owl234/ARL-Next-Test'
     runs-on: ubuntu-latest
     steps:
       - name: Login to Aliyun Container Registry
@@ -38,7 +38,7 @@ jobs:
           docker push ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/autoheal:latest
 
   build-frontend:
-    if: github.repository == 'owl234/ARL-Next'
+    if: github.repository == 'owl234/ARL-Next-Test'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -57,7 +57,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
-          file: ./frontend/Dockerfile.prod
+          file: ./frontend/Dockerfile.test
           platforms: linux/amd64
           push: true
           tags: ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/arl-frontend:latest
@@ -65,15 +65,15 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-web-worker:
-    if: github.repository == 'owl234/ARL-Next'
+    if: github.repository == 'owl234/ARL-Next-Test'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Pre-build check for critical deployment files
         run: |
-          if ! grep -q "COPY ./version.txt ./start-prod.sh ./docker-compose.prod.yml /code/" Dockerfile.prod; then
-            echo "::error::Dockerfile.prod is missing the critical COPY instruction for deployment scripts. This will break the domestic one-click deployment!"
+          if ! grep -q "COPY ./version.txt ./start-test.sh ./docker-compose.test.yml /code/" Dockerfile.test; then
+            echo "::error::Dockerfile.test is missing the critical COPY instruction for deployment scripts. This will break the domestic one-click deployment!"
             exit 1
           fi
       - name: Set up QEMU
@@ -90,7 +90,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile.prod
+          file: ./Dockerfile.test
           platforms: linux/amd64
           push: true
           tags: |
@@ -100,7 +100,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-puppeteer:
-    if: github.repository == 'owl234/ARL-Next'
+    if: github.repository == 'owl234/ARL-Next-Test'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -127,7 +127,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-osint:
-    if: github.repository == 'owl234/ARL-Next'
+    if: github.repository == 'owl234/ARL-Next-Test'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

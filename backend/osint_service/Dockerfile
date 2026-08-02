@@ -1,5 +1,5 @@
 # 阶段一：构建依赖环境
-FROM python:3.11-slim AS builder
+FROM python:3.13-slim AS builder
 
 WORKDIR /osint_service
 
@@ -19,7 +19,7 @@ RUN uv pip install --no-cache -r requirements.txt && \
     pip uninstall -y pip setuptools
 
 # 阶段二：生产运行环境 (强制遵守纯净运行环境红线)
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /osint_service
 

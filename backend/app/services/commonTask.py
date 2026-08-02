@@ -95,7 +95,7 @@ class CommonTask(object):
 
 # *** 对用户提交的站点或者是发现的站点进行后续处理
 class WebSiteFetch(object):
-    def __init__(self, task_id: str, sites: list, options: dict, scope_domain: list = None):
+    def __init__(self, task_id: str, sites: list, options: dict, scope_domain: list = None, domain_black_list: list = None):
         self.task_id = task_id
         self.sites = sites  # ** 这个是用户提交的目标
         self.options = options
@@ -109,8 +109,12 @@ class WebSiteFetch(object):
         # 用于判断应该收集的子域名
         if not scope_domain:
             scope_domain = []
+            
+        if not domain_black_list:
+            domain_black_list = []
 
         self.scope_domain = scope_domain
+        self.domain_black_list = domain_black_list
         self.page_url_set = set()
         self.search_engines_result = dict()
         self._poc_sites = None  # 用于PoC 执行， 文件目录爆破 的目标
@@ -306,20 +310,22 @@ class WebSiteFetch(object):
             self.search_engines_result[ret_url] = entry_urls
 
     def add_wih_domain_set(self, record):
-        if self.scope_domain:
-            if record.recordType == "domain":
-                # 如果是域名，需要判断是否在域名范围内
+        if self.domain_black_list:
+            if domain_in_scope_domain(record.content, self.domain_black_list):
+                return
+
+        if record.recordType == "domain":
+            if self.scope_domain:
                 if not domain_in_scope_domain(record.content, self.scope_domain):
                     return
+            
+            if utils.check_domain_black(record.content) or utils.is_forbidden_domain(record.content):
+                return
 
-                if utils.check_domain_black(record.content):
-                    return
+            if record.content in self.wih_domain_set:
+                return
 
-                # 在域名范围内，需要判断是否已经存在
-                if record.content in self.wih_domain_set:
-                    return
-
-                self.wih_domain_set.add(record.content)
+            self.wih_domain_set.add(record.content)
 
     def run_web_info_hunter(self):
         records = set(services.run_wih(self.sites))
@@ -332,7 +338,7 @@ class WebSiteFetch(object):
 
             item = record.dump_json()
             item["task_id"] = self.task_id
-            utils.safe_insert_asset('wih', ['task_id', 'site', 'url'], item)
+            utils.safe_insert_asset('wih', ['task_id', 'site', 'fnv_hash'], item)
             self.wih_record_set.add(record.fnv_hash)
 
     def run(self):

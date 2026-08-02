@@ -40,25 +40,32 @@ class InfoHunter(object):
             logger.warning(e)
 
     def exec_wih(self):
-        command = [self.wih_bin_path,
-                   "-r {}".format(Config.WIH_RULE_PATH),
+        import shlex
+        def safe_quote(s):
+            return shlex.quote(str(s).strip('\'"'))
+            
+        command = [safe_quote(self.wih_bin_path),
+                   "-r {}".format(safe_quote(Config.WIH_RULE_PATH)),
                    "-J",
-                   "-o {}".format(self.wih_result_path),
-                   "--concurrency 3",  # 并发数
+                   "-o {}".format(safe_quote(self.wih_result_path)),
+                   "--concurrency 2",  # 并发数
                    "--log-level zero",  # 不输出日志
                    "--concurrency-per-site 1",  # 每个站点的并发数
                    "--disable-ak-sk-output",  # 禁止 AK/SK 单独保存
-                   "-t {}".format(self.wih_target_path),
+                   "-t {}".format(safe_quote(self.wih_target_path)),
                    ]
 
         if Config.PROXY_URL:
-            command.append("--proxy {}".format(Config.PROXY_URL))
+            command.append("--proxy {}".format(safe_quote(Config.PROXY_URL)))
 
         logger.info(" ".join(command))
         utils.exec_system(command, timeout=5 * 24 * 60 * 60)
 
     def check_have_wih(self) -> bool:
-        command = [self.wih_bin_path, "--version"]
+        import shlex
+        def safe_quote(s):
+            return shlex.quote(str(s).strip('\'"'))
+        command = [safe_quote(self.wih_bin_path), "--version"]
         try:
             output = utils.check_output(command, timeout=2 * 60)
             if "version:" in str(output):
@@ -81,20 +88,37 @@ class InfoHunter(object):
                 if not line:
                     break
 
-                data = json.loads(line)
-                site = data["target"]
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Error decoding json wih result: {e}")
+                    continue
+                
+                try:
+                    site = data["target"]
+                except KeyError:
+                    logger.error(f"Error parsing wih result line, missing 'target': {line}")
+                    continue
+                    
                 records = data.get("records", [])
                 for item in records:
-                    content = item["content"]
-                    if item["tag"]:
-                        content = "{} ({})".format(content, item["tag"])
+                    content = item.get("content", "")
+                    source = item.get("source", "")
+                    if item.get("tag"):
+                        source = "{} [{}]".format(source, item.get("tag"))
+
+                    fnv_hash = item.get("hash")
+                    if not fnv_hash:
+                        import hashlib
+                        raw_str = f"{site}_{content}_{source}".encode('utf-8')
+                        fnv_hash = hashlib.md5(raw_str).hexdigest()
 
                     record_dict = {
-                        "record_type": item["id"],
+                        "record_type": item.get("id", "unknown"),
                         "content": content,
-                        "source": item["source"],
+                        "source": source,
                         "site": site,
-                        "fnv_hash": item["hash"],
+                        "fnv_hash": fnv_hash,
                     }
 
                     results.append(WihRecord(**record_dict))
@@ -119,6 +143,10 @@ class InfoHunter(object):
 
 def run_wih(sites: List[str]) -> List[WihRecord]:
     logger.info("run webInfoHunter, sites: {}".format(len(sites)))
+    
+    if not sites:
+        return []
+
     hunter = InfoHunter(sites)
     results = hunter.run()
 

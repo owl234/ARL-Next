@@ -301,11 +301,13 @@ const handleLogout = () => {
 
 // 监听路由变化，保持左侧菜单高亮的一致性
 watch(() => route.path, (newPath) => {
-  // 如果当前在详情页，依然让“任务管理”菜单亮起
+  // 如果当前在详情页，依然让相应的菜单亮起
   if (newPath.startsWith('/taskList')) {
     selectedKeys.value = ['/taskList'];
   } else if (newPath.startsWith('/assetRecon')) {
     selectedKeys.value = ['/assetRecon'];
+  } else if (newPath.startsWith('/group')) {
+    selectedKeys.value = ['/group'];
   } else {
     selectedKeys.value = [newPath];
   }

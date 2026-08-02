@@ -327,12 +327,16 @@
           </div>
         </template>
 
+        <template v-else-if="column.key === 'cidr_ip'">
+          <a style="cursor: pointer; font-family: monospace; font-size: 14px;" @click="openCidrDetail(record)">{{ record.cidr_ip || '-' }}</a>
+        </template>
+
         <template v-else-if="column.key === 'ip_count_col'">
-          <a style="cursor: pointer;">{{ record.ip_count || 0 }}</a>
+          <span>{{ record.ip_count || 0 }}</span>
         </template>
 
         <template v-else-if="column.key === 'domain_count_col'">
-          <a style="cursor: pointer;">{{ record.domain_count || 0 }}</a>
+          <span>{{ record.domain_count || 0 }}</span>
         </template>
 
         <template v-else-if="column.key === 'verify_command'">
@@ -352,13 +356,28 @@
         </template>
 
         <template v-else-if="column.key === 'wih_site'">
-          <a :href="record.site" target="_blank" style="word-break: break-all;">
-            {{ record.site || '-' }}
-          </a>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <a :href="record.site" target="_blank" style="word-break: break-all;">
+              {{ record.site || '-' }}
+            </a>
+            <a-popover v-if="record.sites && record.sites.length > 1" placement="topLeft">
+              <template #content>
+                <div style="max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+                  <a v-for="(s, idx) in record.sites.slice(1)" :key="idx" :href="s" target="_blank" style="word-break: break-all;">
+                    {{ s }}
+                  </a>
+                </div>
+              </template>
+              <a-badge :count="`+${record.sites.length - 1} 站点`" :number-style="{ backgroundColor: '#1890ff', color: '#fff', cursor: 'pointer', borderRadius: '4px', padding: '0 6px', fontSize: '12px' }" />
+            </a-popover>
+          </div>
         </template>
 
       </template>
     </a-table>
+
+    <!-- 综合C段详情弹窗 (提取为组件) -->
+    <CidrDetailModal v-model:open="cipDetailModalVisible" :record="currentCidrRecord" />
 
     <div v-if="tabConfig[activeTab]" style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px; margin-top: 16px;">
       <div style="color: var(--arl-text-color); opacity: 0.65;">共 {{ Math.ceil(pagination.total / pagination.pageSize) || 1 }} 页 / {{ pagination.total }} 条数据</div>
@@ -430,6 +449,7 @@ import { useRoute } from 'vue-router';
 import request from '../utils/request';
 import { message } from 'ant-design-vue';
 import { SearchOutlined } from '@ant-design/icons-vue';
+import CidrDetailModal from '../components/CidrDetailModal.vue';
 
 const route = useRoute();
 const activeTab = ref('site');
@@ -951,6 +971,17 @@ const submitRiskTask = async () => {
 // 标签管理逻辑
 const tagVisible = ref(false);
 const tagSubmitLoading = ref(false);
+
+// C段详情弹窗 (提取为组件)
+const cipDetailModalVisible = ref(false);
+const currentCidrRecord = ref(null);
+
+const openCidrDetail = (record) => {
+  currentCidrRecord.value = record;
+  cipDetailModalVisible.value = true;
+};
+
+// 当前行操作菜单
 const newTagValue = ref('');
 const currentTagRecord = ref(null);
 

@@ -372,7 +372,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"系统登录\" || body=\"res/icon/key.png\" || body=\"login\""
+        "fofa_rule": "body=\"系统登录\" || body=\"res/icon/key.png\""
     },
     "东胜物流软件": {
         "cats": [
@@ -724,7 +724,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"css/fw/full.css\" || body=\"js/p/login.js\" || body=\"login\""
+        "fofa_rule": "body=\"css/fw/full.css\" || body=\"js/p/login.js\""
     },
     "TP-LINK 产品": {
         "cats": [
@@ -1058,7 +1058,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"javascript:document.form1.uname.focus()\" || body=\"Office Anywhere\" || body=\"/static/templates/2013_01/index.css/\" || body=\"/images/tongda.ico\" || body=\"通达OA\" || body=\"<a href='http://www.tongda2000.com/' target='_black'>通达官网</a>\" || body=\"紧急通知：今日10点停电\" || body=\"href=\\\"/static/images/tongda.ico\\\"\" || body=\"tongda2000\" || body=\"login\" || body=\"<link rel=\\\"shortcut icon\\\" href=\\\"/images/tongda.ico\\\" />\" || body=\"oa提示：不能登录oa\""
+        "fofa_rule": "body=\"javascript:document.form1.uname.focus()\" || body=\"Office Anywhere\" || body=\"/static/templates/2013_01/index.css/\" || body=\"/images/tongda.ico\" || body=\"通达OA\" || body=\"<a href='http://www.tongda2000.com/' target='_black'>通达官网</a>\" || body=\"紧急通知：今日10点停电\" || body=\"href=\\\"/static/images/tongda.ico\\\"\" || body=\"tongda2000\" || body=\"<link rel=\\\"shortcut icon\\\" href=\\\"/images/tongda.ico\\\" />\" || body=\"oa提示：不能登录oa\""
     },
     "深信服一体化网关 MIG": {
         "cats": [
@@ -7180,7 +7180,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"Grafana\" || body=\"login\" || body=\"grafana-app\" || body=\"<title>Grafana</title>\" || body=\"grafana\\..+\\.com/public/build/\" || body=\"__grafana_public_path__\""
+        "fofa_rule": "body=\"Grafana\" || body=\"grafana-app\" || body=\"<title>Grafana</title>\" || body=\"grafana\\..+\\.com/public/build/\" || body=\"__grafana_public_path__\""
     },
     "Canal Admin": {
         "cats": [
@@ -7239,7 +7239,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"中新金盾信息安全管理系统\" || body=\"login\" || body=\"useusbkey\""
+        "fofa_rule": "body=\"中新金盾信息安全管理系统\" || body=\"useusbkey\""
     },
     "中成科信 综合管理平台": {
         "cats": [
@@ -7310,7 +7310,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"SANGFOR\" || body=\"NGAF\" || body=\"login\""
+        "fofa_rule": "body=\"SANGFOR\" || body=\"NGAF\""
     },
     "IBM HTTP Server": {
         "cats": [
@@ -7341,7 +7341,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"nps\" || body=\"ehang\" || body=\"login\""
+        "fofa_rule": "body=\"nps\" || body=\"ehang\""
     },
     "群晖 DiskStation": {
         "cats": [
@@ -7373,7 +7373,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"rjsslvpn_encookie\" || body=\"SSLVPN\" || body=\"login\" || body=\"document.cookie = \\\"rjsslvpn_encookie=yes;\\\"\" || body=\"rjweb\""
+        "fofa_rule": "body=\"rjsslvpn_encookie\" || body=\"SSLVPN\" || body=\"document.cookie = \\\"rjsslvpn_encookie=yes;\\\"\" || body=\"rjweb\""
     },
     "蜂网企业流控云路由器": {
         "cats": [
@@ -7388,7 +7388,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"ifw8\" || body=\"企业级流控云路由器\" || body=\"login\""
+        "fofa_rule": "body=\"ifw8\" || body=\"企业级流控云路由器\""
     },
     "网御 安全网关": {
         "cats": [
@@ -7403,7 +7403,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"安全系统\" || body=\"网御星云\" || body=\"login\""
+        "fofa_rule": "body=\"安全系统\" || body=\"网御星云\""
     },
     "Citrix Access Gateway": {
         "cats": [
@@ -7417,7 +7417,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"Citrix Access Gateway\" || body=\"login\""
+        "fofa_rule": "body=\"Citrix Access Gateway\""
     },
     "深信服安全感知平台": {
         "cats": [
@@ -7475,7 +7475,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"流媒体管理服务器\" || body=\"MSHTML\" || body=\"login\""
+        "fofa_rule": "body=\"流媒体管理服务器\" || body=\"MSHTML\""
     },
     "noVNC 远程访问": {
         "cats": [
@@ -7881,7 +7881,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"微擎 - 公众平台自助引擎\" || body=\"www.w7.cc\" || body=\"login\""
+        "fofa_rule": "body=\"微擎 - 公众平台自助引擎\" || body=\"www.w7.cc\""
     },
     "Jspxcms": {
         "cats": [
@@ -8030,7 +8030,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"Welcome to Hue\" || body=\"Query. Explore.\" || body=\"login\""
+        "fofa_rule": "body=\"Welcome to Hue\" || body=\"Query. Explore.\""
     },
     "亿邮邮件系统": {
         "cats": [
@@ -8074,7 +8074,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"网神信息技术\" || body=\"login\" || body=\"防火墙\""
+        "fofa_rule": "body=\"网神信息技术\" || body=\"防火墙\""
     },
     "中腾OA": {
         "cats": [
@@ -8089,7 +8089,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"systemAction\" || body=\"zt_webframe\" || body=\"login\""
+        "fofa_rule": "body=\"systemAction\" || body=\"zt_webframe\""
     },
     "Igenus邮件系统": {
         "cats": [
@@ -8219,7 +8219,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"ER6300G2\" || body=\"h3c.com\" || body=\"login\""
+        "fofa_rule": "body=\"ER6300G2\" || body=\"h3c.com\""
     },
     "H3C ER3100": {
         "cats": [
@@ -8234,7 +8234,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"ER3100\" || body=\"h3c.com\" || body=\"login\""
+        "fofa_rule": "body=\"ER3100\" || body=\"h3c.com\""
     },
     "SDCMS神盾内容管理系统": {
         "cats": [
@@ -8248,7 +8248,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"sdcms\" || body=\"login\""
+        "fofa_rule": "body=\"sdcms\""
     },
     "天迈科技网络视频监控系统": {
         "cats": [
@@ -8531,7 +8531,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"ruoyi\" || body=\"login\""
+        "fofa_rule": "body=\"ruoyi\""
     },
     "万户 OA": {
         "cats": [
@@ -8561,7 +8561,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"全息AI\" || body=\"g_is_hk\" || body=\"login\""
+        "fofa_rule": "body=\"全息AI\" || body=\"g_is_hk\""
     },
     "天融信产品": {
         "cats": [
@@ -8603,7 +8603,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"module=login\" || body=\"topsec\" || body=\"login\""
+        "fofa_rule": "body=\"module=login\" || body=\"topsec\""
     },
     "天融信 Reporter": {
         "cats": [
@@ -8618,7 +8618,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"Login @ Reporter\" || body=\"topsec\" || body=\"login\""
+        "fofa_rule": "body=\"Login @ Reporter\" || body=\"topsec\""
     },
     "易瑞授权访问系统": {
         "cats": [
@@ -8790,7 +8790,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"spon_base64.js\" || body=\"login\""
+        "fofa_rule": "body=\"spon_base64.js\""
     },
     "NVS3000综合视频监控平台": {
         "cats": [
@@ -8805,7 +8805,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"视频监控\" || body=\"NVS3000综合\" || body=\"login\""
+        "fofa_rule": "body=\"视频监控\" || body=\"NVS3000综合\""
     },
     "银达汇智 智慧综合管理平台": {
         "cats": [
@@ -9162,7 +9162,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"easypanel\" || body=\"vhost\" || body=\"login\" || body=\"/vhost/view/default/style/login.css\""
+        "fofa_rule": "body=\"easypanel\" || body=\"vhost\" || body=\"/vhost/view/default/style/login.css\""
     },
     "明源云 ERP": {
         "cats": [
@@ -9401,7 +9401,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"reporter\" || body=\"login\" || body=\"action.php\""
+        "fofa_rule": "body=\"reporter\" || body=\"action.php\""
     },
     "智邦国际-企业管理软件": {
         "cats": [
@@ -9475,7 +9475,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"DPSSLVPN\" || body=\"SSL VPN Service\" || body=\"login\""
+        "fofa_rule": "body=\"DPSSLVPN\" || body=\"SSL VPN Service\""
     },
     "百卓byzoro-安全网关": {
         "cats": [
@@ -9930,7 +9930,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"login\" || body=\"v3/js/odm/odm.js\""
+        "fofa_rule": "body=\"v3/js/odm/odm.js\""
     },
     "锐捷防火墙": {
         "cats": [
@@ -9972,7 +9972,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"用户管理登录\" || body=\"login\" || body=\"images/zh-CN/login_03.gif\""
+        "fofa_rule": "body=\"用户管理登录\" || body=\"images/zh-CN/login_03.gif\""
     },
     "华为云桌面": {
         "cats": [
@@ -10168,7 +10168,7 @@
         ],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"0;url=/webmail/\" || body=\"richmail.config.js\" || body=\"login\" || title=\"RichMail\""
+        "fofa_rule": "body=\"0;url=/webmail/\" || body=\"richmail.config.js\" || title=\"RichMail\""
     },
     "字节数联云桌面系统": {
         "cats": [
@@ -10210,7 +10210,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"#commonTip\" || body=\"css/icomoon\" || body=\"login\" || body=\"wwLogin\""
+        "fofa_rule": "body=\"#commonTip\" || body=\"css/icomoon\" || body=\"wwLogin\""
     },
     "金万维异速联": {
         "cats": [
@@ -19644,7 +19644,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"grafana_icon.svg\" || body=\"login\" || body=\"window.grafanabootdata = \" || body=\"grafana-app\""
+        "fofa_rule": "body=\"grafana_icon.svg\" || body=\"window.grafanabootdata = \" || body=\"grafana-app\""
     },
     "grandnode": {
         "cats": [
@@ -19874,7 +19874,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"ER3100\" || body=\"h3c.com\" || body=\"login\""
+        "fofa_rule": "body=\"ER3100\" || body=\"h3c.com\""
     },
     "h3c-er6300g2": {
         "cats": [
@@ -19889,7 +19889,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"ER6300G2\" || body=\"h3c.com\" || body=\"login\""
+        "fofa_rule": "body=\"ER6300G2\" || body=\"h3c.com\""
     },
     "h3c-hdm": {
         "cats": [
@@ -23806,7 +23806,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"login\" || body=\"安全系统\" || body=\"网御星云\""
+        "fofa_rule": "body=\"安全系统\" || body=\"网御星云\""
     },
     "leadsec-soc": {
         "cats": [
@@ -31182,7 +31182,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"login\" || body=\"sdcms\""
+        "fofa_rule": "body=\"sdcms\""
     },
     "sdcncsi": {
         "cats": [
@@ -36148,7 +36148,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"powered by <a href=\\\"http://www.whmcs.com\" || body=\"<div id=\\\"welcome_box\\\">please <a href=\\\"clientarea.php\\\" title=\\\"login\\\"><strong>login</strong></a> or <a href=\\\"register.php\\\" title=\\\"register\\\"><strong>register</strong></a></div>\""
+        "fofa_rule": "body=\"powered by <a href=\\\"http://www.whmcs.com\""
     },
     "whtzjkj-erp": {
         "cats": [
@@ -38264,7 +38264,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"loid_regist()\" || body=\"login\""
+        "fofa_rule": "body=\"loid_regist()\""
     },
     "中新金盾-信息安全管理系统": {
         "cats": [
@@ -39679,7 +39679,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"MSHTML\" || body=\"login\" || body=\"流媒体管理服务器\""
+        "fofa_rule": "body=\"MSHTML\" || body=\"流媒体管理服务器\""
     },
     "深信服waf": {
         "cats": [
@@ -39710,7 +39710,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"NGAF\" || body=\"SANGFOR\" || body=\"login\""
+        "fofa_rule": "body=\"NGAF\" || body=\"SANGFOR\""
     },
     "深信服行为感知系统": {
         "cats": [
@@ -65824,7 +65824,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "header=\"content-security-policy: \\.fohr\\.co\" || body=\"name\" || body=\"title\""
+        "fofa_rule": "header=\"content-security-policy: \\.fohr\\.co\" || body=\"name\""
     },
     "Foleon": {
         "cats": [
@@ -67906,7 +67906,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"<(?:div|style) id=\\\"gerrit_\" || body=\">gerrit code review</a>\\s*\\\"\\s*\\(([0-9.]+)\\)\" || body=\"gerrit_ui/gerrit_ui\" || body=\"title\" || body=\"Gerrit\" || body=\"gerrit_ui\""
+        "fofa_rule": "body=\"<(?:div|style) id=\\\"gerrit_\" || body=\">gerrit code review</a>\\s*\\\"\\s*\\(([0-9.]+)\\)\" || body=\"gerrit_ui/gerrit_ui\" || body=\"Gerrit\" || body=\"gerrit_ui\""
     },
     "Gesio": {
         "cats": [
@@ -92401,19 +92401,6 @@
         "website": "",
         "fofa_rule": "body=\"rum-static\\.pingdom\\.net\" || body=\"_prum\""
     },
-    "Pingdom Uptime Monitoring": {
-        "cats": [
-            1111
-        ],
-        "headers": [],
-        "html": [
-            "title"
-        ],
-        "title": [],
-        "icon": "default.png",
-        "website": "",
-        "fofa_rule": "body=\"title\""
-    },
     "Pingoteam": {
         "cats": [
             1111
@@ -115806,19 +115793,6 @@
         "website": "",
         "fofa_rule": "body=\"author\""
     },
-    "UpScale Systems": {
-        "cats": [
-            1111
-        ],
-        "headers": [],
-        "html": [
-            "title"
-        ],
-        "title": [],
-        "icon": "default.png",
-        "website": "",
-        "fofa_rule": "body=\"title\""
-    },
     "UpSellit": {
         "cats": [
             1111
@@ -127923,5 +127897,85 @@
         "icon": "default.png",
         "website": "",
         "fofa_rule": "body=\"generator\""
+    },
+    "Vite 构建工具": {
+        "cats": [
+            1111
+        ],
+        "headers": [],
+        "html": [
+            "vite-legacy-polyfill",
+            "@vitejs"
+        ],
+        "title": [],
+        "icon": "default.png",
+        "website": "",
+        "fofa_rule": "body=\"vite-legacy-polyfill\" || body=\"@vitejs\""
+    },
+    "React 前端框架": {
+        "cats": [
+            1111
+        ],
+        "headers": [],
+        "html": [
+            "<div id=\"root\"></div>"
+        ],
+        "title": [],
+        "icon": "default.png",
+        "website": "",
+        "fofa_rule": "body=\"<div id=\\\"root\\\"></div>\""
+    },
+    "阿里云 CDN (Swift)": {
+        "cats": [
+            1111
+        ],
+        "headers": [
+            "eagleid",
+            "x-swift-savetime"
+        ],
+        "html": [],
+        "title": [],
+        "icon": "default.png",
+        "website": "",
+        "fofa_rule": "header=\"eagleid\" || header=\"x-swift-savetime\""
+    },
+    "字节跳动 TOS 存储": {
+        "cats": [
+            1111
+        ],
+        "headers": [
+            "x-tos-hash-crc64ecma"
+        ],
+        "html": [],
+        "title": [],
+        "icon": "default.png",
+        "website": "",
+        "fofa_rule": "header=\"x-tos-hash-crc64ecma\""
+    },
+    "字节跳动风控 (SecSDK)": {
+        "cats": [
+            1111
+        ],
+        "headers": [],
+        "html": [
+            "secsdk.umd.js"
+        ],
+        "title": [],
+        "icon": "default.png",
+        "website": "",
+        "fofa_rule": "body=\"secsdk.umd.js\""
+    },
+    "火山引擎 ImageX": {
+        "cats": [
+            1111
+        ],
+        "headers": [
+            "x-powered-by: ImageX"
+        ],
+        "html": [],
+        "title": [],
+        "icon": "default.png",
+        "website": "",
+        "fofa_rule": "header=\"x-powered-by: ImageX\""
     }
 }

@@ -41,10 +41,24 @@ class AssetWihUpdateTask(CommonTask):
         self.insert_task_stat()
 
     def wih_results_save(self):
+        from pymongo import UpdateOne
+        bulk_operations = []
         for record in self.wih_results:
             item = record.dump_json()
             item["task_id"] = self.task_id
-            utils.conn_db('wih').insert_one(item)
+            
+            # 使用 UpdateOne 构建 Upsert 操作
+            query = {"task_id": self.task_id, "site": item["site"], "fnv_hash": item["fnv_hash"]}
+            bulk_operations.append(UpdateOne(query, {"$set": item}, upsert=True))
+            
+            # 分批写入防止内存爆炸
+            if len(bulk_operations) >= 1000:
+                utils.conn_db('wih').bulk_write(bulk_operations, ordered=False)
+                bulk_operations.clear()
+                
+        # 写入残余批次
+        if bulk_operations:
+            utils.conn_db('wih').bulk_write(bulk_operations, ordered=False)
 
     def run_wih_monitor(self):
         service_name = "wih_monitor"
@@ -68,17 +82,21 @@ class AssetWihUpdateTask(CommonTask):
         if not scope_data:
             return
 
-        domain_array = scope_data.get("domain_array")
-        if domain_array is None:
-            if scope_data.get("scope_type") != "domain":
-                return
+        if "domain_array" in scope_data:
+            domain_array = scope_data.get("domain_array", [])
         else:
-            if not domain_array:
+            if scope_data.get("scope_type") == "domain":
+                domain_array = scope_data.get("scope_array", [])
+            else:
                 return
+
+        if not domain_array:
+            return
 
         domains = []
         for item in self.wih_results:
             if item.recordType == "domain":
+                # 由于这些记录在入库前的 asset_wih_monitor 阶段已做过强校验（范围与黑名单），此处只需校验是否为新子域名即可
                 if item.content in self.scope_sub_domains:
                     continue
 

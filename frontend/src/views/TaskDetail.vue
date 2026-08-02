@@ -347,12 +347,16 @@
           </div>
         </template>
 
+        <template v-else-if="column.key === 'cidr_ip'">
+          <a style="cursor: pointer; font-family: monospace; font-size: 14px;" @click="openCidrDetail(record)">{{ record.cidr_ip || '-' }}</a>
+        </template>
+
         <template v-else-if="column.key === 'ip_count_col'">
-          <a style="cursor: pointer;">{{ record.ip_count || 0 }}</a>
+          <span>{{ record.ip_count || 0 }}</span>
         </template>
 
         <template v-else-if="column.key === 'domain_count_col'">
-          <a style="cursor: pointer;">{{ record.domain_count || 0 }}</a>
+          <span>{{ record.domain_count || 0 }}</span>
         </template>
 
         <template v-else-if="column.key === 'verify_command'">
@@ -372,13 +376,28 @@
         </template>
 
         <template v-else-if="column.key === 'wih_site'">
-          <a :href="record.site" target="_blank" style="word-break: break-all;">
-            {{ record.site || '-' }}
-          </a>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <a :href="record.site" target="_blank" style="word-break: break-all;">
+              {{ record.site || '-' }}
+            </a>
+            <a-popover v-if="record.sites && record.sites.length > 1" placement="topLeft">
+              <template #content>
+                <div style="max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+                  <a v-for="(s, idx) in record.sites.slice(1)" :key="idx" :href="s" target="_blank" style="word-break: break-all;">
+                    {{ s }}
+                  </a>
+                </div>
+              </template>
+              <a-badge :count="`+${record.sites.length - 1} 站点`" :number-style="{ backgroundColor: '#1890ff', color: '#fff', cursor: 'pointer', borderRadius: '4px', padding: '0 6px', fontSize: '12px' }" />
+            </a-popover>
+          </div>
         </template>
 
       </template>
     </a-table>
+
+    <!-- 综合C段详情弹窗 (提取为组件) -->
+    <CidrDetailModal v-model:open="cipDetailModalVisible" :record="currentCidrRecord" />
 
     <!-- 指纹统计关联站点弹窗 -->
     <a-modal v-model:open="fingerModalVisible" :title="`指纹关联站点：${currentFingerName}`" :footer="null" width="800px">
@@ -480,16 +499,25 @@
 </template>
 
 <script setup>
-// 💥 核心修改 2：引入 createVNode 和 Modal、ExclamationCircleOutlined
-import { ref, onMounted, reactive, watch, computed, createVNode, onUnmounted, nextTick } from 'vue';
+import { ref, onMounted, onUnmounted, reactive, watch, nextTick, computed, createVNode } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
 import { SearchOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue';
+import CidrDetailModal from '../components/CidrDetailModal.vue';
 
 const route = useRoute();
 const router = useRouter();
 const query = route?.query || {};
+
+// C段详情弹窗 (提取为组件)
+const cipDetailModalVisible = ref(false);
+const currentCidrRecord = ref(null);
+
+const openCidrDetail = (record) => {
+  currentCidrRecord.value = record;
+  cipDetailModalVisible.value = true;
+};
 
 // 弹窗状态与方法
 const fingerModalVisible = ref(false);

@@ -3,6 +3,7 @@ import collections
 import requests.exceptions
 import time
 import random
+import contextvars
 from lxml import etree
 from xing.utils import get_logger
 
@@ -57,7 +58,10 @@ class BaseThread(object):
                 continue
 
             self.semaphore.acquire()
-            t1 = threading.Thread(target=self._work, args=(target,))
+            
+            context = contextvars.copy_context()
+            t1 = threading.Thread(target=context.run, args=(self._work, target,))
+            
             # 可以快速结束程序
             t1.setDaemon(True)
             t1.start()

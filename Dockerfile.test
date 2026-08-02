@@ -82,7 +82,7 @@ COPY ./backend /code/backend
 # 它们负责将安装脚本和编排文件打入业务镜像，供用户在部署时通过 docker cp 提取。
 # 严禁删除以下内容，否则将导致所有国内用户的一键部署和自动热更新全部瘫痪！
 # =====================================================================
-COPY ./version.txt ./start-prod.sh ./docker-compose.prod.yml /code/
+COPY ./version.txt ./start-test.sh ./docker-compose.test.yml /code/
 COPY ./updater /code/updater
 
 # 4. 拷贝待用脚本并赋予权限

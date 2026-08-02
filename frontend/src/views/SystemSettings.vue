@@ -1626,7 +1626,7 @@ const startUpdate = async () => {
         // 解析进度，简单计算进度条
         if (logText.includes('后台任务已启动')) updateProgress.value = 20;
         if (logText.includes('同步完毕')) updateProgress.value = 50;
-        if (logText.includes('开始执行 start-prod.sh')) updateProgress.value = 85;
+        if (logText.includes('开始执行 start-')) updateProgress.value = 85;
         
         const combinedLogs = logText + (updateOfflineNotices.value ? '\n' + updateOfflineNotices.value : '');
         if (updateLogs.value !== combinedLogs) {

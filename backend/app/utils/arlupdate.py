@@ -44,13 +44,14 @@ def create_index():
         "asset_nuclei_result": "scope_id",
         "asset_stat_finger": "scope_id",
         "poc": "plugin_name",
+        "asset_wih": ["scope_id", "record_type", "fnv_hash"],
     }
     for table in index_map:
         if isinstance(index_map[table], list):
             for index in index_map[table]:
-                conn_db(table).create_index(index)
+                conn_db(table).create_index(index, background=True)
         else:
-            conn_db(table).create_index(index_map[table])
+            conn_db(table).create_index(index_map[table], background=True)
 
     # 兜底：创建联合唯一索引，彻底解决极端并发下的重复写入问题
     unique_indexes = {
@@ -66,7 +67,8 @@ def create_index():
         "nuclei_result": [("task_id", 1), ("template_id", 1), ("host", 1)],
         "stat_finger": [("task_id", 1), ("name", 1)],
         "cip": [("task_id", 1), ("cidr_ip", 1)],
-        "wih": [("task_id", 1), ("site", 1), ("url", 1)]
+        "wih": [("task_id", 1), ("site", 1), ("fnv_hash", 1)],
+        "asset_wih": [("scope_id", 1), ("site", 1), ("fnv_hash", 1)]
     }
 
     for col, keys in unique_indexes.items():
@@ -74,7 +76,47 @@ def create_index():
             conn_db(col).create_index(keys, unique=True, background=True)
         except Exception as e:
             import logging
-            logging.getLogger().warning(f"Failed to create unique index on {col}: {e}")
+            if "E11000" in str(e) or "duplicate key error" in str(e).lower():
+                logging.getLogger().warning(f"Duplicate key error on {col}, attempting to deduplicate...")
+                try:
+                    group_id = {k[0]: f"${k[0]}" for k in keys}
+                    pipeline = [
+                        {"$group": {"_id": group_id, "dups": {"$push": "$_id"}, "count": {"$sum": 1}}},
+                        {"$match": {"count": {"$gt": 1}}}
+                    ]
+                    for doc in conn_db(col).aggregate(pipeline, allowDiskUse=True):
+                        dups = doc['dups'][1:]
+                        if dups:
+                            conn_db(col).delete_many({"_id": {"$in": dups}})
+                    conn_db(col).create_index(keys, unique=True, background=True)
+                    logging.getLogger().info(f"Successfully deduplicated and created unique index on {col}")
+                except Exception as de:
+                    logging.getLogger().error(f"Failed to deduplicate {col}: {de}")
+            else:
+                logging.getLogger().warning(f"Failed to create unique index on {col}: {e}")
+
+    # 专门处理特殊的系统日志索引
+    def _create_syslog_indexes():
+        import time
+        import logging
+        max_retries = 30
+        retries = 0
+        while retries < max_retries:
+            try:
+                # 2592000 秒 = 30天
+                conn_db('syslog').create_index([("create_time", 1)], expireAfterSeconds=2592000, background=True)
+                # 为 task_id 建立索引，防止前端查看任务日志时触发全表扫描（COLLSCAN）拖垮系统
+                conn_db('syslog').create_index([("task_id", 1)], background=True)
+                logging.getLogger().info("Syslog indexes created successfully.")
+                return
+            except Exception as e:
+                retries += 1
+                wait_time = min(2 ** retries, 300)
+                logging.getLogger().warning(f"Failed to create syslog indexes (Attempt {retries}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+        logging.getLogger().error("CRITICAL: Failed to create syslog indexes after maximum retries. Please check MongoDB status!")
+
+    threading.Thread(target=_create_syslog_indexes, daemon=True).start()
 
 
 def arl_update():
@@ -85,15 +127,40 @@ def arl_update():
     
     from app.services.fingerprint_cache import finger_db_cache
     finger_db_cache._auto_seed_if_empty()
+    import time
+    db = conn_db('system_config')
     
-    update_lock = os.path.join(Config.TMP_PATH, 'arl_update.lock')
-    if os.path.exists(update_lock):
+    # 尝试初始化锁记录
+    try:
+        db.insert_one({"_id": "init_lock", "status": "pending", "locked_at": 0})
+    except Exception:
+        pass 
+    
+    # 检查并释放过期的死锁（超过60分钟未完成）
+    stale_time = time.time() - 3600
+    db.update_one(
+        {"_id": "init_lock", "status": "processing", "locked_at": {"$lt": stale_time}},
+        {"$set": {"status": "pending"}}
+    )
+    
+    # 尝试抢占初始化锁
+    result = db.update_one(
+        {"_id": "init_lock", "status": "pending"},
+        {"$set": {"status": "processing", "locked_at": time.time()}}
+    )
+    
+    # 如果没拿到锁，说明已有其他进程正在处理或已经处理完毕
+    if result.modified_count == 0:
         return
 
-    update_task_tag()
-    create_index()
-
-    open(update_lock, 'a').close()
+    try:
+        update_task_tag()
+        create_index()
+        db.update_one({"_id": "init_lock"}, {"$set": {"status": "completed"}})
+    except Exception as e:
+        import logging
+        logging.getLogger().error(f"Failed to complete arl_update: {e}")
+        db.update_one({"_id": "init_lock"}, {"$set": {"status": "pending"}}, upsert=True)
 
 
 # 创建锁，防止多线程同时更新

@@ -11,7 +11,8 @@ class WihRecord:
         self.content = content        # 具体泄露的真实内容 (比如: "LTAI5t...xxx")
         self.source = source          # 证据来源，即是从哪个 JS 文件或页面发现的
         self.site = site              # 所属的站点 (比如: https://www.example.com)
-        self.fnv_hash = fnv_hash      # 唯一身份标识 (使用 FNV 算法生成的哈希值，防止完全相同的数据重复插入)
+        # [强制类型约束] 实例化时即转为字符串，保证全局哈希一致性，彻底阻断大整型溢出及下游兼容性风险
+        self.fnv_hash = str(fnv_hash) if fnv_hash else ""
 
     def __str__(self):
         return "{} {} {} {}".format(self.recordType, self.content, self.source, self.site)
@@ -22,23 +23,23 @@ class WihRecord:
     def __eq__(self, other):
         """
         【强去重校验】
-        通过比对预先生成的 fnv_hash。只要类型、内容、来源都一样，哈希就一样。
-        极大避免了多台分布式扫描器跑到了同一个 JS 文件导致数据库被相同泄露数据撑爆的问题。
+        结合 fnv_hash 与 site。
+        避免跨域（不同子域名）发生相同文件（如 app.js）泄露时，被错误地全局去重，导致安全团队遗漏受影响站点。
         """
-        return self.fnv_hash == other.fnv_hash
+        return self.fnv_hash == other.fnv_hash and self.site == other.site
 
     def __hash__(self):
-        return self.fnv_hash
+        return hash((self.fnv_hash, self.site))
 
     def dump_json(self):
         """
         自定义的序列化输出，直接给入库使用。
-        注意：fnv_hash 被转成了 string，因为 MongoDB 对于超大数字处理有时会有兼容性问题。
+        注意：fnv_hash 在实例化时已转为了 string，因为 MongoDB 对于超大数字处理有时会有兼容性问题。
         """
         return {
             "record_type": self.recordType,
             "content": self.content,
             "site": self.site,
             "source": self.source,
-            "fnv_hash": str(self.fnv_hash),
+            "fnv_hash": self.fnv_hash,
         }

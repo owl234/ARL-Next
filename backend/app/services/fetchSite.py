@@ -82,7 +82,7 @@ class FetchSite(BaseThread):
             "http_server": conn.headers.get("Server", ""),
             "body_length": len(conn.content),
             "finger": [],
-            "favicon": fetch_favicon(site) # 触发提取 Icon 哈希
+            "favicon": fetch_favicon(site, html_content=conn.content)
         }
 
         self.fetch_fingerprint(item, content=conn.content)
@@ -202,7 +202,7 @@ class FetchFavicon(object):
         }
         return result
 
-    def run(self):
+    def run(self, html_content=None):
         result = {}
         try:
             # 策略一：简单粗暴，直接去根目录找 /favicon.ico (90% 的网站是这样)
@@ -213,7 +213,7 @@ class FetchFavicon(object):
                 return self.build_result(data)
 
             # 策略二：如果根目录没有，说明是奇葩前端框架，去解析网页 HTML 源码，找到 <link rel="icon"> 标签指定的路径
-            favicon_url = self.find_icon_url_from_html()
+            favicon_url = self.find_icon_url_from_html(html_content=html_content)
             if not favicon_url:
                 return result
             data = self.get_favicon_data(favicon_url)
@@ -258,12 +258,15 @@ class FetchFavicon(object):
             pieces.append(bytes.decode(binascii.b2a_base64(chunk)))
         return "".join(pieces)
 
-    def find_icon_url_from_html(self):
+    def find_icon_url_from_html(self, html_content=None):
         """用 pyquery (类似 jQuery 的操作语法) 提取 HTML 中的图标链接"""
-        conn = http_req(self.url)
-        if b"<link" not in conn.content:
+        if not html_content:
+            conn = http_req(self.url)
+            html_content = conn.content
+            
+        if b"<link" not in html_content:
             return
-        d = pq(conn.content)
+        d = pq(html_content)
         links = d('link').items()
         icon_link_list = []
         for link in links:
@@ -276,3 +279,7 @@ class FetchFavicon(object):
 
         if icon_link_list:
             return urljoin(self.url, icon_link_list[0].attr('href'))
+
+def fetch_favicon(url, html_content=None):
+    f = FetchFavicon(url)
+    return f.run(html_content=html_content)

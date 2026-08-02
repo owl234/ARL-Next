@@ -110,7 +110,7 @@ services:
   # MongoDB 数据库 (去除了 ports "27018:27017" 的外网暴露)
   mongodb:
     <<: *default-logging
-    image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/mongo:7.0
+    image: mongo:7.0
     container_name: arl-mongodb-prod
     restart: always
     environment:
@@ -119,7 +119,7 @@ services:
       - MONGO_INITDB_ROOT_PASSWORD=admin
       - TZ=Asia/Shanghai
     volumes:
-      - mongo_data_v7:/data/db
+      - mongo_data:/data/db
     networks:
       - arl-net
 
@@ -167,7 +167,7 @@ networks:
     driver: bridge
 
 volumes:
-  mongo_data_v7:
+  mongo_data:
   rabbitmq_data:
   arl_screenshots:
   arl_poc_plugins:
