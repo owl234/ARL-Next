@@ -14,7 +14,7 @@ COPY . .
 RUN pnpm run build
 
 # 阶段二：使用 Nginx 部署静态文件
-FROM nginx:1.26-bookworm
+FROM nginx:1.26-alpine
 # 将构建好的 dist 文件复制到 Nginx 默认目录
 COPY --from=builder /app/dist /usr/share/nginx/html
 
