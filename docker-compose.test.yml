@@ -16,7 +16,7 @@ services:
     restart: always
     ports:
       # 映射公网 5173 端口直连 Nginx 服务
-      - "5174:5173"
+      - "5173:5173"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -113,6 +113,7 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod-test/mongo:7.0
     container_name: arl-mongodb-test
     restart: always
+    command: ["--wiredTigerCacheSizeGB", "1"]
     environment:
       - MONGO_INITDB_DATABASE=arl
       - MONGO_INITDB_ROOT_USERNAME=admin

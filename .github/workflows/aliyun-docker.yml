@@ -29,9 +29,9 @@ jobs:
           docker tag mongo:7.0 ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/mongo:7.0
           docker push ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/mongo:7.0
           
-          docker pull rabbitmq:3-management
-          docker tag rabbitmq:3-management ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/rabbitmq:3-management
-          docker push ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/rabbitmq:3-management
+          docker pull rabbitmq:3-alpine
+          docker tag rabbitmq:3-alpine ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/rabbitmq:3-alpine
+          docker push ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/rabbitmq:3-alpine
 
           docker pull willfarrell/autoheal:latest
           docker tag willfarrell/autoheal:latest ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/autoheal:latest

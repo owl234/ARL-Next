@@ -113,6 +113,7 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/mongo:7.0
     container_name: arl-mongodb-prod
     restart: always
+    command: ["--wiredTigerCacheSizeGB", "1"]
     environment:
       - MONGO_INITDB_DATABASE=arl
       - MONGO_INITDB_ROOT_USERNAME=admin
@@ -126,7 +127,7 @@ services:
   # RabbitMQ 队列 (去除了 ports "5673:5672" 和 "15673:15672" 的外网暴露)
   rabbitmq:
     <<: *default-logging
-    image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/rabbitmq:3-management
+    image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/rabbitmq:3-alpine
     container_name: arl-rabbitmq-prod
     restart: always
     environment:
