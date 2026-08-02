@@ -126,11 +126,17 @@
     >
       <a-alert
           v-if="!tycConfigCheck.valid && !tycConfigCheck.loading"
-          :message="tycConfigCheck.message"
           type="warning"
           show-icon
           style="margin-bottom: 16px;"
-      />
+      >
+        <template #message>
+          {{ tycConfigCheck.message || '未配置天眼查 ID 或 Token，请先完成配置。' }}
+          <a @click="router.push({ path: '/systemSettings', query: { tab: 'api_config' } })" style="margin-left: 8px; font-weight: 500;">
+            去配置 &rarr;
+          </a>
+        </template>
+      </a-alert>
       <a-form-item label="任务名称" name="name" :rules="[{ required: true, message: '请输入任务名称' }]">
         <a-input v-model:value="tycFormState.name" placeholder="请输入任务名称" />
       </a-form-item>
@@ -348,10 +354,14 @@ const handleTycOk = async () => {
     await tycFormRef.value.validate();
 
     if (!tycConfigCheck.valid) {
-      Modal.warning({
+      Modal.confirm({
         title: '天眼查配置无效',
-        content: tycConfigCheck.message || '未配置天眼查 ID 或 Token，请在系统设置中配置后再试。',
-        okText: '知道了'
+        content: tycConfigCheck.message || '未配置天眼查 ID 或 Token，请先完成配置后再创建任务。',
+        okText: '去配置',
+        cancelText: '取消',
+        onOk() {
+          router.push({ path: '/systemSettings', query: { tab: 'api_config' } });
+        }
       });
       return;
     }

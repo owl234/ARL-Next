@@ -742,11 +742,13 @@ import { InfoCircleOutlined, ThunderboltOutlined } from '@ant-design/icons-vue';
 import { ref, reactive, onMounted, onUnmounted, computed, nextTick } from 'vue';
 import { message } from 'ant-design-vue';
 import request from '@/utils/request';
+import { useRoute } from 'vue-router';
 
 const reloadPage = () => {
   window.location.reload();
 };
 
+const route = useRoute();
 const activeKey = ref('dictionary');
 const loading = ref(false);
 const searchLoading = ref(false);
@@ -1676,6 +1678,9 @@ const scrollToBottom = () => {
 };
 
 onMounted(() => {
+  if (route.query.tab) {
+    activeKey.value = route.query.tab;
+  }
   checkVersion();
   fetchDictList();
   fetchBruteDictList();
