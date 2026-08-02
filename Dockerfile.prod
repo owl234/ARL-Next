@@ -84,6 +84,7 @@ COPY ./backend /code/backend
 # =====================================================================
 COPY ./version.txt ./start-prod.sh ./docker-compose.prod.yml /code/
 COPY ./updater /code/updater
+COPY ./frontend /code/frontend
 
 # 4. 拷贝待用脚本并赋予权限
 RUN cp /code/backend/wait-for-it.sh /usr/bin/wait-for-it.sh && \
