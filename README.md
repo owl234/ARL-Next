@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/owl234-arl-next-badge.png)](https://mseep.ai/app/owl234-arl-next)
+
 <div align="center">
 
   # ARL-Next
