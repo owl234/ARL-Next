@@ -67,6 +67,10 @@ request.interceptors.response.use(
         return res;
     },
     (error) => {
+        // blob 类请求（如下载）的错误体由业务组件自行解析并提示精确信息，避免双重弹窗
+        if (error.config && error.config.responseType === 'blob') {
+            return Promise.reject(error);
+        }
         // 处理真正的 HTTP 级别报错 (如 500, 502)
         message.error('网络请求异常，请检查后端服务！');
         return Promise.reject(error);

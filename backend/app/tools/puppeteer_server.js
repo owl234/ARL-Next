@@ -8,23 +8,137 @@ const vm = require('vm');
 const wappalyzerScript = new vm.Script(wappalyzerCode);
 const json = JSON.parse(fs.readFileSync(path.join(__dirname, 'apps.json'), 'utf8'));
 
-let browser;
+// ==========================================
+// 1. 异步信号量并发队列 (Concurrency Control)
+// ==========================================
+class ConcurrencySemaphore {
+    constructor(maxConcurrent = 2) {
+        this.maxConcurrent = maxConcurrent;
+        this.currentRunning = 0;
+        this.queue = [];
+    }
 
-async function initBrowser() {
-    browser = await puppeteer.launch({
+    async acquire() {
+        if (this.currentRunning < this.maxConcurrent) {
+            this.currentRunning++;
+            return Promise.resolve();
+        }
+        return new Promise(resolve => this.queue.push(resolve));
+    }
+
+    release() {
+        this.currentRunning--;
+        if (this.queue.length > 0) {
+            this.currentRunning++;
+            const next = this.queue.shift();
+            next();
+        }
+    }
+}
+
+const semaphore = new ConcurrencySemaphore(2); // 严格限制 Chromium 最多同时活跃 2 个页面
+
+// ==========================================
+// 2. 浏览器实例与动态引用计数管理
+// ==========================================
+let currentBrowserWrapper = null;
+let requestsCount = 0;
+let isRotating = false;
+const MAX_REQUESTS = 200; // 每 200 次请求自愈轮转一次 (平衡 V8 堆内存释放与 Chromium 启动开销)
+
+class BrowserWrapper {
+    constructor(browser) {
+        this.browser = browser;
+        this.activeTasks = 0;
+        this.isRetired = false;
+        this.fallbackTimeoutId = null;
+    }
+
+    acquireTask() {
+        this.activeTasks++;
+    }
+
+    releaseTask() {
+        this.activeTasks--;
+        if (this.isRetired && this.activeTasks <= 0) {
+            this.destroy();
+        }
+    }
+
+    retire() {
+        this.isRetired = true;
+        if (this.activeTasks <= 0) {
+            this.destroy();
+        } else {
+            // 兜底 35 秒强制回收（防止个别异常任务挂死）
+            this.fallbackTimeoutId = setTimeout(() => {
+                console.log('[BrowserManager] Fallback 35s reached for retired browser, forcing destroy...');
+                this.destroy();
+            }, 35000);
+        }
+    }
+
+    destroy() {
+        if (this.fallbackTimeoutId) {
+            clearTimeout(this.fallbackTimeoutId);
+            this.fallbackTimeoutId = null;
+        }
+        if (this.browser) {
+            console.log('[BrowserManager] Retiring old browser: all in-flight tasks finished. Releasing memory.');
+            const b = this.browser;
+            this.browser = null;
+            b.close().catch(() => true);
+            if (b.process() && b.process().pid) {
+                try {
+                    process.kill(b.process().pid, 'SIGKILL');
+                } catch(e) {}
+            }
+        }
+    }
+}
+
+async function launchBrowserInstance() {
+    const browser = await puppeteer.launch({
         executablePath: '/usr/bin/chromium',
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox', 
             '--disable-dev-shm-usage', 
             '--ignore-certificate-errors', 
-            '--disable-gpu'
+            '--disable-gpu',
+            '--js-flags=--max-old-space-size=512',
+            '--disable-site-isolation-trials',
+            '--disable-extensions',
+            '--mute-audio'
         ],
         ignoreHTTPSErrors: true
     });
+    return new BrowserWrapper(browser);
 }
 
-function analyzeUrl(url) {
+async function checkRotation() {
+    if (requestsCount >= MAX_REQUESTS && !isRotating) {
+        isRotating = true;
+        requestsCount = 0; // 重置计数
+        console.log('[BrowserManager] Max requests reached (200), performing seamless rolling restart...');
+        
+        const oldWrapper = currentBrowserWrapper;
+        try {
+            const newWrapper = await launchBrowserInstance();
+            currentBrowserWrapper = newWrapper;
+            console.log('[BrowserManager] New browser spawned. Handing over traffic...');
+            if (oldWrapper) {
+                oldWrapper.retire();
+            }
+        } catch (e) {
+            console.error('[BrowserManager] Failed to launch new browser during rotation:', e);
+        } finally {
+            isRotating = false;
+        }
+    }
+}
+
+function analyzeUrl(url, targetWrapper) {
     return new Promise(async (resolve, reject) => {
         let page;
         let context;
@@ -41,9 +155,15 @@ function analyzeUrl(url) {
             console.log(`[Timeout] 32s limit reached for ${url}`);
             cleanupAndResolve([]);
         }, 32000);
+
         try {
+            if (!targetWrapper.browser) {
+                cleanupAndResolve([]);
+                return;
+            }
+
             // Create a new incognito context for isolation
-            context = await browser.createIncognitoBrowserContext();
+            context = await targetWrapper.browser.createIncognitoBrowserContext();
             page = await context.newPage();
             
             // Bypass WAF by mocking User-Agent and webdriver
@@ -147,7 +267,7 @@ function analyzeUrl(url) {
     });
 }
 
-async function takeScreenshot(url) {
+function takeScreenshot(url, targetWrapper) {
     return new Promise(async (resolve, reject) => {
         let page;
         let context;
@@ -172,7 +292,12 @@ async function takeScreenshot(url) {
         }, 25000);
         
         try {
-            context = await browser.createIncognitoBrowserContext();
+            if (!targetWrapper.browser) {
+                cleanupAndResolve(null);
+                return;
+            }
+
+            context = await targetWrapper.browser.createIncognitoBrowserContext();
             page = await context.newPage();
             
             // Bypass WAF by mocking User-Agent and webdriver
@@ -280,56 +405,6 @@ async function takeScreenshot(url) {
     });
 }
 
-let requestsCount = 0;
-let isRestartingBrowser = false;
-const MAX_REQUESTS = 300; // Self-heal to prevent memory leaks
-
-async function checkShutdown() {
-    if (requestsCount >= MAX_REQUESTS && !isRestartingBrowser) {
-        isRestartingBrowser = true;
-        requestsCount = 0; // Reset for the new browser
-        console.log('Max requests reached, performing rolling restart of browser instance...');
-        
-        const oldBrowser = browser;
-        
-        try {
-            browser = await puppeteer.launch({
-                executablePath: '/usr/bin/chromium',
-                args: [
-                    '--no-sandbox', 
-                    '--disable-setuid-sandbox', 
-                    '--disable-dev-shm-usage', 
-                    '--ignore-certificate-errors', 
-                    '--disable-gpu'
-                ],
-                ignoreHTTPSErrors: true
-            });
-            console.log('New browser spawned. Retiring old browser in background...');
-        } catch (e) {
-            console.error('Failed to launch new browser during rotation:', e);
-            browser = oldBrowser; // Revert to old if failed
-        }
-
-        isRestartingBrowser = false;
-
-        if (browser !== oldBrowser) {
-            // Give the old browser exactly 35 seconds to finish its pending tasks, then kill
-            setTimeout(() => {
-                console.log('Cleaning up retired browser...');
-                if (oldBrowser) {
-                    oldBrowser.close().catch(() => true);
-                    // Double tap to avoid zombies if close() hangs
-                    if (oldBrowser.process() && oldBrowser.process().pid) {
-                        try {
-                            process.kill(oldBrowser.process().pid, 'SIGKILL');
-                        } catch(e) {}
-                    }
-                }
-            }, 35000);
-        }
-    }
-}
-
 const server = http.createServer(async (req, res) => {
     if (req.method === 'POST') {
         let body = '';
@@ -344,11 +419,28 @@ const server = http.createServer(async (req, res) => {
                     return;
                 }
                 
+                // 绑定当前接收请求时的目标 BrowserWrapper 实例
+                const targetWrapper = currentBrowserWrapper;
+                if (!targetWrapper || !targetWrapper.browser) {
+                    res.writeHead(503);
+                    res.end('Browser instance is initializing');
+                    return;
+                }
+
+                // 获取任务与并发信号量
+                targetWrapper.acquireTask();
+                await semaphore.acquire();
+
                 let result;
-                if (req.url === '/screenshot') {
-                    result = await takeScreenshot(url);
-                } else {
-                    result = await analyzeUrl(url);
+                try {
+                    if (req.url === '/screenshot') {
+                        result = await takeScreenshot(url, targetWrapper);
+                    } else {
+                        result = await analyzeUrl(url, targetWrapper);
+                    }
+                } finally {
+                    semaphore.release();
+                    targetWrapper.releaseTask();
                 }
                 
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -359,18 +451,19 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(500);
                 res.end(e.message);
             } finally {
-                checkShutdown();
+                checkRotation();
             }
         });
     } else {
         res.writeHead(200);
         res.end('Puppeteer Wappalyzer Server OK');
-        checkShutdown();
+        checkRotation();
     }
 });
 
-initBrowser().then(() => {
+launchBrowserInstance().then(wrapper => {
+    currentBrowserWrapper = wrapper;
     server.listen(5005, '0.0.0.0', () => {
-        console.log('Puppeteer server running on port 5005');
+        console.log('Puppeteer server running on port 5005 (Semaphore=2, MaxV8=512MB)');
     });
 }).catch(console.error);

@@ -103,30 +103,68 @@ class ARLResource(Resource):
                 continue
 
 
-            # 3. 忽略空值（前端传了字段但没给值的，不管它）
-            if args[key] is None:
+            # 3. 忽略空值（前端传了字段但没给值的，或者空字符串，不管它）
+            if args[key] is None or args[key] == '':
                 continue
 
             # 4. 核心魔法：识别后缀并翻译成 MongoDB 指令
+            # __gte 代表 greater than or equal (大于等于)
+            if key.endswith("__gte"):
+                real_key = key.split('__gte')[0]
+                actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
+                raw_value = query_args.get(actual_key, {})
+                if not isinstance(raw_value, dict):
+                    raw_value = {}
+                raw_value.update({"$gte": args[key]})
+                query_args[actual_key] = raw_value
+
+            # __lte 代表 less than or equal (小于等于)
+            elif key.endswith("__lte"):
+                real_key = key.split('__lte')[0]
+                actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
+                raw_value = query_args.get(actual_key, {})
+                if not isinstance(raw_value, dict):
+                    raw_value = {}
+                raw_value.update({"$lte": args[key]})
+                query_args[actual_key] = raw_value
+
             # __dgt 代表 datetime greater than (时间大于)
-            if key.endswith("__dgt"):
+            elif key.endswith("__dgt"):
                 real_key = key.split('__dgt')[0]
-                raw_value = query_args.get(real_key, {})
-                raw_value.update({
-                    "$gt": datetime.strptime(args[key],
-                                             "%Y-%m-%d %H:%M:%S")
-                })
-                query_args[real_key] = raw_value
+                actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
+                raw_value = query_args.get(actual_key, {})
+                if not isinstance(raw_value, dict):
+                    raw_value = {}
+                if real_key in ["start_time", "end_time"]:
+                    raw_value.update({"$gte": args[key]})
+                else:
+                    try:
+                        raw_value.update({
+                            "$gt": datetime.strptime(args[key],
+                                                     "%Y-%m-%d %H:%M:%S")
+                        })
+                    except (ValueError, TypeError):
+                        continue
+                query_args[actual_key] = raw_value
 
             # __dlt 代表 datetime less than (时间小于)
             elif key.endswith("__dlt"):
                 real_key = key.split('__dlt')[0]
-                raw_value = query_args.get(real_key, {})
-                raw_value.update({
-                    "$lt": datetime.strptime(args[key],
-                                             "%Y-%m-%d %H:%M:%S")
-                })
-                query_args[real_key] = raw_value
+                actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
+                raw_value = query_args.get(actual_key, {})
+                if not isinstance(raw_value, dict):
+                    raw_value = {}
+                if real_key in ["start_time", "end_time"]:
+                    raw_value.update({"$lte": args[key]})
+                else:
+                    try:
+                        raw_value.update({
+                            "$lt": datetime.strptime(args[key],
+                                                     "%Y-%m-%d %H:%M:%S")
+                        })
+                    except (ValueError, TypeError):
+                        continue
+                query_args[actual_key] = raw_value
 
             # __ngt 代表 numeric greater than (数字大于)
             elif key.endswith("__ngt"):

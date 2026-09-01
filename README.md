@@ -27,7 +27,7 @@
     <a href="#comparison"><b>💡 原版痛点对比</b></a> •
     <a href="#core-features"><b>✨ 核心特性</b></a> •
     <a href="./mcp-server/README.md"><b>🤖 MCP配置指南</b></a> •
-    <a href="#changelog"><b>📜 更新日志</b></a>
+    <a href="./CHANGELOG.md"><b>📜 更新日志</b></a>
   </p>
 </div>
 
@@ -213,7 +213,7 @@ chmod +x start-prod.sh && \
 bash start-prod.sh
 ```
 
-##### 方法二：GitHub 源码克隆部署（适用于海外服务器 / 需二次开发）
+##### 方法二：GitHub 源码克隆部署（适用于海外服务器 / 源码部署）
 
 > [!TIP]
 > `start-prod.sh` 内置全套环境探针，裸机运行亦会自动安装 Docker 并优化内核配置。
@@ -237,38 +237,27 @@ bash start-prod.sh
 
 > [!TIP]
 > **商业证书替换 (可选)**：将您申请的真实 SSL 证书重命名为 `arl.crt` 和 `arl.key` 放至 `ssl-certs/` 目录，然后再次执行 `bash start-prod.sh` 即可。
+
 ---
 
-### 💻 开发环境部署 (前端本地 + Docker 后端)
+### 🔄 生产环境版本升级
 
-- 👥 **适用场景**：二次开发、PoC 插件编写与深度调试。
-- ⚡ **核心优势**：前后端彻底解耦，**双端热重载 (Hot Reload)** 实时生效，无需重复打包。
-- ⚙️ **前置依赖**：本地已安装 Docker 与 Node.js 18+ (脚本会自动检测并配置 pnpm 环境)。
+ARL-Next 支持 **Web 管理后台一键热更新**（在「系统设置」中无感升级）与 **终端标准手动升级**：
 
-#### 🚀 一键拉起开发环境
+#### 🚀 生产环境一键标准手动升级（⭐ 官方推荐）
+
+在服务器终端进入 ARL-Next 部署目录，直接执行升级脚本即可自动拉取最新镜像并完成数据库平滑演进：
 
 ```bash
-git clone https://github.com/owl234/ARL-Next.git && cd ARL-Next
-# 自动在后台启动后端容器组 (API / Worker / MongoDB / RabbitMQ)，并在前台启动 Vite 前端服务
-bash start-dev.sh
+cd ~/ARL-Next
+sudo bash start-prod.sh
 ```
 
-启动完成后，访问 `http://localhost:5173` 即可实时预览开发界面（默认凭据：`admin` / `arlpass`）。
-
----
-
-### 🗄️ 开发者调试端口与数据库直连 (开发环境专用)
-
-> [!NOTE]
-> 生产环境为保障安全性已默认切断所有底层中间件外网端口。开发环境下可通过以下地址直连调试：
-
-| 调试组件 | 访问地址 / 连接串 | 账号 | 密码 | 说明 / 用途 |
-| :--- | :--- | :--- | :--- | :--- |
-| **🍃 MongoDB 7.0** | `mongodb://admin:admin@127.0.0.1:27018/arl?authSource=admin` | `admin` | `admin` | Navicat / Compass 数据库直连 |
-| **🐇 RabbitMQ 管理台** | `http://127.0.0.1:15673` | `admin` | `admin` | 消息队列与消费者状态监控 |
-| **🐇 RabbitMQ AMQP** | `amqp://admin:admin@127.0.0.1:5673/` | `admin` | `admin` | Celery 任务协议端口 |
-| **⚙️ Backend API** | `http://127.0.0.1:5001/api/` | — | — | 后端 Flask RESTful 调试直连 |
-| **🧩 OSINT 微服务** | `http://127.0.0.1:16182/docs` | — | — | 天眼查/ICP 异步微服务 Swagger |
+> [!TIP]
+> **底层执行保障**：
+> - **数据无损平滑演进**：内置增量迁移逻辑，存量 MongoDB 数据与索引 100% 完整保留，杜绝升级崩溃。
+> - **稳定快照备份**：自动为当前运行版本打上 `backup-stable` 标签，保障异常时可秒级回退。
+> - **极速拉取与探活**：直连阿里云北京 ACR 镜像私库拉取最新构建，API 动态探活就绪后再放行。
 
 ---
 
@@ -299,10 +288,15 @@ bash start-dev.sh
 <summary><b>Q3: 点击 Web 端的“一键系统更新”时，提示 <code>[ERROR]触发更新失败</code>？</b></summary>
 <br/>
 
-**A:** 这种情况通常是因为宿主机更新守护进程未响应。请通过 SSH 登录终端执行以下命令重启更新服务：
-```bash
-sudo systemctl restart arl-updater.service
-```
+**A:** 这种情况通常是因为宿主机更新守护进程未响应。您可以通过以下两种方式解决：
+- **方式 1 (推荐)：直接在终端执行生产环境标准手动升级**
+  ```bash
+  cd ~/ARL-Next && sudo bash start-prod.sh
+  ```
+- **方式 2：重启宿主机更新服务后重试 Web 更新**
+  ```bash
+  sudo systemctl restart arl-updater.service
+  ```
 </details>
 
 <details>
@@ -332,127 +326,9 @@ docker compose -f docker-compose.prod.yml restart
 
 ---
 
-## <span id="changelog"></span>📜 版本更新历史
+## 📜 更新日志
 
-<details open>
-<summary><b>🚀 v1.2.0 (当前版本)</b></summary><br/>
-
-* **交互与体验**：全站核心数据表格与顶部操作栏封装并引入悬浮吸附（`useSticky`）与局部平滑滚动，规避长页面滚动遮挡；统一全局分页器（`useGlobalPageSize`，支持单页 500 条）并实现 `localStorage` 持久化记忆；引入 Vue `Keep-Alive` 页面缓存与返回静默刷新机制。
-* **现代化字典系统**：重构字典管理为三栏交互布局（分类/列表/编辑），支持分类 Emoji 命名、新建字典抽屉、txt/dic 在线预览与编辑、未保存呼吸灯提示及一键安全删除；重构字典加载与上传校验模块，收敛路径遍历风险。
-* **调度与监控重构**：资产分组下发监控任务新增支持「周期性监控」与「一次性扫描」双模切换，一键下发即时比对增量与变动并精准反馈成功数；重构调度器执行引擎，引入二次防重消费校验与随机休眠，规避队列积压导致并发拉起重复任务；新增 `monitor_diff.py` 动态比对引擎，实现 13 类资产毫秒级基线对比、`new`/`update` 增量打标、未变动资产过滤与 Syslog 审计汇总；修复 SimHash 与联合索引计算，收敛监控防抖失效与内存泄漏。
-* **告警推送升级**：全面重构 `push.py` 多通道告警引擎，支持 13 类资产新增（🌟）与变动（🔄）的 Markdown / HTML 结构化报文推送；原生适配钉钉、企业微信、飞书、Telegram 及 Email，内置 3500 字符防超长截断保护与无变动干净摘要。
-* **扫描链路与容错隔离**：在 `CommonTask`、`DomainTask`、`IPTask`、`RiskCruising` 中全线引入 `safe_phase` 上下文管理器，实现各扫描阶段异常捕获与耗时审计，规避单插件报错导致 Celery 任务崩溃；调整 `nuclei_scan` 扫描时序至末尾防止目标被阻断；放宽 Nuclei 超时至 15 天；优化 AlienVault/Chaos 查询超时与天眼查防风控延时；文件泄露爆破改用生成器独立迭代规避漏扫。
-* **高吞吐持久层**：全线模块升级 `safe_insert_asset_many` 与 `bulk_write` 批量入库，覆盖全量核心集合，消除 N+1 读写瓶颈与高并发主键冲突；支持轻重任务及 OSINT 并发数热扩缩容。
-* **AI 原生与运维更新**：MCP 服务由 Node.js 彻底重构为轻量原生 Python 服务（FastMCP），输出深度重构为 AI 原生 CSV 流与 13 维全景资产大盘，Token 消耗降低 80%+；重构 `updater/updater.py` 支持生产镜像覆盖与开发环境 `git pull` 双模更新；优化 `start-prod.sh` 宿主机 Swap 精准探测与 Nginx Gzip 压缩分发。
-</details>
-
-<details>
-<summary><b>v1.1.8</b></summary><br/>
-
-* **架构跃升**：核心运行环境全面跨代至 **Python 3.13** 与 **MongoDB 7.0**。新增 `upgrade-mongo.sh` 自动化脚本，实现数据库大版本的无损平滑迁移。
-* **内存治理**：引入极限防 OOM 机制。切换 RabbitMQ 为 Alpine 镜像，限制 MongoDB 最大内存池为 1GB；导出引擎重构为 `$group` 流式处理，彻底杜绝海量资产溢出。
-* **CI/CD 重构**：全线引入 Docker 多阶段构建与 `uv` 极速包管理器，大幅缩减镜像体积。补全自动发版流，实现海外预构建镜像后直推国内阿里云私库。
-* **稳定与安全**：底层引入 `contextvars` 根治异步任务上下文丢失；修复 `InfoHunter` 外部命令注入隐患；重构适配 `urllib3` 废弃 `get_host` 后的兼容性崩溃。
-* **指纹与交互**：扩充 Vite、React、TOS 等现代 Web 指纹，站点监控新增 `body_length` 异动感知。前端新增 CIDR 气泡悬浮组件以优化聚合视图，MCP 新增 `asset_wih` 调度。
-</details>
-
-<details>
-<summary><b>v1.1.7</b></summary><br/>
-
-* **核心底座**：重构数据库落库机制，全面引入 `bulk_write` 与批量入库，为13张核心资产表增加联合唯一索引，彻底杜绝极端并发下的数据冗余，大幅提升大任务流性能。
-* **网络引擎**：重构底层网络请求工具，引入自适应连接池及 10MB 响应截断保护机制，有效防止因恶意站点超大返回包导致的内存泄漏与任务假死。
-* **爬虫自愈**：升级浏览器渲染微服务，新增滚动重启（Rolling Restart）与资源防泄漏自愈机制，根除大批量网页截图时可能产生的僵尸进程。
-* **安全控制**：系统设置新增对平台 Basic Auth 防护的图形化热切换支持，底层自动重构并重载 Nginx 网关配置。
-* **威胁雷达**：重构 Github CVE 与黑客工具监控逻辑，修复时区导致的数据遗漏，全面改用原子级 `upsert` 防竞争锁确保推送不重复。
-* **任务调度**：深度重构 WIH 域名的多层级迭代探测逻辑，并增强全线端口扫描、Web 指纹等组件的错误容忍与忙碌重试策略。
-* **前端交互**：大幅优化与重构 Dashboard 仪表盘统计、资产搜索、Github 管理、任务详情等多个核心视图页面，带来更优质的信息呈现。
-* **UI 修正**：资产站点表格对齐原版经典字段，恢复状态码、标题展示，修复 WIH 来源映射，并修复“添加标签”功能的交互反馈。
-* **部署增强**：增加启动环境自动化巡检，自动识别并清理因 Docker 导致错误生成的幽灵 `.htpasswd` 目录以确保服务正常启动。
-* **其他杂项**：精简代码库，清理已废弃截图资源，并在开发文档中补充规范了版本推送的消息标准。
-</details>
-
-<details>
-<summary><b>v1.1.6</b></summary><br/>
-
-* **架构**：Puppeteer 从后台 Worker 中彻底分离为独立的 Node.js HTTP 微服务容器，大幅释放后台调度压力。
-* **性能**：重构指纹识别引擎，引入 Aho-Corasick 多模式匹配算法与内存缓存，极速提升 Web 资产扫描效率。
-* **爬虫**：优化 URL 去重算法，底层哈希池引入 Set 结构替代 List，将检索复杂度从 O(N²) 降至 O(1)，消除大规模爬取时的 CPU 瓶颈。
-* **部署**：支持 Github 浅拉取 (Shallow clone) 部署兼容；启动脚本新增 API 动态健康检测，彻底消除早期 502 报错。
-* **修复**：修复了任务列表 (Task List) 与资产侦察 (Asset Recon) 数据展示异常及状态同步问题。
-</details>
-
-<details>
-<summary><b>v1.1.5</b></summary><br/>
-
-* **架构**：重构 `icp_query` 为独立 `osint_service` 微服务，引入纯异步调度，降低主节点负载。
-* **调度**：实现轻重任务队列分离 (FOFA 等轻查询独立)，并在系统设置中支持精细化并发数配置。
-* **部署**：自动分配 2G Swap 解决 OOM 崩溃；多阶段构建缩减镜像体积；新增 Autoheal 容器自愈服务，自动监控并重启假死节点。
-* **安全**：热更新服务 (`updater.py`) 增设内网白名单拦截机制，阻断公网调用；修复 Nginx 与 SSE 跨域限制。
-* **功能**：任务列表新增“模糊/精确/数值”条件过滤及组合导出；核心任务层增加站点防重复插入机制。
-</details>
-
-<details>
-<summary><b>v1.1.4</b></summary><br/>
-
-* **修复**：补齐策略中缺失的 Host 碰撞配置，确保后台任务能正常联动与下发。
-* **修复**：修复全局背景样式，解决长页面滚动时底部可能出现的白边与背景闪烁问题。
-* **部署**：全方位重构一键部署与热更新底层健壮性。新增并发防冲突锁、配置文件原子级写入、网络断连自动重试机制；自动清理遗留幽灵容器与磁盘废弃镜像；增加平滑停机时间（60秒）以防产生扫描脏数据；并修复了多项可能导致部署瘫痪的边缘隐患。
-* **构建**：升级 GitHub Actions 构建依赖版本。
-</details>
-
-<details>
-<summary><b>v1.1.3</b></summary><br/>
-
-* **AI原生**：首次引入 MCP (Model Context Protocol) Server，赋能外部 AI 大模型无缝接管资产调度与检索。
-* **UI重构**：前端样式系统全面解耦重构，新增动态主题色与自定义背景，打造极客专属工作台。
-* **安全**：生产环境 Nginx 全面启用 Basic Auth 强制前置拦截，容器启动自动生成强密码凭证，实现极致防护。
-* **功能**：新增全局资产指纹细粒度检索功能，支持在全系统中穿透式定位目标站点。
-</details>
-
-<details>
-<summary><b>v1.1.2</b></summary><br/>
-
-* **核心**：新增系统一键升级机制，支持平滑热更新。
-* **组件**：Nuclei 扫描引擎升级至 v3.11.0。
-* **前端**：极致性能优化，修复 Auth 拦截器等验证问题。
-</details>
-
-<details>
-<summary><b>v1.1.1</b></summary><br/>
-
-* **资产**：资产范围 (Scope) 扩充，全面支持并严格区分 Domain 与 IP 类型的目标校验与调度。
-* **功能**：新增自定义 PoC 源码在线读取、编辑与全可视化创建管理，增强了级联删除逻辑。
-* **功能**：新增字典配置模块，提供弱口令字典查询、预览及可视化读写管理。
-* **优化**：360 搜索引擎采集逻辑新增反爬熔断保护，追加高价值关键字深度挖掘；生产环境 Nginx 开启 Gzip 压缩。
-* **修复**：修复前端详情页高级搜索表单及组件数据联动异常。
-</details>
-
-<details>
-<summary><b>v1.1.0</b></summary><br/>
-
-* **新增**：全新引入 GitHub 威胁情报雷达（支持 CVE 漏洞雷达、安全武器库及黑客动态监测）。
-* **新增**：完善告警生态，支持 Telegram 机器人推送告警。
-* **重构**：前端系统设置与 Github 管理页面结构重构，全面启用 HTTP/2 多路复用，大幅降低前端并发加载延迟。
-* **修复**：修复 HTTP 存活检测与站点截图组件在 Docker 下的超时和崩溃 Bug，及仪表盘漏洞趋势无数据的 Bug。
-</details>
-
-<details>
-<summary><b>v1.0.9</b></summary><br/>
-
-* **重构**：分离后端 ARL 内部漏洞与 Nuclei 引擎扫描结果的统计逻辑。
-* **交互**：Dashboard 漏洞统计卡片 UI 极简重构，支持按漏洞类型与危害等级点击下钻（Drill-down）。
-* **交互**：资产查询页面支持接收仪表盘的联动请求，实现页面跳转与高级筛选项的自动填充。
-</details>
-
-<details>
-<summary><b>v1.0.8</b></summary><br/>
-
-* **功能**：完善 POC 导入机制，支持批量拖拽上传验证脚本，并提供标准 Python POC 模板下载。
-* **架构**：引入 Celery 任务并发热扩缩容机制，修改并发数配置后即时生效，无需重启服务。
-* **重构**：重构仪表盘底层查询逻辑，统一基于站点表单库进行海量数据的高效查询。
-* **部署**：深度分离开发与生产环境启动脚本，增加 POC 独立数据卷挂载。
-* **优化**：优化前端站点截图预览样式防变形，并持续迭代系统内置指纹库。
-</details>
+详细的版本演进历史、各版本特性与问题修复记录，请参阅 ➔ [**CHANGELOG.md**](./CHANGELOG.md)
 
 ---
 
@@ -482,6 +358,9 @@ ARL-Next 的持续高频迭代离不开社区伙伴的慷慨支持。特别致�
   </a>
   <a href="https://github.com/phpmac" target="_blank">
     <img src="https://github.com/phpmac.png" width="48" height="48" style="border-radius: 50%; margin: 0 8px;" alt="phpmac" title="感谢 phpmac 的支持！"/>
+  </a>
+  <a href="https://github.com/123lpone" target="_blank">
+    <img src="https://github.com/123lpone.png" width="48" height="48" style="border-radius: 50%; margin: 0 8px;" alt="123lpone" title="感谢 123lpone 的支持！"/>
   </a>
 </p>
 

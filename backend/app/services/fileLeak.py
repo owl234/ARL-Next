@@ -176,14 +176,13 @@ class Page():
             if abs(len(self_content) - len(other_content)) >= max(500, int(min_len_content*0.1)):
                 return False
 
-            # 如果 Title 相同，认为是同一类页面（比如都有同样的错误标题）
-            if len(self.title) > 2 and self.title == other.title:
-                return True
-
-            # 【终极武器】：使用 difflib 计算两个页面的文本相似度，超过 80% (bool_ratio) 就认为是相同的 404 页面
-            quick_ratio = difflib.SequenceMatcher(None, self_content, other_content).quick_ratio()
+            # 【终极武器】：使用 difflib 计算两个页面的特征切片文本相似度，超过 80% (bool_ratio) 就认为是相同的 404 页面
+            # 截取前 4KB 特征切片比对，避免全量 50KB 构建庞大字符索引表引发的 CPU 100% 与堆内存碎片化
+            s_sample = self_content[:4096] if len(self_content) > 4096 else self_content
+            o_sample = other_content[:4096] if len(other_content) > 4096 else other_content
+            quick_ratio = difflib.SequenceMatcher(None, s_sample, o_sample).quick_ratio()
             if quick_ratio >= bool_ratio:
-                self.times +=1
+                self.times += 1
                 return True
             else:
                 return False
@@ -285,13 +284,13 @@ class FileLeak(BaseThread):
         self.record_page = False
         self.skip_302 = False
         self.location_404_url = set()
+        self.is_spa_wildcard = False
 
     def work(self, url):
         if self.error_times >= 20:
             return
         req = self.http_req(url)
         page = Page(req)
-
 
         if self.record_page:
             self.page_all.append(page)
@@ -302,18 +301,16 @@ class FileLeak(BaseThread):
             return
 
         # 如果它初步看起来像是真的（没有命中黑名单特征），先放入白名单
-        # 但注意，接下来它还要经受 check_page_200() 的地狱级拷问
         if page not in self.page404_set:
             self.page200_set.add(page)
 
-
     def build_404_page(self):
         """
-        [第一性原理：建立基线]
-        扫描开始前的第一件事，就是访问 /not_found_2222_111，
-        把服务器的“真实 404 反馈面貌”记录下来，加入黑名单库 (self.page404_set)。
-        后面任何跟它“长得像”（通过 Page.__eq__ 相似度对比）的页面，都会被直接干掉。
+        【第一性原理：动态基线学习】
+        1. 请求基础 404 测试路径 /not_found_2222_111
+        2. 发起随机 Hash 路径探测，识别 SPA 路由与 CDN 泛 200 行为
         """
+        import uuid
         url_404 = URL(self.target + self.path_404, self.path_404)
         logger.info("req => {}".format(url_404))
         page_404 = Page(self.http_req(url_404))
@@ -327,13 +324,31 @@ class FileLeak(BaseThread):
         if page_404.is_302() and page_404.location_url.endswith(page_404.url.payload + "/"):
             self.skip_302 = True
 
+        # 发送第二个随机探测包判定 SPA 泛解析
+        try:
+            rand_path = f"chk_probe_{uuid.uuid4().hex[:8]}"
+            url_rand = URL(self.target + rand_path, rand_path)
+            page_rand = Page(self.http_req(url_rand))
+            self.page404_set.add(page_rand)
+            if page_404.status_code == 200 and page_rand.status_code == 200:
+                content_type = page_404.raw_req.conn.headers.get("Content-Type", "")
+                if "text/html" in content_type.lower() or "application/xhtml" in content_type.lower():
+                    self.is_spa_wildcard = True
+                    logger.info("Target {} detected as SPA / Wildcard 200 Catch-All".format(self.target))
+        except Exception:
+            pass
+
+    def http_req(self, url: URL):
+        try:
+            req = HTTPReq(url)
+            req.req()
+            return req
+        except Exception as e:
+            logger.warning("error on {}".format(e))
+            self.error_times += 1
+            raise e
+
     def run(self):
-        """
-        [第一性原理：扫描三部曲]
-        1. 建立 404 基线 (build_404_page)
-        2. 多线程狂奔，并发探测所有字典路径 (_run)
-        3. 对所有初步成活的结果进行二次证伪 (check_page_200)
-        """
         t1 = time.time()
         logger.info("start fileleak {}".format(len(self.targets)))
 
@@ -348,18 +363,87 @@ class FileLeak(BaseThread):
 
         return self.page200_set
 
-    def http_req(self, url: URL):
+    def verify_magic_signature(self, page: Page) -> bool:
+        """
+        【高危敏感文件真实魔数/特征强校验】
+        针对 Git、SVN、源码压缩包、Actuator、Swagger、配置文件进行真实性校验
+        """
+        path_lower = page.url.path.lower()
+        content = page.content
+        if not content:
+            return False
+
+        content_str = ""
         try:
-            req = HTTPReq(url)
-            req.req()
-            return req
-        except Exception as e:
-            logger.warning("error on {}".format(e))
-            self.error_times += 1
-            raise e
+            content_str = content[:2048].decode('utf-8', errors='ignore')
+        except Exception:
+            pass
+
+        # 1. 过滤明显的 HTML 404 / 默认错误页假 200
+        is_html = content.lstrip().startswith(b"<!doctype") or content.lstrip().startswith(b"<html") or "<title>" in content_str.lower()
+
+        # 2. 如果判定为 SPA 单页应用，且不是明确的 API/二进制接口，过滤所有普通 HTML
+        if getattr(self, 'is_spa_wildcard', False) and is_html:
+            if "swagger-ui" not in content_str.lower():
+                return False
+
+        # 3. Git 泄露校验
+        if "/.git/" in path_lower or path_lower.endswith("/.git"):
+            if b"[core]" in content or b"repositoryformatversion" in content or b"ref: refs/heads/" in content or b"PACK" in content[:16]:
+                return True
+            return False
+
+        # 4. SVN 泄露校验
+        if "/.svn/" in path_lower or path_lower.endswith("/.svn"):
+            if b"svn://" in content or b"dir\n" in content or (content[:4].isdigit()):
+                return True
+            return False
+
+        # 5. 压缩包与备份文件校验 (.zip, .rar, .7z, .tar.gz, .bak, .sql)
+        backup_exts = [".zip", ".rar", ".7z", ".tar.gz", ".tgz", ".tar", ".bak", ".sql", ".dump"]
+        if any(path_lower.endswith(ext) for ext in backup_exts):
+            if is_html or content.lstrip().startswith(b"{\"code\"") or content.lstrip().startswith(b"{\"msg\""):
+                return False
+            if path_lower.endswith(".zip") and not (content.startswith(b"PK\x03\x04") or content.startswith(b"PK\x05\x06")):
+                return False
+            if path_lower.endswith(".rar") and not content.startswith(b"Rar!"):
+                return False
+            if path_lower.endswith(".7z") and not content.startswith(b"7z\xbc\xaf"):
+                return False
+            if path_lower.endswith(".sql"):
+                sql_kws = ["create table", "insert into", "-- mysql", "drop table", "database"]
+                if not any(kw in content_str.lower() for kw in sql_kws):
+                    return False
+            return True
+
+        # 6. Spring Boot Actuator 校验
+        if "/actuator/" in path_lower or path_lower.endswith("/actuator"):
+            if is_html:
+                return False
+            actuator_kws = ["contexts", "_links", "names", "beans", "health", "metrics", "mappings", "status"]
+            if any(kw in content_str.lower() for kw in actuator_kws):
+                return True
+            return False
+
+        # 7. Swagger / OpenAPI 校验
+        if any(kw in path_lower for kw in ["swagger", "api-docs", "openapi"]):
+            if "swagger" in content_str.lower() or "openapi" in content_str.lower() or "paths" in content_str.lower() or "swagger-ui" in content_str.lower():
+                return True
+            return False
+
+        # 8. 敏感配置文件 (.env, .yml, .yaml, .properties, .conf, .ini, secrets)
+        config_exts = [".env", ".yml", ".yaml", ".properties", ".conf", ".ini", "secrets.yml", "config.json"]
+        if any(path_lower.endswith(ext) or ext in path_lower for ext in config_exts):
+            if is_html:
+                return False
+
+        return True
 
     def is_404_page(self, page: Page):
         if page.status_code not in self.page200_code_list:
+            return True
+
+        if not self.verify_magic_signature(page):
             return True
 
         if page.is_backup_path:
@@ -394,10 +478,7 @@ class FileLeak(BaseThread):
     def check_page_200(self):
         """
         [第一性原理：证伪算法 (False Positive Mitigation)]
-        这是防止误报的最强防线。
-        假设你扫到了一个 /admin.php 返回 200 OK，并且内容看起来也很正常。怎么证明它是真的？
-        很简单：你在后面加点垃圾字符，去请求 /admin.php1337。
-        如果 /admin.php1337 也返回 200 OK 且页面相似，那说明这整个目录都在骗人，/admin.php 也是假的！
+        通过 1337 扰乱测试与真实特征强校验双重过滤
         """
         for page in self.page200_set:
             if page in self.page404_set:
@@ -419,9 +500,17 @@ class FileLeak(BaseThread):
                     self.page404_set.add(page)
                     self.skip_302 = True
 
-        # 最终真理：从白名单中剔除掉所有与黑名单（基线404和1337测试页面）相似度过高的页面
-        # 这里的相减操作 `-=` 底层会狂热调用 Page.__eq__ 的文本相似度算法！
+        # 最终真理：从白名单中剔除掉所有与黑名单相似度过高的页面
         self.page200_set -= self.page404_set
+
+        # 二次强校验过滤
+        valid_pages = set()
+        for page in self.page200_set:
+            if self.verify_magic_signature(page):
+                valid_pages.add(page)
+            else:
+                logger.info("Discarded false positive by magic signature: {}".format(page.url))
+        self.page200_set = valid_pages
 
 
     def gen_check_url(self, url: URL):

@@ -440,9 +440,9 @@
 
 <script setup>
 
-import { ref as _ref_for_sticky, ref, onMounted, reactive, watch, onUnmounted, computed } from 'vue';
+import { ref, onMounted, reactive, watch, onUnmounted, computed } from 'vue';
 import { useSticky } from '../utils/useSticky';
-const actionBarRef = _ref_for_sticky(null);
+const actionBarRef = ref(null);
 const { stickyConfig, actionBarHeight } = useSticky(actionBarRef);
 import { useRoute } from 'vue-router';
 import request from '../utils/request';
@@ -507,6 +507,10 @@ const pagination = reactive({ current: 1, pageSize: globalPageSize.value, total:
 
 watch(() => pagination.pageSize, (newSize) => {
   globalPageSize.value = newSize;
+});
+
+watch(globalPageSize, (newSize) => {
+  pagination.pageSize = newSize;
 });
 
 const previewVisible = ref(false);

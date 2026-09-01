@@ -47,16 +47,40 @@ def not_in_black_ips(target):
     return True
 
 
+_asn_reader = None
+_city_reader = None
+
+
+def _get_asn_reader():
+    global _asn_reader
+    if _asn_reader is None and Config.GEOIP_ASN:
+        try:
+            _asn_reader = geoip2.database.Reader(Config.GEOIP_ASN)
+        except Exception:
+            _asn_reader = False
+    return _asn_reader if _asn_reader is not False else None
+
+
+def _get_city_reader():
+    global _city_reader
+    if _city_reader is None and Config.GEOIP_CITY:
+        try:
+            _city_reader = geoip2.database.Reader(Config.GEOIP_CITY)
+        except Exception:
+            _city_reader = False
+    return _city_reader if _city_reader is not False else None
+
+
 def get_ip_asn(ip):
     from . import get_logger
     logger = get_logger()
     item = {}
     try:
-        reader = geoip2.database.Reader(Config.GEOIP_ASN)
-        response = reader.asn(ip)
-        item["number"] = response.autonomous_system_number
-        item["organization"] = response.autonomous_system_organization
-        reader.close()
+        reader = _get_asn_reader()
+        if reader:
+            response = reader.asn(ip)
+            item["number"] = response.autonomous_system_number
+            item["organization"] = response.autonomous_system_organization
     except Exception as e:
         logger.warning("{} {}".format(e, ip))
 
@@ -67,22 +91,21 @@ def get_ip_city(ip):
     from . import get_logger
     logger = get_logger()
     try:
-        reader = geoip2.database.Reader(Config.GEOIP_CITY)
-        response = reader.city(ip)
-        item = {
-            "city": response.city.name,
-            "latitude": response.location.latitude,
-            "longitude": response.location.longitude,
-            "country_name": response.country.name,
-            "country_code": response.country.iso_code,
-            "region_name": response.subdivisions.most_specific.name,
-            "region_code": response.subdivisions.most_specific.iso_code,
-        }
-        reader.close()
-        return item
-
+        reader = _get_city_reader()
+        if reader:
+            response = reader.city(ip)
+            return {
+                "city": response.city.name,
+                "latitude": response.location.latitude,
+                "longitude": response.location.longitude,
+                "country_name": response.country.name,
+                "country_code": response.country.iso_code,
+                "region_name": response.subdivisions.most_specific.name,
+                "region_code": response.subdivisions.most_specific.iso_code,
+            }
+        return {}
     except Exception as e:
-        logger.warning("{} {}".format(e,ip))
+        logger.warning("{} {}".format(e, ip))
         return {}
 
 

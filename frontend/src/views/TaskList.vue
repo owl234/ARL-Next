@@ -142,10 +142,22 @@
         </template>
 
         <template v-else-if="column.key === 'statistic'">
-          <div v-if="record.statistic" style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <a-badge v-if="record.statistic.site_cnt !== undefined" :count="record.statistic.site_cnt" title="站点" />
-            <a-badge v-if="record.statistic.domain_cnt !== undefined" :count="record.statistic.domain_cnt" title="域名" />
-            <a-badge v-if="record.statistic.ip_cnt !== undefined" :count="record.statistic.ip_cnt" :number-style="{ backgroundColor: '#52c41a' }" title="IP" />
+          <div v-if="record.statistic" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <a-tooltip v-if="record.statistic.site_cnt !== undefined" :title="`站点: ${record.statistic.site_cnt}`">
+              <a-badge :count="record.statistic.site_cnt" :number-style="{ backgroundColor: '#00bcd4' }" show-zero />
+            </a-tooltip>
+            <a-tooltip v-if="record.statistic.domain_cnt !== undefined" :title="`域名: ${record.statistic.domain_cnt}`">
+              <a-badge :count="record.statistic.domain_cnt" :number-style="{ backgroundColor: '#1890ff' }" show-zero />
+            </a-tooltip>
+            <a-tooltip v-if="record.statistic.ip_cnt !== undefined" :title="`IP: ${record.statistic.ip_cnt}`">
+              <a-badge :count="record.statistic.ip_cnt" :number-style="{ backgroundColor: '#52c41a' }" show-zero />
+            </a-tooltip>
+            <a-tooltip v-if="record.statistic.wih_cnt !== undefined && record.statistic.wih_cnt > 0" :title="`WIH: ${record.statistic.wih_cnt}`">
+              <a-badge :count="record.statistic.wih_cnt" :number-style="{ backgroundColor: '#faad14' }" />
+            </a-tooltip>
+            <a-tooltip v-if="record.statistic.vuln_cnt !== undefined && record.statistic.vuln_cnt > 0" :title="`风险: ${record.statistic.vuln_cnt}`">
+              <a-badge :count="record.statistic.vuln_cnt" :number-style="{ backgroundColor: '#ff4d4f' }" />
+            </a-tooltip>
           </div>
           <span v-else style="color: var(--arl-text-color); opacity: 0.45;">-</span>
         </template>
@@ -184,14 +196,14 @@
 
         <template v-else-if="column.key === 'action'">
           <a-space size="small">
-            <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" @click="syncTask(record)">同 步</a-button>
+            <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" :disabled="record.status !== 'done' && record.status !== 'stop' && record.status !== 'error'" @click="syncTask(record)">同 步</a-button>
             <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" @click="exportTask(record)">导 出</a-button>
 
-            <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" @click="stopSingleTask(record)" :disabled="record.status === 'done' || record.status === 'error'">停 止</a-button>
+            <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" @click="stopSingleTask(record)" :disabled="record.status === 'done' || record.status === 'stop' || record.status === 'error'">停 止</a-button>
 
-            <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" :disabled="record.status !== 'done' && record.status !== 'error'" @click="deleteSingleTask(record)">删 除</a-button>
+            <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" :disabled="record.status !== 'done' && record.status !== 'stop' && record.status !== 'error'" @click="deleteSingleTask(record)">删 除</a-button>
 
-            <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" @click="restartTask(record)">重 启</a-button>
+            <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" :disabled="record.status !== 'done' && record.status !== 'stop' && record.status !== 'error'" @click="restartTask(record)">重 启</a-button>
           </a-space>
         </template>
 
@@ -355,8 +367,9 @@
 <script setup>
 defineOptions({ name: 'TaskList' });
 
-import { ref as _ref_for_sticky, ref, reactive, onMounted, computed, createVNode, watch, onActivated } from 'vue';import { useSticky } from '../utils/useSticky';
-const actionBarRef = _ref_for_sticky(null);
+import { ref, reactive, onMounted, computed, createVNode, watch, onActivated } from 'vue';
+import { useSticky } from '../utils/useSticky';
+const actionBarRef = ref(null);
 const { stickyConfig } = useSticky(actionBarRef);
 
 import { Modal, message, Checkbox } from 'ant-design-vue';
@@ -382,11 +395,15 @@ watch(() => pagination.pageSize, (newSize) => {
   globalPageSize.value = newSize;
 });
 
+watch(globalPageSize, (newSize) => {
+  pagination.pageSize = newSize;
+});
+
 // 1:1 还原原版精确的宽带分配，并为任务名和目标开启排序
 const columns = [
   { title: '任务名', dataIndex: 'name', key: 'name', width: 180, sorter: true, ellipsis: true },
   { title: '目标', dataIndex: 'target', key: 'target', width: 220, sorter: true, ellipsis: true },
-  { title: '统计', dataIndex: 'statistic', key: 'statistic', width: 100 },
+  { title: '统计', dataIndex: 'statistic', key: 'statistic', width: 120 },
   { title: '配置项', dataIndex: 'options', key: 'options', width: 160, ellipsis: true },
   { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
   { title: '开始时间', dataIndex: 'start_time', key: 'start_time', width: 160 },
@@ -399,10 +416,11 @@ const columns = [
 const getStatusColor = (status) => {
   if (status === 'done') return 'success';     // 成功：绿色
   if (status === 'error') return 'error';      // 失败：红色
+  if (status === 'stop') return 'warning';     // 停止：橙黄色
   if (status === 'waiting') return 'default';  // 等待：灰色
 
   // ARL 会把当前执行的插件名作为状态，比如 domain_brute, port_scan
-  // 只要不是上面三种，统统认为是“正在运行”，显示为蓝色处理中状态
+  // 只要不是上面几种，统统认为是“正在运行”，显示为蓝色处理中状态
   return 'processing';
 };
 
@@ -521,7 +539,7 @@ const handleBatchDelete = () => {
   });
 };
 
-// 💥 完美复刻 ARL 任务停止：批量强制终止选中的任务
+// 💥 任务停止：智能识别运行态并批量终止选中的任务
 const handleBatchStop = () => {
   if (!hasSelected.value) {
     message.warning('请先勾选需要停止的任务');
@@ -536,23 +554,39 @@ const handleBatchStop = () => {
     return;
   }
 
-  // 2. 原版风格的确认弹窗（不需要内部复选框了）
+  // 2. 智能预先分析选中任务中的运行状态
+  const selectedRecords = taskList.value.filter(item => validKeys.includes(item._id || item.task_id));
+  const activeCount = selectedRecords.filter(item => !['done', 'stop', 'error'].includes(item.status)).length;
+  const finishedCount = validKeys.length - activeCount;
+
+  let modalContent = `确认要强制停止选中的 ${validKeys.length} 项任务吗？`;
+  if (activeCount > 0 && finishedCount > 0) {
+    modalContent = `选中的 ${validKeys.length} 项任务中包含 ${activeCount} 项正在运行，${finishedCount} 项已结束任务将自动跳过。确认执行停止操作吗？`;
+  } else if (activeCount === 0) {
+    modalContent = `选中的 ${validKeys.length} 项任务均已结束（完成/已停止/失败），确认继续同步状态吗？`;
+  }
+
+  // 3. 原版风格的确认弹窗
   Modal.confirm({
     title: '停止确认',
     icon: createVNode(ExclamationCircleOutlined),
-    content: `确认要强制停止选中的 ${validKeys.length} 项任务吗？`,
+    content: modalContent,
     okText: '确 定',
     cancelText: '取 消',
-    // 停止按钮不需要像删除那样标红，保持默认的蓝色即可
     onOk: async () => {
       try {
-        // 3. 1:1 对齐你抓包的极简 Payload 结构
+        // 4. 1:1 对齐极简 Payload 结构
         const res = await request.post('/task/batch_stop/', {
           task_id: validKeys
         });
 
         if (res.code === 200) {
-          message.success(`成功下发停止指令给 ${validKeys.length} 项任务！`);
+          const data = res.data;
+          if (data && (data.stopped_count !== undefined || data.skipped_count !== undefined)) {
+            message.success(`停止指令已处理：成功停止 ${data.stopped_count || 0} 项，已跳过 ${data.skipped_count || 0} 项已结束任务`);
+          } else {
+            message.success(`成功下发停止指令给 ${validKeys.length} 项任务！`);
+          }
           selectedRowKeys.value = []; // 清空表格勾选状态
           fetchTasks(pagination.current, pagination.pageSize); // 刷新当前页表格以获取最新状态
         } else {
@@ -1130,5 +1164,4 @@ onActivated(() => {
   font-size: 14px;
   color: var(--arl-text-color);
 }
-
 </style>

@@ -117,8 +117,9 @@
 
 <script setup>
 
-import { ref as _ref_for_sticky, ref, reactive, onMounted, watch } from 'vue';import { useSticky } from '../utils/useSticky';
-const actionBarRef = _ref_for_sticky(null);
+import { ref, reactive, onMounted, watch } from 'vue';
+import { useSticky } from '../utils/useSticky';
+const actionBarRef = ref(null);
 const { stickyConfig } = useSticky(actionBarRef);
 
 import { useRouter } from 'vue-router'; // 引入路由
@@ -136,6 +137,10 @@ const pagination = reactive({ current: 1, pageSize: globalPageSize.value, total:
 
 watch(() => pagination.pageSize, (newSize) => {
   globalPageSize.value = newSize;
+});
+
+watch(globalPageSize, (newSize) => {
+  pagination.pageSize = newSize;
 });
 const selectedRowKeys = ref([]);
 

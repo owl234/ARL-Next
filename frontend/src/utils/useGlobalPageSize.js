@@ -1,12 +1,35 @@
 import { ref, watch } from 'vue';
 
-export function useGlobalPageSize(defaultSize = 10) {
-  const storedSize = localStorage.getItem('global_pageSize');
-  const pageSize = ref(storedSize ? parseInt(storedSize, 10) : defaultSize);
+const getInitialPageSize = (defaultSize = 10) => {
+  try {
+    const storedSize = localStorage.getItem('global_pageSize');
+    if (storedSize) {
+      const parsed = parseInt(storedSize, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Failed to read global_pageSize from localStorage:', e);
+  }
+  return defaultSize;
+};
 
-  watch(pageSize, (newSize) => {
-    localStorage.setItem('global_pageSize', newSize);
-  });
+// 单例响应式状态，全站各组件共享同一引用
+const globalPageSize = ref(getInitialPageSize(10));
 
-  return pageSize;
+// 监听变动并安全同步到 localStorage
+watch(globalPageSize, (newSize) => {
+  try {
+    if (newSize && !isNaN(newSize) && newSize > 0) {
+      localStorage.setItem('global_pageSize', String(newSize));
+    }
+  } catch (e) {
+    console.error('Failed to save global_pageSize to localStorage:', e);
+  }
+});
+
+export function useGlobalPageSize() {
+  return globalPageSize;
 }
+

@@ -33,6 +33,12 @@ QUERY_PLUGIN:
     enable: true
   crtsh:
     enable: true
+  hackertarget:
+    enable: true
+  anubis:
+    enable: true
+  wayback:
+    enable: true
   fofa:  # fofa 的key配置在上面
     enable: true
   hunter_qax: # 网站 https://hunter.qianxin.com/

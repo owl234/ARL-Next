@@ -114,12 +114,14 @@ onMounted(() => {
   dbHelper.get('bgImage').then((savedBgImage) => {
     if (savedBgImage) {
       currentBgImage.value = savedBgImage;
-      document.body.style.backgroundImage = `url(${savedBgImage})`;
-      document.body.style.backgroundSize = 'cover';
-      document.body.style.backgroundPosition = 'center';
-      document.body.style.backgroundAttachment = 'fixed';
-      document.body.classList.add('has-bg-image');
-      document.documentElement.classList.add('has-bg-image');
+      requestAnimationFrame(() => {
+        document.body.style.backgroundImage = `url(${savedBgImage})`;
+        document.body.style.backgroundSize = 'cover';
+        document.body.style.backgroundPosition = 'center';
+        document.body.style.backgroundAttachment = 'fixed';
+        document.body.classList.add('has-bg-image');
+        document.documentElement.classList.add('has-bg-image');
+      });
     } else {
       document.body.style.backgroundColor = isDarkMode.value ? '#000000' : '#f1f5f9';
       document.documentElement.style.backgroundColor = isDarkMode.value ? '#000000' : '#f1f5f9';

@@ -95,6 +95,44 @@ def get_cert(host, port):
         logger.debug("get cert error {}:{} {}".format(host,port, e))
 
 
+def extract_domains_from_cert(cert_data, base_domain):
+    """
+    从 SSL/TLS 证书对象中提取属于 base_domain 的全部子域名（解析 Common Name 与 Subject Alternative Names）
+    """
+    from .domain import is_valid_domain, check_domain_black
+    domains = set()
+    if not cert_data or not isinstance(cert_data, dict):
+        return domains
+
+    base_domain_lower = base_domain.strip().lower()
+
+    # 1. 提取 Subject Common Name (CN)
+    subject = cert_data.get("subject", {})
+    if isinstance(subject, dict):
+        cn = subject.get("common_name", "")
+        if cn:
+            cn = cn.strip().replace("*.", "").lower()
+            if cn.endswith("." + base_domain_lower) or cn == base_domain_lower:
+                if is_valid_domain(cn) and not check_domain_black(cn):
+                    domains.add(cn)
+
+    # 2. 提取 Extensions -> subjectAltName (SAN)
+    extensions = cert_data.get("extensions", {})
+    if isinstance(extensions, dict):
+        san = extensions.get("subjectAltName", "")
+        if san:
+            for item in san.split(","):
+                item = item.strip()
+                if item.lower().startswith("dns:"):
+                    d = item[4:].strip().replace("*.", "").lower()
+                    if d.endswith("." + base_domain_lower) or d == base_domain_lower:
+                        if is_valid_domain(d) and not check_domain_black(d):
+                            domains.add(d)
+
+    return domains
+
+
+
 
 
 

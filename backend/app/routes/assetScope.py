@@ -46,9 +46,9 @@ class ARLAssetScope(ARLResource):
         args = self.parser.parse_args()
         data = self.build_data(args=args, collection='asset_scope')
 
-        # 历史数据兼容：如果发现没有 domain_array 字段，说明是旧版结构，动态赋予它
+        # 历史数据兼容与探测状态统计
         for item in data.get("items", []):
-            if "domain_array" not in item:
+            if "domain_array" not in item or "ip_array" not in item:
                 st = item.get("scope_type")
                 sa = item.get("scope_array", [])
                 if st == AssetScopeType.DOMAIN:
@@ -58,8 +58,20 @@ class ARLAssetScope(ARLResource):
                     item["domain_array"] = []
                     item["ip_array"] = sa
                 else:
-                    item["domain_array"] = []
-                    item["ip_array"] = []
+                    d_arr = []
+                    i_arr = []
+                    for x in sa:
+                        if utils.is_valid_domain(x):
+                            d_arr.append(x)
+                        else:
+                            i_arr.append(x)
+                    item["domain_array"] = d_arr
+                    item["ip_array"] = i_arr
+
+            from app.helpers.scope import get_scope_domain_stat
+            domain_status, domain_stat = get_scope_domain_stat(item)
+            item["domain_status"] = domain_status
+            item["domain_stat"] = domain_stat
 
         return data
 
@@ -104,12 +116,21 @@ class ARLAssetScope(ARLResource):
             return utils.build_ret(ErrorMsg.DomainInvalid, {"scope": ""})
 
         # 5. 组装数据，实行“双轨制”存储
+        domain_status = {}
+        for d in domain_array:
+            domain_status[d] = {
+                "status": "unprobed",
+                "sync_source": "manual",
+                "sync_time": utils.curr_date()
+            }
+
         scope_data = {
             "name": name,
             "scope_type": scope_type,
             "scope": ",".join(new_scope_array),
             "scope_array": new_scope_array,
             "domain_array": domain_array,
+            "domain_status": domain_status,
             "ip_array": ip_array,
             "black_scope": black_scope,
             "black_scope_array": black_scope_array,
@@ -186,9 +207,12 @@ class DeleteARLAssetScope(ARLResource):
         return utils.build_ret(ErrorMsg.Success, {"scope_id": scope_id, "scope":scope})
 
     def get_scope_data(self, scope_id):
-        query = {'_id': ObjectId(scope_id)}
-        scope_data = utils.conn_db(self._table).find_one(query)
-        return scope_data
+        try:
+            query = {'_id': ObjectId(scope_id)}
+            scope_data = utils.conn_db(self._table).find_one(query)
+            return scope_data
+        except Exception:
+            return None
 
     # 接口 B：整体销毁 (POST) - 连锅端！
     @auth
@@ -278,7 +302,148 @@ class AddARLAssetScope(ARLResource):
                 else:
                     return utils.build_ret(ErrorMsg.DomainInvalid, {"scope": x, "error": "非法的域名或IP格式"})
 
+        domain_status = scope_data.get("domain_status", {})
+        if not isinstance(domain_status, dict):
+            domain_status = {}
+        for d in scope_data.get("domain_array", []):
+            if d not in domain_status:
+                domain_status[d] = {
+                    "status": "unprobed",
+                    "sync_source": "manual",
+                    "sync_time": utils.curr_date()
+                }
+        scope_data["domain_status"] = domain_status
         scope_data["scope"] = ",".join(scope_data["scope_array"])
         utils.conn_db(table).find_one_and_replace(query, scope_data)
 
         return utils.build_ret(ErrorMsg.Success, {"scope_id": scope_id, "scope": scope})
+
+
+# ==========================================
+# 接口：全量/批量更新资产范围 (POST /update/ 或 /edit/)
+# ==========================================
+update_scope_fields = ns.model('UpdateScope', {
+    '_id': fields.String(description="资产范围 ID"),
+    'scope_id': fields.String(description="资产范围 ID（别名兼容）"),
+    'name': fields.String(description="资产组名称"),
+    'scope': fields.String(description="资产范围（完整新列表）"),
+    'black_scope': fields.String(description="资产黑名单")
+})
+
+
+@ns.route('/update/')
+@ns.route('/edit/')
+class UpdateARLAssetScope(ARLResource):
+    @auth
+    @ns.expect(update_scope_fields)
+    def post(self):
+        """
+        修改/批量更新资产组范围（含 Diff 计算与级联删除孤儿资产）
+        """
+        args = self.parse_args(update_scope_fields)
+        scope_id = args.pop('_id', None) or args.pop('scope_id', None)
+        if not scope_id:
+            return utils.build_ret(ErrorMsg.NotFoundScopeID, {"error": "缺少资产组 ID"})
+
+        table = 'asset_scope'
+        try:
+            query = {'_id': ObjectId(scope_id)}
+        except Exception:
+            return utils.build_ret(ErrorMsg.NotFoundScopeID, {"scope_id": scope_id})
+
+        scope_data = utils.conn_db(table).find_one(query)
+        if not scope_data:
+            return utils.build_ret(ErrorMsg.NotFoundScopeID, {"scope_id": scope_id})
+
+        # 兜底旧数据
+        if "domain_array" not in scope_data:
+            st = scope_data.get("scope_type")
+            sa = scope_data.get("scope_array", [])
+            scope_data["domain_array"] = list(sa) if st == AssetScopeType.DOMAIN else []
+            scope_data["ip_array"] = list(sa) if st == AssetScopeType.IP else []
+
+        name = args.pop('name', None)
+        if name:
+            scope_data["name"] = name
+
+        black_scope = args.pop('black_scope', None)
+        if black_scope is not None:
+            scope_data["black_scope"] = black_scope
+            scope_data["black_scope_array"] = list(filter(None, re.split(r",|\s", black_scope))) if black_scope else []
+
+        scope = args.pop('scope', None)
+        if scope is not None:
+            raw_scope_array = re.split(r",|\s", scope)
+            raw_scope_array = list(filter(None, raw_scope_array))
+
+            if not raw_scope_array:
+                return utils.build_ret(ErrorMsg.DomainInvalid, {"error": "资产组必须保留至少一个资产范围，禁止清空"})
+
+            new_scope_array = []
+            domain_array = []
+            ip_array = []
+
+            # 智能探测并去重保留顺序
+            seen = set()
+            for x in raw_scope_array:
+                x = x.strip().lower()
+                if not x:
+                    continue
+                if utils.is_valid_domain(x):
+                    item = x
+                    if item not in seen:
+                        seen.add(item)
+                        new_scope_array.append(item)
+                        domain_array.append(item)
+                else:
+                    transfer = utils.ip.transfer_ip_scope(x)
+                    if transfer is not None:
+                        item = transfer
+                        if item not in seen:
+                            seen.add(item)
+                            new_scope_array.append(item)
+                            ip_array.append(item)
+                    else:
+                        return utils.build_ret(ErrorMsg.DomainInvalid, {"scope": x, "error": "非法的域名或IP格式"})
+
+            if not new_scope_array:
+                return utils.build_ret(ErrorMsg.DomainInvalid, {"error": "未包含有效的域名或IP"})
+
+            old_scopes = set(scope_data.get("scope_array", []))
+            current_new_scopes = set(new_scope_array)
+
+            removed_scopes = old_scopes - current_new_scopes
+
+            domain_status = scope_data.get("domain_status", {})
+            if not isinstance(domain_status, dict):
+                domain_status = {}
+
+            # 级联深度清理被移除主干目标的孤儿数据
+            for removed in removed_scopes:
+                domain_status.pop(removed, None)
+                utils.conn_db("asset_domain").delete_many({"scope_id": str(scope_id), "domain": removed})
+                utils.conn_db("asset_ip").delete_many({"scope_id": str(scope_id), "ip": removed})
+                utils.conn_db("asset_site").delete_many({"scope_id": str(scope_id), "domain": removed})
+                utils.conn_db("asset_wih").delete_many({"scope_id": str(scope_id), "domain": removed})
+
+            for d in domain_array:
+                if d not in domain_status:
+                    domain_status[d] = {
+                        "status": "unprobed",
+                        "sync_source": "manual",
+                        "sync_time": utils.curr_date()
+                    }
+
+            scope_data["domain_status"] = domain_status
+            scope_data["scope_array"] = new_scope_array
+            scope_data["domain_array"] = domain_array
+            scope_data["ip_array"] = ip_array
+            scope_data["scope"] = ",".join(new_scope_array)
+
+        utils.conn_db(table).find_one_and_replace(query, scope_data)
+
+        # 兼容返回数据
+        scope_data["_id"] = str(scope_data.get("_id", scope_id))
+        scope_data["scope_id"] = str(scope_id)
+
+        return utils.build_ret(ErrorMsg.Success, scope_data)

@@ -42,21 +42,21 @@ if [ "$HEAVY" -gt 0 ] || [ "$LIGHT" -gt 0 ]; then
     echo "Starting HEAVY workers: $HEAVY, LIGHT workers: $LIGHT"
 
     if [ "$LIGHT" -gt 0 ]; then
-        # 后台启动轻任务队列，并给它更大的 tasks-per-child
-        python3 /code/backend/.venv-docker/bin/celery -A app.celerytask.celery worker -Q arltask_light -n arltask_light -c "$LIGHT" --max-tasks-per-child=50 -l info &
+        # 后台启动轻任务队列，并给它更大的 tasks-per-child 与 300MB 内存熔断
+        python3 /code/backend/.venv-docker/bin/celery -A app.celerytask.celery worker -Q arltask_light -n arltask_light -c "$LIGHT" --max-tasks-per-child=50 --max-memory-per-child=300000 -l info &
     fi
     
     if [ "$HEAVY" -gt 0 ]; then
-        # 后台启动重任务队列，并且严格限制 max-tasks-per-child=5 以防止内存泄露
-        python3 /code/backend/.venv-docker/bin/celery -A app.celerytask.celery worker -Q arltask,arltask_heavy -n arltask_heavy -c "$HEAVY" --max-tasks-per-child=5 -l info &
+        # 后台启动重任务队列，并且严格限制 max-tasks-per-child=5 与 500MB 内存优雅熔断（任务执行后回收）
+        python3 /code/backend/.venv-docker/bin/celery -A app.celerytask.celery worker -Q arltask,arltask_heavy -n arltask_heavy -c "$HEAVY" --max-tasks-per-child=5 --max-memory-per-child=500000 -l info &
     fi
 else
     echo "Both Concurrency is 0, sleep"
     sleep 3600000000
 fi
 
-# 后台启动 GitHub 扫描 Celery worker
-python3 /code/backend/.venv-docker/bin/celery -A app.celerytask.celery worker -Q arlgithub -n arlgithub -c 2 --max-tasks-per-child=100 -l info &
+# 后台启动 GitHub 扫描 Celery worker (配置 300MB 内存熔断)
+python3 /code/backend/.venv-docker/bin/celery -A app.celerytask.celery worker -Q arlgithub -n arlgithub -c 2 --max-tasks-per-child=100 --max-memory-per-child=300000 -l info &
 # 后台启动 Celery 定时任务调度器 (Scheduler)
 python3 /code/backend/.venv-docker/bin/celery -A app.celerytask.celery beat -l info &
 

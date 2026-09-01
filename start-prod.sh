@@ -21,6 +21,16 @@ if ! flock -n 9; then
     exit 1
 fi
 
+# 出口清理临时日志文件（无痕执行）
+cleanup_temp_files() {
+    # 注意：/tmp/arl_dockerd.log 是长期运行 daemon 的排障依据，保留不清理；
+    # 仅清理本脚本一次性命令的临时输出。
+    rm -f /tmp/arl_pull_step.log /tmp/arl_deploy_step.log 2>/dev/null || true
+}
+trap cleanup_temp_files EXIT
+# INT/TERM 时清理后显式退出，避免 handler 返回后脚本在 set -e 豁免位置继续执行
+trap 'cleanup_temp_files; exit 130' INT TERM
+
 # ==================== 通用加载动画指示器 ====================
 run_with_spinner() {
     local msg="$1"
@@ -50,6 +60,17 @@ run_with_spinner() {
         echo "========================================================="
     fi
     return $status
+}
+
+# ==================== 通用超时执行适配器 ====================
+run_cmd_with_timeout() {
+    local sec="$1"
+    shift
+    if command -v timeout &>/dev/null; then
+        timeout "$sec" "$@"
+    else
+        "$@"
+    fi
 }
 
 # ==================== 依赖检查与自动安装函数 ====================
@@ -128,7 +149,7 @@ check_and_install_docker() {
         fi
         
         # 启动并使能 Docker 服务
-        if systemctl enable --now docker &>/dev/null || service docker start &>/dev/null; then
+        if run_cmd_with_timeout 30 systemctl enable --now docker &>/dev/null || run_cmd_with_timeout 30 service docker start &>/dev/null; then
             echo "✅ Docker 服务已启动！"
         fi
     else
@@ -216,7 +237,7 @@ check_and_configure_swap() {
     local swap_size_mb=$(free -m | awk '/^Swap:/ {print $2}')
     if [ -n "$swap_size_mb" ] && [ "$swap_size_mb" -ge 1024 ] 2>/dev/null; then
         local swap_size_gb=$(awk "BEGIN {printf \"%.1f\", $swap_size_mb/1024}")
-        echo "✅ 检测到系统已有 Swap (${swap_size_gb}G)，跳过自动配置。"
+        echo "✅ 检测到系统已有 Swap (${swap_size_gb}G)，跳过创建。"
         return 0
     fi
     
@@ -225,12 +246,6 @@ check_and_configure_swap() {
         chmod 600 /swapfile
         mkswap /swapfile &>/dev/null
         swapon /swapfile &>/dev/null
-        sysctl vm.swappiness=10 &>/dev/null
-        
-        # 写入 sysctl.conf
-        if ! grep -q "vm.swappiness=10" /etc/sysctl.conf; then
-            echo "vm.swappiness=10" >> /etc/sysctl.conf
-        fi
         
         # 写入 fstab 开机自动挂载
         if ! grep -q "/swapfile" /etc/fstab; then
@@ -243,6 +258,39 @@ check_and_configure_swap() {
     fi
 }
 
+# 6. 宿主机内核防假死与扫描性能调优 (swappiness/vfs_cache_pressure/overcommit)
+tune_system_kernel_parameters() {
+    echo "⚙️ 正在配置宿主机内核性能与防假死参数 (swappiness=10, vfs_cache_pressure=50, overcommit_memory=1)..."
+    
+    # 动态应用参数
+    sysctl -w vm.swappiness=10 &>/dev/null || true
+    sysctl -w vm.vfs_cache_pressure=50 &>/dev/null || true
+    sysctl -w vm.overcommit_memory=1 &>/dev/null || true
+    
+    # 持久化写入 /etc/sysctl.conf (去重并追加)
+    if [ -f /etc/sysctl.conf ]; then
+        sed -i '/vm.swappiness/d' /etc/sysctl.conf
+        sed -i '/vm.vfs_cache_pressure/d' /etc/sysctl.conf
+        sed -i '/vm.overcommit_memory/d' /etc/sysctl.conf
+        echo "vm.swappiness = 10" >> /etc/sysctl.conf
+        echo "vm.vfs_cache_pressure = 50" >> /etc/sysctl.conf
+        echo "vm.overcommit_memory = 1" >> /etc/sysctl.conf
+    fi
+    echo "✅ 宿主机内核参数调优完成（已持久化至 /etc/sysctl.conf）！"
+}
+
+# 7. 检查宿主机磁盘剩余空间 (至少预留 2GB)
+check_disk_space() {
+    echo "⚙️ 正在检查宿主机磁盘剩余空间..."
+    local free_kb=$(df -k . | awk 'NR==2 {print $4}')
+    if [ -n "$free_kb" ] && [ "$free_kb" -lt 2097152 ] 2>/dev/null; then
+        local free_mb=$((free_kb / 1024))
+        echo "❌ 错误：当前目录所在磁盘剩余空间仅有 ${free_mb}MB，不足 2GB。更新可能因磁盘写满中断，请先清理磁盘后重试。"
+        exit 1
+    fi
+    echo "✅ 宿主机磁盘空间充足！"
+}
+
 # ==================== 执行部署流程 ====================
 
 echo "🚀 开始执行 ARL-Next 生产一键部署与调优..."
@@ -250,8 +298,87 @@ echo "🚀 开始执行 ARL-Next 生产一键部署与调优..."
 # 执行依赖检测与安装
 check_and_install_python3
 check_and_install_docker
+
+# 4.5 统一探测 Docker 守护进程是否就绪；缺失 timeout 命令的极简环境直接探测（接受极小概率挂起风险）
+docker_info_ok() {
+    run_cmd_with_timeout 3 docker info &>/dev/null
+}
+
+# 4.5 轮询探测 Docker 守护进程就绪（最多 15 轮 × 每轮 ≤3 秒探测，避免慢启动误杀与卡死态无限阻塞）
+wait_docker_daemon() {
+    local i
+    for i in {1..15}; do
+        # 显式超时兜底：卡死态 daemon（socket 存在但无响应）会让 docker info 无限阻塞
+        if docker_info_ok; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+# 4.6 检查 Docker 守护进程是否真正在运行，未运行则尝试启动
+check_docker_daemon() {
+    echo "⚙️ 正在检查 Docker 守护进程运行状态..."
+    if docker_info_ok; then
+        echo "✅ Docker 守护进程运行正常！"
+        return 0
+    fi
+
+    echo "⚠️ Docker 二进制文件存在，但守护进程未运行，尝试启动..."
+
+    # 方式一：systemd 服务托管
+    if command -v systemctl &>/dev/null; then
+        run_cmd_with_timeout 30 systemctl start docker 2>/dev/null || true
+        if wait_docker_daemon; then
+            echo "✅ Docker 守护进程启动成功！"
+            return 0
+        fi
+    fi
+
+    # 方式二：SysV init 服务（仅无 systemd 时使用，避免与托管实例竞争）
+    if ! command -v systemctl &>/dev/null && command -v service &>/dev/null; then
+        run_cmd_with_timeout 30 service docker start 2>/dev/null || true
+        if wait_docker_daemon; then
+            echo "✅ Docker 守护进程启动成功！"
+            return 0
+        fi
+    fi
+
+    # 兜底：仅在没有 systemd/service 托管的极简环境下直接启动 dockerd
+    if ! command -v systemctl &>/dev/null && ! command -v service &>/dev/null && command -v dockerd &>/dev/null; then
+        # 防竞争：若已有 dockerd 进程在运行（如 updater 侧刚拉起），直接等待其就绪，
+        # 避免两个 dockerd 争抢 /var/run/docker.sock 与 /var/lib/docker 造成数据损坏
+        if command -v pgrep &>/dev/null && pgrep -x dockerd &>/dev/null; then
+            echo "⚠️ 检测到 dockerd 进程已在运行，等待其就绪..."
+            if wait_docker_daemon; then
+                return 0
+            fi
+            echo "❌ 错误：已检测到 dockerd 进程但无法就绪，可能存在异常状态，请手动排查。"
+            return 1
+        fi
+        # 9>&- 关闭继承的部署锁 fd：flock 锁挂在打开文件描述上，子进程继承 fd 即持续持锁，
+        # 否则 dockerd 长期存活会导致后续部署被误判为「另一个任务正在运行」
+        # 追加模式 >> 与 updater.py 侧 dockerd 日志保持一致，避免相互截断
+        nohup dockerd 9>&- >> /tmp/arl_dockerd.log 2>&1 &
+        if wait_docker_daemon; then
+            echo "✅ Docker 守护进程通过 dockerd 直接启动成功！"
+            return 0
+        fi
+    fi
+
+    echo "❌ 错误：Docker 守护进程无法启动。请手动排查："
+    echo "   1. 执行 'journalctl -u docker' 或查看 dockerd 日志找出原因"
+    echo "   2. 检查 'df -h' 确认磁盘未满"
+    echo "   3. 检查 /var/lib/docker 目录权限"
+    return 1
+}
+
+check_disk_space
+check_docker_daemon || exit 1
 check_and_install_compose
 check_and_configure_swap
+tune_system_kernel_parameters
 
 # 1. 宿主机 Docker 守护进程性能调优 (userland-proxy)
 DOCKER_CONFIG_DIR="/etc/docker"
@@ -291,8 +418,8 @@ if [ "$UPDATED" = "ERROR" ]; then
     echo "⚠️ 警告：无法解析已有的 $DOCKER_CONFIG_FILE，可能存在 JSON 语法错误，跳过自动性能配置。"
 elif [ "$UPDATED" = "UPDATED" ]; then
     echo "✅ 已成功配置 'userland-proxy': false 参数。正在重启 Docker 服务使配置生效..."
-    if systemctl restart docker &>/dev/null || service docker restart &>/dev/null; then
-        echo "✅ Docker 服务重启成功！"
+    if (run_cmd_with_timeout 30 systemctl restart docker &>/dev/null || run_cmd_with_timeout 30 service docker restart &>/dev/null) && wait_docker_daemon; then
+        echo "✅ Docker 服务重启并就绪成功！"
     else
         echo "⚠️ 警告：无法通过 systemctl 或 service 重启 Docker 服务，这可能是因为您运行在非 systemd 环境中。"
         echo "👉 请在部署完成后手动重启 Docker 服务以使性能调优生效。"
@@ -384,16 +511,48 @@ if [ ! -f "./frontend/.htpasswd" ]; then
     echo "✅ 已生成默认 Basic Auth 凭证: 账号 admin / 密码 arl_next"
 fi
 
+echo "🐳 正在为当前运行版本创建稳定备份快照..."
+docker tag crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest arl-web:backup-stable 2>/dev/null || true
+docker tag crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-worker:latest arl-worker:backup-stable 2>/dev/null || true
+docker tag crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-frontend:latest arl-frontend:backup-stable 2>/dev/null || true
+
 echo "🐳 正在从阿里云镜像库极速拉取最新构建..."
 MAX_RETRIES=3
 RETRY_COUNT=0
+DAEMON_RETRY=0
+MAX_DAEMON_RETRY=2
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if docker compose -f docker-compose.prod.yml pull; then
+    PULL_LOG="/tmp/arl_pull_step.log"
+    if (set -o pipefail; docker compose -f docker-compose.prod.yml pull 2>&1 | tee "$PULL_LOG"); then
         break
     fi
+
+    # 区分「Docker 守护进程未运行」与「网络波动」两类失败原因
+    if grep -qiE "Cannot connect to the Docker daemon|Is the docker daemon running|docker.sock" "$PULL_LOG"; then
+        DAEMON_RETRY=$((DAEMON_RETRY+1))
+        if [ $DAEMON_RETRY -gt $MAX_DAEMON_RETRY ]; then
+            echo "❌ 错误：Docker 守护进程反复异常，已尝试重启 $MAX_DAEMON_RETRY 次仍失败。"
+            echo "👉 请手动排查：执行 'journalctl -u docker' 查看日志，检查 'df -h' 磁盘空间。"
+            cat "$PULL_LOG"
+            exit 1
+        fi
+        echo "⚠️ Docker 守护进程未在运行，正在尝试自动启动 (第 $DAEMON_RETRY/$MAX_DAEMON_RETRY 次)..."
+        if check_docker_daemon; then
+            # daemon 已恢复，本次失败不计入网络重试次数，直接重试一次
+            continue
+        fi
+        echo "❌ 错误：Docker 守护进程启动失败，请手动排查后再运行："
+        echo "   - 执行 'journalctl -u docker' 查看系统日志"
+        echo "   - 执行 'df -h' 确认磁盘空间充足"
+        echo "   - 确认 /var/lib/docker 目录权限正常"
+        cat "$PULL_LOG"
+        exit 1
+    fi
+
     RETRY_COUNT=$((RETRY_COUNT+1))
     if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
         echo "❌ 错误：多次拉取镜像失败，请检查服务器网络或稍后再试。"
+        cat "$PULL_LOG"
         exit 1
     fi
     echo "⚠️ 镜像拉取遇到网络波动，正在进行第 $RETRY_COUNT 次重试 (等待 5 秒)..."
@@ -403,8 +562,8 @@ done
 echo "🚀 正在启动生产多服务容器组并清理可能遗留的孤儿容器..."
 docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
-echo "⏳ 正在等待后端 API 就绪 (动态检测)..."
-MAX_WAIT=60
+echo "⏳ 正在等待后端 API 就绪 (动态健康探针检测)..."
+MAX_WAIT=90
 WAIT_TIME=0
 while [ $WAIT_TIME -lt $MAX_WAIT ]; do
     if docker exec arl-web-prod curl -s http://127.0.0.1:5000/ > /dev/null 2>&1; then

@@ -12,7 +12,7 @@
       <!-- ================= Tab 1: 扫描结果 ================= -->
       <a-tab-pane key="result" tab="扫描结果">
 
-        <div style="position: sticky; top: 0px; z-index: 10; background-color: var(--arl-bg-layout); margin: -24px -24px 16px -24px; padding: 24px 24px 16px 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+        <div ref="actionBarRef" style="position: sticky; top: 0px; z-index: 10; background-color: var(--arl-bg-layout); margin: -24px -24px 16px -24px; padding: 24px 24px 16px 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
         <div class="search-row" style="margin-bottom: 16px; ">
           <div class="search-item">
             <span class="label">路径名：</span>
@@ -104,9 +104,10 @@
 
 <script setup>
 
-import { ref as _ref_for_sticky, ref, reactive, onMounted, watch, nextTick, onUnmounted } from 'vue';import { useSticky } from '../utils/useSticky';
-const _fake_ref = _ref_for_sticky(null);
-const { stickyConfig } = useSticky(_fake_ref);
+import { ref, reactive, onMounted, watch, nextTick, onUnmounted } from 'vue';
+import { useSticky } from '../utils/useSticky';
+const actionBarRef = ref(null);
+const { stickyConfig } = useSticky(actionBarRef);
 
 import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
@@ -135,6 +136,10 @@ const pagination = reactive({ current: 1, pageSize: globalPageSize.value, total:
 
 watch(() => pagination.pageSize, (newSize) => {
   globalPageSize.value = newSize;
+});
+
+watch(globalPageSize, (newSize) => {
+  pagination.pageSize = newSize;
 });
 
 const selectedRowKeys = ref([]);
@@ -217,26 +222,37 @@ const fetchLogData = async (isPolling = false) => {
   }
 };
 
+const startSyslogTimer = () => {
+  if (syslogTimer) clearInterval(syslogTimer);
+  fetchLogData();
+  syslogTimer = setInterval(() => fetchLogData(true), 5000);
+};
+
+const stopSyslogTimer = () => {
+  if (syslogTimer) {
+    clearInterval(syslogTimer);
+    syslogTimer = null;
+  }
+};
+
 watch(activeTab, (newTab) => {
   if (newTab === 'result') {
+    stopSyslogTimer();
     fetchData();
-    if (syslogTimer) clearInterval(syslogTimer);
   } else if (newTab === 'log') {
-    fetchLogData();
-    syslogTimer = setInterval(() => fetchLogData(true), 5000);
+    startSyslogTimer();
   }
 });
 
 onMounted(() => {
   fetchData();
   if (activeTab.value === 'log') {
-    fetchLogData();
-    syslogTimer = setInterval(() => fetchLogData(true), 5000);
+    startSyslogTimer();
   }
 });
 
 onUnmounted(() => {
-  if (syslogTimer) clearInterval(syslogTimer);
+  stopSyslogTimer();
 });
 </script>
 

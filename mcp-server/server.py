@@ -9,28 +9,61 @@ import sys
 import json
 import urllib3
 import requests
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from mcp.server.fastmcp import FastMCP
 
 # Disable insecure HTTPS warnings for self-signed certificates
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-ARL_HOST = os.environ.get("ARL_HOST", "https://127.0.0.1:5003").rstrip("/")
-ARL_TOKEN = os.environ.get("ARL_TOKEN", "")
-
-if not ARL_TOKEN:
-    sys.stderr.write("Warning: ARL_TOKEN environment variable is not set.\n")
-
 mcp = FastMCP(
     "arl-next",
     dependencies=["requests", "urllib3"]
 )
 
+def _get_auth():
+    host = os.environ.get("ARL_HOST", "").strip()
+    token = os.environ.get("ARL_TOKEN", "").strip()
+    candidate_paths = [
+        Path.cwd() / "ARL_auth.md",
+        Path("/Users/sienchen/Documents/github_project/ARL-Next/ARL_auth.md"),
+        Path("/Users/sienchen/Documents/github_project/Hunt-Next/ARL_auth.md"),
+    ]
+    if not host or not token:
+        for cp in candidate_paths:
+            if cp.exists():
+                try:
+                    content = cp.read_text(encoding="utf-8")
+                    for line in content.splitlines():
+                        if not host and line.startswith("ARL_HOST:"):
+                            host = line.split(":", 1)[1].strip()
+                        elif not token and line.startswith("ARL_TOKEN:"):
+                            token = line.split(":", 1)[1].strip()
+                        elif not token and "token" in line and "'" in line:
+                            parts = line.split("'")
+                            if len(parts) >= 4 and parts[1] == "token":
+                                token = parts[3].strip()
+                except Exception:
+                    pass
+    if not host:
+        host = "https://111.228.59.202:5173"
+    if not token:
+        raise RuntimeError(
+            "ARL API token not configured: set ARL_TOKEN env var or add 'ARL_TOKEN: <key>' "
+            "to ARL_auth.md (see repo root ARL_auth.md). Refusing hardcoded default."
+        )
+    return host.rstrip("/"), token
+
 def _request(method: str, endpoint: str, params: dict = None, json_data: dict = None, timeout: int = 15):
-    """统一向 ARL 后端 API 发送请求"""
-    url = f"{ARL_HOST}/api{endpoint}"
+    """统一向 ARL 后端 API 发送请求
+
+    注意:ARL 鉴权/业务失败返回 HTTP 200 + JSON `{"code":401,...}`(非 HTTP 4xx)。
+    因此除 HTTP 状态码外,还需检查 JSON 的 `code` 字段。
+    """
+    host, token = _get_auth()
+    url = f"{host}/api{endpoint}"
     headers = {
-        "Token": ARL_TOKEN,
+        "Token": token,
         "Content-Type": "application/json"
     }
     try:
@@ -47,7 +80,11 @@ def _request(method: str, endpoint: str, params: dict = None, json_data: dict = 
             return {"code": resp.status_code, "message": f"HTTP Error {resp.status_code}: {resp.text}"}
         content_type = resp.headers.get("Content-Type", "")
         if "application/json" in content_type:
-            return resp.json()
+            data = resp.json()
+            # ARL 用 HTTP 200 + JSON code!=200 表示业务失败(如鉴权 401),在此统一标记
+            if isinstance(data, dict) and "code" in data and data["code"] != 200:
+                return data
+            return data
         return resp.text
     except Exception as e:
         return {"code": 500, "message": f"Connection error: {str(e)}"}
@@ -213,5 +250,130 @@ def get_task_detail_export(target: str = "", task_id: str = "", tab: str = "site
     
     return res
 
+@mcp.tool()
+def list_arl_tasks(page: int = 1, size: int = 15, query: str = "", status: str = "") -> str:
+    """
+    列出 ARL-Next 中的扫描任务列表（极其节省 Token 的精炼表格）。
+    
+    参数：
+    - page: 页码，默认 1
+    - size: 每页数量，默认 15
+    - query: 模糊匹配任务名或目标（如 'bytedance.com'）
+    - status: 过滤任务状态（如 'done', 'running', 'stop', 'error'）
+    """
+    params = {"page": page, "size": size}
+    if query:
+        params["target"] = query
+    if status:
+        params["status"] = status
+        
+    res = _request("GET", "/task/", params=params)
+    if not isinstance(res, dict) or "items" not in res:
+        return f"[-] 查询失败: {res}"
+        
+    items = res.get("items", [])
+    total = res.get("total", len(items))
+    out = [f"📋 ARL-Next 任务总数: {total} (当前第 {page} 页 / 共 {len(items)} 条)", "| 任务 ID | 状态 | 目标 | 任务名称 |", "| :--- | :---: | :--- | :--- |"]
+    for it in items:
+        tid = it.get("_id", "")
+        st = it.get("status", "")
+        tgt = it.get("target", "")
+        nm = it.get("name", "")
+        out.append(f"| `{tid}` | `{st}` | {tgt} | {nm} |")
+    return "\n".join(out)
+
+@mcp.tool()
+def create_scan_task(target: str, name: str = "", port_scan: bool = True, service_detection: bool = True, domain_brute: bool = True, file_leak: bool = False, nuclei_scan: bool = False, poc_names: list[str] = None) -> str:
+    """
+    向 ARL-Next 主动下发新建资产侦察或漏洞扫描任务。
+    
+    参数：
+    - target: 目标域名或IP（如 'test.example.com'），必填
+    - name: 任务名称（若为空则自动命名为 'AI-Agent-<target>-<时间>'）
+    - port_scan: 是否开启端口扫描，默认 True
+    - service_detection: 是否开启服务识别，默认 True
+    - domain_brute: 是否开启子域名爆破，默认 True
+    - file_leak: 是否开启敏感文件泄露扫描，默认 False
+    - nuclei_scan: 是否开启 Nuclei CVE 漏洞扫描，默认 False
+    - poc_names: 可选指定执行的 PoC 插件名称列表（例如 ['Adminer_PHP_Identify']）
+    """
+    from datetime import datetime
+    if not target:
+        return "【错误】target 不能为空"
+        
+    if not name:
+        now_tag = datetime.now().strftime("%m%d_%H%M")
+        name = f"AI-Agent-{target}-{now_tag}"
+        
+    payload = {
+        "name": name,
+        "target": target,
+        "port_scan": port_scan,
+        "service_detection": service_detection,
+        "domain_brute": domain_brute,
+        "file_leak": file_leak,
+        "nuclei_scan": nuclei_scan,
+        "site_identify": True,
+        "ssl_cert": True,
+        "site_capture": False,
+        "search_engines": False,
+        "site_spider": False,
+        "arl_search": True,
+        "alt_dns": False,
+        "dns_query_plugin": True,
+        "skip_scan_cdn_ip": True
+    }
+    
+    if poc_names:
+        payload["poc_config"] = [{"plugin_name": p} for p in poc_names]
+        
+    res = _request("POST", "/task/", json_data=payload)
+    if isinstance(res, dict) and res.get("code") == 200:
+        items = res.get("items", [])
+        tids = [it.get("task_id") for it in items if isinstance(it, dict) and it.get("task_id")]
+        return f"✅ 成功在 ARL-Next 创建扫描任务！\n- 任务名称: {name}\n- 目标: {target}\n- 生成 Task ID: {', '.join(tids) if tids else '已入队'}\n- 扫描配置: 端口扫描={port_scan}, 服务识别={service_detection}, 域名爆破={domain_brute}, Nuclei={nuclei_scan}, PoC数={len(poc_names or [])}"
+    else:
+        return f"❌ 任务创建失败: {res}"
+
+@mcp.tool()
+def stop_arl_task(task_id: str) -> str:
+    """
+    主动停止/中止 ARL-Next 中正在运行的扫描任务。
+    
+    参数：
+    - task_id: 24位 ARL 任务 ID
+    """
+    if not task_id or len(task_id) != 24:
+        return "【错误】必须提供合法的 24位 task_id"
+    res = _request("GET", f"/task/stop/{task_id}")
+    if isinstance(res, dict) and res.get("code") == 200:
+        return f"✅ 任务 {task_id} 已成功发送终止信号并标记停止。"
+    return f"[-] 停止任务失败: {res}"
+
+@mcp.tool()
+def sync_assets_to_scope(scope_name: str, assets: list[str]) -> str:
+    """
+    将 AI 在侦察中发现的新资产（子域名/IP）反哺同步回 ARL-Next 资产分组（AssetScope）。
+    
+    参数：
+    - scope_name: 资产组名称（如 '抖音业务线-AI扩充'）
+    - assets: 资产列表（域名或 IP 列表）
+    """
+    if not scope_name or not assets:
+        return "【错误】scope_name 和 assets 不能为空"
+        
+    scope_str = "\n".join([a.strip() for a in assets if a.strip()])
+    payload = {
+        "name": scope_name,
+        "scope": scope_str,
+        "black_scope": "",
+        "scope_type": "mixed"
+    }
+    res = _request("POST", "/asset_scope/", json_data=payload)
+    if isinstance(res, dict) and res.get("code") == 200:
+        return f"✅ 成功将 {len(assets)} 个新资产反哺同步至 ARL-Next 资产组「{scope_name}」！"
+    return f"[-] 反哺资产组失败: {res}"
+
 if __name__ == "__main__":
     mcp.run()
+

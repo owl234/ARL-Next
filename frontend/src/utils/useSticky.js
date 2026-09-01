@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, isRef } from 'vue';
 
 export function useSticky(actionBarRef, offsetModifier = 24) {
   const stickyTopNumber = ref(180);
@@ -16,15 +16,19 @@ export function useSticky(actionBarRef, offsetModifier = 24) {
 
   onMounted(() => {
     scrollContainer.value = document.querySelector('.ant-layout-content');
+    const getTargetEl = () => (isRef(actionBarRef) ? actionBarRef.value : actionBarRef);
+
     const updateSticky = () => {
-      if (actionBarRef.value) {
-        const rect = actionBarRef.value.getBoundingClientRect();
+      const el = getTargetEl();
+      if (el && typeof el.getBoundingClientRect === 'function') {
+        const rect = el.getBoundingClientRect();
         stickyTopNumber.value = rect.height;
         actionBarHeight.value = rect.height;
       }
     };
     resizeObserver = new ResizeObserver(updateSticky);
-    if (actionBarRef.value) resizeObserver.observe(actionBarRef.value);
+    const targetEl = getTargetEl();
+    if (targetEl) resizeObserver.observe(targetEl);
     updateSticky();
   });
 

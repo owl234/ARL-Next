@@ -57,7 +57,10 @@
                         <span class="dict-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500;">{{ item.mainTitle }}</span>
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                           <span class="dict-subtitle">{{ item.subTitle }}</span>
-                          <span class="dict-badge">txt</span>
+                          <div style="display: flex; gap: 4px; align-items: center;">
+                            <a-tag v-if="item.is_builtin" color="purple" style="margin: 0; font-size: 10px; line-height: 16px; padding: 0 4px; border-radius: 2px;">内置</a-tag>
+                            <span class="dict-badge">txt</span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -104,17 +107,29 @@
                        <a-tag :color="unifiedSelectedType === 'asset' ? 'blue' : 'orange'" style="margin: 0;">
                          {{ unifiedSelectedType === 'asset' ? '资产发现' : '弱口令' }}
                        </a-tag>
+                       <a-tag v-if="unifiedSelectedIsBuiltin" color="purple" style="margin: 0;">
+                         🔒 系统内置
+                       </a-tag>
                      </div>
                      <div style="color: var(--arl-text-color); opacity: 0.55; font-size: 12px; font-family: 'Fira Code', monospace;">{{ unifiedSelectedDesc }} | Total: {{ totalLines }} lines</div>
                    </div>
-                   <div style="display: flex; gap: 8px;">
+                   <div style="display: flex; gap: 8px; align-items: center;">
+                      <a-button @click="handleDownloadDict" :loading="downloadLoading" title="导出字典文件">
+                        <template #icon><span style="margin-right:4px;">📥</span></template> 导出字典
+                      </a-button>
+                      <a-tooltip v-if="unifiedSelectedIsBuiltin" title="系统预置核心字典受安全保护，禁止彻底删除">
+                        <a-button danger disabled>
+                          <template #icon><span style="margin-right:4px;">🗑️</span></template> 删除字典
+                        </a-button>
+                      </a-tooltip>
                       <a-popconfirm
+                        v-else
                         title="确定要彻底删除该字典文件吗？此操作不可逆！"
                         placement="bottomRight"
                         @confirm="handleDeleteDict"
                       >
                         <a-button danger>
-                          <template #icon><span style="margin-right:4px;">🗑️</span></template> 删除选中
+                          <template #icon><span style="margin-right:4px;">🗑️</span></template> 删除字典
                         </a-button>
                       </a-popconfirm>
                      <a-button @click="searchDrawerVisible = true">
@@ -127,8 +142,28 @@
                 </div>
                 
                 <!-- 极简内容预览区 -->
-                <div class="native-preview-area hide-scrollbar">
-                  <div class="native-code-wrapper">
+                <div class="native-preview-area hide-scrollbar" style="display: flex; flex-direction: column; gap: 12px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; background: var(--arl-bg-white); padding: 8px 16px; border-radius: 8px; border: 1px solid var(--arl-border-color); box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span style="font-size: 13px; font-weight: 500; color: var(--arl-text-color);">
+                        📄 内容预览 (展示前 {{ previewLimit }} 行 / 共 {{ totalLines }} 行)
+                      </span>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                      <span style="font-size: 12px; opacity: 0.65; color: var(--arl-text-color);">预览行数:</span>
+                      <a-radio-group v-model:value="previewLimit" size="small" @change="() => fetchPreview(selectedDict)">
+                        <a-radio-button :value="50">50</a-radio-button>
+                        <a-radio-button :value="100">100</a-radio-button>
+                        <a-radio-button :value="500">500</a-radio-button>
+                        <a-radio-button :value="1000">1000</a-radio-button>
+                      </a-radio-group>
+                      <a-button size="small" @click="copyPreviewContent">
+                        <template #icon><span style="margin-right:2px;">📋</span></template> 复制预览
+                      </a-button>
+                    </div>
+                  </div>
+
+                  <div class="native-code-wrapper" style="flex: 1;">
                     <div class="native-line-numbers" v-if="previewContent">
                       <div v-for="n in previewLinesCount" :key="n" class="line-number">{{ n }}</div>
                     </div>
@@ -138,7 +173,7 @@
                       </div>
                       <pre v-else class="code-text">{{ previewContent }}</pre>
                       <div v-if="totalLines > previewLimit" class="code-limit-hint">
-                        // 仅预览前 {{ previewLimit }} 行内容...
+                        // 仅预览前 {{ previewLimit }} 行内容 (总计 {{ totalLines }} 行)...
                       </div>
                     </div>
                   </div>
@@ -193,6 +228,8 @@
                     <a-select-option value="black">🛡️ 全局黑名单拦截 (black*)</a-select-option>
                     <a-select-option value="port_">🔌 端口扫描策略 (port_)</a-select-option>
                     <a-select-option value="dnsserver_">🌐 DNS 解析配置 (dnsserver_)</a-select-option>
+                    <a-select-option value="username_">👤 弱口令账号 (username_)</a-select-option>
+                    <a-select-option value="password_">🔑 弱口令密码 (password_)</a-select-option>
                   </a-select>
                 </a-form-item>
                 <a-form-item label="字典名称 (仅英文、数字、下划线)" required>
@@ -406,8 +443,11 @@ admin123
                   
                   <!-- CNAME 规则 -->
                   <div class="native-code-wrapper" style="flex: none; display: flex; flex-direction: column; padding: 0;">
-                    <div style="padding: 8px 16px; background: rgba(0,0,0,0.02); border-bottom: 1px solid var(--arl-border-color); font-weight: 500; font-size: 13px; color: var(--arl-text-color);">
-                      🌍 CNAME 规则 ({{ (selectedCdn.cname_domain || []).length }})
+                    <div style="padding: 8px 16px; background: rgba(0,0,0,0.02); border-bottom: 1px solid var(--arl-border-color); font-weight: 500; font-size: 13px; color: var(--arl-text-color); display: flex; justify-content: space-between; align-items: center;">
+                      <span>🌍 CNAME 规则 ({{ (selectedCdn.cname_domain || []).length }})</span>
+                      <a-button size="small" type="text" @click="() => copyTextList(selectedCdn.cname_domain, 'CNAME 规则')">
+                        📋 复制
+                      </a-button>
                     </div>
                     <div style="display: flex; position: relative; padding: 16px;">
                       <div class="native-line-numbers" v-if="selectedCdn.cname_domain && selectedCdn.cname_domain.length > 0">
@@ -424,8 +464,11 @@ admin123
 
                   <!-- IP CIDR 规则 -->
                   <div class="native-code-wrapper" style="flex: none; display: flex; flex-direction: column; padding: 0;">
-                    <div style="padding: 8px 16px; background: rgba(0,0,0,0.02); border-bottom: 1px solid var(--arl-border-color); font-weight: 500; font-size: 13px; color: var(--arl-text-color);">
-                      🔌 IP CIDR 规则 ({{ (selectedCdn.ip_cidr || []).length }})
+                    <div style="padding: 8px 16px; background: rgba(0,0,0,0.02); border-bottom: 1px solid var(--arl-border-color); font-weight: 500; font-size: 13px; color: var(--arl-text-color); display: flex; justify-content: space-between; align-items: center;">
+                      <span>🔌 IP CIDR 规则 ({{ (selectedCdn.ip_cidr || []).length }})</span>
+                      <a-button size="small" type="text" @click="() => copyTextList(selectedCdn.ip_cidr, 'IP CIDR 规则')">
+                        📋 复制
+                      </a-button>
                     </div>
                     <div style="display: flex; position: relative; padding: 16px;">
                       <div class="native-line-numbers" v-if="selectedCdn.ip_cidr && selectedCdn.ip_cidr.length > 0">
@@ -979,13 +1022,13 @@ admin123
                   已是最新版本。
                 </span>
               </a-descriptions-item>
-              <a-descriptions-item v-if="hasNewVersion" label="更新日志" style="white-space: pre-wrap;">
-                {{ releaseNotes }}
+              <a-descriptions-item v-if="hasNewVersion" label="更新日志">
+                <div class="markdown-release-notes hide-scrollbar" v-html="renderedReleaseNotes" style="max-height: 380px; overflow-y: auto; line-height: 1.6; font-size: 13px; background: rgba(0,0,0,0.02); padding: 12px 16px; border-radius: 6px; border: 1px solid var(--arl-border-color);"></div>
               </a-descriptions-item>
             </a-descriptions>
             
             <div style="margin-top: 20px; text-align: center;">
-              <a-popconfirm title="此操作将拉取最新镜像并重启系统容器，大概需要几分钟时间，请确认当前无正在执行的重要任务。确定执行更新吗？" @confirm="startUpdate">
+              <a-popconfirm title="此操作将拉取最新镜像并重启系统容器，大概需要几分钟时间，请确认当前无正在执行的重要任务。确定执行更新吗？" @confirm="handleStartUpdateClick">
                 <a-button type="primary" size="large" danger :loading="updateButtonLoading" :disabled="!hasNewVersion && !forceUpdateMode">
                   一键系统更新
                 </a-button>
@@ -1017,8 +1060,10 @@ admin123
 
 <script setup>
 import { InfoCircleOutlined, ThunderboltOutlined } from '@ant-design/icons-vue';
-import { ref, reactive, onMounted, onUnmounted, computed, nextTick, watch } from 'vue';import { message } from 'ant-design-vue';
+import { ref, reactive, onMounted, onUnmounted, computed, nextTick, watch } from 'vue';
+import { message, Modal } from 'ant-design-vue';
 import request from '@/utils/request';
+import { copyText } from '@/utils/clipboard';
 import { useRoute } from 'vue-router';
 
 const reloadPage = () => {
@@ -1051,10 +1096,14 @@ const openCreateDictDrawer = () => {
     const key = selectedCategoryKeys.value[0];
     if (key.includes('子域名爆破')) {
       createDictForm.prefix = 'domain_';
+    } else if (key.includes('智能子域爆破')) {
+      createDictForm.prefix = 'altdns_';
     } else if (key.includes('目录文件泄露')) {
       createDictForm.prefix = 'file_';
     } else if (key.includes('端口扫描策略')) {
       createDictForm.prefix = 'port_';
+    } else if (key.includes('DNS 解析')) {
+      createDictForm.prefix = 'dnsserver_';
     } else if (key.includes('全局黑名单拦截')) {
       createDictForm.prefix = 'black';
     } else if (key.includes('group_brute_')) {
@@ -1067,6 +1116,12 @@ const isCreateDictValid = computed(() => {
   return createDictForm.customName && /^[a-zA-Z0-9_]+$/.test(createDictForm.customName);
 });
 
+// 新建字典时按前缀自动路由：username_/password_ → 弱口令字典目录 (brute_dict)，其余 → 资产字典目录 (dictionary)
+const isBruteCreatePrefix = computed(() => {
+  return createDictForm.prefix === 'username_' || createDictForm.prefix === 'password_';
+});
+const createDictApiBase = computed(() => isBruteCreatePrefix.value ? '/api/brute_dict' : '/api/dictionary');
+
 const resetCreateDictForm = () => {
   createDictForm.prefix = 'domain_';
   createDictForm.customName = '';
@@ -1077,18 +1132,24 @@ const resetCreateDictForm = () => {
 
 const handleCreateDictManual = async () => {
   let targetName = `${createDictForm.prefix}${createDictForm.customName}.txt`;
-  
+
   createDictLoading.value = true;
   try {
-    const res = await request.post('/api/dictionary/create', {
+    const res = await request.post(`${createDictApiBase.value}/create`, {
       name: targetName,
       content: createDictForm.content
     });
     if (res.code === 200) {
       message.success(`字典 ${targetName} 新建成功！`);
+      // 先捕获前缀判定再重置表单，避免 resetCreateDictForm 将 prefix 重置为 domain_ 导致刷新错列表
+      const isBrute = isBruteCreatePrefix.value;
       createDictDrawerVisible.value = false;
       resetCreateDictForm();
-      fetchDictList();
+      if (isBrute) {
+        fetchBruteDictList();
+      } else {
+        fetchDictList();
+      }
     } else {
       message.error(res.message || '新建失败');
     }
@@ -1120,28 +1181,40 @@ const handleCreateDictUpload = async () => {
 
   createDictLoading.value = true;
   try {
-    const res = await request.post('/api/dictionary/upload_large', formData, {
+    const res = await request.post(`${createDictApiBase.value}/upload_large`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
     if (res.code === 200) {
       const hideMsg = message.loading(`字典 ${targetName} 正在后台导入中，您可以继续其他操作...`, 0);
+      // 先捕获前缀判定与 API 基址再重置表单，避免 resetCreateDictForm 将 prefix 重置为 domain_ 导致轮询/刷新错命名空间
+      const apiBase = createDictApiBase.value;
+      const isBrute = isBruteCreatePrefix.value;
       createDictDrawerVisible.value = false;
       resetCreateDictForm();
-      
+
       const pollTimer = setInterval(async () => {
         try {
-          const statusRes = await request.get('/api/dictionary/upload_status', { params: { task_id: res.task_id } });
+          const statusRes = await request.get(`${apiBase}/upload_status`, { params: { task_id: res.task_id } });
           if (statusRes.code === 200) {
             if (statusRes.data.status === 'completed') {
               clearInterval(pollTimer);
               hideMsg();
               message.success(`字典 ${targetName} 导入完成！新增 ${statusRes.data.inserted_lines} 条，忽略重复 ${statusRes.data.ignored_lines} 条`);
-              fetchDictList(false);
+              if (isBrute) {
+                fetchBruteDictList(false);
+              } else {
+                fetchDictList(false);
+              }
             } else if (statusRes.data.status === 'error') {
               clearInterval(pollTimer);
               hideMsg();
               message.error(`导入 ${targetName} 失败: ${statusRes.data.message}`);
             }
+          } else {
+            // 任务不存在/状态丢失（如后端容器重启），停止轮询避免定时器泄漏
+            clearInterval(pollTimer);
+            hideMsg();
+            message.warning(`导入任务状态已丢失 (${statusRes.message || '任务不存在'})，请刷新页面后确认。`);
           }
         } catch (e) {
           // 忽略轮询时的网络抖动
@@ -1199,16 +1272,21 @@ const handleLargeUpload = async (info) => {
               
               if (currentType === 'asset') {
                 fetchDictList(false);
-                fetchDictPreview(targetName);
+                fetchPreview(targetName);
               } else {
                 fetchBruteDictList(false);
-                fetchBruteDictPreview(targetName);
+                fetchPreview(targetName);
               }
             } else if (statusRes.data.status === 'error') {
               clearInterval(pollTimer);
               hideMsg();
               message.error(`字典 ${targetName} 追加失败: ${statusRes.data.message}`);
             }
+          } else {
+            // 任务不存在/状态丢失，停止轮询避免定时器泄漏
+            clearInterval(pollTimer);
+            hideMsg();
+            message.warning('追加任务状态已丢失，请刷新页面后确认。');
           }
         } catch (e) {
           // 忽略轮询时的网络抖动
@@ -1416,6 +1494,12 @@ const bruteSvcGroups = computed(() => {
     'alibaba-druid': 'Alibaba Druid'
   };
   bruteDictList.value.forEach(item => {
+    // 通用弱口令字典（如 common_password.txt）归入独立分组
+    if (item.name.startsWith('common_') && item.name.endsWith('.txt')) {
+      if (!groups['通用弱口令']) groups['通用弱口令'] = [];
+      groups['通用弱口令'].push(item);
+      return;
+    }
     const m = item.name.match(/^(?:username|password)_(.+)\.txt$/);
     if (!m) return;
     const svcKey = m[1];
@@ -1439,6 +1523,7 @@ const treeData = computed(() => {
           mainTitle: friendly,
           subTitle: item.name,
           key: `asset__${item.name}`,
+          is_builtin: item.is_builtin
         };
       });
       data.push({ title: group, key: `group_asset_${group}`, selectable: false, children });
@@ -1454,11 +1539,17 @@ const treeData = computed(() => {
         if (item.name.startsWith('username_')) friendlyPrefix = '账号字典';
         else if (item.name.startsWith('password_')) friendlyPrefix = '密码字典';
         else if (item.name.includes('common_')) friendlyPrefix = '通用弱口令';
-        
+
+        // 通用弱口令组内直接显示文件名，避免 "[通用弱口令] 通用弱口令" 冗余
+        const mainTitle = svc === '通用弱口令'
+          ? (friendlyPrefix === '通用弱口令' ? item.name : `${friendlyPrefix || item.name}`)
+          : `[${svc}] ${friendlyPrefix || item.name}`;
+
         npocChildren.push({
-          mainTitle: `[${svc}] ${friendlyPrefix || item.name}`,
+          mainTitle,
           subTitle: item.name,
           key: `brute__${item.name}`,
+          is_builtin: item.is_builtin
         });
       });
     }
@@ -1485,6 +1576,9 @@ watch(treeData, (newVal) => {
   if (menuOpenKeys.value.length === 0 && newVal.length > 0) {
     menuOpenKeys.value = newVal.map(g => g.key);
   }
+  if (newVal.length > 0 && (!selectedCategoryKeys.value.length || !newVal.find(g => g.key === selectedCategoryKeys.value[0]))) {
+    selectedCategoryKeys.value = [newVal[0].key];
+  }
 }, { immediate: true });
 
 const handleUnifiedMenuSelect = ({ key }) => {
@@ -1492,18 +1586,21 @@ const handleUnifiedMenuSelect = ({ key }) => {
 };
 
 const handleAppendAndClose = async () => {
-  await handleAppend();
-  appendDrawerVisible.value = false;
+  const ok = await handleAppend();
+  if (ok) appendDrawerVisible.value = false;
 };
 
 const handleDeleteBatchCustom = async () => {
-  newEntries.value = batchDeleteEntries.value;
-  await handleDeleteBatch();
-  batchDeleteEntries.value = '';
+  if (!batchDeleteEntries.value.trim()) return;
+  const ok = await deleteEntries(batchDeleteEntries.value);
+  if (ok) {
+    batchDeleteEntries.value = '';
+    searchDrawerVisible.value = false;
+  }
 };
 
-// 分类选择状态
-const selectedCategoryKeys = ref(['🌍 子域名爆破']); // 默认选中第一个分类
+// 分类选择状态（默认对齐首个分类的唯一分组 key）
+const selectedCategoryKeys = ref(['group_asset_🌍 子域名爆破']);
 
 const handleCategorySelect = ({ key }) => {
   selectedCategoryKeys.value = [key];
@@ -1515,6 +1612,18 @@ const unifiedSelectedKeys = ref([]);
 const unifiedSelectedType = ref('');  // 'asset' | 'brute'
 const unifiedSelectedName = ref('');
 const unifiedSelectedDesc = ref('');
+
+const unifiedSelectedIsBuiltin = computed(() => {
+  if (!unifiedSelectedName.value) return false;
+  if (unifiedSelectedType.value === 'asset') {
+    const item = dictList.value.find(d => d.name === unifiedSelectedName.value);
+    return item ? Boolean(item.is_builtin) : false;
+  } else if (unifiedSelectedType.value === 'brute') {
+    const item = bruteDictList.value.find(d => d.name === unifiedSelectedName.value);
+    return item ? Boolean(item.is_builtin) : false;
+  }
+  return false;
+});
 
 const currentFilteredDicts = computed(() => {
   if (!selectedCategoryKeys.value.length) return [];
@@ -1561,6 +1670,55 @@ const previewLinesCount = computed(() => {
   if (!previewContent.value) return 0;
   return previewContent.value.split('\n').length;
 });
+
+const downloadLoading = ref(false);
+const handleDownloadDict = async () => {
+  if (!selectedDict.value) return;
+  downloadLoading.value = true;
+  try {
+    const res = await request.get(`${dictApiBase.value}/download`, {
+      params: { name: selectedDict.value },
+      responseType: 'blob'
+    });
+    // 后端异常时以 HTTP 4xx/5xx 返回，axios 会走 catch 分支
+    const blob = new Blob([res], { type: 'text/plain;charset=utf-8' });
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = selectedDict.value;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(downloadUrl);
+    message.success(`字典 ${selectedDict.value} 导出成功！`);
+  } catch (e) {
+    let errMsg = '导出字典失败';
+    if (e.response && e.response.data instanceof Blob) {
+      try {
+        const text = await e.response.data.text();
+        const parsed = JSON.parse(text);
+        if (parsed.message) errMsg = parsed.message;
+      } catch (_) { /* ignore parse errors */ }
+    }
+    message.error(errMsg);
+    console.error(e);
+  } finally {
+    downloadLoading.value = false;
+  }
+};
+
+const copyPreviewContent = async () => {
+  if (!previewContent.value) {
+    message.warning('当前没有可复制的内容');
+    return;
+  }
+  const ok = await copyText(previewContent.value);
+  if (ok) {
+    message.success('预览内容已成功复制到剪贴板！');
+  } else {
+    message.error('复制失败，请手动选择复制');
+  }
+};
 
 const searchKeyword = ref('');
 const searchResult = ref(null);
@@ -1641,23 +1799,23 @@ const handleSearch = async () => {
   }
 };
 
-// 追加条目（自动路由）
+// 追加条目（自动路由），返回是否成功
 const handleAppend = async () => {
-  if (!newEntries.value.trim()) return;
-  
+  if (!newEntries.value.trim()) return false;
+
   // 智能格式校验（阻断无效输入）
   const lines = newEntries.value.split('\n').map(s => s.trim()).filter(s => s);
   if (selectedDict.value && selectedDict.value.startsWith('port_')) {
     const invalidPorts = lines.filter(p => !/^\d+$/.test(p) || parseInt(p) < 1 || parseInt(p) > 65535);
     if (invalidPorts.length > 0) {
       message.error(`校验失败：包含无效端口号 (如 ${invalidPorts[0]})，请输入 1-65535 之间的纯数字`);
-      return;
+      return false;
     }
   } else if (selectedDict.value && selectedDict.value.includes('domain')) {
     const invalidDomains = lines.filter(d => /[\s,;!@#%^&*()<>{}\[\]]/.test(d));
     if (invalidDomains.length > 0) {
        message.error(`校验失败：子域名字典包含非法字符 (如空格或特殊符号)`);
-       return;
+       return false;
     }
   }
 
@@ -1673,12 +1831,15 @@ const handleAppend = async () => {
       fetchDictList();
       fetchBruteDictList();
       fetchPreview(selectedDict.value);
+      return true;
     } else {
       message.error(res.message || '保存失败');
+      return false;
     }
   } catch (error) {
     message.error('请求保存出错');
     console.error(error);
+    return false;
   } finally {
     submitLoading.value = false;
   }
@@ -1686,17 +1847,22 @@ const handleAppend = async () => {
 
 // 批量删除
 const handleDeleteBatch = async () => {
-  if (!newEntries.value.trim()) return;
-  await deleteEntries(newEntries.value);
+  if (!newEntries.value.trim()) return false;
+  const ok = await deleteEntries(newEntries.value);
+  if (ok) {
+    newEntries.value = '';
+  }
+  return ok;
 };
 
 // 单条删除
 const handleDeleteSingle = async (item) => {
-  if (!item) return;
-  await deleteEntries(item);
-  if (searchResult.value) {
+  if (!item) return false;
+  const ok = await deleteEntries(item);
+  if (ok && searchResult.value) {
     searchResult.value = searchResult.value.filter(x => x !== item);
   }
+  return ok;
 };
 
 // 删除选中字典文件
@@ -1736,6 +1902,7 @@ const handleDeleteDict = async () => {
 
 // 公共删除逻辑（自动路由）
 const deleteEntries = async (content) => {
+  if (!content || !content.trim()) return false;
   deleteLoading.value = true;
   try {
     const res = await request.post(`${dictApiBase.value}/delete_entries`, {
@@ -1744,16 +1911,18 @@ const deleteEntries = async (content) => {
     });
     if (res.code === 200) {
       message.success(`删除成功！尝试删除 ${res.data.total_submitted} 项，实际成功删除 ${res.data.deleted} 项。`);
-      newEntries.value = '';
       fetchDictList();
       fetchBruteDictList();
       fetchPreview(selectedDict.value);
+      return true;
     } else {
       message.error(res.message || '删除失败');
+      return false;
     }
   } catch (error) {
     message.error('请求删除出错');
     console.error(error);
+    return false;
   } finally {
     deleteLoading.value = false;
   }
@@ -1792,26 +1961,18 @@ const totalIpCount = computed(() => {
   return cdnList.value.reduce((acc, curr) => acc + (curr.ip_cidr || []).length, 0);
 });
 
-const previewCdnContent = computed(() => {
-  if (!selectedCdn.value) return '';
-  let lines = [];
-  if (selectedCdn.value.cname_domain && selectedCdn.value.cname_domain.length > 0) {
-    lines.push('// ==================== CNAME 特征 ====================');
-    lines = lines.concat(selectedCdn.value.cname_domain);
+const copyTextList = async (list, label = '内容') => {
+  if (!list || !list.length) {
+    message.warning(`${label}暂无数据`);
+    return;
   }
-  if (selectedCdn.value.ip_cidr && selectedCdn.value.ip_cidr.length > 0) {
-    if (lines.length > 0) lines.push('');
-    lines.push('// ==================== IP CIDR 特征 ====================');
-    lines = lines.concat(selectedCdn.value.ip_cidr);
+  const ok = await copyText(list.join('\n'));
+  if (ok) {
+    message.success(`${label}已复制到剪贴板！`);
+  } else {
+    message.error('复制失败，请手动选择复制');
   }
-  return lines.join('\n');
-});
-
-const previewCdnLinesCount = computed(() => {
-  if (!previewCdnContent.value) return 0;
-  return previewCdnContent.value.split('\n').length;
-});
-
+};
 
 const cdnDrawerVisible = ref(false);
 const isEditingCdn = ref(false);
@@ -1862,6 +2023,27 @@ const submitCdnDrawer = () => {
   }
   const cname_domain = currentCdnForm.cnameText.split('\n').map(s => s.trim()).filter(s => s);
   const ip_cidr = currentCdnForm.ipText.split('\n').map(s => s.trim()).filter(s => s);
+
+  // IP / 网段格式校验（IPv4 或 IPv4 CIDR），阻断明显非法输入写入全局探测配置
+  const cidrRe = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
+  const invalidCidr = ip_cidr.filter(cidr => {
+    if (!cidrRe.test(cidr)) return true;
+    const parts = cidr.split('/');
+    const octets = parts[0].split('.').map(Number);
+    if (octets.some(o => o < 0 || o > 255)) return true;
+    if (parts[1] && (parseInt(parts[1]) < 0 || parseInt(parts[1]) > 32)) return true;
+    return false;
+  });
+  if (invalidCidr.length > 0) {
+    message.error(`IP 格式不合法 (如 ${invalidCidr[0]})，应为 IPv4 地址或 CIDR 网段，例如 1.1.1.1 或 103.21.244.0/22`);
+    return;
+  }
+  // CNAME 后缀校验：不允许空白与路径分隔符
+  const invalidCname = cname_domain.filter(d => /[\s/\\]/.test(d));
+  if (invalidCname.length > 0) {
+    message.error(`CNAME 后缀格式不合法 (如 ${invalidCname[0]})，应为纯域名后缀`);
+    return;
+  }
 
   if (isEditingCdn.value && currentEditIndex.value > -1) {
     cdnList.value[currentEditIndex.value] = {
@@ -1925,33 +2107,6 @@ const saveCdnData = async () => {
   } finally {
     cdnSaveLoading.value = false;
   }
-};
-
-// CDN 一键导入
-const handleCdnImport = (options) => {
-  const { file, onSuccess, onError } = options;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    try {
-      const importedData = JSON.parse(e.target.result);
-      if (Array.isArray(importedData)) {
-        cdnList.value = [...cdnList.value, ...importedData];
-        message.success(`成功导入 ${importedData.length} 条数据，请确认后点击【保存全量更改到服务器】`);
-        onSuccess(null, file);
-      } else {
-        message.error('文件格式错误，应为 JSON 数组');
-        onError(new Error('Format error'));
-      }
-    } catch (err) {
-      message.error('解析 JSON 失败');
-      onError(err);
-    }
-  };
-  reader.onerror = (err) => {
-    message.error('读取文件失败');
-    onError(err);
-  };
-  reader.readAsText(file);
 };
 
 // ======================= 安全策略管理逻辑 =======================
@@ -2078,79 +2233,80 @@ const forceUpdateMode = ref(false);
 const updateModalVisible = ref(false);
 const updateLogs = ref('');
 const updateProgress = ref(0);
+const updatePollInterval = ref(null); // 🛠️ 修复：声明轮询定时器句柄
+const logByteOffset = ref(0);         // 🛠️ 增量 Byte-Offset 偏移量指针
 const updateFinished = ref(false);
 const terminalRef = ref(null);
 const updateButtonLoading = ref(false);
 const updateHasError = ref(false);
 const updateOfflineNotices = ref('');
 
+const renderedReleaseNotes = computed(() => {
+  if (!releaseNotes.value) return '';
+  let html = releaseNotes.value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  
+  html = html.replace(/^### (.*$)/gim, '<h4 style="margin: 12px 0 6px 0; font-weight: 600; font-size: 13px; color: var(--arl-text-color);">$1</h4>');
+  html = html.replace(/^## (.*$)/gim, '<h3 style="margin: 14px 0 8px 0; font-weight: 700; font-size: 14px; color: var(--arl-text-color);">$1</h3>');
+  html = html.replace(/^# (.*$)/gim, '<h2 style="margin: 16px 0 8px 0; font-weight: 700; font-size: 15px; color: var(--arl-text-color);">$1</h2>');
+  
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong style="font-weight: 600;">$1</strong>');
+  html = html.replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.06); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 12px;">$1</code>');
+  
+  html = html.replace(/^\s*-\s+(.*$)/gim, '<li style="margin-left: 18px; line-height: 1.8; list-style-type: disc;">$1</li>');
+  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, '<li style="margin-left: 18px; line-height: 1.8; list-style-type: decimal;">$2</li>');
+  
+  html = html.replace(/\n\n/g, '<div style="height: 6px;"></div>');
+  html = html.replace(/\n/g, '<br/>');
+  html = html.replace(/<br\/>\s*<li/g, '<li').replace(/<\/li>\s*<br\/>/g, '</li>');
+  
+  return html;
+});
 
-const checkVersion = async () => {
+const checkVersion = async (force = false) => {
   try {
-    const res = await request.get('/api/system_config/local_version');
-    if (res.code === 200) {
-      localVersion.value = res.data.version;
-    }
-    
-    // 提取并复用检查版本大小的方法
-    const isGreater = (v1, v2) => {
-      const cleanV1 = v1.replace(/^v/, '');
-      const cleanV2 = v2.replace(/^v/, '');
-      
-      const [base1, suffix1] = cleanV1.split('-');
-      const [base2, suffix2] = cleanV2.split('-');
-      
-      const parts1 = base1.split('.').map(Number);
-      const parts2 = base2.split('.').map(Number);
-      
-      for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
-        const num1 = parts1[i] || 0;
-        const num2 = parts2[i] || 0;
-        if (num1 > num2) return true;
-        if (num1 < num2) return false;
-      }
-      
-      // 基础版本号相同，比较后缀
-      if (suffix1 && !suffix2) return true;
-      if (!suffix1 && suffix2) return false;
-      
-      if (suffix1 && suffix2) {
-        const num1 = parseInt((suffix1.match(/\d+/) || [0])[0], 10);
-        const num2 = parseInt((suffix2.match(/\d+/) || [0])[0], 10);
-        if (num1 !== num2) return num1 > num2;
-        return suffix1 > suffix2;
-      }
-      
-      return false;
-    };
-
-    const ghRes = await fetch('https://api.github.com/repos/owl234/ARL-Next/tags');
-    if (ghRes.ok) {
-      const ghData = await ghRes.json();
-      if (ghData && ghData.length > 0) {
-        // 对 API 返回的标签使用 isGreater 进行降序排序
-        ghData.sort((a, b) => isGreater(a.name, b.name) ? -1 : (isGreater(b.name, a.name) ? 1 : 0));
-        
-        remoteVersion.value = ghData[0].name;
-        
-        // 获取该 tag 对应的 commit 以提取更新日志 (Commit Message)
-        const commitUrl = ghData[0].commit.url;
-        if (commitUrl) {
-          const commitRes = await fetch(commitUrl);
-          if (commitRes.ok) {
-            const commitData = await commitRes.json();
-            releaseNotes.value = commitData.commit.message;
-          }
-        }
-      }
-    }
-      
-    if (localVersion.value && localVersion.value !== '未知版本' && remoteVersion.value) {
-      hasNewVersion.value = isGreater(remoteVersion.value, localVersion.value);
+    const res = await request.get('/api/system_config/check_update', { params: force ? { refresh: 1 } : {} });
+    if (res.code === 200 && res.data) {
+      localVersion.value = res.data.local_version || '未知版本';
+      remoteVersion.value = res.data.remote_version || localVersion.value;
+      hasNewVersion.value = Boolean(res.data.has_new_version);
+      releaseNotes.value = res.data.release_notes || '';
     }
   } catch (e) {
-    console.error('检查版本失败', e);
+    console.error('检查版本更新失败', e);
+    // 降级使用 local_version 接口兜底
+    try {
+      const localRes = await request.get('/api/system_config/local_version');
+      if (localRes.code === 200) {
+        localVersion.value = localRes.data.version;
+      }
+    } catch (_) {}
   }
+};
+
+const handleStartUpdateClick = async () => {
+  try {
+    const res = await request.get('/api/system_config/running_task_count');
+    const runningCount = res.code === 200 && res.data ? (res.data.running_count || 0) : 0;
+    if (runningCount > 0) {
+      Modal.confirm({
+        title: '⚠️ 正在运行的任务告警',
+        content: `系统检测到当前有 ${runningCount} 个正在执行的扫描任务。执行系统更新将重启后台 Worker 容器并中断这些任务（重启后任务将标记为中断状态）。是否确认继续更新？`,
+        okText: '确认强制中断并更新',
+        okType: 'danger',
+        cancelText: '取消并等待任务完成',
+        onOk: () => {
+          startUpdate();
+        }
+      });
+      return;
+    }
+  } catch (e) {
+    console.warn('获取运行中任务数量失败，跳过前置阻断', e);
+  }
+  startUpdate();
 };
 
 const startUpdate = async () => {
@@ -2172,6 +2328,7 @@ const startUpdate = async () => {
     updateProgress.value = 10;
     updateFinished.value = false;
     updateButtonLoading.value = false;
+    logByteOffset.value = 0;
     
     // 1. 触发更新
     const triggerUrl = `/update_stream/trigger?token=${token}`;
@@ -2190,10 +2347,14 @@ const startUpdate = async () => {
       return;
     }
 
-    // 2. 开始轮询日志
-    const pollUrl = `/update_stream/log`;
+    // 2. 开始增量轮询日志
+    if (updatePollInterval.value) {
+      clearInterval(updatePollInterval.value);
+    }
+    
     updatePollInterval.value = setInterval(async () => {
       try {
+        const pollUrl = `/update_stream/log?offset=${logByteOffset.value}`;
         const logRes = await fetch(pollUrl);
         if (!logRes.ok) {
           if (logRes.status === 401) {
@@ -2207,45 +2368,63 @@ const startUpdate = async () => {
           }
           // 502 可能是网关重启，不报错，仅记录
           if (!updateOfflineNotices.value.includes('等待网络恢复')) {
-            updateOfflineNotices.value += '⏳ 网关重启中或服务暂时不可达，正在等待网络恢复...\n';
+            updateOfflineNotices.value = '⏳ 网关重启中或服务暂时不可达，正在等待网络恢复...\n';
             updateLogs.value += '⏳ 网关重启中或服务暂时不可达，正在等待网络恢复...\n';
             scrollToBottom();
           }
           return;
         }
-        const logText = await logRes.text();
-        
-        // 解析进度，简单计算进度条
-        if (logText.includes('后台任务已启动')) updateProgress.value = 20;
-        if (logText.includes('同步完毕')) updateProgress.value = 50;
-        if (logText.includes('开始执行 start-')) updateProgress.value = 85;
-        
-        const combinedLogs = logText + (updateOfflineNotices.value ? '\n' + updateOfflineNotices.value : '');
-        if (updateLogs.value !== combinedLogs) {
-          updateLogs.value = combinedLogs;
-          scrollToBottom();
-        }
 
-        // 检查是否结束
-        if (logText.includes('[DONE]')) {
-          clearInterval(updatePollInterval.value);
-          updateProgress.value = 100;
-          updateFinished.value = true;
-          updateOfflineNotices.value = '';
+        const contentType = logRes.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const data = await logRes.json();
+          logByteOffset.value = data.offset !== undefined ? data.offset : logByteOffset.value;
+          if (data.chunk) {
+            updateLogs.value += data.chunk;
+            scrollToBottom();
+          }
+          
+          // 动态解析进度
+          if (updateLogs.value.includes('后台任务已启动')) updateProgress.value = Math.max(updateProgress.value, 20);
+          if (updateLogs.value.includes('基础架构同步完毕')) updateProgress.value = Math.max(updateProgress.value, 40);
+          if (updateLogs.value.includes('正在从阿里云镜像库极速拉取')) updateProgress.value = Math.max(updateProgress.value, 60);
+          if (updateLogs.value.includes('开始执行 start-')) updateProgress.value = Math.max(updateProgress.value, 80);
+          if (updateLogs.value.includes('后端服务已完全就绪')) updateProgress.value = Math.max(updateProgress.value, 95);
+
+          if (data.done) {
+            clearInterval(updatePollInterval.value);
+            updateProgress.value = 100;
+            updateFinished.value = true;
+            updateOfflineNotices.value = '';
+            message.success('🎉 系统更新成功！请点击下方按钮重新加载页面。', 5);
+          } else if (data.error) {
+            clearInterval(updatePollInterval.value);
+            updateFinished.value = true;
+            updateHasError.value = true;
+            updateOfflineNotices.value = '';
+            message.error('❌ 系统更新遇到错误，请查看日志！', 8);
+          }
+        } else {
+          // 纯文本兜底
+          const logText = await logRes.text();
           updateLogs.value = logText;
-          message.success('🎉 系统更新成功！请点击下方的按钮重新加载页面。', 5);
-        } else if (logText.includes('[ERROR]')) {
-          clearInterval(updatePollInterval.value);
-          updateFinished.value = true;
-          updateHasError.value = true;
-          updateOfflineNotices.value = '';
-          updateLogs.value = logText;
-          message.error('❌ 系统更新遇到错误，请查看日志！', 8);
+          scrollToBottom();
+          if (logText.includes('[DONE]')) {
+            clearInterval(updatePollInterval.value);
+            updateProgress.value = 100;
+            updateFinished.value = true;
+            message.success('🎉 系统更新成功！', 5);
+          } else if (logText.includes('[ERROR]')) {
+            clearInterval(updatePollInterval.value);
+            updateFinished.value = true;
+            updateHasError.value = true;
+            message.error('❌ 系统更新遇到错误！', 8);
+          }
         }
       } catch (err) {
         // 网络请求失败（容器重启时）忽略错误，继续轮询
         if (!updateOfflineNotices.value.includes('等待容器恢复')) {
-          updateOfflineNotices.value += '⏳ 网络暂时断开，正在等待容器恢复...\n';
+          updateOfflineNotices.value = '⏳ 网络暂时断开，正在等待容器恢复...\n';
           updateLogs.value += '⏳ 网络暂时断开，正在等待容器恢复...\n';
           scrollToBottom();
         }
@@ -2283,6 +2462,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (updatePollInterval.value) {
     clearInterval(updatePollInterval.value);
+    updatePollInterval.value = null;
   }
 });
 </script>

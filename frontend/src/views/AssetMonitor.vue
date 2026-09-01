@@ -51,7 +51,7 @@
 
         <template v-if="column.key === 'scope_id'">
           <a
-              style="cursor: pointer;\"
+              style="cursor: pointer;"
               @click="goToAssetScope(record.scope_id)"
           >
             {{ record.scope_id }}
@@ -88,8 +88,9 @@
 
 <script setup>
 
-import { ref as _ref_for_sticky, ref, onMounted, reactive, computed, createVNode, watch } from 'vue';import { useSticky } from '../utils/useSticky';
-const actionBarRef = _ref_for_sticky(null);
+import { ref, onMounted, reactive, computed, createVNode, watch } from 'vue';
+import { useSticky } from '../utils/useSticky';
+const actionBarRef = ref(null);
 const { stickyConfig } = useSticky(actionBarRef);
 
 import request from '../utils/request';
@@ -118,6 +119,10 @@ const pagination = reactive({ current: 1, pageSize: globalPageSize.value, total:
 
 watch(() => pagination.pageSize, (newSize) => {
   globalPageSize.value = newSize;
+});
+
+watch(globalPageSize, (newSize) => {
+  pagination.pageSize = newSize;
 });
 
 const selectedRowKeys = ref([]);

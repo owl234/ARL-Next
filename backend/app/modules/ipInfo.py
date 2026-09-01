@@ -87,15 +87,25 @@ class IPInfo(BaseInfo):
         for x in self.port_info_list:
             port_info.append(x.dump_json(flag=False))
 
+        geo_asn = self.geo_asn
+        as_org = geo_asn.get("organization", "") if isinstance(geo_asn, dict) else ""
+        asn_num = geo_asn.get("number", "") if isinstance(geo_asn, dict) else ""
+        c_seg = ".".join(self.ip.split(".")[:3]) + ".0/24" if self.ip and "." in self.ip else ""
+
         item = {
             "ip": self.ip,
             "domain": self.domain,
             "port_info": port_info,
             "os_info": self.os_info,
             "ip_type": self.ip_type,
-            "geo_asn": self.geo_asn,  # 触发懒加载计算
-            "geo_city": self.geo_city,# 触发懒加载计算
-            "cdn_name": self.cdn_name
+            "geo_asn": geo_asn,        # 触发懒加载计算
+            "geo_city": self.geo_city, # 触发懒加载计算
+            "asn_info": geo_asn,
+            "as_organization": as_org,
+            "asn": asn_num,
+            "c_segment": c_seg,
+            "cdn_name": self.cdn_name,
+            "is_cdn": bool(self.cdn_name)
         }
         return item
 

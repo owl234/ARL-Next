@@ -60,19 +60,12 @@ class IPTask(CommonTask):
         raise NotImplementedError()
 
     def port_scan(self):
-        scan_port_map = {
-            "top100": ScanPortType.TOP100,
-            "top1000": ScanPortType.TOP1000,
-            "all": ScanPortType.ALL,
-            "custom": ScanPortType.CUSTOM
-        }
         option_scan_port_type = self.options.get("port_scan_type", "test")
         
         if option_scan_port_type == "custom" and self.options.get("port_custom"):
             actual_ports = self.options.get("port_custom")
         else:
-            mapped_type = scan_port_map.get(option_scan_port_type, ScanPortType.TOP100)
-            actual_ports = get_scan_ports(mapped_type)
+            actual_ports = get_scan_ports(option_scan_port_type)
 
         scan_port_option = {
             "ports": actual_ports,
@@ -108,6 +101,14 @@ class IPTask(CommonTask):
             if ip_info["ip_type"] == "PUBLIC":
                 ip_info["geo_asn"] = utils.get_ip_asn(curr_ip)
                 ip_info["geo_city"] = utils.get_ip_city(curr_ip)
+
+            cdn_name = utils.get_cdn_name_by_ip(curr_ip)
+            ip_info["cdn_name"] = cdn_name
+            ip_info["is_cdn"] = bool(cdn_name)
+            ip_info["asn_info"] = ip_info["geo_asn"]
+            ip_info["as_organization"] = ip_info["geo_asn"].get("organization", "") if isinstance(ip_info["geo_asn"], dict) else ""
+            ip_info["asn"] = ip_info["geo_asn"].get("number", "") if isinstance(ip_info["geo_asn"], dict) else ""
+            ip_info["c_segment"] = ".".join(curr_ip.split(".")[:3]) + ".0/24" if "." in curr_ip else ""
 
             # 仅仅资产发现任务将IP全部存储起来
             if self.task_tag == 'task':

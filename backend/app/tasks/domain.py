@@ -1,4 +1,5 @@
 import time
+import os
 import random
 import copy
 from urllib.parse import urlparse
@@ -102,9 +103,15 @@ class DomainBrute(object):
 
         self._resolver()
 
+        filtered_dynamic_count = 0
         for domain in self.resolver_map:
             ips = self.resolver_map[domain]
             if ips:
+                # 🛡️ 方案 4：智能拦截动态自指 CDN 边缘基础设施节点 (0 误杀)
+                if utils.is_dynamic_ip_edge_domain(domain, resolved_ips=ips):
+                    filtered_dynamic_count += 1
+                    continue
+
                 if domain in self.domain_cnames:
                     item = {
                         "domain": domain,
@@ -120,6 +127,9 @@ class DomainBrute(object):
                         "ips": ips
                     }
                 self.domain_info_list.append(modules.DomainInfo(**item))
+
+        if filtered_dynamic_count > 0:
+            logger.info("[+] 🛡️ 智能过滤: 共拦截 {} 个动态 IP / P2P-CDN 边缘基础设施节点 (已跳过入库与后续扫描)".format(filtered_dynamic_count))
 
         self.domain_info_list = list(set(self.domain_info_list))
         return self.domain_info_list
@@ -152,25 +162,8 @@ class ScanPort(object):
         self.option = option
 
     def get_cdn_name(self, ip, domain_info):
-        cdn_name = utils.get_cdn_name_by_ip(ip)
-        if cdn_name:
-            return cdn_name
-
-        if domain_info.type != "CNAME":
-            return ""
-
-        if not domain_info.record_list:
-            return ""
-
-        cname = domain_info.record_list[0]
-        cdn_name = utils.get_cdn_name_by_cname(cname)
-        if cdn_name:
-            return cdn_name
-
-        if len(domain_info.ip_list) >= 4:
-            return "CDN"
-
-        return ""
+        cname = domain_info.record_list[0] if (domain_info.type == "CNAME" and domain_info.record_list) else ""
+        return utils.get_cdn_name_comprehensive(ip=ip, cname=cname, ip_count=len(domain_info.ip_list))
 
     def run(self):
         for info in self.domain_info_list:
@@ -440,7 +433,34 @@ skip_scan_cdn_ip
 dns_query_plugin
 '''
 
-MAX_MAP_COUNT = 35
+MAX_MAP_COUNT = getattr(Config, "DOMAIN_MAX_MAP_COUNT", 200)
+
+RECURSIVE_SENSITIVE_PREFIXES = {
+    "api", "app", "dev", "test", "qa", "uat", "pre", "boe", "ppe",
+    "admin", "gw", "gateway", "k8s", "corp", "intra", "inner", "cloud",
+    "saas", "pass", "service", "node", "web", "mobile", "h5", "open", "lead", "leads"
+}
+
+def _load_recursive_dict():
+    dict_path = os.path.join(Config.basedir, 'dicts', 'domain_top300.txt')
+    if os.path.exists(dict_path):
+        words = []
+        with open(dict_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                w = line.strip().lower()
+                if w and not w.startswith('#'):
+                    words.append(w)
+        if words:
+            return words
+    return [
+        "api", "app", "web", "admin", "dev", "test", "qa", "uat", "pre", "prod",
+        "gateway", "gw", "service", "auth", "sso", "login", "pay", "order", "user",
+        "data", "bi", "report", "open", "h5", "m", "static", "img", "res", "doc",
+        "manage", "mis", "portal", "inner", "intra", "corp", "k8s", "node", "core"
+    ]
+
+RECURSIVE_TOP_DICT = _load_recursive_dict()
+
 
 
 class DomainTask(CommonTask):
@@ -473,21 +493,12 @@ class DomainTask(CommonTask):
 
         self.wih_domain_set = set()  # 通过调用 WebInfoHunter 获取的域名集合
 
-        scan_port_map = {
-            "top100": ScanPortType.TOP100,
-            "top1000": ScanPortType.TOP1000,
-            "all": ScanPortType.ALL,
-            "custom": ScanPortType.CUSTOM
-        }
         option_scan_port_type = self.options.get("port_scan_type", "test")
         
         if option_scan_port_type == "custom" and self.options.get("port_custom"):
             actual_ports = self.options.get("port_custom")
-        elif option_scan_port_type.endswith(".txt"):
-            actual_ports = get_scan_ports(option_scan_port_type)
         else:
-            mapped_type = scan_port_map.get(option_scan_port_type, ScanPortType.TOP100)
-            actual_ports = get_scan_ports(mapped_type)
+            actual_ports = get_scan_ports(option_scan_port_type)
 
         scan_port_option = {
             "ports": actual_ports,
@@ -536,16 +547,23 @@ class DomainTask(CommonTask):
 
     @property
     def not_found_domain_ips(self):
-        # ** 用来判断是否是泛解析域名
+        # ** 用来判断是否是泛解析域名，采用双随机探测交叉验证，防止单次调度或CDN随机节点误判
         if self._not_found_domain_ips is None:
-            fake_domain = "at" + utils.random_choices(4) + "." + self.base_domain
-            self._not_found_domain_ips = utils.get_ip(fake_domain, log_flag=False)
+            fake_domain_1 = "at" + utils.random_choices(6) + "." + self.base_domain
+            fake_domain_2 = "at" + utils.random_choices(6) + "." + self.base_domain
+            ips1 = utils.get_ip(fake_domain_1, log_flag=False)
+            ips2 = utils.get_ip(fake_domain_2, log_flag=False)
+
+            if ips1 and ips2 and set(ips1) == set(ips2):
+                self._not_found_domain_ips = list(ips1)
+                cnames = utils.get_cname(fake_domain_1, log_flag=False)
+                if cnames:
+                    self._not_found_domain_ips.extend(cnames)
+            else:
+                self._not_found_domain_ips = []
 
             if self._not_found_domain_ips:
-                self._not_found_domain_ips.extend(utils.get_cname(fake_domain, log_flag=False))
-
-            if self._not_found_domain_ips:
-                logger.info("not_found_domain_ips  {} {}".format(fake_domain, self._not_found_domain_ips))
+                logger.info("not_found_domain_ips  {} {}".format(self.base_domain, self._not_found_domain_ips))
 
         return self._not_found_domain_ips
 
@@ -783,18 +801,33 @@ class DomainTask(CommonTask):
         else:
             self.cert_map = ssl_cert(self.ip_set, self.base_domain)
 
+        cert_domains = set()
         for target in self.cert_map:
             if ":" not in target:
                 continue
             ip = target.split(":")[0]
             port = int(target.split(":")[1])
+            cert_data = self.cert_map[target]
             item = {
                 "ip": ip,
                 "port": port,
-                "cert": self.cert_map[target],
+                "cert": cert_data,
                 "task_id": self.task_id,
             }
             utils.safe_insert_asset('cert', ['task_id', 'ip', 'port'], item)
+
+            # 核心优化：从 TLS 证书 SAN / CN 中提取属于 base_domain 的有效子域名
+            extracted = utils.extract_domains_from_cert(cert_data, self.base_domain)
+            cert_domains.update(extracted)
+
+        if cert_domains:
+            logger.info(f"extracted {len(cert_domains)} subdomains from SSL certs for {self.base_domain}")
+            cert_domain_info_list = self.build_domain_info(list(cert_domains))
+            if self.task_tag == "task":
+                cert_domain_info_list = self.clear_domain_info_by_record(cert_domain_info_list)
+                self.save_domain_info_list(cert_domain_info_list, source="ssl_cert")
+            self.domain_info_list.extend(cert_domain_info_list)
+
 
     def build_single_domain_info(self, domain):
         _type = "A"
@@ -879,6 +912,65 @@ class DomainTask(CommonTask):
             self.update_task_field("status", "alt_dns")
             with self.safe_phase("alt_dns", self.base_update_task):
                 self.alt_dns()
+
+        '''***智能多级递归爆破****'''
+        if self.options.get("domain_brute"):
+            self.update_task_field("status", "recursive_domain_brute")
+            with self.safe_phase("recursive_domain_brute", self.base_update_task):
+                self.recursive_domain_brute()
+
+    def recursive_domain_brute(self):
+        """
+        [第一性原理：针对高价值三级子域的智能多级递归爆破]
+        当发现开发/测试/网关/API等高价值三级域名时，使用精选 Top 300 词库探测四级/五级内层子域
+        """
+        t1 = time.time()
+        base_len = len(self.base_domain)
+        target_subs = set()
+        for item in self.domain_info_list:
+            domain = item.domain.lower().strip()
+            if not domain.endswith("." + self.base_domain) or domain == self.base_domain:
+                continue
+            sub = domain[:- (base_len + 1)]
+            # 针对直接三级子域名（如 dev.xxx.com, api.xxx.com）
+            labels = sub.split(".")
+            if len(labels) == 1:
+                prefix = labels[0]
+                if prefix in RECURSIVE_SENSITIVE_PREFIXES or any(p in prefix for p in ["dev", "test", "api", "qa", "uat", "pre", "boe", "ppe", "admin", "gw"]):
+                    target_subs.add(domain)
+
+        if not target_subs:
+            return
+
+        logger.info("start recursive_domain_brute on {} sub-targets for {}".format(len(target_subs), self.base_domain))
+        recursive_discovered = []
+        for sub_target in list(target_subs)[:10]:  # 限制最多同时对前 10 个高价值子域执行递归，保障极速性能
+            r1 = "rf" + utils.random_choices(6) + "." + sub_target
+            r2 = "rf" + utils.random_choices(6) + "." + sub_target
+            ips1 = set(utils.get_ip(r1, log_flag=False) or [])
+            ips2 = set(utils.get_ip(r2, log_flag=False) or [])
+            wildcard_ips = []
+            if ips1 and ips2 and ips1 == ips2:
+                wildcard_ips = list(ips1)
+
+            out = services.mass_dns(sub_target, RECURSIVE_TOP_DICT, wildcard_ips)
+            for x in out:
+                rec_domain = x.get("domain", "").lower().strip()
+                if rec_domain and rec_domain.endswith("." + self.base_domain):
+                    recursive_discovered.append(rec_domain)
+
+        if recursive_discovered:
+            recursive_discovered = list(set(recursive_discovered))
+            logger.info("recursive_domain_brute found {} raw candidates".format(len(recursive_discovered)))
+            domain_info_list = self.build_domain_info(recursive_discovered)
+            if self.task_tag == "task":
+                domain_info_list = self.clear_domain_info_by_record(domain_info_list)
+                self.save_domain_info_list(domain_info_list, source="recursive_brute")
+            self.domain_info_list.extend(domain_info_list)
+
+        elapse = time.time() - t1
+        logger.info("end recursive_domain_brute result {}, elapse {:.2f}s".format(len(recursive_discovered), elapse))
+
 
     def start_ip_fetch(self):
         self.gen_ipv4_map()

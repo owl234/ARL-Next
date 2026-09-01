@@ -422,6 +422,24 @@
           </div>
         </template>
 
+        <template v-else-if="column.key === 'wih_risk_level'">
+          <a-tag :color="record.risk_level === 'CRITICAL' ? 'red' : (record.risk_level === 'MEDIUM' ? 'orange' : 'default')">
+            {{ record.risk_level || 'LOW' }}
+          </a-tag>
+        </template>
+
+        <template v-else-if="column.key === 'ip_cdn_tag'">
+          <a-tag v-if="record.is_cdn || record.cdn_name" color="blue">{{ record.cdn_name || 'CDN节点' }}</a-tag>
+          <a-tag v-else color="green">独立源站</a-tag>
+        </template>
+
+        <template v-else-if="column.key === 'content' && activeTab === 'wih'">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="word-break: break-all;">{{ record.content }}</span>
+            <a-button type="link" size="small" style="padding: 0;" @click="copyText(record.content)">复制</a-button>
+          </div>
+        </template>
+
       </template>
     </a-table>
 
@@ -468,14 +486,14 @@
     <div v-show="activeTab === 'syslog'">
       <div style="border: 1px solid var(--arl-border-color); border-radius: 4px; padding: 8px; background-color: var(--arl-bg-light);">
         <div ref="terminalContainer" style="background-color: #001529; color: #e6f7ff; font-family: 'Fira Code', Consolas, 'Courier New', monospace; padding: 16px; border-radius: 4px; height: calc(100vh - 240px); overflow-y: auto; font-size: 13px; line-height: 1.6; box-shadow: inset 0 2px 8px rgba(0,0,0,0.2);" @mouseenter="pauseScroll = true" @mouseleave="pauseScroll = false">
-          <div v-for="(log, idx) in dataSource" :key="log._id || log.id || idx" style="margin-bottom: 6px; word-break: break-all; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 4px;">
+          <div v-for="(log, idx) in syslogList" :key="log._id || log.id || idx" style="margin-bottom: 6px; word-break: break-all; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 4px;">
             <a style="margin-right: 8px;">[{{ log.create_time }}]</a>
             <span :style="{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warning' ? '#faad14' : '#52c41a', fontWeight: 'bold', marginRight: '8px' }">[{{ (log.level || 'info').toUpperCase() }}]</span>
             <a style="margin-right: 8px;" v-if="log.title">[{{ log.title }}]</a>
             <span style="color: #e6f7ff;">{{ log.message }}</span>
           </div>
-          <div v-if="dataSource.length === 0 && !loading" style="color: rgba(255,255,255,0.45); font-style: italic;">[System] 暂无日志记录... (等待日志生成)</div>
-          <div v-if="loading" style="color: rgba(255,255,255,0.45); font-style: italic;">[System] 正在拉取日志...</div>
+          <div v-if="syslogList.length === 0 && !syslogLoading" style="color: rgba(255,255,255,0.45); font-style: italic;">[System] 暂无日志记录... (等待日志生成)</div>
+          <div v-if="syslogLoading && syslogList.length === 0" style="color: rgba(255,255,255,0.45); font-style: italic;">[System] 正在拉取日志...</div>
         </div>
       </div>
     </div>
@@ -544,13 +562,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, reactive, watch, nextTick, computed, createVNode, ref as _ref_for_sticky } from 'vue';import { useRoute, useRouter } from 'vue-router';
+import { ref, onMounted, onUnmounted, reactive, watch, nextTick, computed, createVNode } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
-import { SearchOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue';
+import {
+  ExclamationCircleOutlined
+} from '@ant-design/icons-vue';
 import CidrDetailModal from '../components/CidrDetailModal.vue';
 import { useSticky } from '../utils/useSticky';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
+import { copyText as copyToClipboard } from '../utils/clipboard';
 
 // 更新差异弹窗状态
 const diffModalVisible = ref(false);
@@ -595,8 +617,19 @@ const route = useRoute();
 const router = useRouter();
 const query = route?.query || {};
 
-const actionBarRef = _ref_for_sticky(null);
+const actionBarRef = ref(null);
 const { stickyConfig } = useSticky(actionBarRef);
+
+// 复制文字并提示 (复用 utils/clipboard 兼容非 HTTPS 环境)
+const copyText = async (text, label = '内容') => {
+  if (!text) return;
+  const ok = await copyToClipboard(text);
+  if (ok) {
+    message.success(`已复制 ${label} 到剪贴板`);
+  } else {
+    message.info('复制失败，请手动选取复制');
+  }
+};
 
 // C段详情弹窗 (提取为组件)
 const cipDetailModalVisible = ref(false);
@@ -743,6 +776,10 @@ watch(() => pagination.pageSize, (newSize) => {
   globalPageSize.value = newSize;
 });
 
+watch(globalPageSize, (newSize) => {
+  pagination.pageSize = newSize;
+});
+
 // 💥 核心修改 3：在配置字典中加入 deleteUrl
 const tabConfig = reactive({
   site: {
@@ -750,6 +787,7 @@ const tabConfig = reactive({
     deleteUrl: '/site/delete/',
     searchFields: [
       { label: '站点', key: 'site', operator: '=' },
+      { label: 'IP', key: 'ip', operator: '=' },
       { label: '主机名', key: 'hostname', operator: '=' },
       { label: '标题', key: 'title', operator: '=' },
       { label: 'Web Server', key: 'http_server', operator: '=' },
@@ -759,7 +797,6 @@ const tabConfig = reactive({
       { label: 'favicon hash', key: 'favicon.hash', operator: '=' },
       { label: '标签', key: 'tag', operator: '=' }
     ],
-    // 💥 修复：删除了瞎加的 IP、端口和操作列，完全对齐原版站点表格！表格控制
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
       { title: '变更状态', key: 'change_status', width: 100, align: 'center' },
@@ -768,10 +805,9 @@ const tabConfig = reactive({
       { title: '标题', dataIndex: 'title', key: 'title', width: 200 },
       { title: 'headers', key: 'headers',width: 500},
       { title: 'finger', key: 'finger', width: 150 },
-      { title: '截图', key: 'screenshot', width: 280 } // 保持宽度给图片留足空间
+      { title: '截图', key: 'screenshot', width: 280 }
     ]
   },
-  // 💡 新增：子域名 Tab 的 1:1 配置
   domain: {
     url: '/domain/',
     deleteUrl: '/domain/delete/',
@@ -794,17 +830,14 @@ const tabConfig = reactive({
       { title: '来源', dataIndex: 'source', key: 'source', width: 150 }
     ]
   },
-
-  // 💡 新增：IP Tab 的 1:1 配置
-// 💡 新增：IP Tab 的 1:1 配置
   ip: {
     url: '/ip/',
-    deleteUrl: '/ip/delete/', // 视上一轮测试情况，如果删不掉请改回 '/site/delete/'
+    deleteUrl: '/ip/delete/',
     exportUrl: '/ip/export/',
     exportName: ' IP 端口',
     searchFields: [
       { label: 'IP', key: 'ip', operator: '=' },
-      // 🚨 核心修复：对齐后端的嵌套对象查询字段
+      { label: 'C段', key: 'c_segment', operator: '=' },
       { label: '端口', key: 'port_info.port_id', operator: '=' },
       { label: '操作系统', key: 'os_info.name', operator: '=' },
       { label: '域名', key: 'domain', operator: '=' },
@@ -821,19 +854,18 @@ const tabConfig = reactive({
       }
     ],
     cols: [
-      // ... 列配置保持不变 ...
       { title: '序号', key: 'index', width: 60, align: 'center' },
       { title: '变更状态', key: 'change_status', width: 100, align: 'center' },
       { title: 'IP', dataIndex: 'ip', key: 'ip', width: 160 },
+      { title: 'C段', dataIndex: 'c_segment', key: 'c_segment', width: 140 },
       { title: '操作系统', key: 'os_info', width: 150 },
       { title: '开放端口', key: 'port_info', width: 200 },
       { title: '关联域名', key: 'domain', width: 250 },
-      { title: 'CDN', dataIndex: 'cdn_name', key: 'cdn_name', width: 150 },
+      { title: 'CDN状态', key: 'ip_cdn_tag', width: 150 },
       { title: 'Geo', key: 'geo_city', width: 180 },
       { title: 'AS', key: 'geo_asn', width: 280 }
     ]
   },
-  // 💡 重新构建：1:1 对齐截图的 SSL证书 配置
   cert: {
     url: '/cert/',
     deleteUrl: '/cert/delete/',
@@ -848,15 +880,12 @@ const tabConfig = reactive({
       { title: '序号', key: 'index', width: 60, align: 'center' },
       { title: '变更状态', key: 'change_status', width: 100, align: 'center' },
       { title: 'HOST', key: 'host', width: 180 },
-      { title: 'CERT', key: 'cert_detail', width: 900 } // 留出巨大的空间给卡片
+      { title: 'CERT', key: 'cert_detail', width: 900 }
     ]
   },
-
-  // 💡 新增：服务 Tab 的 1:1 配置
   service: {
     url: '/service/',
     deleteUrl: '/service/delete/',
-    // 🚨 故意不写 exportUrl，完美对齐原版不带导出功能的 UI
     searchFields: [
       { label: '服务', key: 'service_name', operator: '=' },
       { label: 'IP', key: 'service_info.ip', operator: '=' },
@@ -871,12 +900,9 @@ const tabConfig = reactive({
       { title: 'Product', key: 'product', width: 250 }
     ]
   },
-
-  // 💡 新增：文件泄露 Tab 的 1:1 配置
   fileleak: {
     url: '/fileleak/',
     deleteUrl: '/fileleak/delete/',
-    // 🚨 同样不配置 exportUrl，隐身导出按钮
     searchFields: [
       { label: 'URL', key: 'url', operator: '=' },
       { label: '标题', key: 'title', operator: '=' },
@@ -886,19 +912,17 @@ const tabConfig = reactive({
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
       { title: '变更状态', key: 'change_status', width: 100, align: 'center' },
-      { title: 'URL', key: 'fileleak_url', width: 500 }, // 用专属 key 渲染超链接
+      { title: 'URL', key: 'fileleak_url', width: 500 },
       { title: '标题', dataIndex: 'title', key: 'title', width: 250 },
       { title: '状态码', dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
       { title: 'body 长度', dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' }
     ]
   },
-
-  // 💡 新增：URL信息 Tab 的 1:1 配置
   url: {
     url: '/url/',
     deleteUrl: '/site/delete/',
-    exportUrl: '/url/export/', // 恢复导出接口
-    exportName: 'URL信息',     // 自动生成“导出URL信息”按钮
+    exportUrl: '/url/export/',
+    exportName: 'URL信息',
     searchFields: [
       { label: 'URL', key: 'url', operator: '=' },
       { label: '标题', key: 'title', operator: '=' },
@@ -928,22 +952,19 @@ const tabConfig = reactive({
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
       { title: '变更状态', key: 'change_status', width: 100, align: 'center' },
-      { title: 'URL', key: 'url_link', width: 450 }, // 专用 key 渲染超链接
+      { title: 'URL', key: 'url_link', width: 450 },
       { title: '标题', dataIndex: 'title', key: 'title', width: 200 },
       { title: '状态码', dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
       { title: 'body 长度', dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' },
       { title: '来源', dataIndex: 'source', key: 'source', width: 150 }
     ]
   },
-
-  // 💡 新增：风险 Tab 的 1:1 配置
   vuln: {
     url: '/vuln/',
     deleteUrl: '/vuln/delete/',
-    // 🚨 截图显示无导出按钮，所以不配置 exportUrl
     searchFields: [
       { label: '漏洞名称', key: 'vul_name', operator: '=' },
-      { label: '类别', key: 'vul_category', operator: '=' }, // ARL 常用的类别字段名
+      { label: '类别', key: 'vul_category', operator: '=' },
       { label: '应用名', key: 'app_name', operator: '=' },
       { label: '目标', key: 'target', operator: '=' }
     ],
@@ -954,16 +975,13 @@ const tabConfig = reactive({
       { title: '类别', dataIndex: 'vul_category', key: 'vul_category', width: 120 },
       { title: '应用名', dataIndex: 'app_name', key: 'app_name', width: 150 },
       { title: '目标', dataIndex: 'target', key: 'target', width: 200 },
-      { title: '凭证', key: 'verify_data', width: 350 }, // 凭证通常较长，用插槽渲染
+      { title: '凭证', key: 'verify_data', width: 350 },
       { title: '发现时间', dataIndex: 'insert_time', key: 'insert_time', width: 160 }
     ]
   },
-
-  // 💡 新增：服务(python) Tab 的 1:1 配置
   npoc_service: {
     url: '/npoc_service/',
     deleteUrl: '/npoc_service/delete/',
-    // 🚨 截图显示无导出按钮，不配置 exportUrl
     searchFields: [
       { label: '协议', key: 'scheme', operator: '=' },
       { label: '主机', key: 'host', operator: '=' },
@@ -980,13 +998,11 @@ const tabConfig = reactive({
       { title: '保存时间', dataIndex: 'insert_time', key: 'insert_time', width: 180 }
     ]
   },
-
-  // 💡 新增：C段 Tab 的 1:1 配置
   cip: {
     url: '/cip/',
     deleteUrl: '/site/delete/',
-    exportUrl: '/cip/export/', // 恢复导出接口
-    exportName: 'C段',         // 自动生成“导出C段”按钮
+    exportUrl: '/cip/export/',
+    exportName: 'C段',
     searchFields: [
       { label: 'C段', key: 'cidr_ip', operator: '=' }
     ],
@@ -998,12 +1014,9 @@ const tabConfig = reactive({
       { title: '域名数', key: 'domain_count_col', width: 150, align: 'center' }
     ]
   },
-
-  // 💡 新增：nuclei Tab 的 1:1 配置
   nuclei_result: {
     url: '/nuclei_result/',
-    deleteUrl: '/nuclei_result/delete/', // 视后端情况，如果报错可改为 '/site/delete/'
-    // 🚨 截图显示无导出按钮，不配置 exportUrl
+    deleteUrl: '/nuclei_result/delete/',
     searchFields: [
       { label: '模版ID', key: 'template_id', operator: '=' },
       { label: '目标', key: 'target', operator: '=' },
@@ -1015,19 +1028,16 @@ const tabConfig = reactive({
       { title: '变更状态', key: 'change_status', width: 100, align: 'center' },
       { title: '模版ID', dataIndex: 'template_id', key: 'template_id', width: 180 },
       { title: '目标', dataIndex: 'target', key: 'target', width: 200 },
-      { title: '漏洞URL', key: 'nuclei_vuln_url', width: 300 }, // 用专用 key 渲染超链接
-      { title: '漏洞名称', dataIndex: 'vuln_name', key: 'vul_name', width: 200 },
+      { title: '漏洞URL', key: 'nuclei_vuln_url', width: 300 },
+      { title: '漏洞名称', dataIndex: 'vuln_name', key: 'vuln_name', width: 200 },
       { title: '漏洞等级', dataIndex: 'vuln_severity', key: 'vuln_severity', width: 100, align: 'center' },
       { title: '保存时间', dataIndex: 'insert_time', key: 'insert_time', width: 160 },
-      { title: '验证命令', key: 'verify_command', width: 350 } // 命令可能很长，用插槽防撑破
+      { title: '验证命令', key: 'verify_command', width: 350 }
     ]
   },
-
-  // 💡 新增：指纹统计 Tab 的 1:1 配置
   stat_finger: {
     url: '/stat_finger/',
-    deleteUrl: '/site/delete/', // 视后端情况，如果报错可改为 '/site/delete/'
-    // 🚨 截图显示无导出按钮
+    deleteUrl: '/site/delete/',
     searchFields: [
       { 
         label: 'finger', 
@@ -1071,25 +1081,6 @@ const tabConfig = reactive({
       { title: '来源 JS', key: 'wih_source', width: 450 },
       { title: '来源站点', dataIndex: 'site', key: 'wih_site', width: 250 }
     ]
-  },
-
-  // 💡 新增：任务日志 Tab 的配置
-  syslog: {
-    url: '/syslog/',
-    // 隐藏删除和导出按钮
-    searchFields: [
-      { label: '日志级别', key: 'level', operator: '=' },
-      { label: '日志标题', key: 'title', operator: '=' },
-      { label: '内容信息', key: 'message', operator: '=' }
-    ],
-    cols: [
-      { title: '序号', key: 'index', width: 60, align: 'center' },
-      { title: '变更状态', key: 'change_status', width: 100, align: 'center' },
-      { title: '级别', key: 'syslog_level', width: 100, align: 'center' },
-      { title: '标题', dataIndex: 'title', key: 'title', width: 150 },
-      { title: '记录时间', dataIndex: 'create_time', key: 'create_time', width: 180 },
-      { title: '详细信息', key: 'syslog_message', width: 500 }
-    ]
   }
 });
 
@@ -1131,23 +1122,11 @@ const fetchData = async (isPolling = false) => {
       }
     }
 
-    if (activeTab.value === 'syslog') {
-      params.order = 'create_time';
-    }
-
     const res = await request.get(config.url, { params });
     if (res.code === 200) {
       dataSource.value = res.items || [];
       pagination.total = res.total || 0;
       selectedRowKeys.value = [];
-      
-      if (activeTab.value === 'syslog' && !pauseScroll.value) {
-        nextTick(() => {
-          if (terminalContainer.value) {
-            terminalContainer.value.scrollTop = terminalContainer.value.scrollHeight;
-          }
-        });
-      }
     }
   } catch (error) {
     if (!isPolling) {
@@ -1277,13 +1256,50 @@ const handleTableChange = (page, pageSize) => {
   fetchData();
 };
 
-// 💡 新增：任务日志自动刷新机制
+// 💡 独立任务日志状态与拉取机制 (与通用资产表格及 pagination 彻底解耦，防止污染全局分页)
+const syslogList = ref([]);
+const syslogLoading = ref(false);
 let syslogTimer = null;
+
+const fetchSyslog = async (isPolling = false) => {
+  const taskId = query.task_id;
+  if (!taskId) return;
+  try {
+    if (!isPolling) syslogLoading.value = true;
+    const res = await request.get('/syslog/', {
+      params: {
+        task_id: taskId,
+        size: 5000,
+        order: 'create_time',
+        _t: Date.now()
+      }
+    });
+    if (res.code === 200) {
+      syslogList.value = res.items || [];
+      if (!pauseScroll.value) {
+        nextTick(() => {
+          if (terminalContainer.value) {
+            terminalContainer.value.scrollTop = terminalContainer.value.scrollHeight;
+          }
+        });
+      }
+    }
+  } catch (error) {
+    if (!isPolling) {
+      message.error('加载任务日志失败');
+    }
+  } finally {
+    if (!isPolling) {
+      syslogLoading.value = false;
+    }
+  }
+};
 
 const startSyslogTimer = () => {
   if (syslogTimer) clearInterval(syslogTimer);
+  fetchSyslog();
   syslogTimer = setInterval(() => {
-    fetchData(true);
+    fetchSyslog(true);
   }, 5000); // 每 5 秒拉取一次最新日志
 };
 
@@ -1345,27 +1361,28 @@ const stopTaskStatusTimer = () => {
 };
 
 watch(activeTab, (newVal) => {
-  if (tabConfig[newVal]) {
+  if (newVal === 'syslog') {
+    stopSyslogTimer();
+    startSyslogTimer();
+  } else if (tabConfig[newVal]) {
+    stopSyslogTimer();
     columns.value = tabConfig[newVal].cols;
     searchForm.value = {};
     pagination.current = 1;
-    if (newVal === 'syslog') {
-      pagination.pageSize = 500;
-      startSyslogTimer();
-    } else {
-      pagination.pageSize = 10;
-      stopSyslogTimer();
-    }
     fetchData();
   } else {
+    stopSyslogTimer();
     dataSource.value = [];
     columns.value = [];
-    stopSyslogTimer();
   }
 });
 
 onMounted(() => {
-  fetchData();
+  if (activeTab.value === 'syslog') {
+    startSyslogTimer();
+  } else {
+    fetchData();
+  }
   startTaskStatusTimer();
 });
 

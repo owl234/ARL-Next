@@ -1,3 +1,5 @@
+import re
+import ipaddress
 import tld
 from app.config import Config
 
@@ -126,3 +128,69 @@ def cut_first_name(domain):
 
     item = ".".join(domain_parts[1:])
     return item
+
+
+def extract_dynamic_ip_from_domain(domain: str):
+    """
+    从子域名中提取潜在的 IPv4 结构。
+    支持格式：
+      - 117-187-206-224.example.com
+      - 117_187_206_224.example.com
+      - node-117-187-206-224.example.com
+      - ip-117-187-206-224.example.com
+      - edge-117-187-206-224.example.com
+    返回标准的 IPv4 字符串，若无则返回 None
+    """
+    if not domain or not isinstance(domain, str):
+        return None
+        
+    pattern = r'(?:^|[._-])(?:(?:node|ip|edge|host|server|cdn|pcdn)[._-])?(\d{1,3})[-_.](\d{1,3})[-_.](\d{1,3})[-_.](\d{1,3})(?:[._-]|$)'
+    m = re.search(pattern, domain.lower())
+    if not m:
+        return None
+        
+    try:
+        octets = [int(g) for g in m.groups()]
+        if all(0 <= o <= 255 for o in octets):
+            return '.'.join(map(str, octets))
+    except Exception:
+        pass
+    return None
+
+
+def is_private_or_reserved_ip(ip_str: str) -> bool:
+    """判断是否为 RFC1918 私网/回环/保留 IP（这些 IP 坚决不视为 CDN 噪音，予以豁免保留）"""
+    try:
+        ip_obj = ipaddress.ip_address(ip_str)
+        return ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_reserved or ip_obj.is_link_local
+    except Exception:
+        return False
+
+
+def is_dynamic_ip_edge_domain(domain: str, resolved_ips=None, strict_dns: bool = True) -> bool:
+    """
+    双重自指校验：
+    1. 域名中提取出有效 IPv4
+    2. 该 IP 属于公网 IP（非内网私有 IP，RFC1918 豁免）
+    3. 如果提供了 resolved_ips，则要求 extracted_ip 必须存在于 resolved_ips 中（100% 确定性）
+    4. 若未提供 resolved_ips 且 strict_dns=True，则保持保守策略返回 False，避免无 DNS 解析下的静态误判
+    """
+    extracted_ip = extract_dynamic_ip_from_domain(domain)
+    if not extracted_ip:
+        return False
+        
+    # RFC 1918 私网 IP 豁免保护（内网资产极高价值，绝不拦截）
+    if is_private_or_reserved_ip(extracted_ip):
+        return False
+        
+    # 如果有 DNS 解析结果，必须严格自指匹配
+    if resolved_ips is not None:
+        if isinstance(resolved_ips, (list, set, tuple)):
+            return extracted_ip in resolved_ips
+        elif isinstance(resolved_ips, str):
+            return extracted_ip == resolved_ips
+    elif strict_dns:
+        return False
+            
+    return True
+

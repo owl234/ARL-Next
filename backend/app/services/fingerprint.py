@@ -48,12 +48,13 @@ class FingerPrint:
                     return
                 elif op in ('=', '=='):
                     if isinstance(var, str) and var in self.literals and isinstance(val, str) and val.startswith('"'):
-                        from .expr import unquote_string
-                        clean_val = unquote_string(val)
-                        if clean_val:
-                            # 长度太短的字面量不作为短路条件，防止短路失败率过高
-                            if len(clean_val) >= 2:
-                                self.literals[var].add(clean_val)
+                        from .expr import unquote_string, is_bad_clause_content
+                        if not is_bad_clause_content(var, val):
+                            clean_val = unquote_string(val)
+                            if clean_val:
+                                # 长度太短的字面量不作为短路条件，防止短路失败率过高
+                                if len(clean_val) >= 2:
+                                    self.literals[var].add(clean_val)
                 return
 
         # Fallback for unexpected structure

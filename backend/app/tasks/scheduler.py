@@ -101,10 +101,16 @@ def wrap_domain_executors(base_domain=None, scheduler_id=None, scope_id=None, op
         sync_asset(task_id, scope_id, update_flag=True, push_flag=True, task_name=name)
         if new_domain:
             webhook.domain_asset_web_hook(task_id=task_id, scope_id=scope_id)
+        if scope_id and base_domain:
+            from app.helpers.scope import update_scope_domain_status
+            update_scope_domain_status(scope_id, base_domain, "probed", task_id)
     except Exception as e:
         logger.exception(e)
         domain_executor.update_task_field("status", TaskStatus.ERROR)
         domain_executor.update_task_field("end_time", utils.curr_date())
+        if scope_id and base_domain:
+            from app.helpers.scope import update_scope_domain_status
+            update_scope_domain_status(scope_id, base_domain, "error", task_id)
 
     logger.info("end domain_executors {} {} {}".format(base_domain, scope_id, options))
 
@@ -162,10 +168,16 @@ def oneshot_domain_executors(base_domain=None, scope_id=None, options=None, name
         sync_asset(task_id, scope_id, update_flag=True, push_flag=True, task_name=name)
         if new_domain:
             webhook.domain_asset_web_hook(task_id=task_id, scope_id=scope_id)
+        if scope_id and base_domain:
+            from app.helpers.scope import update_scope_domain_status
+            update_scope_domain_status(scope_id, base_domain, "probed", task_id)
     except Exception as e:
         logger.exception(e)
         domain_executor.update_task_field("status", TaskStatus.ERROR)
         domain_executor.update_task_field("end_time", utils.curr_date())
+        if scope_id and base_domain:
+            from app.helpers.scope import update_scope_domain_status
+            update_scope_domain_status(scope_id, base_domain, "error", task_id)
 
     logger.info("end oneshot_domain_executors {} {} {}".format(base_domain, scope_id, options))
 
@@ -179,7 +191,7 @@ class DomainExecutor(DomainTask):
         self.scope_domain_set = None
         self.new_domain_set = None
         self.task_tag = "monitor"
-        self.wildcard_ip_set = None
+        self.wildcard_map = {}
 
     def run(self):
         base_update = self.base_update_task
@@ -261,7 +273,7 @@ class DomainExecutor(DomainTask):
         new = self.clear_domain_info_by_record(new)
         self.task_tag = "monitor"
 
-        if self.wildcard_ip_set:
+        if getattr(self, 'wildcard_map', None):
             new = self.clear_wildcard_domain_info(new)
 
         elapse = time.time() - t1
@@ -276,31 +288,48 @@ class DomainExecutor(DomainTask):
         self.domain_info_list = new
 
     def set_wildcard_ip_set(self):
-        cut_set = set()
-        random_name = utils.random_choices(6)
+        """
+        针对每个可能存在泛解析的父级域名进行独立探测，建立 (parent_domain -> wildcard_ips) 映射
+        采用双随机探测交叉验证，避免 CDN Anycast 节点 IP 污染全局并误杀合法业务
+        """
+        self.wildcard_map = {}
+        parent_domains = set()
         for domain in self.new_domain_set:
             cut_name = utils.domain.cut_first_name(domain)
             if cut_name:
-                cut_set.add("{}.{}".format(random_name, cut_name))
+                parent_domains.add(cut_name)
 
-        info_list = build_domain_info(cut_set)
-        wildcard_ip_set = set()
-        for info in info_list:
-            wildcard_ip_set |= set(info.ip_list)
+        for parent in parent_domains:
+            rand1 = "wf" + utils.random_choices(6) + "." + parent
+            rand2 = "wf" + utils.random_choices(6) + "." + parent
+            ips1 = set(utils.get_ip(rand1, log_flag=False) or [])
+            ips2 = set(utils.get_ip(rand2, log_flag=False) or [])
+            if ips1 and ips2 and ips1 == ips2:
+                self.wildcard_map[parent] = ips1
+                logger.info(f"detected wildcard zone: *.{parent} -> {ips1}")
 
-        self.wildcard_ip_set = wildcard_ip_set
-        logger.info("start get wildcard_ip_set {}".format(len(self.wildcard_ip_set)))
+        logger.info("start get wildcard_map with {} wildcard zones".format(len(self.wildcard_map)))
 
     def clear_wildcard_domain_info(self, info_list):
+        if not getattr(self, 'wildcard_map', None):
+            return info_list
         cnt = 0
         new = []
         for info in info_list:
-            common_set = self.wildcard_ip_set & set(info.ip_list)
-            if common_set:
+            domain = info.domain
+            is_wildcard = False
+            # 仅对其直接父级或上层域名的泛解析规则进行校验
+            for parent, wc_ips in self.wildcard_map.items():
+                if domain.endswith("." + parent) and domain != parent:
+                    info_ips = set(info.ip_list)
+                    if info_ips and info_ips.issubset(wc_ips):
+                        is_wildcard = True
+                        break
+            if is_wildcard:
                 cnt += 1
                 continue
             new.append(info)
-        logger.info("clear_wildcard_domain_info {}".format(cnt))
+        logger.info("clear_wildcard_domain_info filtered: {}".format(cnt))
         return new
 
 
@@ -489,10 +518,17 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options):
         executor.run()
         executor.sync_asset_site_wih()
 
+        from app.helpers.scope import update_scope_domain_status
+        for ip in target.split():
+            update_scope_domain_status(scope_id, ip, "probed", executor.task_id)
+
     except Exception as e:
         logger.warning("error on ip_executor {}".format(executor.ip_target))
         logger.exception(e)
         executor.base_update_task.update_task_field("status", TaskStatus.ERROR)
+        from app.helpers.scope import update_scope_domain_status
+        for ip in target.split():
+            update_scope_domain_status(scope_id, ip, "error", getattr(executor, 'task_id', None))
 
 def oneshot_ip_executors(target, scope_id, task_name, options):
     # This is a one-time execution, no scheduler_id
@@ -501,7 +537,14 @@ def oneshot_ip_executors(target, scope_id, task_name, options):
         executor.insert_task_data()
         executor.run()
         executor.sync_asset_site_wih()
+
+        from app.helpers.scope import update_scope_domain_status
+        for ip in target.split():
+            update_scope_domain_status(scope_id, ip, "probed", executor.task_id)
     except Exception as e:
         logger.warning("error on oneshot_ip_executors {}".format(executor.ip_target))
         logger.exception(e)
         executor.base_update_task.update_task_field("status", TaskStatus.ERROR)
+        from app.helpers.scope import update_scope_domain_status
+        for ip in target.split():
+            update_scope_domain_status(scope_id, ip, "error", getattr(executor, 'task_id', None))

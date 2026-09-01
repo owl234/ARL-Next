@@ -14,6 +14,8 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-frontend:latest
     container_name: arl-frontend-prod
     restart: always
+    mem_limit: 128m
+    mem_reservation: 64m
     ports:
       # 映射公网 5173 端口直连 Nginx 服务
       - "5173:5173"
@@ -35,6 +37,9 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest
     container_name: arl-web-prod
     restart: always
+    mem_limit: 600m
+    mem_reservation: 256m
+    oom_score_adj: 0
     command: bash -c "/code/backend/start_web_prod.sh"
     working_dir: /code
     volumes:
@@ -64,6 +69,9 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-puppeteer:latest
     container_name: arl-puppeteer-prod
     restart: always
+    mem_limit: 600m
+    mem_reservation: 256m
+    oom_score_adj: 300
     command: bash -c "export NODE_PATH=/usr/local/lib/node_modules && node /code/backend/app/tools/puppeteer_server.js"
     working_dir: /code
     environment:
@@ -78,6 +86,9 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-worker:latest
     container_name: arl-worker-prod
     restart: always
+    mem_limit: 1400m
+    mem_reservation: 512m
+    oom_score_adj: 500
     stop_grace_period: 1m
     command: bash -c "/code/backend/start_worker_prod.sh"
     working_dir: /code
@@ -115,6 +126,9 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/mongo:7.0
     container_name: arl-mongodb-prod
     restart: always
+    mem_limit: 1024m
+    mem_reservation: 512m
+    oom_score_adj: -500
     command: ["--wiredTigerCacheSizeGB", "1"]
     environment:
       - MONGO_INITDB_DATABASE=arl
@@ -132,6 +146,9 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/rabbitmq:3-alpine
     container_name: arl-rabbitmq-prod
     restart: always
+    mem_limit: 384m
+    mem_reservation: 128m
+    oom_score_adj: -500
     environment:
       - RABBITMQ_DEFAULT_USER=admin
       - RABBITMQ_DEFAULT_PASS=admin
@@ -148,6 +165,8 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/osint-service:latest
     container_name: arl-osint-service-prod
     restart: always
+    mem_limit: 128m
+    mem_reservation: 64m
     networks:
       - arl-net
 
@@ -157,6 +176,8 @@ services:
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/autoheal:latest
     container_name: arl-autoheal
     restart: always
+    mem_limit: 64m
+    mem_reservation: 32m
     environment:
       - AUTOHEAL_CONTAINER_LABEL=autoheal
       - TZ=Asia/Shanghai

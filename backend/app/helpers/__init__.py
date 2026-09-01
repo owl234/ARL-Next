@@ -16,7 +16,13 @@ from .task import (
 
 # 从当前目录下的 scope.py 文件中，导入与“扫描范围（Scope）”限制相关的函数。
 # 比如用来判断某个 IP 或域名是否在允许扫描的白名单内。
-from .scope import get_scope_by_scope_id, check_target_in_scope
+from .scope import (
+    get_scope_by_scope_id,
+    check_target_in_scope,
+    update_scope_domain_status,
+    get_scope_domain_stat,
+    trigger_scope_domain_scan
+)
 
 # 从当前目录下的 url.py 文件中，导入通过任务ID查询 URL 结果的函数。
 from .url import get_url_by_task_id

@@ -318,12 +318,58 @@ def cleanup_zombie_tasks():
                 )
         else:
             # 普通任务直接报错
-            conn('task').update_one({"_id": task["_id"]}, {"$set": {"status": TaskStatus.ERROR}})
+            conn('task').update_one(
+                {"_id": task["_id"]},
+                {"$set": {
+                    "status": TaskStatus.ERROR,
+                    "end_time": utils.curr_date(),
+                    "end_reason": "系统重启/升级中断 (Interrupted by system restart/update)"
+                }}
+            )
             
         count += 1
         
-    if count > 0:
-        logger.info(f"Cleaned up {count} zombie tasks on startup.")
+def cleanup_orphan_tmp_files(max_age_seconds=86400):
+    """
+    清理 TMP_PATH 目录下的孤儿临时文件（如强行终止任务遗留的 wih、nuclei、massdns 等中间文件）
+    默认清理修改时间超过 24 小时 (86400秒) 的临时文件，白名单排除系统配置文件
+    """
+    import os
+    import shutil
+    from app.config import Config
+
+    tmp_dir = Config.TMP_PATH
+    if not os.path.exists(tmp_dir):
+        return
+
+    now = time.time()
+    clean_count = 0
+    preserved_files = {'github.hash', '.gitkeep', '.gitignore'}
+
+    try:
+        for fname in os.listdir(tmp_dir):
+            if fname in preserved_files or fname.startswith('.'):
+                continue
+
+            fpath = os.path.join(tmp_dir, fname)
+            try:
+                if os.path.isfile(fpath) or os.path.islink(fpath):
+                    mtime = os.path.getmtime(fpath)
+                    if (now - mtime) > max_age_seconds:
+                        os.unlink(fpath)
+                        clean_count += 1
+                elif os.path.isdir(fpath):
+                    mtime = os.path.getmtime(fpath)
+                    if (now - mtime) > max_age_seconds:
+                        shutil.rmtree(fpath, ignore_errors=True)
+                        clean_count += 1
+            except Exception as fe:
+                logger.warning(f"Failed to clean tmp file {fpath}: {fe}")
+    except Exception as e:
+        logger.error(f"Error scanning tmp_dir {tmp_dir}: {e}")
+
+    if clean_count > 0:
+        logger.info(f"Cleaned up {clean_count} orphan tmp files older than {max_age_seconds}s from {tmp_dir}.")
 
 
 def run_forever():
@@ -332,7 +378,11 @@ def run_forever():
     
     # 启动时先清理僵尸任务并恢复
     cleanup_zombie_tasks()
+    # 启动时清理孤儿临时文件
+    cleanup_orphan_tmp_files()
     
+    last_tmp_clean = time.time()
+
     while True:
         # Threat Intelligence (CVE/Tools/Hackers) 独立任务调度
         from app.tasks.github_threat_monitor import threat_intelligence_scheduler
@@ -346,6 +396,12 @@ def run_forever():
 
         # 计划任务调度
         task_schedule.task_scheduler()
+
+        # 每小时自动巡检并清理一次孤儿临时文件
+        curr_time = time.time()
+        if curr_time - last_tmp_clean > 3600:
+            cleanup_orphan_tmp_files()
+            last_tmp_clean = curr_time
 
         # logger.debug(time.time())
         # sleep 时间不能超过60S，Github 里的任务可能运行不了。

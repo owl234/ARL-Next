@@ -10,18 +10,25 @@ server {
     ssl_certificate      /certs/arl.crt;
     ssl_certificate_key  /certs/arl.key;
 
-    ssl_session_cache    shared:SSL:1m;
-    ssl_session_timeout  5m;
+    # TLS 协议与长效会话复用加速 (避免每次请求重复握手)
+    ssl_protocols        TLSv1.2 TLSv1.3;
+    ssl_session_cache    shared:SSL:10m;
+    ssl_session_timeout  1d;
+    ssl_session_tickets  on;
 
     ssl_ciphers  HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers  on;
 
+    # TCP 高性能传输优化
+    tcp_nopush   on;
+    tcp_nodelay  on;
+
     # 开启 gzip 压缩加速静态资源加载
     gzip on;
     gzip_static on; # 优先使用前端预生成的 .gz 文件，降低 CPU 消耗
-    gzip_min_length 1k;
+    gzip_min_length 256;
     gzip_comp_level 6;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml font/woff2 application/vnd.ms-fontobject;
     gzip_vary on;
     # 必须开启 gzip_proxied 才能压缩代理转发的 API 响应内容
     gzip_proxied any;
@@ -33,10 +40,17 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # 针对静态资源添加长缓存
+    # 针对静态资源添加长期不可变缓存 (带 Hash 的 Chunk)
     location ^~ /assets/ {
         root   /usr/share/nginx/html;
         add_header Cache-Control "public, max-age=31536000, immutable";
+        access_log off;
+    }
+
+    # 针对 favicon 和通用图标等静态文件添加缓存
+    location ~* \.(?:ico|svg|png|jpg|jpeg|gif|webp|woff2?|ttf|eot)$ {
+        root   /usr/share/nginx/html;
+        add_header Cache-Control "public, max-age=86400";
         access_log off;
     }
 
@@ -48,10 +62,12 @@ server {
         add_header Expires 0;
     }
 
-    # 2. 动态 API 反向代理
-    location /api/ {
+    # 2. 动态 API 反向代理 (使用 ^~ 阻止正则匹配劫持以 .jpg/.png 结尾的截图 API)
+    location ^~ /api/ {
         auth_basic off;
         proxy_pass http://arl-web:5000/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -64,7 +80,8 @@ server {
     }
 
     # 3. 代理更新服务 SSE (解决 Mixed Content 与跨域端口屏蔽问题)
-    location /update_stream/ {
+    location ^~ /update_stream/ {
+        auth_basic off; # 更新与状态检测接口不受 Basic Auth 拦截
         proxy_pass http://host.docker.internal:8888/update/;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

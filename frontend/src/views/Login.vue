@@ -35,7 +35,7 @@ const loading = ref(false);
 
 const formState = reactive({
   username: 'admin',
-  password: 'arlpass',
+  password: '',
 });
 
 const onFinish = async (values) => {

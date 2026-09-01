@@ -110,6 +110,7 @@ class AddARLScheduler(ARLResource):
 
         # 下发 域名类型监控任务
         if domain_targets:
+            from app.helpers.scope import update_scope_domain_status
             for x in domain_targets:
                 curr_name = name
                 if not name:
@@ -120,10 +121,12 @@ class AddARLScheduler(ARLResource):
                 scheduler_id = app_scheduler.add_scheduler(domain=x, scope_id=scope_id,
                                                options=task_options, interval=interval,
                                                name=curr_name, scope_type=AssetScopeType.DOMAIN)
+                update_scope_domain_status(scope_id, x, "scanning", scheduler_id)
                 ret_data.append({"domain": x, "scope_id": scope_id, "scheduler_id": scheduler_id})
 
         # 下发IP 类型监控任务
         if ip_targets:
+            from app.helpers.scope import update_scope_domain_status
             curr_name = name
             ip_target = " ".join(ip_targets)
             if not name:
@@ -134,6 +137,8 @@ class AddARLScheduler(ARLResource):
             scheduler_id = app_scheduler.add_scheduler(domain=ip_target, scope_id=scope_id,
                                            options=task_options, interval=interval,
                                            name=curr_name, scope_type=AssetScopeType.IP)
+            for x in ip_targets:
+                update_scope_domain_status(scope_id, x, "scanning", scheduler_id)
             ret_data.append({"domain": ip_target, "scope_id": scope_id, "scheduler_id": scheduler_id})
 
         return utils.build_ret(ErrorMsg.Success, ret_data)
@@ -478,28 +483,32 @@ class OneTimeScanScheduler(ARLResource):
         
         ret_data = []
         # 下发 域名类型一次性扫描
-        for x in domain_targets:
-            curr_name = name
-            if not name:
-                curr_name = "一次性扫描-{}-{}".format(scope_data["name"], x)
-            curr_name = truncate_string(curr_name)
-            
-            task_data = {
-                "domain": x,
-                "scope_id": scope_id,
-                "type": AssetScopeType.DOMAIN,
-                "monitor_options": task_options,
-                "name": curr_name
-            }
-            options = {
-                "celery_action": CeleryAction.ONESHOT_DOMAIN_EXEC_TASK,
-                "data": task_data
-            }
-            celery_id = celerytask.arl_task.apply_async(kwargs={'options': options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
-            ret_data.append({"domain": x, "celery_id": str(celery_id)})
+        if domain_targets:
+            from app.helpers.scope import update_scope_domain_status
+            for x in domain_targets:
+                curr_name = name
+                if not name:
+                    curr_name = "一次性扫描-{}-{}".format(scope_data["name"], x)
+                curr_name = truncate_string(curr_name)
+                
+                task_data = {
+                    "domain": x,
+                    "scope_id": scope_id,
+                    "type": AssetScopeType.DOMAIN,
+                    "monitor_options": task_options,
+                    "name": curr_name
+                }
+                options = {
+                    "celery_action": CeleryAction.ONESHOT_DOMAIN_EXEC_TASK,
+                    "data": task_data
+                }
+                celery_id = celerytask.arl_task.apply_async(kwargs={'options': options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
+                update_scope_domain_status(scope_id, x, "scanning", str(celery_id))
+                ret_data.append({"domain": x, "celery_id": str(celery_id)})
 
         # 下发 IP 类型一次性扫描
         if ip_targets:
+            from app.helpers.scope import update_scope_domain_status
             curr_name = name
             ip_target = " ".join(ip_targets)
             if not name:
@@ -518,6 +527,8 @@ class OneTimeScanScheduler(ARLResource):
                 "data": task_data
             }
             celery_id = celerytask.arl_task.apply_async(kwargs={'options': options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
+            for x in ip_targets:
+                update_scope_domain_status(scope_id, x, "scanning", str(celery_id))
             ret_data.append({"domain": ip_target, "celery_id": str(celery_id)})
             
         return utils.build_ret(ErrorMsg.Success, ret_data)

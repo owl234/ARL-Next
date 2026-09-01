@@ -69,8 +69,8 @@
             <a-switch checked-children="🌙" un-checked-children="☀️" v-model:checked="isDarkMode" @change="toggleDarkMode" />
           </div>
 
-          <div style="margin-right: 24px; display: flex; align-items: center;" title="启用/禁用 Basic Auth 防护">
-            <a-switch checked-children="🔒" un-checked-children="🔓" v-model:checked="isBasicAuthEnabled" @change="toggleBasicAuth" :loading="isBasicAuthLoading" />
+          <div style="margin-right: 24px; display: flex; align-items: center;" :title="isBasicAuthOnline ? (isBasicAuthEnabled ? 'Basic Auth 安全防护已开启 (点击切换)' : 'Basic Auth 安全防护已关闭 (点击切换)') : 'Basic Auth 控制服务未连接'">
+            <a-switch :checked="isBasicAuthEnabled" :loading="isBasicAuthLoading" :disabled="!isBasicAuthOnline" @click="handleBasicAuthSwitchClick" checked-children="🔒" un-checked-children="🔓" />
           </div>
 
           <span class="header-text-action" style="cursor: pointer; margin-right: 24px; display: flex; align-items: center;" @click="handleShowMcpModal">
@@ -92,9 +92,9 @@
       </a-layout-header>
 
       <a-layout-content class="arl-main-content" style="margin: 16px; display: flex; flex-direction: column; overflow-y: auto; height: 0;">
-        <div :style="{ background: hasBgImage ? (isDarkMode ? 'rgba(15, 23, 42, 0.5)' : 'rgba(255, 255, 255, 0.4)') : (isDarkMode ? '#0f172a' : 'transparent'), flex: '1 0 auto', borderRadius: '4px' }">
+        <div :style="{ background: hasBgImage ? (isDarkMode ? 'rgba(15, 23, 42, 0.5)' : 'rgba(255, 255, 255, 0.4)') : (isDarkMode ? '#0f172a' : 'transparent'), flex: '1 0 auto', display: 'flex', flexDirection: 'column', borderRadius: '4px' }">
           <router-view v-slot="{ Component }">
-            <keep-alive include="AssetRecon,TaskList,AssetScope">
+            <keep-alive include="Dashboard,AssetRecon,TaskList,AssetScope">
               <component :is="Component" />
             </keep-alive>
           </router-view>
@@ -152,6 +152,42 @@
     </a-form>
   </a-modal>
 
+  <!-- Basic Auth 配置与开启弹窗 -->
+  <a-modal
+    v-model:visible="showBasicAuthModal"
+    title="🔒 开启 Nginx Basic Auth 前置安全防护"
+    okText="确认开启并生效"
+    cancelText="取消"
+    :confirmLoading="isBasicAuthLoading"
+    @ok="handleConfirmEnableBasicAuth"
+    @cancel="showBasicAuthModal = false"
+    width="520px"
+    wrapClassName="arl-theme-modal"
+    rootClassName="arl-theme-modal"
+  >
+    <div style="margin-bottom: 16px; font-size: 13px; line-height: 1.6; color: var(--arl-text-color);">
+      <p style="margin-bottom: 8px;">开启 Basic Auth 前置安全网关防护后，访问系统前需输入 HTTP 基础认证账密，可有效抵御公网扫描器被动探测与爆破。</p>
+    </div>
+
+    <a-form :model="basicAuthForm" :rules="basicAuthRules" ref="basicAuthFormRef" layout="vertical">
+      <a-form-item label="Basic Auth 账号" name="username" extra="基础认证账号，默认为 admin">
+        <a-input v-model:value="basicAuthForm.username" placeholder="请输入账号" />
+      </a-form-item>
+      <a-form-item label="Basic Auth 密码" name="password" extra="留空则保持现有密码或使用系统默认密码 (arl_next)">
+        <a-input-password v-model:value="basicAuthForm.password" placeholder="留空使用默认/现有密码，或输入新密码" />
+      </a-form-item>
+    </a-form>
+
+    <div style="background: var(--arl-bg-light, rgba(0,0,0,0.03)); padding: 12px; border-radius: 6px; border: 1px solid var(--arl-border-color, rgba(255,255,255,0.08)); font-size: 12px; color: var(--arl-text-color); opacity: 0.85;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <span style="font-weight: bold; color: var(--arl-theme-color);">💡 快速预设：</span>
+        <a-button type="link" size="small" style="padding: 0; height: auto;" @click="resetBasicAuthDefaults">填充默认凭证 (admin / arl_next)</a-button>
+      </div>
+      <div>• 凭证文件持久化存放于宿主机工作目录下的 <code>frontend/.htpasswd</code>。</div>
+      <div style="margin-top: 4px; color: #faad14;">• <b>验证提示：</b> 浏览器会长期缓存基础认证，开启后若需验证防护拦截效果，请使用<b>无痕窗口</b>访问。</div>
+    </div>
+  </a-modal>
+
   <!-- 沉浸式背景屏幕保护叠加层 -->
   <div class="screensaver-overlay" :class="{ 'is-active': isUIHidden }">
     <div class="screensaver-content">
@@ -166,16 +202,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch, computed, onUnmounted } from 'vue';import { useRoute, useRouter } from 'vue-router';
+import { ref, reactive, onMounted, watch, computed, onUnmounted, createVNode } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 // 引入 request (根据你的实际路径调整)
 import request from '@/utils/request';
 // 引入主题提取工具和 IndexedDB
 import { extractDominantColor, processImageToBase64, dbHelper } from '@/utils/theme';
-// 引入 Ant Design 的消息提示
-import { message } from 'ant-design-vue';
+// 引入 Ant Design 的消息提示与模态框
+import { message, Modal } from 'ant-design-vue';
 
 // 补全所有需要的图标
-import { DashboardOutlined, MenuUnfoldOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, GlobalOutlined, SearchOutlined, DesktopOutlined, AppstoreOutlined, SettingOutlined, TagsOutlined, BugOutlined, ClockCircleOutlined, GithubOutlined, EyeOutlined, DeploymentUnitOutlined, RobotOutlined, BgColorsOutlined, PictureOutlined, UploadOutlined, DeleteOutlined } from '@ant-design/icons-vue';
+import { DashboardOutlined, MenuUnfoldOutlined, MenuFoldOutlined, UserOutlined, LogoutOutlined, GlobalOutlined, SearchOutlined, DesktopOutlined, AppstoreOutlined, SettingOutlined, TagsOutlined, BugOutlined, ClockCircleOutlined, GithubOutlined, EyeOutlined, DeploymentUnitOutlined, RobotOutlined, BgColorsOutlined, PictureOutlined, UploadOutlined, DeleteOutlined, SafetyCertificateOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -187,6 +224,7 @@ const hasBgImage = ref(false);
 const isUIHidden = ref(false);
 
 const isBasicAuthEnabled = ref(true);
+const isBasicAuthOnline = ref(true);
 const isBasicAuthLoading = ref(false);
 
 const currentTime = ref('');
@@ -466,51 +504,140 @@ const refreshMcpToken = async () => {
   }
 };
 
+/* ---------- Basic Auth 管理逻辑 ---------- */
+const showBasicAuthModal = ref(false);
+const basicAuthFormRef = ref();
+const basicAuthForm = reactive({
+  username: 'admin',
+  password: 'arl_next'
+});
+
+const basicAuthRules = {
+  username: [{ required: true, message: '请输入 Basic Auth 账号', trigger: 'blur' }]
+};
+
+const resetBasicAuthDefaults = () => {
+  basicAuthForm.username = 'admin';
+  basicAuthForm.password = 'arl_next';
+};
+
 const fetchBasicAuthStatus = async () => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
   try {
-    const res = await fetch('/update_stream/auth_status');
+    const res = await fetch('/update_stream/auth_status', { signal: controller.signal });
     if (res.ok) {
       const data = await res.json();
       if (data.status === 'ok') {
         isBasicAuthEnabled.value = data.enabled;
+        isBasicAuthOnline.value = true;
+        return;
       }
     }
+    isBasicAuthOnline.value = false;
   } catch (error) {
-    console.error('Failed to fetch basic auth status:', error);
+    // 开发模式或未启动 updater 服务时优雅容错
+    isBasicAuthOnline.value = false;
+  } finally {
+    clearTimeout(timeoutId);
   }
 };
 
-const toggleBasicAuth = async (checked) => {
-  isBasicAuthLoading.value = true;
+const handleBasicAuthSwitchClick = () => {
+  if (isBasicAuthLoading.value || !isBasicAuthOnline.value) return;
+  
+  if (!isBasicAuthEnabled.value) {
+    // 当前为关闭状态，点击打开自定义配置弹窗
+    showBasicAuthModal.value = true;
+  } else {
+    // 当前为开启状态，点击弹出高危关闭警示
+    Modal.confirm({
+      title: '关闭 Nginx Basic Auth 前置安全防护',
+      icon: createVNode(ExclamationCircleOutlined, { style: 'color: #ff4d4f;' }),
+      width: 480,
+      content: createVNode('div', { style: 'margin-top: 12px; line-height: 1.6;' }, [
+        createVNode('p', { style: 'margin-bottom: 8px; color: #ff4d4f;' }, '关闭后，Web 前端网关将直接对网络环境暴露（仅保留系统应用层登录鉴权）。'),
+        createVNode('p', { style: 'margin-bottom: 0;' }, '确定要关闭 Basic Auth 防护吗？')
+      ]),
+      okText: '确认关闭',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => executeToggleBasicAuth(false)
+    });
+  }
+};
+
+const handleConfirmEnableBasicAuth = async () => {
   try {
-    // 1. 获取 token
+    await basicAuthFormRef.value?.validate();
+    await executeToggleBasicAuth(true, basicAuthForm.username, basicAuthForm.password);
+    showBasicAuthModal.value = false;
+  } catch (e) {
+    console.error('Basic Auth 表单校验失败:', e);
+  }
+};
+
+const executeToggleBasicAuth = async (checked, username = null, password = null) => {
+  if (isBasicAuthLoading.value) return;
+  isBasicAuthLoading.value = true;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s 熔断保护
+
+  try {
+    // 1. 获取一次性 Token
     const tokenRes = await request.post('/system_config/request_update_token');
     if (tokenRes.code === 200 && tokenRes.data && tokenRes.data.token) {
       const token = tokenRes.data.token;
-      // 2. 调用底层 toggle 接口
-      const toggleRes = await fetch(`/update_stream/toggle_auth?token=${token}&enable=${checked}`);
+      
+      // 2. 调用 POST 接口传递 Token 及账号密码参数
+      const payload = {
+        token,
+        enable: checked,
+        username: username || undefined,
+        password: password || undefined
+      };
+
+      const toggleRes = await fetch('/update_stream/toggle_auth', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Update-Token': token
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+
       if (toggleRes.ok) {
         const data = await toggleRes.json();
         if (data.status === 'ok') {
-          message.success(`Basic Auth 防护已${checked ? '开启' : '关闭'}！`);
           isBasicAuthEnabled.value = checked;
+          if (checked) {
+            message.success({
+              content: `Basic Auth 防护已开启！(账号: ${username || 'admin'}，建议使用无痕窗口验证拦截效果)`,
+              duration: 6
+            });
+          } else {
+            message.success('Basic Auth 前置防护已成功关闭！');
+          }
         } else {
           message.error('切换失败: ' + (data.message || '未知错误'));
-          isBasicAuthEnabled.value = !checked;
         }
       } else {
-        message.error('调用底层切换接口失败');
-        isBasicAuthEnabled.value = !checked;
+        message.error('调用底层切换接口失败，请检查更新服务状态');
       }
     } else {
       message.error(tokenRes.message || '获取授权 Token 失败');
-      isBasicAuthEnabled.value = !checked;
     }
   } catch (error) {
-    console.error(error);
-    message.error('操作失败，请检查网络或控制台日志');
-    isBasicAuthEnabled.value = !checked;
+    if (error.name === 'AbortError') {
+      message.error('请求超时，请检查 updater 更新服务是否正常运行');
+    } else {
+      console.error(error);
+      message.error('操作失败，请检查网络或控制台日志');
+    }
   } finally {
+    clearTimeout(timeoutId);
     isBasicAuthLoading.value = false;
   }
 };

@@ -1,5 +1,6 @@
 import copy
 import re
+from bson import ObjectId
 from app.utils import conn_db as conn
 from app import utils
 logger = utils.get_logger()
@@ -208,6 +209,20 @@ class SyncAsset(object):
             self.sync_by_category(category)
 
         logger.info("end sync {} -> {}, result: {}, update: {}".format(self.task_id, self.scope_id, self.new_asset_counter, self.update_asset_counter))
+
+        if self.scope_id and self.task_id:
+            try:
+                task_info = utils.conn_db('task').find_one({"_id": ObjectId(self.task_id)})
+                if task_info:
+                    target_str = task_info.get("target", "")
+                    from app.helpers import get_ip_domain_list, update_scope_domain_status
+                    target_ips, target_domains = get_ip_domain_list(target_str)
+                    for td in target_domains:
+                        update_scope_domain_status(self.scope_id, td, "probed", self.task_id)
+                    for tip in target_ips:
+                        update_scope_domain_status(self.scope_id, tip, "probed", self.task_id)
+            except Exception as e:
+                logger.error(f"SyncAsset update domain/ip status error: {e}")
 
         return self.new_asset_map, self.new_asset_counter, self.update_asset_map, self.update_asset_counter
 

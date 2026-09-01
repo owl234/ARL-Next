@@ -20,6 +20,10 @@ class BuildDomainInfo(BaseThread):
         if not ips:
             return
 
+        # 🛡️ 方案 4：智能拦截动态自指 CDN 边缘基础设施节点 (0 误杀)
+        if utils.is_dynamic_ip_edge_domain(domain, resolved_ips=ips):
+            return
+
         cnames = utils.get_cname(domain, False)
 
         info = {

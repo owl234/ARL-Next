@@ -83,6 +83,14 @@ def get_celery_logger():
         from celery.utils.log import get_task_logger
         if 'celery' in sys.argv[0]:
             task_logger = get_task_logger(__name__)
+            try:
+                from app.utils import MongoSyslogHandler
+                if not any(isinstance(h, MongoSyslogHandler) for h in task_logger.handlers):
+                    h = MongoSyslogHandler()
+                    h.setLevel(logging.INFO)
+                    task_logger.addHandler(h)
+            except Exception:
+                pass
             return task_logger
     except Exception:
         pass

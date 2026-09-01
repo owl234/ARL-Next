@@ -13,6 +13,12 @@ base_search_icp_task_fields = {
     'target': fields.String(description="查询目标"),
     'status': fields.String(description="任务状态"),
     'query_type': fields.String(description="查询类型"),
+    'end_time__gte': fields.String(description="结束时间大于等于"),
+    'end_time__lte': fields.String(description="结束时间小于等于"),
+    'end_time__dgt': fields.String(description="结束时间大于等于(兼容)"),
+    'end_time__dlt': fields.String(description="结束时间小于等于(兼容)"),
+    'start_time__gte': fields.String(description="开始时间大于等于"),
+    'start_time__lte': fields.String(description="开始时间小于等于"),
     '_id': fields.String(description="任务ID")
 }
 base_search_icp_task_fields.update(base_query_fields)
@@ -28,7 +34,7 @@ add_icp_task_fields = ns.model('AddIcpTask', {
 add_tyc_task_fields = ns.model('AddTycTask', {
     'name': fields.String(required=True, description="任务名称"),
     'gid': fields.String(required=True, description="公司/节点GID"),
-    'depth': fields.Integer(required=False, default=0, description="递归查询层数"),
+    'depth': fields.Integer(required=False, default=1, description="递归查询层数"),
     'invest_ratio': fields.Float(required=False, default=50, description="对外投资最小比例(%)"),
     'query_type': fields.List(fields.String, required=True, description="查询类型(web/app/mapp/wechat/weibo/invest/trademark)")
 })
@@ -122,7 +128,7 @@ class TycTask(ARLResource):
         args = self.parse_args(add_tyc_task_fields)
         name = args.get('name')
         gid = args.get('gid')
-        depth = args.get('depth', 1)
+        depth = max(1, int(args.get('depth', 1) or 1))
         invest_ratio = args.get('invest_ratio', 0)
         query_type = args.get('query_type')
 
@@ -213,6 +219,8 @@ base_search_icp_asset_fields = {
     'percent_num__nlt': fields.Float(description="TYC投资比例数字(小于)"),
     'amount': fields.String(description="TYC注册资本(模糊搜索)"),
     'percent': fields.String(description="TYC投资比例(模糊搜索)"),
+    'examineDate': fields.String(description="TYC审核日期"),
+    'updateRecordTime': fields.String(description="ICP审核日期"),
     'query_type': fields.String(description="查询类型"),
     '_id': fields.String(description="资产ID")
 }
@@ -292,67 +300,132 @@ class IcpTaskDelete(ARLResource):
             return build_ret(ErrorMsg.Error, {"error": str(e)})
 
 
+def _restart_single_icp_task(task_id: str):
+    """
+    底层核心逻辑：克隆并重启单个 ICP / TYC 任务
+    返回: (ok: bool, reason: str, data: dict)
+    """
+    try:
+        task = conn_db('icp_task').find_one({"_id": bson.ObjectId(task_id)})
+        if not task:
+            return False, "not_found", {"task_id": task_id, "error": "任务不存在"}
+
+        # 防御逻辑：处于运行中或等待中的任务不允许重复重启
+        if task.get("status") in [TaskStatus.WAITING, TaskStatus.RUNNING, "running"]:
+            return False, "running", {"task_id": task_id, "error": "任务正在运行或等待中"}
+
+        # 克隆旧任务数据
+        task.pop('_id', None)
+        task['status'] = TaskStatus.WAITING
+        task['start_time'] = curr_date()
+        task['end_time'] = "-"
+        task['statistic'] = {"asset_cnt": 0}
+        task['error_msg'] = ""
+
+        # 插入新任务
+        result = conn_db('icp_task').insert_one(task)
+        new_task_id = str(result.inserted_id)
+
+        # 格式化 query_type 确保为 list
+        query_type = task.get("query_type", ["web"])
+        if isinstance(query_type, str):
+            query_type = [q.strip() for q in query_type.split(',') if q.strip()]
+
+        # 重新发起
+        if task.get("task_type") == "tyc":
+            from app.services.tycClient import TycClient
+            client = TycClient()
+            options = {
+                "task_id": new_task_id,
+                "gid": task.get("gid"),
+                "depth": task.get("depth", 1),
+                "invest_ratio": task.get("invest_ratio", 0),
+                "query_type": query_type,
+                "type": "tyc",
+                "tyc_id": client.gid,
+                "tyc_token": client.token
+            }
+        else:
+            options = {
+                "task_id": new_task_id,
+                "target": task.get("target"),
+                "query_type": query_type,
+                "type": "icp"
+            }
+
+        import requests
+        try:
+            res = requests.post("http://osint-service:16181/api/v1/recon/start", json=options, timeout=5)
+            res.raise_for_status()
+        except Exception as e:
+            logger.error(f"Failed to trigger osint-service: {e}")
+            conn_db('icp_task').update_one({"_id": result.inserted_id}, {"$set": {"status": "error", "error_msg": "请求 osint-service 失败或超时"}})
+            return False, "trigger_failed", {"task_id": task_id, "error": f"微服务调度失败: {e}"}
+
+        return True, "success", {"old_task_id": task_id, "new_task_id": new_task_id}
+    except Exception as e:
+        logger.error(f"Restart task {task_id} failed: {e}")
+        return False, "error", {"task_id": task_id, "error": str(e)}
+
+
 @ns.route('/restart/<string:task_id>')
 class IcpTaskRestart(ARLResource):
     @auth
     def get(self, task_id):
-        """重启 ICP 任务 (单任务)"""
+        """重启 ICP 任务 (单任务 GET)"""
+        return self._restart(task_id)
+
+    @auth
+    def post(self, task_id):
+        """重启 ICP 任务 (单任务 POST)"""
+        return self._restart(task_id)
+
+    def _restart(self, task_id):
+        ok, reason, res = _restart_single_icp_task(task_id)
+        if ok:
+            return build_ret(ErrorMsg.Success, {"task_id": res["new_task_id"]})
+        if reason == "not_found":
+            return build_ret(ErrorMsg.NotFoundTask, {"task_id": task_id})
+        if reason == "running":
+            return build_ret(ErrorMsg.TaskIsRunning, {"task_id": task_id})
+        return build_ret(ErrorMsg.Error, {"error": res.get("error", "重启失败")})
+
+
+@ns.route('/restart/')
+class IcpTaskBatchRestart(ARLResource):
+    @auth
+    def post(self):
+        """批量重启 ICP / TYC 任务"""
         try:
-            task = conn_db('icp_task').find_one({"_id": bson.ObjectId(task_id)})
-            if not task:
-                return build_ret(ErrorMsg.NotFoundTask, {"task_id": task_id})
+            from flask import request as flask_request
+            args = flask_request.json or {}
+            task_ids = args.get('task_ids') or args.get('task_id', [])
+            if isinstance(task_ids, str):
+                task_ids = [task_ids]
+            if not isinstance(task_ids, list):
+                return build_ret(ErrorMsg.Error, {"error": "task_ids must be a list"})
 
-            # 克隆旧任务数据
-            task.pop('_id', None)
-            task['status'] = TaskStatus.WAITING
-            task['start_time'] = curr_date()
-            task['end_time'] = "-"
-            task['statistic'] = {"asset_cnt": 0}
-            task['error_msg'] = ""
+            restarted_tasks = []
+            skipped_tasks = []
+            failed_tasks = []
 
-            # 插入新任务
-            result = conn_db('icp_task').insert_one(task)
-            new_task_id = str(result.inserted_id)
+            for tid in task_ids:
+                ok, reason, res = _restart_single_icp_task(str(tid))
+                if ok:
+                    restarted_tasks.append(res)
+                elif reason == "running":
+                    skipped_tasks.append(tid)
+                else:
+                    failed_tasks.append({"task_id": tid, "reason": reason, "error": res.get("error")})
 
-            # 重新发起
-            if task.get("task_type") == "tyc":
-                options = {
-                    "task_id": new_task_id,
-                    "gid": task.get("gid"),
-                    "depth": task.get("depth", 1),
-                    "invest_ratio": task.get("invest_ratio", 0),
-                    "query_type": task.get("query_type", ["web"])
-                }
-                options["type"] = "tyc"
-                options["tyc_id"] = task.get("gid")
-                
-                from app.services.tycClient import TycClient
-                client = TycClient()
-                options["tyc_token"] = client.token
-                
-                import requests
-                try:
-                    res = requests.post("http://osint-service:16181/api/v1/recon/start", json=options, timeout=5)
-                    res.raise_for_status()
-                except Exception as e:
-                    logger.error(f"Failed to trigger osint-service: {e}")
-                    conn_db('icp_task').update_one({"_id": result.inserted_id}, {"$set": {"status": "error", "error_msg": "请求 osint-service 失败或超时"}})
-            else:
-                options = {
-                    "task_id": new_task_id,
-                    "target": task.get("target"),
-                    "query_type": task.get("query_type", ["web"])
-                }
-                options["type"] = "icp"
-                import requests
-                try:
-                    res = requests.post("http://osint-service:16181/api/v1/recon/start", json=options, timeout=5)
-                    res.raise_for_status()
-                except Exception as e:
-                    logger.error(f"Failed to trigger osint-service: {e}")
-                    conn_db('icp_task').update_one({"_id": result.inserted_id}, {"$set": {"status": "error", "error_msg": "请求 osint-service 失败或超时"}})
-
-            return build_ret(ErrorMsg.Success, {"task_id": new_task_id})
+            return build_ret(ErrorMsg.Success, {
+                "restarted_count": len(restarted_tasks),
+                "skipped_count": len(skipped_tasks),
+                "failed_count": len(failed_tasks),
+                "restarted_tasks": restarted_tasks,
+                "skipped_tasks": skipped_tasks,
+                "failed_tasks": failed_tasks
+            })
         except Exception as e:
             return build_ret(ErrorMsg.Error, {"error": str(e)})
 
@@ -522,10 +595,15 @@ class IcpTaskSync(ARLResource):
         """将 ICP/TYC 任务中的网站域名同步至资产分组"""
         try:
             from flask import request as flask_request
+            from app.helpers.scope import update_scope_domain_status, trigger_scope_domain_scan
             args = flask_request.json or {}
             mode = args.get('mode', 'new') # 'new' or 'existing'
             target_name = args.get('target_name', '').strip()
             scope_id = args.get('scope_id')
+            auto_scan = args.get('auto_scan', False)
+            task_type = args.get('task_type', 'oneshot')
+            policy_id = args.get('policy_id', '')
+            interval_hours = int(args.get('interval_hours', 24) or 24)
 
             task = conn_db('icp_task').find_one({"_id": bson.ObjectId(task_id)})
             if not task:
@@ -542,11 +620,15 @@ class IcpTaskSync(ARLResource):
             if not domains:
                 return build_ret(ErrorMsg.Error, {"error": "未发现网站资产，无法同步"})
 
+            final_scope_id = None
+            task_triggered_count = 0
+
             if mode == 'existing' and scope_id:
                 # 关联已有资产
                 scope = conn_db('asset_scope').find_one({"_id": bson.ObjectId(scope_id)})
                 if not scope:
                     return build_ret(ErrorMsg.Error, {"error": "指定的资产组不存在"})
+                final_scope_id = str(scope["_id"])
                 old_array = scope.get("scope_array", [])
                 
                 # Calculate duplicates and new additions
@@ -561,12 +643,26 @@ class IcpTaskSync(ARLResource):
                 if old_domain_array is None:
                     old_domain_array = old_array if scope.get("scope_type", "domain") == "domain" else []
                 new_domain_array = list(set(old_domain_array) | domains)
+
+                domain_status = scope.get("domain_status", {})
+                if not isinstance(domain_status, dict):
+                    domain_status = {}
+
+                for d in new_additions:
+                    if d not in domain_status:
+                        domain_status[d] = {
+                            "status": "unprobed",
+                            "sync_source": "icp",
+                            "sync_time": curr_date()
+                        }
+
                 conn_db('asset_scope').update_one(
                     {"_id": scope["_id"]},
                     {"$set": {
                         "scope_array": new_array,
                         "scope": ",".join(new_array),
-                        "domain_array": new_domain_array
+                        "domain_array": new_domain_array,
+                        "domain_status": domain_status
                     }}
                 )
                 target_name = scope.get('name')
@@ -578,6 +674,7 @@ class IcpTaskSync(ARLResource):
                 # 检查是否同名，不再限制 scope_type
                 scope = conn_db('asset_scope').find_one({"name": target_name})
                 if scope:
+                    final_scope_id = str(scope["_id"])
                     old_array = scope.get("scope_array", [])
                     
                     old_set = set(old_array)
@@ -591,36 +688,77 @@ class IcpTaskSync(ARLResource):
                     if old_domain_array is None:
                         old_domain_array = old_array if scope.get("scope_type", "domain") == "domain" else []
                     new_domain_array = list(set(old_domain_array) | domains)
+
+                    domain_status = scope.get("domain_status", {})
+                    if not isinstance(domain_status, dict):
+                        domain_status = {}
+
+                    for d in new_additions:
+                        if d not in domain_status:
+                            domain_status[d] = {
+                                "status": "unprobed",
+                                "sync_source": "icp",
+                                "sync_time": curr_date()
+                            }
+
                     conn_db('asset_scope').update_one(
                         {"_id": scope["_id"]},
                         {"$set": {
                             "scope_array": new_array,
                             "scope": ",".join(new_array),
-                            "domain_array": new_domain_array
+                            "domain_array": new_domain_array,
+                            "domain_status": domain_status
                         }}
                     )
                 else:
                     new_array = list(domains)
+                    new_additions = set(domains)
                     insert_count = len(domains)
                     duplicate_count = 0
                     
+                    domain_status = {}
+                    for d in domains:
+                        domain_status[d] = {
+                            "status": "unprobed",
+                            "sync_source": "icp",
+                            "sync_time": curr_date()
+                        }
+
                     scope_data = {
                         "name": target_name,
                         "scope_type": "mixed",
                         "scope": ",".join(new_array),
                         "scope_array": new_array,
                         "domain_array": new_array,
+                        "domain_status": domain_status,
                         "ip_array": [],
                         "black_scope": "",
                         "black_scope_array": []
                     }
-                    conn_db('asset_scope').insert_one(scope_data)
+                    insert_res = conn_db('asset_scope').insert_one(scope_data)
+                    final_scope_id = str(insert_res.inserted_id)
+
+            # 如果用户勾选了自动下发任务且存在新增域名
+            if auto_scan and policy_id and new_additions and final_scope_id:
+                try:
+                    task_triggered_count = trigger_scope_domain_scan(
+                        scope_id=final_scope_id,
+                        domains=list(new_additions),
+                        policy_id=policy_id,
+                        task_type=task_type,
+                        interval=interval_hours * 3600
+                    )
+                except Exception as e:
+                    logger.error(f"Auto trigger scan error after sync: {e}")
 
             return build_ret(ErrorMsg.Success, {
                 "msg": f"成功同步了 {len(domains)} 个域名到资产分组 '{target_name}'",
                 "insert_count": insert_count,
                 "duplicate_count": duplicate_count,
+                "task_triggered_count": task_triggered_count,
+                "new_domains": list(new_additions),
                 "target_name": target_name,
+                "scope_id": final_scope_id,
                 "mode": mode
             })
         except Exception as e:

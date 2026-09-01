@@ -129,7 +129,7 @@ async def run_icp_job(options):
 async def run_tyc_job(options):
     task_id = options.get("task_id")
     gid = options.get("gid")
-    depth = options.get("depth", 1)
+    depth = max(1, int(options.get("depth", 1) or 1))
     invest_ratio = options.get("invest_ratio", 0)
     query_types = options.get("query_type", [])
     tyc_id = options.get("tyc_id")
@@ -207,7 +207,7 @@ async def run_tyc_job(options):
                     if invest_list:
                         passed_count = 0
                         dropped_count = 0
-                        default_pass_names = []
+                        dropped_unknown_names = []
 
                         for item in invest_list:
                             item['task_id'] = task_id
@@ -221,6 +221,9 @@ async def run_tyc_job(options):
                                     item['percent_num'] = percent_num
                                 except ValueError:
                                     pass
+                            elif isinstance(pct, (int, float)):
+                                percent_num = float(pct)
+                                item['percent_num'] = percent_num
                             
                             rc = item.get("amount")
                             if rc and isinstance(rc, str):
@@ -230,26 +233,26 @@ async def run_tyc_job(options):
                                         item['amount_num'] = float(m.group(1))
                                     except ValueError:
                                         pass
+                            elif isinstance(rc, (int, float)):
+                                item['amount_num'] = float(rc)
                                         
                             # 判定是否达标
                             is_passed = True
-                            is_default_pass = False
                             
                             if invest_ratio and float(invest_ratio) > 0:
                                 if percent_num is not None:
                                     if percent_num < float(invest_ratio):
                                         is_passed = False
                                 else:
-                                    is_default_pass = True
+                                    # 严格模式：设置了最低投资比例时，无具体持股比例数据的子公司直接丢弃
+                                    is_passed = False
+                                    cname = item.get("name", item.get("id", "未知公司"))
+                                    dropped_unknown_names.append(cname)
                                     
                             if is_passed:
                                 await db['icp_asset'].insert_one(item)
                                 next_gids.append(item.get("id"))
                                 passed_count += 1
-                                if is_default_pass:
-                                    # 尝试获取公司名称记录日志
-                                    cname = item.get("name", item.get("id", "未知公司"))
-                                    default_pass_names.append(cname)
                             else:
                                 dropped_count += 1
                                 
@@ -257,9 +260,9 @@ async def run_tyc_job(options):
                         total_assets += passed_count
                         await update_stats()
                         
-                        await insert_syslog("info", "投资查询", f"目标 {current_gid} 投资查询完成，共发现 {len(invest_list)} 家对外投资，其中 {passed_count} 家达标(入库并递归)，{dropped_count} 家因比例不足被丢弃。")
-                        if default_pass_names:
-                            await insert_syslog("info", "投资查询", f"目标 {current_gid} 的以下子公司因无具体投资比例数据，默认放行: {', '.join(default_pass_names)}")
+                        await insert_syslog("info", "投资查询", f"目标 {current_gid} 投资查询完成，共发现 {len(invest_list)} 家对外投资，其中 {passed_count} 家达标(入库并递归)，{dropped_count} 家因比例不足或缺失被丢弃。")
+                        if dropped_unknown_names:
+                            await insert_syslog("info", "投资查询", f"目标 {current_gid} 的以下子公司因无具体投资比例数据，在最低投资比例限制下已被丢弃: {', '.join(dropped_unknown_names)}")
                 except Exception as e:
                     logger.error(f"TYC Query exception for invest: {e}")
                     error_msg.append(f"invest error: {str(e)}")

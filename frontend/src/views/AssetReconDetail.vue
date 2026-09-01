@@ -22,7 +22,7 @@
       <div style="margin-bottom: 16px;">
       <a-form :model="searchForm" layout="inline" style="row-gap: 16px;">
         <template v-for="col in dynamicColumns" :key="col.key">
-          <a-form-item v-if="col.key !== 'raw' && col.key !== 'icon' && col.key !== 'examineDate'" :label="col.title + ':'">
+          <a-form-item v-if="col.key !== 'raw' && col.key !== 'icon' && col.key !== 'examineDate' && col.key !== 'updateRecordTime'" :label="col.title + ':'">
             <a-input-group compact v-if="['amount', 'percent'].includes(col.dataIndex)">
               <a-select v-model:value="searchFormOp[col.dataIndex]" style="width: 70px" :options="[{value:'eq',label:'='},{value:'gt',label:'>'},{value:'lt',label:'<'}]" />
               <a-input v-model:value="searchForm[col.dataIndex]" style="width: 130px" :placeholder="'输入' + col.title" @pressEnter="onSearch">
@@ -50,6 +50,7 @@
         :rowKey="(record) => record._id || record.id || Math.random()"
         bordered
         style="margin-bottom: 16px;"
+        @change="handleTableChange"
     >
         <template #bodyCell="{ column, record, text }">
           <template v-if="column.key === 'icon'">
@@ -78,7 +79,7 @@
 
       <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px;">
         <div style="color: var(--arl-text-color); opacity: 0.65;">共 {{ Math.ceil(pagination.total / pagination.pageSize) || 1 }} 页 / {{ pagination.total }} 条数据</div>
-        <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" show-size-changer @change="handleTableChange" @showSizeChange="handleTableChange" />
+        <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" show-size-changer @change="handlePaginationChange" @showSizeChange="handlePaginationChange" />
       </div>
     </div>
 
@@ -99,9 +100,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';import { useRoute, useRouter } from 'vue-router';
+import { ref, reactive, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { SearchOutlined } from '@ant-design/icons-vue';
 import request from '../utils/request';
+import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 
 const route = useRoute();
 const router = useRouter();
@@ -131,11 +134,38 @@ watch(() => pagination.pageSize, (newSize) => {
   globalPageSize.value = newSize;
 });
 
+watch(globalPageSize, (newSize) => {
+  pagination.pageSize = newSize;
+});
+
 const syslogList = ref([]);
 let syslogTimer = null;
 const terminalContainer = ref(null);
 
-import { useGlobalPageSize } from '../utils/useGlobalPageSize';
+const sortState = reactive({
+  field: null,
+  order: null // 'ascend' | 'descend' | null
+});
+
+const getDefaultSortForTab = (tab) => {
+  const isTyc = query.task_type === 'tyc';
+  if (isTyc) {
+    if (tab === 'web' || tab === 'mapp') {
+      return { field: 'examineDate', order: 'descend' };
+    }
+  } else {
+    if (['web', 'app', 'mapp', 'kapp'].includes(tab)) {
+      return { field: 'updateRecordTime', order: 'descend' };
+    }
+  }
+  return { field: null, order: null };
+};
+
+const resetTabSort = (tab) => {
+  const def = getDefaultSortForTab(tab);
+  sortState.field = def.field;
+  sortState.order = def.order;
+};
 
 const webColumns = [
   { title: '主办单位名称', dataIndex: 'companyName', key: 'companyName', width: 220 },
@@ -200,6 +230,7 @@ const baseIcpColumns = [
   { title: '主备案号', dataIndex: 'mainLicence', key: 'mainLicence', width: 180 },
   { title: '域名', dataIndex: 'domain', key: 'domain', width: 200 },
   { title: '网站名称', dataIndex: 'serviceName', key: 'serviceName', width: 200 },
+  { title: '审核日期', dataIndex: 'updateRecordTime', key: 'updateRecordTime', width: 140 },
   { title: '详情', key: 'raw', width: 80 }
 ];
 
@@ -210,20 +241,31 @@ const genericColumns = [
 
 const dynamicColumns = computed(() => {
   const isTyc = query.task_type === 'tyc';
-  if (activeTab.value === 'invest') return investColumns;
-  if (activeTab.value === 'trademark') return trademarkColumns;
-  if (activeTab.value === 'wechat') return wechatColumns;
-  if (activeTab.value === 'weibo') return weiboColumns;
-
-  if (isTyc) {
-    if (activeTab.value === 'web') return webColumns;
-    if (activeTab.value === 'mapp') return mappColumns;
-    if (activeTab.value === 'app') return appColumns;
+  let cols = [];
+  if (activeTab.value === 'invest') cols = investColumns;
+  else if (activeTab.value === 'trademark') cols = trademarkColumns;
+  else if (activeTab.value === 'wechat') cols = wechatColumns;
+  else if (activeTab.value === 'weibo') cols = weiboColumns;
+  else if (isTyc) {
+    if (activeTab.value === 'web') cols = webColumns;
+    else if (activeTab.value === 'mapp') cols = mappColumns;
+    else if (activeTab.value === 'app') cols = appColumns;
+    else cols = genericColumns;
   } else {
-    if (['web', 'app', 'mapp', 'kapp'].includes(activeTab.value)) return baseIcpColumns;
+    if (['web', 'app', 'mapp', 'kapp'].includes(activeTab.value)) cols = baseIcpColumns;
+    else cols = genericColumns;
   }
 
-  return genericColumns;
+  return cols.map((col) => {
+    if (col.key === 'examineDate' || col.key === 'updateRecordTime') {
+      return {
+        ...col,
+        sorter: true,
+        sortOrder: sortState.field === col.key ? sortState.order : null
+      };
+    }
+    return col;
+  });
 });
 
 const searchForm = reactive({});
@@ -246,7 +288,17 @@ const resetSearch = () => {
 const fetchAssets = async (page = 1, size = 10) => {
   loading.value = true;
   try {
-    const queryParams = { page, size, task_id: taskId, query_type: activeTab.value };
+    let orderParam = '-_id';
+    if (sortState.field && sortState.order) {
+      orderParam = (sortState.order === 'ascend' ? '+' : '-') + sortState.field;
+    } else {
+      const def = getDefaultSortForTab(activeTab.value);
+      if (def.field && def.order) {
+        orderParam = (def.order === 'ascend' ? '+' : '-') + def.field;
+      }
+    }
+
+    const queryParams = { page, size, task_id: taskId, query_type: activeTab.value, order: orderParam };
     for (const [key, val] of Object.entries(searchForm)) {
       if (val !== undefined && val !== null && val !== '') {
         if (['amount', 'percent'].includes(key)) {
@@ -281,7 +333,22 @@ const fetchAssets = async (page = 1, size = 10) => {
 };
 
 const onSearch = () => fetchAssets(1, pagination.pageSize);
-const handleTableChange = (page, pageSize) => fetchAssets(page, pageSize);
+const handleTableChange = (paginationData, filters, sorter) => {
+  if (sorter && sorter.field && sorter.order) {
+    sortState.field = sorter.field;
+    sortState.order = sorter.order;
+  } else {
+    const def = getDefaultSortForTab(activeTab.value);
+    sortState.field = def.field;
+    sortState.order = def.order;
+  }
+  pagination.current = 1;
+  fetchAssets(1, pagination.pageSize);
+};
+
+const handlePaginationChange = (page, pageSize) => {
+  fetchAssets(page, pageSize);
+};
 
 const fetchSyslog = async () => {
   try {
@@ -318,6 +385,8 @@ const onTabChange = (key) => {
     searchFormOp['amount'] = 'eq';
     searchFormOp['percent'] = 'eq';
   }
+
+  resetTabSort(key);
 
   if (key === 'log') {
     fetchSyslog();
@@ -376,6 +445,7 @@ const fetchTaskStatistic = async () => {
 
 onMounted(() => {
   if (taskId) {
+    resetTabSort(activeTab.value);
     fetchAssets(pagination.current, pagination.pageSize);
     fetchTaskStatistic();
     taskTimer = setInterval(fetchTaskStatistic, 5000);

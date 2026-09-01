@@ -265,9 +265,6 @@
             <!-- 子 Tab 1: 周期策略管理 -->
             <a-tab-pane key="scheduler" tab="周期策略管理">
         <div style="position: sticky; top: 0px; z-index: 10; background-color: var(--arl-bg-layout); margin: -24px -24px 16px -24px; padding: 24px 24px 16px 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-
-
-    <div style="position: sticky; top: 0px; z-index: 10; background-color: var(--arl-bg-layout); margin: -24px -24px 16px -24px; padding: 24px 24px 16px 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
         <div style="margin-bottom: 20px; display: flex; justify-content: space-between;">
           <a-button type="primary" @click="openSchedulerAdd">添加策略</a-button>
           <a-button type="dashed" @click="fetchSchedulerData">
@@ -308,11 +305,8 @@
           </a-popconfirm>
         </div>
 
-        
-    </div>
-        <!-- 策略表格 -->
-        
         </div>
+        <!-- 策略表格 -->
 <a-table
             :row-selection="{ selectedRowKeys: schedulerSelectedRowKeys, onChange: onSchedulerSelectChange }"
             :loading="schedulerLoading"
@@ -367,7 +361,7 @@
         <!-- 策略分页 -->
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0;">
           <div style="color: var(--arl-text-color); opacity: 0.65;">共 {{ Math.ceil(schedulerPagination.total / schedulerPagination.pageSize) || 1 }} 页 / {{ schedulerPagination.total }} 条数据</div>
-          <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="schedulerPagination.current" v-model:pageSize="schedulerPagination.pageSize" :total="schedulerPagination.total" show-size-changer @change="handleSchedulerTableChange" />
+          <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="schedulerPagination.current" v-model:pageSize="schedulerPagination.pageSize" :total="schedulerPagination.total" show-size-changer @change="handleSchedulerTableChange" @showSizeChange="handleSchedulerTableChange" />
         </div>
       </a-tab-pane>
 
@@ -460,7 +454,7 @@
               <a-button
                   size="small"
                   style="margin-right: 8px;"
-                  :disabled="record.status === 'done' || record.status === 'error'"
+                  :disabled="record.status === 'done' || record.status === 'stop' || record.status === 'error'"
                   @click="handleTaskSingleAction('stop', record._id)"
               >停止</a-button>
 
@@ -474,7 +468,7 @@
         <!-- 任务分页 -->
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0;">
           <div style="color: var(--arl-text-color); opacity: 0.65;">共 {{ Math.ceil(taskPagination.total / taskPagination.pageSize) || 1 }} 页 / {{ taskPagination.total }} 条数据</div>
-          <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="taskPagination.current" v-model:pageSize="taskPagination.pageSize" :total="taskPagination.total" show-size-changer @change="handleTaskTableChange" />
+          <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="taskPagination.current" v-model:pageSize="taskPagination.pageSize" :total="taskPagination.total" show-size-changer @change="handleTaskTableChange" @showSizeChange="handleTaskTableChange" />
         </div>
       </a-tab-pane>
     </a-tabs>
@@ -598,9 +592,11 @@ import { useRouter, useRoute } from 'vue-router';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
 import { SearchOutlined, InboxOutlined, SyncOutlined, LinkOutlined, AlertOutlined, ToolOutlined, TeamOutlined, InfoCircleOutlined, ClockCircleOutlined } from '@ant-design/icons-vue';
+import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 
 const router = useRouter();
 const route = useRoute();
+const globalPageSize = useGlobalPageSize(10);
 const mainTab = ref('ti');
 const activeTabDlp = ref('scheduler');
 const activeTabTi = ref('cve_history');
@@ -637,14 +633,27 @@ watch(activeTabTi, (newTab) => {
   else if (newTab === 'hackers_target') fetchHackersData();
 });
 
-
 // ==========================================
 // ⚙️ 模块 A: 监控策略管理 (github_scheduler)
 // ==========================================
 const schedulerLoading = ref(false);
 const schedulerData = ref([]);
 const schedulerSearchForm = reactive({ name: '', keyword: '', status: undefined });
-const schedulerPagination = reactive({ current: 1, pageSize: 10, total: 0 });
+const schedulerPagination = reactive({ current: 1, pageSize: globalPageSize.value, total: 0 });
+
+watch(globalPageSize, (newSize) => {
+  schedulerPagination.pageSize = newSize;
+  taskPagination.pageSize = newSize;
+  toolsPagination.pageSize = newSize;
+  hackersPagination.pageSize = newSize;
+  cvePagination.pageSize = newSize;
+});
+
+watch(() => schedulerPagination.pageSize, (newSize) => { globalPageSize.value = newSize; });
+watch(() => taskPagination.pageSize, (newSize) => { globalPageSize.value = newSize; });
+watch(() => toolsPagination.pageSize, (newSize) => { globalPageSize.value = newSize; });
+watch(() => hackersPagination.pageSize, (newSize) => { globalPageSize.value = newSize; });
+watch(() => cvePagination.pageSize, (newSize) => { globalPageSize.value = newSize; });
 
 const schedulerSelectedRowKeys = ref([]);
 const schedulerHasSelected = computed(() => schedulerSelectedRowKeys.value.length > 0);
@@ -772,7 +781,7 @@ const submitSchedulerModal = async () => {
 const taskLoading = ref(false);
 const taskData = ref([]);
 const taskSearchForm = reactive({ name: '', keyword: '', status: undefined });
-const taskPagination = reactive({ current: 1, pageSize: 10, total: 0 });
+const taskPagination = reactive({ current: 1, pageSize: globalPageSize.value, total: 0 });
 
 const taskSelectedRowKeys = ref([]);
 const taskHasSelected = computed(() => taskSelectedRowKeys.value.length > 0);
@@ -915,7 +924,7 @@ const filteredToolsData = computed(() => {
   });
 });
 
-const toolsPagination = reactive({ current: 1, pageSize: 10 });
+const toolsPagination = reactive({ current: 1, pageSize: globalPageSize.value });
 const pagedToolsData = computed(() => {
   const start = (toolsPagination.current - 1) * toolsPagination.pageSize;
   return filteredToolsData.value.slice(start, start + toolsPagination.pageSize);
@@ -1005,7 +1014,7 @@ const filteredHackersData = computed(() => {
   });
 });
 
-const hackersPagination = reactive({ current: 1, pageSize: 10 });
+const hackersPagination = reactive({ current: 1, pageSize: globalPageSize.value });
 const pagedHackersData = computed(() => {
   const start = (hackersPagination.current - 1) * hackersPagination.pageSize;
   return filteredHackersData.value.slice(start, start + hackersPagination.pageSize);
@@ -1127,7 +1136,7 @@ const filteredCveData = computed(() => {
   });
 });
 
-const cvePagination = reactive({ current: 1, pageSize: 10 });
+const cvePagination = reactive({ current: 1, pageSize: globalPageSize.value });
 const pagedCveData = computed(() => {
   const start = (cvePagination.current - 1) * cvePagination.pageSize;
   return filteredCveData.value.slice(start, start + cvePagination.pageSize);

@@ -217,14 +217,47 @@ class BatchStopTask(ARLResource):
         args = self.parse_args(batch_stop_fields)
         task_id_list = args.pop("task_id", [])  # 拿到所有需要停止的任务 ID
 
-        # 遍历每一个任务 ID，逐个调用底层的 stop_task 函数
-        for task_id in task_id_list:
-            if not task_id:
-                continue
-            stop_task(task_id)
+        stopped_ids = []
+        skipped_ids = []
+        failed_ids = []
+        done_status = [TaskStatus.DONE, TaskStatus.STOP, TaskStatus.ERROR]
 
-        # 这里不关心中间是否有失败，直接统一返回成功给前端
-        return utils.build_ret(ErrorMsg.Success, {})
+        # 遍历每一个任务 ID，逐个隔离调用底层的 stop_task 函数
+        for task_id in task_id_list:
+            if not task_id or not isinstance(task_id, str) or not ObjectId.is_valid(task_id):
+                failed_ids.append(str(task_id) if task_id is not None else "")
+                continue
+            try:
+                task_data = utils.conn_db('task').find_one({'_id': ObjectId(task_id)})
+                if not task_data:
+                    failed_ids.append(task_id)
+                    continue
+
+                # 智能柔性跳过已结束任务，不进行冗余的 Celery 广播
+                if task_data.get("status") in done_status:
+                    skipped_ids.append(task_id)
+                    continue
+
+                ret = stop_task(task_id)
+                if ret.get("code") == 200:
+                    stopped_ids.append(task_id)
+                elif ret.get("code") == 105:  # TaskIsDone
+                    skipped_ids.append(task_id)
+                else:
+                    failed_ids.append(task_id)
+            except Exception as e:
+                logger.error(f"Batch stop task {task_id} error: {e}")
+                failed_ids.append(task_id)
+
+        return utils.build_ret(ErrorMsg.Success, {
+            "total": len(task_id_list),
+            "stopped_count": len(stopped_ids),
+            "skipped_count": len(skipped_ids),
+            "failed_count": len(failed_ids),
+            "stopped_ids": stopped_ids,
+            "skipped_ids": skipped_ids,
+            "failed_ids": failed_ids
+        })
 
 
 # ==========================================
@@ -245,6 +278,9 @@ class StopTask(ARLResource):
 # ==========================================
 def stop_task(task_id):
     """任务停止"""
+    if not task_id or not isinstance(task_id, str) or not ObjectId.is_valid(task_id):
+        return utils.build_ret(ErrorMsg.NotFoundTask, {"task_id": str(task_id)})
+
     # 1. 定义哪些状态属于“已经结束”（完成、已停止、报错）
     done_status = [TaskStatus.DONE, TaskStatus.STOP, TaskStatus.ERROR]
 
@@ -254,7 +290,7 @@ def stop_task(task_id):
         return utils.build_ret(ErrorMsg.NotFoundTask, {"task_id": task_id})
 
     # 3. 如果任务本来就已经结束了，就不需要再去杀进程了，直接返回
-    if task_data["status"] in done_status:
+    if task_data.get("status") in done_status:
         return utils.build_ret(ErrorMsg.TaskIsDone, {"task_id": task_id})
 
     # 4. 获取后台真正干活的工人的编号 (celery_id)
@@ -265,11 +301,13 @@ def stop_task(task_id):
         utils.conn_db('task').update_one({'_id': ObjectId(task_id)}, update_data)
         return utils.build_ret(ErrorMsg.Success, {"task_id": task_id})
 
-    # 5. 【核心杀手锏】：连接到 Celery 的控制台
-    control = celerytask.celery.control
-
-    # 向指定的工人发送 SIGTERM (强制终止) 信号，要求他立刻放下手头的工作！
-    control.revoke(celery_id, signal='SIGTERM', terminate=True)
+    # 5. 【核心杀手锏】：连接到 Celery 的控制台并向指定工人发送 SIGTERM 信号
+    try:
+        control = celerytask.celery.control
+        # 向指定的工人发送 SIGTERM (强制终止) 信号，要求他立刻放下手头的工作！
+        control.revoke(celery_id, signal='SIGTERM', terminate=True)
+    except Exception as e:
+        logger.error(f"Failed to revoke celery task {celery_id} for task {task_id}: {e}")
 
     # 6. 打扫战场：不管工人死没死透，在数据库里强制把任务状态改成 "已停止 (STOP)"，并记录结束时间
     # $set 是 MongoDB 专属语法，代表只更新这两个指定的字段，不影响其他字段
@@ -628,5 +666,6 @@ class TaskRestart(ARLResource):
             return utils.build_ret(ErrorMsg.Error, {"error": str(e)})
 
         return utils.build_ret(ErrorMsg.Success, {"task_id": task_id_list})
+
 
 

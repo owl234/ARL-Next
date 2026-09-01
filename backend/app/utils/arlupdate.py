@@ -25,7 +25,10 @@ def create_index():
         "site": ["task_id", "status", "title", "hostname", "site", "http_server"],
         "service": "task_id",
         "url": "task_id",
-        "vuln": "task_id",
+        "task": ["status", "start_time"],
+        "icp_task": ["status", "start_time", "end_time"],
+        "vuln": ["task_id", "save_date"],
+        "nuclei_result": ["task_id", "vuln_severity", "save_date"],
         "asset_ip": "scope_id",
         "asset_site": "scope_id",
         "asset_domain": ["scope_id", "domain"],
@@ -43,6 +46,7 @@ def create_index():
         "asset_stat_finger": "scope_id",
         "poc": "plugin_name",
         "asset_wih": ["scope_id", "record_type", "fnv_hash"],
+        "dict_upload_task": "task_id",
     }
     for table in index_map:
         if isinstance(index_map[table], list):
@@ -79,6 +83,22 @@ def create_index():
             import logging
             if "E11000" in str(e) or "duplicate key error" in str(e).lower():
                 logging.getLogger().warning(f"Duplicate key error on {col}, attempting to deduplicate...")
+                
+                # 🛡️【无损兼容】在去重前，为存量数据自动平滑生成新标准 Hash 补齐，避免 null 误聚合
+                if col in ["wih", "asset_wih"]:
+                    try:
+                        from app.services.wih.fnv1a import fnv1a_64
+                        cursor = conn_db(col).find(
+                            {"$or": [{"fnv_hash": {"$exists": False}}, {"fnv_hash": None}, {"fnv_hash": ""}]},
+                            batch_size=500
+                        )
+                        for doc in cursor:
+                            content = doc.get("content", "")
+                            new_hash = fnv1a_64(content) if content else f"fallback_{doc['_id']}"
+                            conn_db(col).update_one({"_id": doc["_id"]}, {"$set": {"fnv_hash": new_hash}})
+                    except Exception as inner_ex:
+                        logging.getLogger().error(f"Failed to migrate missing fnv_hash for {col}: {inner_ex}")
+
                 try:
                     group_id = {k[0]: f"${k[0]}" for k in keys}
                     pipeline = [
@@ -96,7 +116,7 @@ def create_index():
             else:
                 logging.getLogger().warning(f"Failed to create unique index on {col}: {e}")
 
-    # 专门处理特殊的系统日志索引
+    # 专门处理特殊的系统日志与临时任务索引
     def _create_syslog_indexes():
         import time
         import logging
@@ -108,7 +128,9 @@ def create_index():
                 conn_db('syslog').create_index([("create_time", 1)], expireAfterSeconds=2592000, background=True)
                 # 为 task_id 建立索引，防止前端查看任务日志时触发全表扫描（COLLSCAN）拖垮系统
                 conn_db('syslog').create_index([("task_id", 1)], background=True)
-                logging.getLogger().info("Syslog indexes created successfully.")
+                # 字典异步上传任务记录 7 天自动过期清理 (604800 秒)
+                conn_db('dict_upload_task').create_index([("create_time", 1)], expireAfterSeconds=604800, background=True)
+                logging.getLogger().info("Syslog & dict upload indexes created successfully.")
                 return
             except Exception as e:
                 retries += 1
@@ -118,6 +140,93 @@ def create_index():
         logging.getLogger().error("CRITICAL: Failed to create syslog indexes after maximum retries. Please check MongoDB status!")
 
     threading.Thread(target=_create_syslog_indexes, daemon=True).start()
+
+
+def migrate_asset_scope_domain_status():
+    """
+    后台静默补齐存量 asset_scope 分组的 domain_status 探测状态与覆盖度
+    彻底消除前端访问存量资产分组时的延迟
+    """
+    def _worker():
+        import logging
+        logger = logging.getLogger()
+        try:
+            scopes = list(conn_db("asset_scope").find({"domain_status": {"$exists": False}}))
+            if not scopes:
+                return
+            logger.info(f"Start migrating domain_status for {len(scopes)} asset scopes...")
+            from app.helpers.scope import get_scope_domain_stat
+            for sc in scopes:
+                try:
+                    get_scope_domain_stat(sc, auto_persist=True)
+                except Exception as ex:
+                    logger.warning(f"Error migrating scope {sc.get('_id')}: {ex}")
+            logger.info("Successfully finished migrating asset scope domain_status.")
+        except Exception as e:
+            logger.error(f"migrate_asset_scope_domain_status error: {e}")
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def ensure_builtin_dicts():
+    """确保核心内置字典文件存在（防止升级后因持久化数据卷隔离缺失新增的内置字典）"""
+    import os
+    import logging
+    from app.config import Config
+    dict_dir = os.path.join(Config.basedir if hasattr(Config, 'basedir') else os.path.dirname(os.path.dirname(__file__)), 'dicts')
+    top300_path = os.path.join(dict_dir, 'domain_top300.txt')
+    if not os.path.exists(top300_path):
+        try:
+            from app.tasks.domain import _load_recursive_dict
+            words = _load_recursive_dict()
+            with open(top300_path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(words) + '\n')
+            logging.getLogger().info("Successfully auto-seeded missing domain_top300.txt into dicts volume.")
+        except Exception as e:
+            logging.getLogger().warning(f"Failed to auto-seed domain_top300.txt: {e}")
+
+
+def cleanup_zombie_tasks():
+    """
+    🛡️【系统韧性】启动与更新时自动收敛因系统重启或更新中断的僵尸/孤儿任务
+    将非终态任务优雅收敛为 TaskStatus.ERROR，并记录明确的终止原因与时间戳
+    """
+    import logging
+    import time
+    from app.modules import TaskStatus
+    logger = logging.getLogger()
+    try:
+        non_running = [TaskStatus.DONE, TaskStatus.WAITING, TaskStatus.ERROR, TaskStatus.STOP]
+        zombie_tasks = list(conn_db('task').find({"status": {"$nin": non_running}}))
+        if zombie_tasks:
+            logger.warning(f"Detected {len(zombie_tasks)} interrupted tasks during startup, converging status...")
+            curr_date = time.strftime("%Y-%m-%d %H:%M:%S")
+            for task in zombie_tasks:
+                if task.get("task_tag") == "monitor":
+                    conn_db('task').delete_one({"_id": task["_id"]})
+                    options = task.get("options", {})
+                    scheduler_id = options.get("scheduler_id")
+                    if scheduler_id:
+                        try:
+                            from bson import ObjectId
+                            conn_db('scheduler').update_one(
+                                {"_id": ObjectId(scheduler_id)},
+                                {"$set": {"next_run_time": int(time.time())}}
+                            )
+                        except Exception:
+                            pass
+                else:
+                    conn_db('task').update_one(
+                        {"_id": task["_id"]},
+                        {"$set": {
+                            "status": TaskStatus.ERROR,
+                            "end_time": curr_date,
+                            "end_reason": "系统重启/升级中断 (Interrupted by system restart/update)"
+                        }}
+                    )
+            logger.info("Successfully converged interrupted tasks to ERROR.")
+    except Exception as e:
+        logger.error(f"Failed to cleanup zombie tasks: {e}")
 
 
 def arl_update():
@@ -130,39 +239,56 @@ def arl_update():
     finger_db_cache._auto_seed_if_empty()
     import time
     db = conn_db('system_config')
+    now = time.time()
     
     # 尝试初始化锁记录，使用 upsert 和 $setOnInsert 避免 DuplicateKeyError
     db.update_one(
         {"_id": "init_lock"},
-        {"$setOnInsert": {"status": "pending", "locked_at": 0}},
+        {"$setOnInsert": {"status": "idle", "locked_at": 0, "last_completed_at": 0}},
         upsert=True
-    ) 
-    
-    # 检查并释放过期的死锁（超过60分钟未完成）
-    stale_time = time.time() - 3600
+    )
+
+    # 兼容 v1.2.1 及更早版本的锁状态："completed" 迁移为 "idle"，
+    # 否则存量 init_lock 停留在旧版完成态，新版抢占条件永不命中导致迁移逻辑（索引/补齐/收敛）永久跳过
+    db.update_one(
+        {"_id": "init_lock", "status": "completed"},
+        {"$set": {"status": "idle", "last_completed_at": 0}}
+    )
+
+    # 检查并释放过期的死锁（超过60秒未完成）
+    stale_time = now - 60
     db.update_one(
         {"_id": "init_lock", "status": "processing", "locked_at": {"$lt": stale_time}},
-        {"$set": {"status": "pending"}}
+        {"$set": {"status": "idle"}}
     )
     
-    # 尝试抢占初始化锁
+    # 尝试抢占初始化锁：允许在 idle 或初次 pending 时抢占，且距离上次完成时间至少大于 15 秒（避免同一次启动中多 Worker 重复执行）
     result = db.update_one(
-        {"_id": "init_lock", "status": "pending"},
-        {"$set": {"status": "processing", "locked_at": time.time()}}
+        {
+            "_id": "init_lock",
+            "$or": [
+                {"status": {"$in": ["pending", "idle"]}, "last_completed_at": {"$lt": now - 15}},
+                {"status": {"$in": ["pending", "idle"]}, "last_completed_at": {"$exists": False}}
+            ]
+        },
+        {"$set": {"status": "processing", "locked_at": now}}
     )
     
-    # 如果没拿到锁，说明已有其他进程正在处理或已经处理完毕
+    # 如果没拿到锁，说明已有其他进程正在处理或刚刚处理完毕
     if result.modified_count == 0:
         return
 
     try:
+        ensure_builtin_dicts()
         update_task_tag()
         create_index()
-        db.update_one({"_id": "init_lock"}, {"$set": {"status": "completed"}})
+        migrate_asset_scope_domain_status()
+        cleanup_zombie_tasks()
+        db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
     except Exception as e:
         import logging
         logging.getLogger().error(f"Failed to complete arl_update: {e}")
-        db.update_one({"_id": "init_lock"}, {"$set": {"status": "pending"}}, upsert=True)
+        db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "locked_at": 0}}, upsert=True)
 
 
 # 创建锁，防止多线程同时更新

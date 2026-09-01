@@ -95,9 +95,8 @@ class Config(object, metaclass=ConfigMeta):
 
     CDN_JSON_PATH = os.path.join(basedir, 'dicts/cdn_info.json')
 
-    # WebInfoHunter 规则文件
+    # WebInfoHunter 规则文件路径
     WIH_RULE_PATH = os.path.join(basedir, "dicts/wih_rules.yml")
-    WIH_BIN_PATH = os.path.join(basedir, "tools/wih/wih")
 
     black_domain_path = os.path.join(basedir, 'dicts/blackdomain.txt')
     black_hexie_path = os.path.join(basedir, 'dicts/blackhexie.txt')
@@ -135,6 +134,7 @@ class Config(object, metaclass=ConfigMeta):
     FILE_LEAK_TOP_200 = os.path.join(basedir, 'dicts/file_top_200.txt')
 
     DOMAIN_MAX_LEN = 25  # 不包括下发的目标域名长度，
+    DOMAIN_MAX_MAP_COUNT = 200  # 相同解析记录（CNAME/IP）最大收敛阈值，避免 CDN / 统一网关业务被误杀
 
     _DINGDING_SECRET = ""
     _DINGDING_ACCESS_TOKEN = ""

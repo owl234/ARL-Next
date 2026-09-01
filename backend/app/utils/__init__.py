@@ -10,7 +10,11 @@ import hashlib
 import threading
 import contextvars
 import concurrent.futures
-from celery.utils.log import get_task_logger
+try:
+    from celery.utils.log import get_task_logger
+except ImportError:
+    import logging
+    get_task_logger = logging.getLogger
 
 arl_task_id_var = contextvars.ContextVar('arl_task_id', default='global')
 
@@ -19,7 +23,10 @@ class ContextAwareThreadPoolExecutor(concurrent.futures.ThreadPoolExecutor):
         context = contextvars.copy_context()
         return super().submit(context.run, fn, *args, **kwargs)
 
-import colorlog
+try:
+    import colorlog
+except ImportError:
+    colorlog = None
 import logging
 import dns.resolver
 from tld import get_tld
@@ -31,30 +38,55 @@ except ImportError:
 
 from .conn import http_req, conn_db
 from .http import get_title, get_headers
-from .domain import check_domain_black, is_valid_domain, is_in_scope, is_in_scopes, is_valid_fuzz_domain, is_forbidden_domain
+from .domain import (
+    check_domain_black, is_valid_domain, is_in_scope, is_in_scopes, 
+    is_valid_fuzz_domain, is_forbidden_domain,
+    extract_dynamic_ip_from_domain, is_private_or_reserved_ip, is_dynamic_ip_edge_domain
+)
 from .ip import is_vaild_ip_target, not_in_black_ips, get_ip_asn, get_ip_city, get_ip_type
 from .arl import arl_domain, get_asset_domain_by_id
 from .time import curr_date, time2date, curr_date_obj
 from .url import rm_similar_url, get_hostname, normal_url, same_netloc, verify_cert, url_ext
-from .cert import get_cert
+from .cert import get_cert, extract_domains_from_cert
 from .arlupdate import arl_update
-from .cdn import get_cdn_name_by_cname, get_cdn_name_by_ip
-from .device import device_info
-from .cron import check_cron, check_cron_interval
+from .cdn import get_cdn_name_by_cname, get_cdn_name_by_ip, get_cdn_name_by_headers, get_cdn_name_by_ssl, get_cdn_name_comprehensive
+try:
+    from .device import device_info
+except ImportError:
+    device_info = None
+
+try:
+    from .cron import check_cron, check_cron_interval
+except ImportError:
+    check_cron, check_cron_interval = None, None
 from .query_loader import load_query_plugins
 import re
 
 def get_safe_dict_path(filename):
     from app.config import Config
-    import re
-    if not isinstance(filename, str) or not re.match(r'^[a-zA-Z0-9_-]+\.txt$', filename):
-        raise ValueError(f"不合法的字典文件名: {filename}")
+    if not isinstance(filename, str) or not filename.strip():
+        raise ValueError("字典文件名不能为空")
     
-    path = os.path.join(Config.basedir, 'dicts', filename)
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"字典文件不存在: {path}")
+    clean_filename = filename.strip()
+    # 杜绝任何形式的路径穿越字符
+    if '..' in clean_filename or '/' in clean_filename or '\\' in clean_filename:
+        raise ValueError(f"不合法的字典文件名（禁止包含路径分隔符或穿越符号）: {filename}")
     
-    return path
+    if not clean_filename.endswith('.txt'):
+        clean_filename += '.txt'
+    
+    basedir = getattr(Config, 'basedir', None) or os.path.dirname(os.path.dirname(__file__))
+    base_dir = os.path.abspath(os.path.join(basedir, 'dicts'))
+    target_path = os.path.abspath(os.path.join(base_dir, clean_filename))
+    
+    # 严格确保目标路径位于 dicts 目录下
+    if os.path.commonpath([base_dir, target_path]) != base_dir:
+        raise ValueError(f"越界访问字典目录: {filename}")
+        
+    if not os.path.exists(target_path):
+        raise FileNotFoundError(f"字典文件不存在: {target_path}")
+        
+    return target_path
 
 def load_file_generator(path):
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
@@ -100,14 +132,124 @@ def random_choices(k=6):
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=k))
 
 
+import queue
+import atexit
+
+
 def gen_md5(s):
     return hashlib.md5(s.encode()).hexdigest()
 
 
+_SYSLOG_LOCK = threading.Lock()
+
 class MongoSyslogHandler(logging.Handler):
+    """
+    进程感知异步有界缓冲池 Mongo Syslog Handler
+    消除同步 insert_one 对主业务/扫描任务的 I/O 阻塞与 WiredTiger 脏页风暴，
+    同时自动感知 POSIX fork，确保每个 Celery Worker 子进程都拥有活跃独立的日志消费守护线程。
+    """
+    _pid = None
+    _queue = None
+    _stop_event = None
+    _worker_thread = None
+
+    def __init__(self):
+        super().__init__()
+        self._ensure_worker()
+
+    @classmethod
+    def _ensure_worker(cls):
+        current_pid = os.getpid()
+        # 1. 跨进程检测或线程健康状态检查
+        if (
+            cls._pid != current_pid
+            or cls._worker_thread is None
+            or not cls._worker_thread.is_alive()
+            or cls._queue is None
+        ):
+            with _SYSLOG_LOCK:
+                # 跨进程 fork 产生的新进程，重置专属队列与守护线程
+                if cls._pid != current_pid:
+                    cls._pid = current_pid
+                    cls._queue = queue.Queue(maxsize=2000)
+                    cls._stop_event = threading.Event()
+                    cls._worker_thread = threading.Thread(
+                        target=cls._batch_flush_worker,
+                        args=(cls._pid, cls._queue, cls._stop_event),
+                        daemon=True,
+                        name=f"MongoSyslogFlushThread-{current_pid}"
+                    )
+                    cls._worker_thread.start()
+                    try:
+                        atexit.register(cls._flush_on_exit)
+                    except Exception:
+                        pass
+                # 同进程内守护线程异常退出自愈
+                elif (
+                    cls._worker_thread is None
+                    or not cls._worker_thread.is_alive()
+                    or cls._queue is None
+                ):
+                    cls._queue = queue.Queue(maxsize=2000) if cls._queue is None else cls._queue
+                    cls._stop_event = threading.Event()
+                    cls._worker_thread = threading.Thread(
+                        target=cls._batch_flush_worker,
+                        args=(cls._pid, cls._queue, cls._stop_event),
+                        daemon=True,
+                        name=f"MongoSyslogFlushThread-{current_pid}"
+                    )
+                    cls._worker_thread.start()
+
+    @classmethod
+    def _batch_flush_worker(cls, target_pid, target_queue, stop_event):
+        while not stop_event.is_set():
+            batch = []
+            try:
+                item = target_queue.get(timeout=1.0)
+                batch.append(item)
+                while len(batch) < 50:
+                    try:
+                        batch.append(target_queue.get_nowait())
+                    except queue.Empty:
+                        break
+            except queue.Empty:
+                continue
+
+            if batch:
+                try:
+                    conn_db('syslog').insert_many(batch, ordered=False)
+                except Exception:
+                    # 瞬时抖动时短暂休眠 0.3s 重试一次，提升网络异常时的容错率
+                    try:
+                        time.sleep(0.3)
+                        conn_db('syslog').insert_many(batch, ordered=False)
+                    except Exception:
+                        pass
+                finally:
+                    for _ in range(len(batch)):
+                        target_queue.task_done()
+
+    @classmethod
+    def _flush_on_exit(cls):
+        if cls._stop_event:
+            cls._stop_event.set()
+        if cls._queue is not None:
+            batch = []
+            while not cls._queue.empty():
+                try:
+                    batch.append(cls._queue.get_nowait())
+                except queue.Empty:
+                    break
+            if batch:
+                try:
+                    conn_db('syslog').insert_many(batch, ordered=False)
+                except Exception:
+                    pass
+
     def emit(self, record):
         try:
-            task_id = arl_task_id_var.get()
+            self._ensure_worker()
+            task_id = str(arl_task_id_var.get() or "global")
 
             level = record.levelname.lower()
             if level == 'warn':
@@ -122,17 +264,27 @@ class MongoSyslogHandler(logging.Handler):
                 "message": str(record.getMessage()),
                 "create_time": datetime.now().replace(microsecond=0)
             }
-            conn_db('syslog').insert_one(log_doc)
+            # 非阻塞入队，队列满时丢弃以保护业务主线程零 I/O 阻塞
+            if self._queue is not None:
+                try:
+                    self._queue.put_nowait(log_doc)
+                except queue.Full:
+                    pass
         except Exception:
             pass # 捕获异常防止拖垮主业务进程
 
 def init_logger():
-    handler = colorlog.StreamHandler()
-    handler.setFormatter(colorlog.ColoredFormatter(
-        fmt = '%(log_color)s[%(asctime)s] [%(levelname)s] '
-              '[%(threadName)s] [%(filename)s:%(lineno)d] %(message)s', datefmt = "%Y-%m-%d %H:%M:%S"))
-
-    logger = colorlog.getLogger('arlv2')
+    if colorlog:
+        handler = colorlog.StreamHandler()
+        handler.setFormatter(colorlog.ColoredFormatter(
+            fmt = '%(log_color)s[%(asctime)s] [%(levelname)s] '
+                  '[%(threadName)s] [%(filename)s:%(lineno)d] %(message)s', datefmt = "%Y-%m-%d %H:%M:%S"))
+        logger = colorlog.getLogger('arlv2')
+    else:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            fmt = '[%(asctime)s] [%(levelname)s] [%(threadName)s] [%(filename)s:%(lineno)d] %(message)s', datefmt = "%Y-%m-%d %H:%M:%S"))
+        logger = logging.getLogger('arlv2')
 
     logger.setLevel(logging.INFO)
     logger.addHandler(handler)
@@ -278,6 +430,11 @@ def kill_child_process(pid):
 def exit_gracefully(signum, frame):
     logger = get_logger()
     logger.info('Receive signal {} frame {}'.format(signum, frame))
+    # 强制退出前先刷新未写入的日志队列
+    try:
+        MongoSyslogHandler._flush_on_exit()
+    except Exception:
+        pass
     pid = os.getpid()
     kill_child_process(pid)
     try:

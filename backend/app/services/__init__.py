@@ -18,10 +18,11 @@ from .syncAsset import sync_asset
 from .npoc import run_risk_cruising, run_sniffer
 from .autoTag import auto_tag
 from .githubSearch import github_search
-from .infoHunter import run_wih
+from .wih import run_wih_python as run_wih, run_wih_python
 from .baseUpdateTask import BaseUpdateTask
 from .domainSiteUpdate import domain_site_update
 from .dns_query import run_query_plugin
 from .fingerprint_cache import finger_db_cache, finger_db_identify, have_human_rule_from_db
 from .fingerprint import FingerPrint
 from .expr import evaluate_expression, check_expression, check_expression_with_error
+

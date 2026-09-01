@@ -393,6 +393,95 @@ class TestPush(ARLResource):
         except Exception as e:
             return {"code": 500, "message": f"测试推送过程中发生异常: {str(e)}"}
 
+import os
+import re
+import time
+import requests
+from flask import request as flask_req
+
+_UPDATE_CACHE = {
+    "timestamp": 0,
+    "data": None
+}
+
+def get_local_version_str() -> str:
+    """读取本地版本号"""
+    candidates = [
+        '/code/version.txt',
+        'version.txt',
+        os.path.join(os.path.dirname(__file__), '../../../version.txt')
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    v = f.read().strip()
+                    if v:
+                        return v
+            except Exception:
+                pass
+    return '未知版本'
+
+def get_local_changelog_section(tag: str) -> str:
+    """从本地 CHANGELOG.md 中提取指定版本的更新说明"""
+    candidates = [
+        '/code/CHANGELOG.md',
+        'CHANGELOG.md',
+        os.path.join(os.path.dirname(__file__), '../../../CHANGELOG.md')
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                pattern = rf'##\s*\[?{re.escape(tag)}\]?.*?\n(.*?)(?=\n##\s*\[?v|\Z)'
+                match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+                if match:
+                    notes = match.group(1).strip()
+                    return re.sub(r'\n---+\s*$', '', notes).strip()
+            except Exception:
+                pass
+    return ''
+
+def is_version_greater(v1: str, v2: str) -> bool:
+    """比较版本号 v1 是否大于 v2 (支持 v1.2.0-fix1 等格式)"""
+    if not v1 or not v2 or v1 == '未知版本' or v2 == '未知版本':
+        return False
+    
+    clean1 = v1.lstrip('v').strip()
+    clean2 = v2.lstrip('v').strip()
+    
+    base1, *suffix1 = clean1.split('-', 1)
+    base2, *suffix2 = clean2.split('-', 1)
+    
+    parts1 = [int(x) for x in re.findall(r'\d+', base1)]
+    parts2 = [int(x) for x in re.findall(r'\d+', base2)]
+    
+    for i in range(max(len(parts1), len(parts2))):
+        n1 = parts1[i] if i < len(parts1) else 0
+        n2 = parts2[i] if i < len(parts2) else 0
+        if n1 > n2:
+            return True
+        if n1 < n2:
+            return False
+            
+    s1 = suffix1[0] if suffix1 else ''
+    s2 = suffix2[0] if suffix2 else ''
+    
+    if s1 and not s2:
+        return True
+    if not s1 and s2:
+        return False
+    if s1 and s2:
+        nums1 = [int(x) for x in re.findall(r'\d+', s1)]
+        nums2 = [int(x) for x in re.findall(r'\d+', s2)]
+        num1 = nums1[0] if nums1 else 0
+        num2 = nums2[0] if nums2 else 0
+        if num1 != num2:
+            return num1 > num2
+        return s1 > s2
+    return False
+
 @ns.route('/local_version')
 class LocalVersion(ARLResource):
     @auth
@@ -400,17 +489,97 @@ class LocalVersion(ARLResource):
         """
         获取当前本地版本号（通过读取版本文件）
         """
-        import os
+        version = get_local_version_str()
+        return {"code": 200, "message": "success", "data": {"version": version}}
+
+@ns.route('/check_update')
+class CheckUpdate(ARLResource):
+    @auth
+    def get(self):
+        """
+        检查系统版本更新与获取更新日志（带内存缓存与高可用兜底）
+        """
+        global _UPDATE_CACHE
+        local_v = get_local_version_str()
+        force_refresh = flask_req.args.get('refresh', '').lower() in ('1', 'true')
+        now = time.time()
+        
+        # 1. 检查缓存 (1小时有效)
+        if not force_refresh and _UPDATE_CACHE["data"] and (now - _UPDATE_CACHE["timestamp"] < 3600):
+            cached_data = _UPDATE_CACHE["data"].copy()
+            cached_data["local_version"] = local_v
+            cached_data["has_new_version"] = is_version_greater(cached_data.get("remote_version", ""), local_v)
+            cached_data["is_cached"] = True
+            return {"code": 200, "message": "success", "data": cached_data}
+            
+        remote_v = None
+        release_notes = ""
+        html_url = "https://github.com/owl234/ARL-Next"
+        published_at = ""
+        is_offline = False
+        
+        headers = {
+            "User-Agent": "ARL-Next-Server",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        
+        # 2. 尝试从 GitHub Releases 获取最新正式发版
         try:
-            version_file = '/code/version.txt'
-            if os.path.exists(version_file):
-                with open(version_file, 'r') as f:
-                    version = f.read().strip()
-                    if version:
-                        return {"code": 200, "message": "success", "data": {"version": version}}
+            resp = requests.get("https://api.github.com/repos/owl234/ARL-Next/releases/latest", headers=headers, timeout=4)
+            if resp.status_code == 200:
+                rel_data = resp.json()
+                remote_v = rel_data.get("tag_name")
+                release_notes = rel_data.get("body", "")
+                html_url = rel_data.get("html_url", html_url)
+                published_at = rel_data.get("published_at", "")
         except Exception:
             pass
-        return {"code": 200, "message": "success", "data": {"version": "未知版本"}}
+            
+        # 3. 如果 Releases 为空，回退尝试从 Tags 列表提取
+        if not remote_v:
+            try:
+                tag_resp = requests.get("https://api.github.com/repos/owl234/ARL-Next/tags", headers=headers, timeout=4)
+                if tag_resp.status_code == 200:
+                    tags = tag_resp.json()
+                    if tags and isinstance(tags, list):
+                        valid_tags = [t.get("name") for t in tags if t.get("name")]
+                        if valid_tags:
+                            # 降序排列找到最高版本
+                            valid_tags.sort(key=lambda t: [int(x) for x in re.findall(r'\d+', t.split('-')[0])], reverse=True)
+                            remote_v = valid_tags[0]
+            except Exception:
+                pass
+                
+        # 4. 如果未能获取到 release_notes，尝试从本地 CHANGELOG.md 中匹配
+        target_tag_for_notes = remote_v or local_v
+        if not release_notes and target_tag_for_notes:
+            release_notes = get_local_changelog_section(target_tag_for_notes)
+            
+        # 5. 如果 GitHub 完全不可达，进行优雅本地兜底
+        if not remote_v:
+            remote_v = local_v
+            is_offline = True
+            if not release_notes:
+                release_notes = get_local_changelog_section(local_v)
+                
+        has_new = is_version_greater(remote_v, local_v)
+        
+        result_data = {
+            "local_version": local_v,
+            "remote_version": remote_v,
+            "has_new_version": has_new,
+            "release_notes": release_notes,
+            "html_url": html_url,
+            "published_at": published_at,
+            "is_cached": False,
+            "is_offline": is_offline
+        }
+        
+        # 写入缓存
+        _UPDATE_CACHE["timestamp"] = now
+        _UPDATE_CACHE["data"] = result_data
+        
+        return {"code": 200, "message": "success", "data": result_data}
 
 @ns.route('/request_update_token')
 class RequestUpdateToken(ARLResource):
@@ -428,4 +597,20 @@ class RequestUpdateToken(ARLResource):
             return {"code": 200, "message": "Token 生成成功", "data": {"token": token}}
         except Exception as e:
             return {"code": 500, "message": f"生成更新 Token 失败: {str(e)}"}
+
+
+@ns.route('/running_task_count')
+class RunningTaskCount(ARLResource):
+    @auth
+    def get(self):
+        """
+        获取当前系统中正在执行的扫描任务数量（用于更新前置预检与任务告警）
+        """
+        from app.modules import TaskStatus
+        from app.utils import conn_db
+        non_running = [TaskStatus.DONE, TaskStatus.WAITING, TaskStatus.ERROR, TaskStatus.STOP]
+        count = conn_db('task').count_documents({"status": {"$nin": non_running}})
+        return {"code": 200, "message": "success", "data": {"running_count": count}}
+
+
 

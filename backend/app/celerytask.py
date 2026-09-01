@@ -22,10 +22,17 @@ celery.conf.update(
 )
 platforms.C_FORCE_ROOT = True
 
-from celery.signals import task_prerun, task_postrun
-from app.utils import arl_task_id_var
+from celery.signals import task_prerun, task_postrun, worker_process_init
+from app.utils import arl_task_id_var, MongoSyslogHandler
 import threading
 _token_local = threading.local()
+
+@worker_process_init.connect
+def setup_worker_process(**kw):
+    try:
+        MongoSyslogHandler._ensure_worker()
+    except Exception:
+        pass
 
 @task_prerun.connect
 def setup_task_context(task_id, task, args, kwargs, **kw):
@@ -38,14 +45,16 @@ def setup_task_context(task_id, task, args, kwargs, **kw):
             
         business_task_id = "global"
         if isinstance(options, dict):
-            if "data" in options:
-                business_task_id = options["data"].get("task_id") or options["data"].get("scheduler_id", "global")
+            if "data" in options and isinstance(options["data"], dict):
+                business_task_id = options["data"].get("task_id") or options["data"].get("scheduler_id") or options["data"].get("_id") or "global"
             elif "task_id" in options:
-                business_task_id = options.get("task_id", "global")
+                business_task_id = options.get("task_id") or "global"
             elif "scheduler_id" in options:
-                business_task_id = options.get("scheduler_id", "global")
+                business_task_id = options.get("scheduler_id") or "global"
+            elif "_id" in options:
+                business_task_id = options.get("_id") or "global"
                 
-        token = arl_task_id_var.set(business_task_id)
+        token = arl_task_id_var.set(str(business_task_id))
         _token_local.token = token
     except Exception:
         pass

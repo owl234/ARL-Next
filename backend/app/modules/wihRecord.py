@@ -1,5 +1,15 @@
 
 
+HIGH_RISK_TYPES = {
+    "secret_key", "access_key", "access_token", "wechat_corpid", "wechat_appid",
+    "jwt", "ak_sk", "password", "private_key", "api_key", "aliyun_ak", "tencent_ak",
+    "aws_ak", "ssh_key", "token", "app_secret", "corp_secret"
+}
+MEDIUM_RISK_TYPES = {
+    "api_path", "api_route", "internal_ip", "id_card", "phone", "auth_url", "internal_domain"
+}
+
+
 class WihRecord:
     """
     [第一性原理：领域数据模型 - Web Info Hunter (信息泄露)]
@@ -14,8 +24,17 @@ class WihRecord:
         # [强制类型约束] 实例化时即转为字符串，保证全局哈希一致性，彻底阻断大整型溢出及下游兼容性风险
         self.fnv_hash = str(fnv_hash) if fnv_hash else ""
 
+    @property
+    def risk_level(self):
+        rtype = str(self.recordType).lower()
+        if rtype in HIGH_RISK_TYPES or any(k in rtype for k in ["secret", "token", "appid", "corpid", "key", "jwt", "pass"]):
+            return "CRITICAL"
+        elif rtype in MEDIUM_RISK_TYPES or any(k in rtype for k in ["api", "ip", "auth"]):
+            return "MEDIUM"
+        return "LOW"
+
     def __str__(self):
-        return "{} {} {} {}".format(self.recordType, self.content, self.source, self.site)
+        return "[{}] {} {} {} {}".format(self.risk_level, self.recordType, self.content, self.source, self.site)
 
     def __repr__(self):
         return "<WihRecord>" + self.__str__()
@@ -42,4 +61,5 @@ class WihRecord:
             "site": self.site,
             "source": self.source,
             "fnv_hash": self.fnv_hash,
+            "risk_level": self.risk_level
         }

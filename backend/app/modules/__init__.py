@@ -18,58 +18,132 @@ class ScanPortType:
     CUSTOM = "custom"
 
 
+def sanitize_ports(port_lines):
+    """
+    [端口清洗器 Port Sanitizer]
+    过滤注释、非法字符，校验 1-65535 端口与端口范围，生成 Nmap 100% 兼容的端口参数。
+    """
+    import re
+    valid_tokens = []
+    seen = set()
+
+    for line in port_lines:
+        if not line:
+            continue
+        line_str = str(line).strip()
+        if not line_str or line_str.startswith("#") or line_str.startswith("//"):
+            continue
+        
+        # 允许一行中包含逗号或空格分隔的多个端口
+        tokens = re.split(r'[,，\s]+', line_str)
+        for tok in tokens:
+            tok = tok.strip()
+            if not tok or tok.startswith("#"):
+                continue
+            
+            # 支持单个端口 (如 80, 443)
+            if tok.isdigit():
+                port_num = int(tok)
+                if 1 <= port_num <= 65535 and port_num not in seen:
+                    seen.add(port_num)
+                    valid_tokens.append(str(port_num))
+            # 支持端口范围 (如 8000-8080)
+            elif re.match(r'^\d+-\d+$', tok):
+                parts = tok.split('-')
+                start, end = int(parts[0]), int(parts[1])
+                if 1 <= start <= end <= 65535:
+                    range_key = f"{start}-{end}"
+                    if range_key not in seen:
+                        seen.add(range_key)
+                        valid_tokens.append(range_key)
+            # 支持协议后缀 (如 80/tcp -> 80)
+            elif re.match(r'^\d+/tcp$', tok, re.I):
+                port_num = int(tok.split('/')[0])
+                if 1 <= port_num <= 65535 and port_num not in seen:
+                    seen.add(port_num)
+                    valid_tokens.append(str(port_num))
+
+    return ",".join(valid_tokens)
+
+
 def get_scan_ports(port_type):
     """
     [动态读取端口配置]
-    根据 port_type 读取 app/dicts/ 下对应的 port_xxx.txt 文件，并将其转为逗号分隔的字符串。
-    如果没有找到对应字典，回退到兜底配置。
+    根据 port_type 读取 app/dicts/ 下对应的 port_xxx.txt 文件，并将其转为清洗后的逗号分隔字符串。
+    支持 ScanPortType 枚举、简写('top1000')、标准文件名('port_top1000.txt')或自定义上传字典。
+    如果没有找到对应字典或字典内容为空，平滑回退到兜底配置。
     """
-    from app.utils import get_safe_dict_path
+    from app.utils import get_safe_dict_path, get_logger
+    logger = get_logger()
     
-    if isinstance(port_type, str) and port_type.endswith('.txt'):
-        try:
-            path = get_safe_dict_path(port_type)
-        except Exception:
-            path = None
-        filename = None
-    else:
-        basedir = os.path.dirname(os.path.dirname(__file__))
-        dicts_dir = os.path.join(basedir, 'dicts')
-        filename_map = {
-            ScanPortType.TOP100: 'port_top100.txt',
-            ScanPortType.TOP1000: 'port_top1000.txt',
-            ScanPortType.ALL: 'port_all.txt',
-            ScanPortType.CUSTOM: 'port_custom.txt'
-        }
-        filename = filename_map.get(port_type)
-        if filename:
-            path = os.path.join(dicts_dir, filename)
+    basedir = os.path.dirname(os.path.dirname(__file__))
+    dicts_dir = os.path.join(basedir, 'dicts')
+    
+    alias_map = {
+        "top100": "port_top100.txt",
+        "port_top100": "port_top100.txt",
+        "port_top100.txt": "port_top100.txt",
+        "top1000": "port_top1000.txt",
+        "port_top1000": "port_top1000.txt",
+        "port_top1000.txt": "port_top1000.txt",
+        "all": "port_all.txt",
+        "port_all": "port_all.txt",
+        "port_all.txt": "port_all.txt",
+        "custom": "port_custom.txt",
+        "port_custom": "port_custom.txt",
+        "port_custom.txt": "port_custom.txt",
+        "test": "port_top100.txt",
+    }
+    
+    path = None
+    if isinstance(port_type, str):
+        cleaned_type = port_type.strip().lower()
+        if cleaned_type in alias_map:
+            target_filename = alias_map[cleaned_type]
+            direct_path = os.path.join(dicts_dir, target_filename)
+            if os.path.exists(direct_path):
+                path = direct_path
         else:
-            path = None
+            try:
+                path = get_safe_dict_path(port_type)
+            except Exception as e:
+                logger.warning(f"Failed to locate custom port dict '{port_type}': {e}")
+                path = None
+
+    if not path or not os.path.exists(path):
+        if isinstance(port_type, str) and port_type in alias_map:
+            path = os.path.join(dicts_dir, alias_map[port_type])
 
     default_ports = {
         ScanPortType.TOP100: "80,443,8080",
+        "port_top100.txt": "80,443,8080",
         ScanPortType.TOP1000: "80,443,8080,8443",
+        "port_top1000.txt": "80,443,8080,8443",
         ScanPortType.ALL: "1-65535",
-        ScanPortType.CUSTOM: "80,443"
+        "port_all.txt": "1-65535",
+        ScanPortType.CUSTOM: "80,443",
+        "port_custom.txt": "80,443"
     }
 
     if not path or not os.path.exists(path):
-        return default_ports.get(port_type, "80,443")
+        logger.warning(f"Port dictionary file not found for '{port_type}', falling back to default Top 100 ports.")
+        return default_ports.get(port_type, "80,443,8080")
         
     try:
-        ports = []
+        raw_lines = []
         with open(path, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
-                p = line.strip()
-                if p:
-                    ports.append(p)
-        if ports:
-            return ",".join(ports)
-    except Exception:
-        pass
+                raw_lines.append(line)
+                
+        sanitized = sanitize_ports(raw_lines)
+        if sanitized:
+            return sanitized
+        else:
+            logger.warning(f"Port dictionary '{path}' has no valid ports after sanitization, falling back.")
+    except Exception as e:
+        logger.error(f"Error reading port dict '{path}': {e}")
 
-    return default_ports.get(port_type, "80,443")
+    return default_ports.get(port_type, "80,443,8080")
 
 
 class DomainDictType:
@@ -94,6 +168,7 @@ class CollectSource:
 
 class TaskStatus:
     WAITING = "waiting"
+    RUNNING = "running"
     DONE = "done"
     ERROR = "error"
     STOP = "stop"

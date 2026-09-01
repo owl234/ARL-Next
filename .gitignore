@@ -1,7 +1,3 @@
-# Local HTTPS Certificates
-certs/
-mkcert.exe
-
 # =========================
 # ARL 生产环境敏感配置文件隔离
 # =========================
@@ -69,3 +65,7 @@ question.md
 # Ruff cache
 .ruff_cache/
 ARL_auth.md
+
+.claude/
+
+CLAUDE.md

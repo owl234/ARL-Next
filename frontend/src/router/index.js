@@ -1,17 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Login from '../views/Login.vue'
-import Layout from '../views/Layout.vue'
-
-
-
-
-
 
 const routes = [
     {
         path: '/login',
         name: 'Login',
-        component: Login,
+        component: () => import('../views/Login.vue'),
         beforeEnter: (to, from, next) => {
             if (localStorage.getItem('token')) next('/')
             else next()
@@ -20,25 +13,14 @@ const routes = [
     {
         path: '/',
         name: 'Layout',
-        component: Layout,
+        component: () => import('../views/Layout.vue'),
         redirect: '/dashboard',
-        beforeEnter: async (to, from, next) => {
+        beforeEnter: (to, from, next) => {
             const token = localStorage.getItem('token')
             if (!token) {
                 return next('/login')
             }
-            // 真正发起一次轻量级请求校验 Token，而不是无脑信任 localStorage
-            try {
-                // 动态导入 request 防止循环依赖，或者直接在顶部 import
-                const { default: request } = await import('../utils/request.js');
-                await request.get('/api/system_config/local_version');
-                next();
-            } catch (error) {
-                // 请求失败（如 401 报错），清除无效 token 并拦在门外
-                localStorage.removeItem('token');
-                localStorage.removeItem('userInfo');
-                next('/login');
-            }
+            next()
         },
         children: [
             {
