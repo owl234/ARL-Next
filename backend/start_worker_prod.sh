@@ -23,20 +23,20 @@ echo "🚀 正在后台拉起 Celery 任务处理器..."
 HEAVY=$(python3 -c "
 try:
     from app.utils.performance_config import get_performance_config
-    print(get_performance_config().get('celery_heavy_concurrency', 2))
+    print(get_performance_config().get('celery_heavy_concurrency', 1))
 except Exception:
-    print(2)
-" 2>/dev/null || echo 2)
-if ! [[ "$HEAVY" =~ ^[0-9]+$ ]]; then HEAVY=2; fi
+    print(1)
+" 2>/dev/null || echo 1)
+if ! [[ "$HEAVY" =~ ^[0-9]+$ ]]; then HEAVY=1; fi
 
 LIGHT=$(python3 -c "
 try:
     from app.utils.performance_config import get_performance_config
-    print(get_performance_config().get('celery_light_concurrency', 2))
+    print(get_performance_config().get('celery_light_concurrency', 1))
 except Exception:
-    print(2)
-" 2>/dev/null || echo 2)
-if ! [[ "$LIGHT" =~ ^[0-9]+$ ]]; then LIGHT=2; fi
+    print(1)
+" 2>/dev/null || echo 1)
+if ! [[ "$LIGHT" =~ ^[0-9]+$ ]]; then LIGHT=1; fi
 
 if [ "$HEAVY" -gt 0 ] || [ "$LIGHT" -gt 0 ]; then
     echo "Starting HEAVY workers: $HEAVY, LIGHT workers: $LIGHT"

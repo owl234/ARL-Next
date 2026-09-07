@@ -1,5 +1,6 @@
 import os
 import json
+from pymongo.errors import DuplicateKeyError
 from xing.core import PluginType, PluginRunner
 from xing.utils import load_plugins
 from xing.conf import Conf as npoc_conf
@@ -95,11 +96,11 @@ class NPoC(object):
             info["plugin_type"] = p.plugin_type
             
             # 提取富文本元数据
-            info["severity"] = getattr(p, "severity", "")
-            info["description"] = getattr(p, "description", "")
-            info["remediation"] = getattr(p, "remediation", "")
-            info["references"] = getattr(p, "references", [])
-            info["author"] = getattr(p, "author", "")
+            info["severity"] = getattr(p, "severity", "") or ""
+            info["description"] = getattr(p, "description", "") or ""
+            info["remediation"] = getattr(p, "remediation", "") or ""
+            info["references"] = getattr(p, "references", []) or []
+            info["author"] = getattr(p, "author", "") or ""
 
 
             if p.plugin_type == PluginType.POC:
@@ -121,18 +122,33 @@ class NPoC(object):
 
         return info_list
 
-    def sync_to_db(self):
-        for old in self.poc_info_list:
+    def sync_to_db(self, names=None):
+        """
+        同步插件信息到 DB
+
+        :param names: 可选插件名集合；传入时仅同步这些插件（增量场景），
+                     不传则全量同步（/poc/sync/ 显式触发时使用）
+        """
+        infos = self.poc_info_list
+        if names is not None:
+            names = set(names)
+            infos = [x for x in infos if x["plugin_name"] in names]
+
+        for old in infos:
             new = old.copy()
             plugin_name = old["plugin_name"]
             new["update_date"] = utils.curr_date()
 
             logger.info("upsert {} info to db".format(plugin_name))
-            utils.conn_db('poc').update_one(
-                {"plugin_name": plugin_name}, 
-                {"$set": new}, 
-                upsert=True
-            )
+            try:
+                utils.conn_db('poc').update_one(
+                    {"plugin_name": plugin_name},
+                    {"$set": new},
+                    upsert=True
+                )
+            except DuplicateKeyError:
+                # plugin_name 唯一索引下，并发启动时其他 Worker 已先行插入，退化为纯更新
+                utils.conn_db('poc').update_one({"plugin_name": plugin_name}, {"$set": new})
 
         return True
 

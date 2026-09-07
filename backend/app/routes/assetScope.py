@@ -4,7 +4,6 @@ from flask_restx import fields, Namespace
 from app.utils import get_logger, auth
 from app import utils
 from . import base_query_fields, ARLResource, get_arl_parser
-from app.utils import conn_db as conn
 from app.modules import ErrorMsg, AssetScopeType
 
 # 成立“资产组范围”部门，专门管理“地契”
@@ -18,7 +17,6 @@ logger = get_logger()
 base_fields = {
     'name': fields.String(description="资产组名称"),
     'scope': fields.String(description="资产范围"),
-    "black_scope": fields.String(description="资产黑名单"),
     "scope_type": fields.String(description="资产范围类别")
 }
 
@@ -84,13 +82,8 @@ class ARLAssetScope(ARLResource):
         args = self.parse_args(add_asset_scope_fields)
         name = args.pop('name')
         scope = args.pop('scope')
-        black_scope = args.pop('black_scope')
         # scope_type 前端已不再强传，即使传了也仅作为冗余兜底
         scope_type = args.pop('scope_type', "mixed")
-
-        black_scope_array = []
-        if black_scope:
-            black_scope_array = re.split(r",|\s", black_scope)
 
         scope_array = re.split(r",|\s", scope)
         scope_array = list(filter(None, scope_array))
@@ -132,16 +125,16 @@ class ARLAssetScope(ARLResource):
             "domain_array": domain_array,
             "domain_status": domain_status,
             "ip_array": ip_array,
-            "black_scope": black_scope,
-            "black_scope_array": black_scope_array,
         }
-        conn('asset_scope').insert(scope_data)
-
-        # 补全返回数据
-        scope_id = str(scope_data.pop("_id"))
-        scope_data["scope_id"] = scope_id
-
-        return utils.build_ret(ErrorMsg.Success, scope_data)
+        try:
+            insert_res = utils.conn_db('asset_scope').insert_one(scope_data)
+            scope_id = str(insert_res.inserted_id)
+            scope_data.pop("_id", None)
+            scope_data["scope_id"] = scope_id
+            return utils.build_ret(ErrorMsg.Success, scope_data)
+        except Exception as e:
+            logger.error(f"create asset_scope error, detail={e}")
+            return utils.build_ret(ErrorMsg.Error, {"error": "数据库写入异常，请查看服务端日志"})
 
 # ==========================================
 # 接口模块：删除相关 (包含部分删除 和 整体销毁)
@@ -184,6 +177,10 @@ class DeleteARLAssetScope(ARLResource):
         if scope not in scope_data.get("scope_array", []):
             return utils.build_ret(ErrorMsg.NotFoundScope, {"scope_id": scope_id, "scope":scope})
 
+        # 防御：资产组必须保留至少一个资产范围，禁止清空
+        if len(scope_data.get("scope_array", [])) <= 1:
+            return utils.build_ret(ErrorMsg.DomainInvalid, {"error": "资产组必须保留至少一个资产范围，禁止清空"})
+
         # 核心：操作 Python 列表剔除元素，并同步剔除子轨道
         scope_data["scope_array"].remove(scope)
         if "domain_array" in scope_data and scope in scope_data["domain_array"]:
@@ -191,18 +188,29 @@ class DeleteARLAssetScope(ARLResource):
         if "ip_array" in scope_data and scope in scope_data["ip_array"]:
             scope_data["ip_array"].remove(scope)
 
+        # 同步清理 domain_status 监控状态字典
+        domain_status = scope_data.get("domain_status", {})
+        if isinstance(domain_status, dict):
+            domain_status.pop(scope, None)
+            scope_data["domain_status"] = domain_status
+
         scope_data["scope"] = ",".join(scope_data["scope_array"])
-        utils.conn_db(self._table).find_one_and_replace(query, scope_data)
-        
-        # --- 新增：深度级联清理孤儿记录 (级联删除属于该资产的所有子资产) ---
-        # 清理由于将该主干目标踢出 Scope 而产生的废弃监控状态和指纹历史
-        utils.conn_db("asset_domain").delete_many({"scope_id": scope_id, "domain": scope})
-        utils.conn_db("asset_ip").delete_many({"scope_id": scope_id, "ip": scope})
-        
-        # 站点与WIH不仅通过 scope_id 关联，还需要过滤出归属于刚被删除的 scope (即基准 domain/ip) 的记录
-        # 我们这里采用以 domain/ip 作为精确匹配 (通常子系统收集资产时会保存关联的 base_domain/ip 到 domain 字段)
-        utils.conn_db("asset_site").delete_many({"scope_id": scope_id, "domain": scope})
-        utils.conn_db("asset_wih").delete_many({"scope_id": scope_id, "domain": scope})
+
+        try:
+            utils.conn_db(self._table).find_one_and_replace(query, scope_data)
+            
+            # --- 新增：深度级联清理孤儿记录 (级联删除属于该资产的所有子资产) ---
+            # 清理由于将该主干目标踢出 Scope 而产生的废弃监控状态和指纹历史
+            utils.conn_db("asset_domain").delete_many({"scope_id": str(scope_id), "domain": scope})
+            utils.conn_db("asset_ip").delete_many({"scope_id": str(scope_id), "ip": scope})
+            
+            # 站点与WIH不仅通过 scope_id 关联，还需要过滤出归属于刚被删除的 scope (即基准 domain/ip) 的记录
+            # 我们这里采用以 domain/ip 作为精确匹配 (通常子系统收集资产时会保存关联的 base_domain/ip 到 domain 字段)
+            utils.conn_db("asset_site").delete_many({"scope_id": str(scope_id), "domain": scope})
+            utils.conn_db("asset_wih").delete_many({"scope_id": str(scope_id), "domain": scope})
+        except Exception as e:
+            logger.error(f"delete asset_scope target error, scope_id={scope_id}, scope={scope}, detail={e}")
+            return utils.build_ret(ErrorMsg.Error, {"error": "数据库操作异常，请查看服务端日志"})
 
         return utils.build_ret(ErrorMsg.Success, {"scope_id": scope_id, "scope":scope})
 
@@ -233,13 +241,17 @@ class DeleteARLAssetScope(ARLResource):
         table_list = ["asset_domain", "asset_site", "asset_ip", "scheduler", "asset_wih"]
 
         # 3. 第二轮循环：大清洗 (级联删除)
-        for scope_id in scope_id_list:
-            # 删地契本身
-            utils.conn_db(self._table).delete_many({'_id': ObjectId(scope_id)})
+        try:
+            for scope_id in scope_id_list:
+                # 删地契本身
+                utils.conn_db(self._table).delete_many({'_id': ObjectId(scope_id)})
 
-            # 删牵连的战利品
-            for name in table_list:
-                utils.conn_db(name).delete_many({'scope_id': scope_id})
+                # 删牵连的战利品
+                for name in table_list:
+                    utils.conn_db(name).delete_many({'scope_id': str(scope_id)})
+        except Exception as e:
+            logger.error(f"batch delete asset_scope error, scope_ids={scope_id_list}, detail={e}")
+            return utils.build_ret(ErrorMsg.Error, {"error": "数据库操作异常，请查看服务端日志"})
 
         return utils.build_ret(ErrorMsg.Success, {"scope_id": scope_id_list})
 
@@ -267,7 +279,11 @@ class AddARLAssetScope(ARLResource):
         scope_id = args.pop('scope_id', "")
 
         table = 'asset_scope'
-        query = {'_id': ObjectId(scope_id)}
+        try:
+            query = {'_id': ObjectId(scope_id)}
+        except Exception:
+            return utils.build_ret(ErrorMsg.NotFoundScopeID, {"scope_id": scope_id})
+
         scope_data = utils.conn_db(table).find_one(query)
         if not scope_data:
             return utils.build_ret(ErrorMsg.NotFoundScopeID, {"scope_id": scope_id, "scope": scope})
@@ -314,7 +330,11 @@ class AddARLAssetScope(ARLResource):
                 }
         scope_data["domain_status"] = domain_status
         scope_data["scope"] = ",".join(scope_data["scope_array"])
-        utils.conn_db(table).find_one_and_replace(query, scope_data)
+        try:
+            utils.conn_db(table).find_one_and_replace(query, scope_data)
+        except Exception as e:
+            logger.error(f"add asset_scope error, scope_id={scope_id}, scope={scope}, detail={e}")
+            return utils.build_ret(ErrorMsg.Error, {"error": "数据库写入异常，请查看服务端日志"})
 
         return utils.build_ret(ErrorMsg.Success, {"scope_id": scope_id, "scope": scope})
 
@@ -326,8 +346,7 @@ update_scope_fields = ns.model('UpdateScope', {
     '_id': fields.String(description="资产范围 ID"),
     'scope_id': fields.String(description="资产范围 ID（别名兼容）"),
     'name': fields.String(description="资产组名称"),
-    'scope': fields.String(description="资产范围（完整新列表）"),
-    'black_scope': fields.String(description="资产黑名单")
+    'scope': fields.String(description="资产范围（完整新列表）")
 })
 
 
@@ -365,11 +384,6 @@ class UpdateARLAssetScope(ARLResource):
         name = args.pop('name', None)
         if name:
             scope_data["name"] = name
-
-        black_scope = args.pop('black_scope', None)
-        if black_scope is not None:
-            scope_data["black_scope"] = black_scope
-            scope_data["black_scope_array"] = list(filter(None, re.split(r",|\s", black_scope))) if black_scope else []
 
         scope = args.pop('scope', None)
         if scope is not None:
@@ -440,7 +454,11 @@ class UpdateARLAssetScope(ARLResource):
             scope_data["ip_array"] = ip_array
             scope_data["scope"] = ",".join(new_scope_array)
 
-        utils.conn_db(table).find_one_and_replace(query, scope_data)
+        try:
+            utils.conn_db(table).find_one_and_replace(query, scope_data)
+        except Exception as e:
+            logger.error(f"update asset_scope error, scope_id={scope_id}, detail={e}")
+            return utils.build_ret(ErrorMsg.Error, {"error": "数据库写入异常，请查看服务端日志"})
 
         # 兼容返回数据
         scope_data["_id"] = str(scope_data.get("_id", scope_id))

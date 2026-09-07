@@ -8298,7 +8298,7 @@
         ],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "title=\"Consul\""
+        "fofa_rule": "title=\"Consul\" || header=\"X-Consul-Effective-Consistency\" || body=\"Consul Agent\""
     },
     "TVT 公司产品": {
         "cats": [
@@ -9127,7 +9127,18 @@
         ],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "title=\"Kubernetes Dashboard\""
+        "fofa_rule": "title=\"Kubernetes Dashboard\" || body=\"kubernetes-dashboard\" || (body=\"\\\"apiVersion\\\":\\\"v1\\\"\" && body=\"\\\"kind\\\":\\\"Status\\\"\" && (body=\"system:anonymous\" || body=\"k8s\" || body=\"kubernetes\"))"
+    },
+    "Kubelet": {
+        "cats": [
+            1111
+        ],
+        "headers": [],
+        "html": [],
+        "title": [],
+        "icon": "default.png",
+        "website": "",
+        "fofa_rule": "(header=\"Kubelet\" || header=\"kubelet\") || (body=\"PodList\" || body=\"podlist\") || ((body=\"kubelet\" || body=\"Kubelet\") && (body=\"pods\" || body=\"system:anonymous\" || body=\"kubernetes\" || body=\"k8s\"))"
     },
     "easypanel": {
         "cats": [
@@ -12028,7 +12039,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"<title>Nacos</title>\""
+        "fofa_rule": "body=\"<title>Nacos</title>\" || header=\"Location: /nacos\" || header=\"Nacos-Server\""
     },
     "aliyun-rds": {
         "cats": [
@@ -17991,7 +18002,7 @@
         "website": "",
         "fofa_rule": "body=\"content=\\\"esyndicat\""
     },
-    "etcd-io": {
+    "etcd": {
         "cats": [
             1111
         ],
@@ -18003,7 +18014,7 @@
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "body=\"etcdserver\" || body=\"etcdcluster\""
+        "fofa_rule": "body=\"etcdserver\" || body=\"etcdcluster\" || header=\"X-Etcd-Cluster-Id\""
     },
     "etcd-viewer": {
         "cats": [

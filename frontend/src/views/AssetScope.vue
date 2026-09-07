@@ -64,10 +64,6 @@
         <template v-if="column.key === 'name'">
           <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
             <a style="font-weight: 500;" @click="goToDetail(record)">{{ record.name }}</a>
-            <a-tooltip v-if="record.black_scope" placement="top">
-              <template #title>黑名单: {{ record.black_scope }}</template>
-              <a-tag color="error" style="font-size: 11px; padding: 0 4px; line-height: 18px; height: 18px; margin-right: 0;">黑名单</a-tag>
-            </a-tooltip>
           </div>
         </template>
 
@@ -232,15 +228,6 @@
             style="font-family: monospace; font-size: 13px;"
           />
         </a-form-item>
-
-        <a-form-item label="资产黑名单" name="black_scope">
-          <a-textarea
-            v-model:value="addForm.black_scope"
-            :rows="3"
-            placeholder="选填。请输入资产黑名单（在监控与扫描中排除），多个请用逗号或换行分隔"
-            style="font-family: monospace; font-size: 13px;"
-          />
-        </a-form-item>
       </a-form>
     </a-modal>
 
@@ -371,15 +358,6 @@
               <a-button type="link" size="small" style="padding: 0; height: auto;" @click="formatEditGroupScopes">格式化规整</a-button>
             </div>
           </div>
-        </a-form-item>
-
-        <a-form-item label="资产黑名单" name="black_scope">
-          <a-textarea
-            v-model:value="editGroupForm.black_scope"
-            :rows="2"
-            placeholder="选填。请输入资产黑名单，多个请用逗号或换行分隔"
-            style="font-family: monospace; font-size: 13px;"
-          />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -737,8 +715,7 @@ const addFormRef = ref();
 
 const addForm = reactive({
   name: '',
-  scope: '',
-  black_scope: ''
+  scope: ''
 });
 
 const addRules = {
@@ -749,7 +726,6 @@ const addRules = {
 const openAddModal = () => {
   addForm.name = '';
   addForm.scope = '';
-  addForm.black_scope = '';
   addModalVisible.value = true;
 };
 
@@ -786,8 +762,7 @@ const editGroupNewInput = ref('');
 const editGroupForm = reactive({
   _id: '',
   name: '',
-  scope: '',
-  black_scope: ''
+  scope: ''
 });
 
 const editGroupRules = {
@@ -824,7 +799,6 @@ const openEditGroupModal = (record) => {
   editGroupForm.name = record.name || '';
   editGroupScopeList.value = [...(record.scope_array || [])];
   editGroupForm.scope = editGroupScopeList.value.join('\n');
-  editGroupForm.black_scope = record.black_scope || '';
   editGroupMode.value = 'visual';
   editGroupSearchKeyword.value = '';
   editGroupNewInput.value = '';
@@ -943,8 +917,7 @@ const submitEditGroupUpdate = async (scopeList) => {
     const res = await request.post('/asset_scope/update/', {
       _id: editGroupForm._id,
       name: editGroupForm.name,
-      scope: scopeList.join(','),
-      black_scope: editGroupForm.black_scope
+      scope: scopeList.join(',')
     });
 
     if (res.code === 200) {

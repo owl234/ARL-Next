@@ -609,7 +609,7 @@ admin123
                       </template>
                       <a-input-number v-model:value="performanceForm.celery_light_concurrency" :min="1" :max="256" style="width: 100%" />
                       <div style="margin-top: 8px; color: var(--arl-text-color); opacity: 0.45; font-size: 13px;">
-                        走专用独立通道，不受重任务排队阻塞影响。可以根据带宽资源按需放大 (默认 2)。
+                        走专用独立通道，不受重任务排队阻塞影响。可以根据带宽资源按需放大 (默认 1)。
                       </div>
                     </a-form-item>
                   </a-card>
@@ -1043,16 +1043,62 @@ admin123
     </a-tabs>
 
     <!-- 系统更新日志 Modal -->
-    <a-modal v-model:open="updateModalVisible" title="系统更新中，请勿关闭页面" :closable="false" :maskClosable="false" :footer="null" width="800px">
-      <div style="margin-bottom: 15px;">
-        <a-progress :percent="updateProgress" :status="updateHasError ? 'exception' : (updateFinished ? 'success' : 'active')" />
+    <a-modal
+      v-model:open="updateModalVisible"
+      :closable="updateFinished"
+      :maskClosable="false"
+      :footer="null"
+      width="840px"
+    >
+      <template #title>
+        <div style="display: flex; align-items: center; justify-content: space-between; padding-right: 24px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 18px;">🚀</span>
+            <span style="font-weight: 600; font-size: 15px; color: var(--arl-text-color);">ARL-Next 系统在线平滑升级</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div v-if="!updateFinished" class="update-heartbeat-badge">
+              <span class="heartbeat-dot"></span>
+              <span>执行中</span>
+            </div>
+            <div style="font-family: monospace; font-size: 13px; font-weight: 600; color: var(--arl-text-color); background: rgba(0,0,0,0.04); padding: 2px 8px; border-radius: 4px;">
+              ⏱️ 耗时: {{ formattedElapsedTime }}
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 阶段与总进度 -->
+      <div style="margin-bottom: 12px; background: var(--arl-bg-light); border: 1px solid var(--arl-border-color); padding: 10px 14px; border-radius: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span style="font-size: 13px; font-weight: 500; color: var(--arl-text-color);">{{ currentStageTitle }}</span>
+          <span style="font-size: 13px; font-weight: 600; color: #1677ff;">{{ updateProgress }}%</span>
+        </div>
+        <a-progress :percent="updateProgress" :show-info="false" :status="updateHasError ? 'exception' : (updateFinished ? 'success' : 'active')" stroke-linecap="square" />
       </div>
-      <div style="background-color: #1e1e1e; color: #00ff00; padding: 15px; border-radius: 4px; font-family: 'Consolas', 'Courier New', monospace; height: 400px; overflow-y: auto;" ref="terminalRef">
-        <pre style="margin: 0; white-space: pre-wrap; font-family: inherit; color: inherit; background: transparent; border: none; padding: 0;">{{ updateLogs }}</pre>
+
+      <!-- 实时镜像分层动态传输芯片 -->
+      <div v-if="Object.keys(activeLayers).length > 0" class="update-layer-box">
+        <div class="update-layer-header">
+          <span style="font-size: 14px;">⚡</span>
+          <span style="font-weight: 600; font-size: 12px;">正在传输镜像分层 ({{ Object.keys(activeLayers).length }} 个活跃分层):</span>
+        </div>
+        <div class="update-layer-list">
+          <div v-for="(statusText, layerId) in activeLayers" :key="layerId" class="layer-chip">
+            <span class="layer-id">{{ String(layerId).slice(0, 12) }}</span>
+            <span class="layer-status">{{ statusText }}</span>
+          </div>
+        </div>
       </div>
-      <div v-if="updateFinished" style="margin-top: 15px; text-align: center;">
-        <a-button v-if="!updateHasError" type="primary" size="large" @click="reloadPage">🎉 更新完成，点击重新加载页面</a-button>
-        <a-button v-else type="default" size="large" @click="updateModalVisible = false">关闭窗口</a-button>
+
+      <!-- 终端控制台 -->
+      <div style="background-color: #141414; border: 1px solid #333; color: #00ff66; padding: 14px; border-radius: 6px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; height: 380px; overflow-y: auto; box-shadow: inset 0 2px 8px rgba(0,0,0,0.4);" ref="terminalRef">
+        <pre style="margin: 0; white-space: pre-wrap; font-family: inherit; color: inherit; background: transparent; border: none; padding: 0; font-size: 12px; line-height: 1.6;">{{ updateLogs }}</pre>
+      </div>
+
+      <div v-if="updateFinished" style="margin-top: 16px; text-align: center;">
+        <a-button v-if="!updateHasError" type="primary" size="large" @click="reloadPage" style="border-radius: 6px; padding: 0 32px; font-weight: 600;">🎉 更新完成，点击重新加载页面</a-button>
+        <a-button v-else type="default" size="large" @click="updateModalVisible = false" style="border-radius: 6px;">关闭窗口</a-button>
       </div>
     </a-modal>
   </div>
@@ -2158,7 +2204,7 @@ const saveSecurityPolicy = async () => {
 };
 
 // ======================= 性能配置管理逻辑 =======================
-const performanceForm = ref({ celery_heavy_concurrency: 2, celery_light_concurrency: 2, osint_concurrency: 1 });
+const performanceForm = ref({ celery_heavy_concurrency: 1, celery_light_concurrency: 1, osint_concurrency: 1 });
 const performanceLoading = ref(false);
 const performanceSaveLoading = ref(false);
 
@@ -2167,8 +2213,8 @@ const fetchPerformanceConfig = async () => {
   try {
     const res = await request.get('/api/system_config/performance');
     if (res.code === 200) {
-      performanceForm.value.celery_heavy_concurrency = res.data.celery_heavy_concurrency || 2;
-      performanceForm.value.celery_light_concurrency = res.data.celery_light_concurrency || 3;
+      performanceForm.value.celery_heavy_concurrency = res.data.celery_heavy_concurrency || 1;
+      performanceForm.value.celery_light_concurrency = res.data.celery_light_concurrency || 1;
       performanceForm.value.osint_concurrency = res.data.osint_concurrency || 1;
     } else {
       message.error(res.message || '获取性能配置失败');
@@ -2233,13 +2279,25 @@ const forceUpdateMode = ref(false);
 const updateModalVisible = ref(false);
 const updateLogs = ref('');
 const updateProgress = ref(0);
-const updatePollInterval = ref(null); // 🛠️ 修复：声明轮询定时器句柄
+const updatePollInterval = ref(null); // 🛠️ 轮询定时器句柄
 const logByteOffset = ref(0);         // 🛠️ 增量 Byte-Offset 偏移量指针
 const updateFinished = ref(false);
 const terminalRef = ref(null);
 const updateButtonLoading = ref(false);
 const updateHasError = ref(false);
 const updateOfflineNotices = ref('');
+
+// 🌟 实时体验升级：耗时计时器、分层动态传输芯片与当前阶段标题
+const updateElapsedSeconds = ref(0);
+const updateTimer = ref(null);
+const activeLayers = ref({});
+const currentStageTitle = ref('正在准备更新环境...');
+
+const formattedElapsedTime = computed(() => {
+  const mins = Math.floor(updateElapsedSeconds.value / 60);
+  const secs = updateElapsedSeconds.value % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+});
 
 const renderedReleaseNotes = computed(() => {
   if (!releaseNotes.value) return '';
@@ -2309,6 +2367,29 @@ const handleStartUpdateClick = async () => {
   startUpdate();
 };
 
+// 🛠️ 统一停止更新轮询/耗时计时器，并清空动态分层芯片状态
+const stopUpdateTimers = () => {
+  if (updatePollInterval.value) {
+    clearInterval(updatePollInterval.value);
+    updatePollInterval.value = null;
+  }
+  if (updateTimer.value) {
+    clearInterval(updateTimer.value);
+    updateTimer.value = null;
+  }
+  activeLayers.value = {};
+};
+
+// 🛠️ 统一收尾更新流程：停止双定时器、清空分层芯片，并落定终态（标题/进度/成败标记）
+const finishUpdate = (stageTitle, { progress = null, hasError = false } = {}) => {
+  stopUpdateTimers();
+  currentStageTitle.value = stageTitle;
+  if (progress !== null) updateProgress.value = progress;
+  updateFinished.value = true;
+  updateHasError.value = hasError;
+  updateOfflineNotices.value = '';
+};
+
 const startUpdate = async () => {
   if (updateButtonLoading.value) return;
   updateButtonLoading.value = true;
@@ -2329,6 +2410,15 @@ const startUpdate = async () => {
     updateFinished.value = false;
     updateButtonLoading.value = false;
     logByteOffset.value = 0;
+    activeLayers.value = {};
+    updateElapsedSeconds.value = 0;
+    currentStageTitle.value = '正在准备更新环境...';
+
+    // 启动秒级耗时计数器（先统一停止可能残留的定时器并清空分层状态）
+    stopUpdateTimers();
+    updateTimer.value = setInterval(() => {
+      updateElapsedSeconds.value++;
+    }, 1000);
     
     // 1. 触发更新
     const triggerUrl = `/update_stream/trigger?token=${token}`;
@@ -2336,18 +2426,16 @@ const startUpdate = async () => {
       const triggerRes = await fetch(triggerUrl);
       if (!triggerRes.ok) {
         updateLogs.value += '[ERROR] 触发更新失败，服务返回异常状态码。\n';
-        updateFinished.value = true;
-        updateHasError.value = true;
+        finishUpdate('❌ 触发更新失败', { hasError: true });
         return;
       }
     } catch (e) {
       updateLogs.value += '[ERROR] 无法连接到更新服务，请检查网络。\n';
-      updateFinished.value = true;
-      updateHasError.value = true;
+      finishUpdate('❌ 无法连接更新服务', { hasError: true });
       return;
     }
 
-    // 2. 开始增量轮询日志
+    // 2. 开始增量轮询日志与动态分层状态
     if (updatePollInterval.value) {
       clearInterval(updatePollInterval.value);
     }
@@ -2358,9 +2446,7 @@ const startUpdate = async () => {
         const logRes = await fetch(pollUrl);
         if (!logRes.ok) {
           if (logRes.status === 401) {
-            clearInterval(updatePollInterval.value);
-            updateProgress.value = 100;
-            updateFinished.value = true;
+            finishUpdate('🎉 系统更新成功！安全防护已生效', { progress: 100 });
             updateLogs.value += '\n[DONE] 🎉 系统更新成功！\n🔒 检测到基础安全防护 (Basic Auth) 已生效。\n👉 请手动刷新页面，并在弹出的提示框中输入密码重新登录。';
             scrollToBottom();
             message.success('🎉 系统更新成功！请手动刷新页面。', 8);
@@ -2383,25 +2469,47 @@ const startUpdate = async () => {
             updateLogs.value += data.chunk;
             scrollToBottom();
           }
+
+          // 🌟 动态同步镜像分层下载进度
+          if (data.progress && typeof data.progress === 'object') {
+            activeLayers.value = data.progress;
+          } else {
+            activeLayers.value = {};
+          }
           
-          // 动态解析进度
-          if (updateLogs.value.includes('后台任务已启动')) updateProgress.value = Math.max(updateProgress.value, 20);
-          if (updateLogs.value.includes('基础架构同步完毕')) updateProgress.value = Math.max(updateProgress.value, 40);
-          if (updateLogs.value.includes('正在从阿里云镜像库极速拉取')) updateProgress.value = Math.max(updateProgress.value, 60);
-          if (updateLogs.value.includes('开始执行 start-')) updateProgress.value = Math.max(updateProgress.value, 80);
-          if (updateLogs.value.includes('后端服务已完全就绪')) updateProgress.value = Math.max(updateProgress.value, 95);
+          // 动态解析阶段与进度（终态达成后锁定，规避日志延迟写入引起标题回跳与闪烁）
+          if (!updateFinished.value) {
+            if (updateLogs.value.includes('正在拉取核心镜像')) {
+              currentStageTitle.value = '阶段 1/3: 正在拉取核心镜像以提取基础架构';
+              updateProgress.value = Math.max(updateProgress.value, 20);
+            }
+            if (updateLogs.value.includes('核心镜像拉取完成') || updateLogs.value.includes('基础架构同步完毕')) {
+              currentStageTitle.value = '阶段 1/3: 基础架构提取完毕，准备多服务部署';
+              updateProgress.value = Math.max(updateProgress.value, 35);
+            }
+            if (updateLogs.value.includes('正在为当前运行版本创建稳定备份快照')) {
+              currentStageTitle.value = '阶段 2/3: 正在为当前运行版本创建稳定快照';
+              updateProgress.value = Math.max(updateProgress.value, 45);
+            }
+            if (updateLogs.value.includes('正在从阿里云镜像库极速拉取最新构建')) {
+              currentStageTitle.value = '阶段 2/3: 正在从阿里云镜像库极速拉取最新构建';
+              updateProgress.value = Math.max(updateProgress.value, 60);
+            }
+            if (updateLogs.value.includes('所有微服务镜像拉取完成') || updateLogs.value.includes('正在启动生产多服务容器组')) {
+              currentStageTitle.value = '阶段 3/3: 正在启动生产多服务容器组并检测健康状态';
+              updateProgress.value = Math.max(updateProgress.value, 80);
+            }
+            if (updateLogs.value.includes('后端服务已完全就绪')) {
+              currentStageTitle.value = '阶段 3/3: 后端服务与数据库已完全就绪';
+              updateProgress.value = Math.max(updateProgress.value, 95);
+            }
+          }
 
           if (data.done) {
-            clearInterval(updatePollInterval.value);
-            updateProgress.value = 100;
-            updateFinished.value = true;
-            updateOfflineNotices.value = '';
+            finishUpdate('🎉 系统更新与部署已全部完成！', { progress: 100 });
             message.success('🎉 系统更新成功！请点击下方按钮重新加载页面。', 5);
           } else if (data.error) {
-            clearInterval(updatePollInterval.value);
-            updateFinished.value = true;
-            updateHasError.value = true;
-            updateOfflineNotices.value = '';
+            finishUpdate('❌ 系统更新遇到错误', { hasError: true });
             message.error('❌ 系统更新遇到错误，请查看日志！', 8);
           }
         } else {
@@ -2410,14 +2518,10 @@ const startUpdate = async () => {
           updateLogs.value = logText;
           scrollToBottom();
           if (logText.includes('[DONE]')) {
-            clearInterval(updatePollInterval.value);
-            updateProgress.value = 100;
-            updateFinished.value = true;
+            finishUpdate('🎉 系统更新成功！', { progress: 100 });
             message.success('🎉 系统更新成功！', 5);
           } else if (logText.includes('[ERROR]')) {
-            clearInterval(updatePollInterval.value);
-            updateFinished.value = true;
-            updateHasError.value = true;
+            finishUpdate('❌ 系统更新遇到错误', { hasError: true });
             message.error('❌ 系统更新遇到错误！', 8);
           }
         }
@@ -2429,12 +2533,13 @@ const startUpdate = async () => {
           scrollToBottom();
         }
       }
-    }, 1500);
+    }, 1200);
     
   } catch (e) {
     message.error('启动更新失败');
     console.error(e);
     updateButtonLoading.value = false;
+    stopUpdateTimers();
   }
 };
 
@@ -2460,10 +2565,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  if (updatePollInterval.value) {
-    clearInterval(updatePollInterval.value);
-    updatePollInterval.value = null;
-  }
+  stopUpdateTimers();
 });
 </script>
 
@@ -2743,5 +2845,79 @@ onUnmounted(() => {
 }
 .breathing-btn {
   animation: btn-breathing 2s infinite;
+}
+
+/* ================== 系统更新 Modal 实时态势与分层芯片样式 ================== */
+.update-heartbeat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(82, 196, 26, 0.12);
+  color: #52c41a;
+  border: 1px solid rgba(82, 196, 26, 0.3);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.heartbeat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #52c41a;
+  animation: pulse-dot 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0% { transform: scale(0.8); opacity: 0.5; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.8); opacity: 0.5; }
+}
+
+.update-layer-box {
+  margin-bottom: 12px;
+  background: rgba(22, 119, 255, 0.04);
+  border: 1px dashed rgba(22, 119, 255, 0.3);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.update-layer-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #1677ff;
+  margin-bottom: 6px;
+}
+
+.update-layer-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.layer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--arl-bg-white);
+  border: 1px solid var(--arl-border-color);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.layer-id {
+  font-weight: 600;
+  color: #1677ff;
+}
+
+.layer-status {
+  color: var(--arl-text-color);
+  opacity: 0.85;
 }
 </style>

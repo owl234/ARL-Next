@@ -110,15 +110,54 @@
         width="600"
     >
       <a-descriptions bordered :column="1" size="small" v-if="selectedPoc" style="word-break: break-all;">
-        <a-descriptions-item v-for="(value, key) in formatPoc(selectedPoc)" :key="key" :label="formatKey(key)">
-          <template v-if="Array.isArray(value)">
-            <a-tag v-for="item in value" :key="item" color="blue" style="margin-bottom: 4px;">{{ item }}</a-tag>
+        <a-descriptions-item v-for="item in formatPoc(selectedPoc)" :key="item.key" :label="item.label">
+          <!-- 危险级别：彩色 Tag -->
+          <template v-if="item.key === 'severity'">
+            <a-tag :color="getSeverityColor(item.value)" style="font-weight: 500;">{{ item.value }}</a-tag>
           </template>
-          <template v-else-if="typeof value === 'object' && value !== null">
-            <pre style="margin: 0; white-space: pre-wrap; font-size: 12px; background: var(--arl-bg-light); padding: 8px; border-radius: 4px;">{{ JSON.stringify(value, null, 2) }}</pre>
+
+          <!-- 修复建议：高亮提示区块 -->
+          <template v-else-if="item.key === 'remediation'">
+            <div style="background: rgba(24, 144, 255, 0.08); border-left: 3px solid #1890ff; padding: 8px 12px; border-radius: 4px; color: var(--arl-text-color); white-space: pre-wrap; line-height: 1.6;">
+              {{ item.value }}
+            </div>
           </template>
+
+          <!-- 描述文本 -->
+          <template v-else-if="item.key === 'description' || item.key === 'desc'">
+            <div style="white-space: pre-wrap; line-height: 1.6;">{{ item.value }}</div>
+          </template>
+
+          <!-- 参考链接：带图标的新窗口跳转链接 -->
+          <template v-else-if="item.key === 'references' && Array.isArray(item.value)">
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <a
+                v-for="url in item.value"
+                :key="url"
+                :href="url"
+                target="_blank"
+                rel="noopener noreferrer"
+                style="display: inline-flex; align-items: center; gap: 6px; word-break: break-all; color: var(--arl-theme-color, #1890ff);"
+              >
+                <link-outlined style="flex-shrink: 0;" />
+                <span>{{ url }}</span>
+              </a>
+            </div>
+          </template>
+
+          <!-- 其他数组 -->
+          <template v-else-if="Array.isArray(item.value)">
+            <a-tag v-for="tag in item.value" :key="tag" color="blue" style="margin-bottom: 4px;">{{ tag }}</a-tag>
+          </template>
+
+          <!-- 嵌套对象/JSON -->
+          <template v-else-if="typeof item.value === 'object' && item.value !== null">
+            <pre style="margin: 0; white-space: pre-wrap; font-size: 12px; background: var(--arl-bg-light); padding: 8px; border-radius: 4px;">{{ JSON.stringify(item.value, null, 2) }}</pre>
+          </template>
+
+          <!-- 普通文本/默认 -->
           <template v-else>
-            {{ value || '-' }}
+            {{ item.value || '-' }}
           </template>
         </a-descriptions-item>
       </a-descriptions>
@@ -181,7 +220,7 @@ import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
 import request from '../utils/request';
 import { message } from 'ant-design-vue';
-import { SearchOutlined, InboxOutlined } from '@ant-design/icons-vue';
+import { SearchOutlined, InboxOutlined, LinkOutlined } from '@ant-design/icons-vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 
 const editExtensions = [python(), oneDark];
@@ -383,27 +422,79 @@ const showPocDetail = (record) => {
   isDetailDrawerVisible.value = true;
 };
 
-const formatPoc = (poc) => {
-  if (!poc) return {};
-  const { _id, index, ...rest } = poc; // ignore internal fields
-  return rest;
+const getSeverityColor = (sev) => {
+  if (!sev) return 'default';
+  const s = String(sev).toLowerCase();
+  if (s === 'critical') return '#cf1322';
+  if (s === 'high') return '#ff4d4f';
+  if (s === 'medium') return '#fa8c16';
+  if (s === 'low') return '#1890ff';
+  return 'blue';
 };
 
 const formatKey = (key) => {
   const map = {
     vul_name: '漏洞名称',
+    plugin_name: '插件名称',
     app_name: '应用',
+    severity: '危险级别',
     category: '类别',
     scheme: '协议',
-    update_date: '更新时间',
     plugin_type: '插件类型',
     author: '作者',
+    update_date: '更新时间',
     desc: '描述',
     description: '描述',
-    references: '参考链接',
-    severity: '危险级别'
+    remediation: '修复建议',
+    references: '参考链接'
   };
   return map[key] || key;
+};
+
+const formatPoc = (poc) => {
+  if (!poc) return [];
+  const { _id, index, ...rest } = poc; // 过滤内部无用字段
+
+  const order = [
+    'vul_name',
+    'plugin_name',
+    'app_name',
+    'severity',
+    'category',
+    'scheme',
+    'plugin_type',
+    'author',
+    'update_date',
+    'description',
+    'desc',
+    'remediation',
+    'references'
+  ];
+
+  // 选填富文本字段：若为空或未定义则智能隐藏，避免大量空白或短横线占用空间
+  const optionalFields = ['severity', 'author', 'description', 'desc', 'remediation', 'references'];
+
+  const allKeys = Array.from(new Set([...order, ...Object.keys(rest)]));
+  const result = [];
+
+  for (const key of allKeys) {
+    if (!(key in rest)) continue;
+    const value = rest[key];
+
+    if (optionalFields.includes(key)) {
+      if (value === null || value === undefined) continue;
+      if (typeof value === 'string' && value.trim() === '') continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+    }
+
+    result.push({
+      key,
+      label: formatKey(key),
+      value
+    });
+  }
+
+  return result;
 };
 
 const uploadHeaders = {

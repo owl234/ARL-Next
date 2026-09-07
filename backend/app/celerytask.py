@@ -189,7 +189,8 @@ def oneshot_domain_exec(options):
     domain = options.get("domain")
     monitor_options = options.get("monitor_options")
     name = options.get("name")
-    wrap_tasks.oneshot_domain_executors(base_domain=domain, scope_id=scope_id, options=monitor_options, name=name)
+    task_id = options.get("task_id")
+    wrap_tasks.oneshot_domain_executors(base_domain=domain, scope_id=scope_id, options=monitor_options, name=name, task_id=task_id)
 
 
 def domain_task_sync(options):
@@ -265,8 +266,9 @@ def oneshot_ip_exec(options):
     target = options.get("domain") # Payload uses 'domain' for IP target as well
     monitor_options = options.get("monitor_options")
     name = options.get("name")
+    task_id = options.get("task_id")
     wrap_tasks.oneshot_ip_executors(target=target, scope_id=scope_id,
-                                    task_name=name, options=monitor_options)
+                                    task_name=name, options=monitor_options, task_id=task_id)
 
 
 def github_task_task(options):

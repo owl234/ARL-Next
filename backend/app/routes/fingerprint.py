@@ -76,6 +76,9 @@ class ARLFingerprint(ARLResource):
 
         utils.conn_db('fingerprint').insert_one(data)
 
+        # 用户主动重新添加同名指纹 = 恢复该内置指纹，清除删除标记以便后续自动加固
+        utils.conn_db('fingerprint_deleted').delete_one({"name": name})
+
         finger_id = str(data.pop('_id'))
 
         data.pop('update_date')
@@ -98,9 +101,42 @@ class DeleteARLFinger(ARLResource):
         """
         args = self.parse_args(delete_finger_fields)
         id_list = args.pop('_id', "")
+
+        # 批量记录指纹名称到 fingerprint_deleted 黑名单，
+        # 避免内置指纹在下次启动的增量同步中被自动复活，并原子化批量删除
+        valid_oids = []
         for _id in id_list:
-            query = {'_id': ObjectId(_id)}
-            utils.conn_db('fingerprint').delete_one(query)
+            try:
+                valid_oids.append(ObjectId(_id))
+            except Exception:
+                continue
+
+        if valid_oids:
+            # 1. 批量查询待删除指纹名称
+            docs = list(utils.conn_db('fingerprint').find({'_id': {'$in': valid_oids}}, {"name": 1}))
+            names = [d["name"] for d in docs if d.get("name")]
+
+            # 2. 批量记录删除标记，规避 N 次网络往返
+            if names:
+                from pymongo import UpdateOne
+                ops = [
+                    UpdateOne({"name": name}, {"$setOnInsert": {"name": name}}, upsert=True)
+                    for name in names
+                ]
+                try:
+                    utils.conn_db('fingerprint_deleted').bulk_write(ops, ordered=False)
+                except Exception as e:
+                    logger.warning(f"Failed to record deleted fingerprints in bulk: {e}")
+
+            # 3. 批量删除指纹记录
+            utils.conn_db('fingerprint').delete_many({'_id': {'$in': valid_oids}})
+
+            # 4. 强制刷新指纹内存缓存，使删除在当前进程即时生效
+            try:
+                from app.services.fingerprint_cache import finger_db_cache
+                finger_db_cache.update_cache(force=True)
+            except Exception as e:
+                logger.warning(f"Failed to update fingerprint cache after deletion: {e}")
 
         return utils.build_ret(ErrorMsg.Success, {'_id': id_list})
 
@@ -258,6 +294,10 @@ class UploadARLFinger(ARLResource):
                     utils.conn_db('fingerprint').insert_many(new_docs, ordered=False)
                 except BulkWriteError:
                     pass # Safely ignore duplicates during concurrent writes
+                # 批量恢复：清除这些名称的删除标记，使其重新纳入内置指纹增量同步
+                utils.conn_db('fingerprint_deleted').delete_many(
+                    {"name": {"$in": [d["name"] for d in new_docs]}}
+                )
 
             return utils.build_ret(ErrorMsg.Success, {'error_cnt': error_cnt,
                                                       'repeat_cnt': repeat_cnt,'success_cnt': success_cnt})
@@ -291,7 +331,9 @@ class SyncFromJSON(ARLResource):
             db = utils.conn_db('fingerprint')
             # 1. 清空原有数据库指纹
             db.delete_many({})
-            
+            # 全量重置：同步清空删除标记，使全部内置指纹恢复自动增量同步
+            utils.conn_db('fingerprint_deleted').delete_many({})
+
             # 2. 构造文档集写入
             docs = []
             for rule_name, rule_detail in web_app_rules.items():

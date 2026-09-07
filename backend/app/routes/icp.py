@@ -731,9 +731,7 @@ class IcpTaskSync(ARLResource):
                         "scope_array": new_array,
                         "domain_array": new_array,
                         "domain_status": domain_status,
-                        "ip_array": [],
-                        "black_scope": "",
-                        "black_scope_array": []
+                        "ip_array": []
                     }
                     insert_res = conn_db('asset_scope').insert_one(scope_data)
                     final_scope_id = str(insert_res.inserted_id)

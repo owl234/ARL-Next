@@ -4,6 +4,33 @@
 
 ---
 
+## [v1.3.1] - 2026-09-07
+
+### 🚀 新增功能
+- **资产监控任务重新运行链路闭环**：彻底打通资产监控任务（`task_tag: monitor`）手动重启能力，精准区分周期监控任务与一次性扫描任务（Oneshot）；创新引入“预建 WAITING 任务记录 + Celery 路由调度 + Worker 动态收养”机制，支持失败自动回滚删除，后端响应并透传新任务 ID，前端支持无感原地刷新与二次点击防重放。
+- **云原生服务未授权访问 PoC 插件**：ARL-NPoC 引擎扩充新增 Etcd 未授权访问插件（`Etcd_noauth.py`，支持 HTTP REST 与 gRPC-Gateway 双探针精确验证）与 Kubelet API 未授权访问插件（`Kubelet_noauth.py`，覆盖 `/pods` 与 `/runningpods/` 并采用严格 PodList/容器 Spec 特征杜绝误报）。
+- **开源社区矩阵与支持作者浮窗**：前端顶部导航栏集成支持作者浮窗组件（`SupportAuthorPopover.vue`），集成微信支付/支付宝打赏、官方微信公众号（「owl安全」）与作者微信交流群，支持暗黑模式自适应与无图矢量 SVG 优雅降级。
+- **宿主机物理内存可观测与运行预检**：仪表盘（Dashboard）系统监控重构，新增宿主机物理内存已用/总计/可用容量、Swap 虚拟内存使用率与总量指标，并配备 `critical` (>=90%) / `warning` (>=80%) 实时双级告警 Tag 与智能悬浮气泡；部署脚本 `start-prod.sh` 新增 `check_host_memory()` 物理内存预检探针（全栈软保留约 1.8G，低内存只告警不阻断）。
+
+### 🛠️ 性能与重构
+- **全栈解除 Docker 容器内存硬限制**：从 `docker-compose.prod.yml` 中全面移除前端、Web、Puppeteer、Worker、MongoDB、RabbitMQ、OSINT、Autoheal 等微服务的 `mem_limit` 容器硬性限额，释放宿主机多核大内存性能潜力，规避高并发大规模扫描与复杂聚合时核心容器被内核 OOM-Killed 意外中断。
+- **升级 Nmap 7.95 黄金 LTS 稳定版**：多阶段构建中将 Nmap 从旧版编译升级至 7.95 黄金 LTS 稳定版，扩充 2500+ 服务指纹与 336 种现代化 OS 指纹并修复核心内存泄漏；针对 ARM64 / QEMU 交叉编译裁剪剥离 `zenmap`、`ndiff`、`nping`、`ncat` 等臃肿 C++ 模板依赖，锁定编译并发数（`max 2`），彻底规避交叉编译段错误；优化 `/usr/share/nmap` 软链接布局消除冗余镜像层。
+- **系统性能默认并发数收敛**：调整 `system_config.py`、`performance_config.py` 与 `start_worker_prod.sh` 默认并发基线，将 Heavy 与 Light 队列默认并发数从 2 收敛为 1，大幅降低单核/双核小内存 VPS 首次部署的负载压力，提供更稳健的开箱体验。
+- **PoC 详情抽屉交互与安全加固**：重塑 PoC 管理详情抽屉交互，危险级别采用彩色语义 Tag（Critical/High/Medium/Low），修复建议配置高亮引用区块，参考链接支持带图标的外链安全跳转（`rel="noopener noreferrer"`），空值与未定义选填字段智能折叠隐藏。
+
+### 🐛 问题修复与加固
+- **资产分组死字段清理与 CRUD 边界防御**：彻底剔除资产分组文档中历史遗留且从未被扫描/监控链路消费的 `black_scope` 与 `black_scope_array` 冗余死字段，同步收敛前后端与 MCP Server 协议入参；新增组内至少保留一个资产范围的删除防御阻断；规范 PyMongo 异常捕获；子资产级联删除统一强制转换字符串 ObjectId；单项移除时同步清理 `domain_status` 字典规避幽灵状态残留。
+- **在线更新器并发锁加固与阶段态势可视化**：`updater.py` 内部引入 `progress_lock` 互斥锁保障并发线程安全，分层传输进度每 3 秒聚合摘要输出至主日志，消除长时间下载无日志的卡死焦虑；前端系统更新 Modal 重构为 3 阶段态势追踪，集成动态心跳呼吸指示灯与 Docker 分层芯片滚动显示，完善组件卸载定时器销毁机制。
+- **稳定版本镜像快照全面覆盖**：部署脚本 `start-prod.sh` 镜像备份由单一 Web/Worker/Frontend 扩充至全量微服务（新增 `arl-puppeteer` 与 `osint-service`），升级前全自动打标 `backup-stable`。
+- **正则转义字符规范化**：修复 Python 3.12+ 环境下 `nmap.py` 中的无效反斜杠正则转义告警（使用 raw string `r'...'`）。
+
+### 🛡️ 安全与配置
+- **存量指纹与 PoC 增量平滑同步与防复活机制**：`arlupdate.py` 重构 `fingerprint_info_update()` 与 `npoc_info_update()`，确保存量升级仅增量补齐新增指纹与插件，避免覆盖用户自定义属性；引入 `fingerprint_deleted` 集合机制，用户在 UI 主动删除的内置指纹记录删除标记，不再因系统升级或重启而强制复活（重新手动添加或全量 JSON 重置时自动清除）；建立唯一索引时遇键冲突自动通过聚合管道无损去重降级，彻底杜绝 E11000 启动崩溃。
+- **Nginx Basic Auth 网关策略优化**：`default.conf.prod` 中将 Basic Auth 前置网关默认状态调整为 `auth_basic off;`，消除首次安装双重账号密码的困惑与误解；保留 Web 顶部导航栏一键热开启/关闭与修改凭据功能，对齐 README 与全链路文档。
+- **云原生高频端口与特征库扩充**：`webapp.json` 针对 Kubernetes、Kubelet、etcd、Nacos 等云原生资产进行深度指纹加固，清理并归并 `etcd-io` 冗余规则；在 `port_top100.txt` 与 `port_top1000.txt` 字典中扩充 2375、2376、2379、2380、8500、8848 等云原生服务核心端口。
+
+---
+
 ## [v1.3.0] - 2026-09-01
 
 ### 🚀 新增功能

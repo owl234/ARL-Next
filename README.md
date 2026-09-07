@@ -232,7 +232,7 @@ bash start-prod.sh
 
 | 验证层级 | 默认账号 | 默认密码 | 说明 |
 | :--- | :--- | :--- | :--- |
-| **第一层：Nginx Basic Auth 网关** | `admin` | `arl_next` | 前置防扫描器爆破，可在系统设置中一键关闭或修改 |
+| **第一层：Nginx Basic Auth 网关** | `admin` | `arl_next` | 前置防扫描器爆破（默认关闭，可在顶部导航栏一键开启或修改） |
 | **第二层：ARL-Next 系统登录** | `admin` | `arlpass` | 平台主账号，首次登录后建议立即修改 |
 
 > [!TIP]
@@ -281,7 +281,7 @@ sudo bash start-prod.sh
   ```bash
   docker exec -it arl-web-prod python3 /code/backend/inject_user.py
   ```
-- **重置/查看 Basic Auth 凭据**：编辑工作目录下的 `frontend/.htpasswd`，或登录系统后在 **「系统设置」➔「安全防护」** 中一键热修改/关闭。
+- **重置/查看 Basic Auth 凭据**：编辑工作目录下的 `frontend/.htpasswd`，或登录系统后在顶部导航栏「安全防护」图标中一键热开启/修改/关闭。
 </details>
 
 <details>

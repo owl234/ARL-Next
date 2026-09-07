@@ -115,7 +115,7 @@ def wrap_domain_executors(base_domain=None, scheduler_id=None, scope_id=None, op
     logger.info("end domain_executors {} {} {}".format(base_domain, scope_id, options))
 
 
-def oneshot_domain_executors(base_domain=None, scope_id=None, options=None, name=""):
+def oneshot_domain_executors(base_domain=None, scope_id=None, options=None, name="", task_id=None):
     celery_id = "celery_id_placeholder"
 
     if current_task._get_current_object():
@@ -157,11 +157,18 @@ def oneshot_domain_executors(base_domain=None, scope_id=None, options=None, name
         options = {}
     task_data["options"].update(options)
 
-    conn('task').insert_one(task_data)
-    task_id = str(task_data.pop("_id"))
-    
+    if task_id:
+        # 收养重启/预建的任务记录，避免重复落库，保证重启链路可追踪
+        conn('task').update_one(
+            {"_id": ObjectId(task_id)},
+            {"$set": {"celery_id": celery_id, "target": base_domain, "options": task_data["options"]}}
+        )
+    else:
+        conn('task').insert_one(task_data)
+        task_id = str(task_data.pop("_id"))
+
     arl_task_id_var.set(task_id)
-        
+
     domain_executor = DomainExecutor(base_domain, task_id, task_data["options"])
     try:
         new_domain = domain_executor.run()
@@ -371,7 +378,7 @@ class IPExecutor(IPTask):
         # 交给底层的端口扫描引擎执行
         super().port_scan()
 
-    def insert_task_data(self):
+    def insert_task_data(self, task_id=None):
         celery_id = ""
         if current_task._get_current_object():
             celery_id = current_task.request.id
@@ -406,11 +413,20 @@ class IPExecutor(IPTask):
             self.options = {}
 
         task_data["options"].update(self.options)
-        conn('task').insert_one(task_data)
-        self.task_id = str(task_data.pop("_id"))
-        
+
+        if task_id:
+            # 收养重启/预建的任务记录，避免重复落库，保证重启链路可追踪
+            conn('task').update_one(
+                {"_id": ObjectId(task_id)},
+                {"$set": {"celery_id": celery_id, "target": self.ip_target, "options": task_data["options"]}}
+            )
+            self.task_id = task_id
+        else:
+            conn('task').insert_one(task_data)
+            self.task_id = str(task_data.pop("_id"))
+
         arl_task_id_var.set(self.task_id)
-            
+
         # base_update_task 初始化在前，再设置回task_id
         self.base_update_task.task_id = self.task_id
 
@@ -530,11 +546,11 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options):
         for ip in target.split():
             update_scope_domain_status(scope_id, ip, "error", getattr(executor, 'task_id', None))
 
-def oneshot_ip_executors(target, scope_id, task_name, options):
+def oneshot_ip_executors(target, scope_id, task_name, options, task_id=None):
     # This is a one-time execution, no scheduler_id
     executor = IPExecutor(target, scope_id, task_name, "oneshot", options)
     try:
-        executor.insert_task_data()
+        executor.insert_task_data(task_id=task_id)
         executor.run()
         executor.sync_asset_site_wih()
 
@@ -545,6 +561,7 @@ def oneshot_ip_executors(target, scope_id, task_name, options):
         logger.warning("error on oneshot_ip_executors {}".format(executor.ip_target))
         logger.exception(e)
         executor.base_update_task.update_task_field("status", TaskStatus.ERROR)
+        executor.base_update_task.update_task_field("end_time", utils.curr_date())
         from app.helpers.scope import update_scope_domain_status
         for ip in target.split():
             update_scope_domain_status(scope_id, ip, "error", getattr(executor, 'task_id', None))

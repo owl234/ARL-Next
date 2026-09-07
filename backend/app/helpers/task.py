@@ -1,7 +1,7 @@
 import bson
 import re
 from app import utils
-from app.modules import TaskStatus, TaskTag, TaskType, CeleryAction
+from app.modules import TaskStatus, TaskTag, TaskType, CeleryAction, SchedulerStatus
 
 # 初始化日志记录器
 logger = utils.get_logger()
@@ -315,6 +315,28 @@ def get_task_data(task_id):
     return task_data
 
 
+def _is_running_periodic_task(task_data):
+    """
+    判定监控任务是否绑定真实调度记录（周期任务由定时引擎驱动）
+    依据：options 中携带 scheduler_id，且该调度记录存在且处于运行态
+    """
+    options = task_data.get("options", {})
+    if not isinstance(options, dict):
+        return False
+    scheduler_id = options.get("scheduler_id")
+    if not scheduler_id:
+        return False
+    scheduler_id = str(scheduler_id)
+    if scheduler_id == "oneshot":
+        return False
+    try:
+        scheduler_obj_id = bson.ObjectId(scheduler_id)
+    except Exception:
+        return False
+    scheduler_item = utils.conn_db('scheduler').find_one({"_id": scheduler_obj_id})
+    return bool(scheduler_item and scheduler_item.get("status") == SchedulerStatus.RUNNING)
+
+
 def restart_task(task_id):
     name_pre = "重新运行-"
     task_data = get_task_data(task_id)
@@ -322,34 +344,136 @@ def restart_task(task_id):
         raise Exception("没有找到 task_id : {}".format(task_id))
 
     # 把一些基础字段初始化
-    task_data.pop("_id")
+    task_data.pop("_id", None)
     task_data["start_time"] = "-"
     task_data["status"] = TaskStatus.WAITING
     task_data["end_time"] = "-"
     task_data["service"] = []
     task_data["celery_id"] = ""
-    if "statistic" in task_data:
-        task_data.pop("statistic")
+    task_data.pop("statistic", None)
+    task_data.pop("error_msg", None)
+    task_data.pop("end_reason", None)
+    task_data.pop("sync_status", None)
+    task_data.pop("task_id", None)
 
-    name = task_data["name"]
+    name = task_data.get("name") or ""
     if name_pre not in name:
         task_data["name"] = name_pre + name
 
-    task_type = task_data["type"]
+    task_type = task_data.get("type")
     task_tag = task_data.get("task_tag", "")
+    options = task_data.get("options", {})
+    if not isinstance(options, dict):
+        options = {}
+        task_data["options"] = options
+    scope_id = options.get("scope_id")
 
-    # 特殊情况单独判断
+    # 特殊情况单独判断: 风险巡航
     if task_type == TaskType.RISK_CRUISING and task_tag == TaskTag.RISK_CRUISING:
         if task_data.get("result_set_id"):
             raise Exception("task_id : {}, 不支持该任务重新运行".format(task_id))
 
-    # 监控任务的重新下发有点麻烦
-    if task_type == TaskType.DOMAIN and task_tag == TaskTag.MONITOR:
-        raise Exception("task_id : {}, 不支持该任务重新运行".format(task_id))
+    # 判断是否属于资产监控/分组体系
+    is_scope_task = bool(scope_id or task_tag == TaskTag.MONITOR)
 
-    elif task_type == TaskType.IP and task_data["options"].get("scope_id"):
-        raise Exception("task_id : {}, 不支持该任务重新运行".format(task_id))
+    if is_scope_task:
+        return _restart_scope_task(task_data, task_type, task_tag, options, scope_id)
 
+    # 常规资产侦查任务，走标准发车逻辑
     submit_task(task_data)
 
     return task_data
+
+
+def _restart_scope_task(task_data, task_type, task_tag, options, scope_id):
+    """
+    资产监控/分组体系任务重启：
+    - 周期监控任务（绑定运行中的调度记录）由定时引擎驱动，禁止手动重启
+    - 一次性扫描任务：预建新任务记录并派发 ONESHOT，保证重启可追踪、派发失败可回滚
+    """
+    from app.modules import CeleryRoutingKey
+    from app import celerytask
+    from app.helpers.scope import update_scope_domain_status
+
+    # 1. 严格区分周期监控任务与一次性扫描任务
+    if _is_running_periodic_task(task_data):
+        raise Exception("该任务为周期监控任务，由定时引擎自动调度，不支持在此手动重启")
+
+    # 2. 一次性扫描任务：严格防御校验关联资产分组是否存在
+    if not scope_id:
+        raise Exception("一次性扫描任务缺失关联的资产分组 ID，无法重新下发")
+
+    if task_type not in (TaskType.DOMAIN, TaskType.IP):
+        raise Exception("不支持的监控任务类型: {}".format(task_type))
+
+    try:
+        scope_obj_id = bson.ObjectId(str(scope_id))
+    except Exception:
+        raise Exception("资产分组 ID 格式非法: {}".format(scope_id))
+
+    scope_data = utils.conn_db('asset_scope').find_one({"_id": scope_obj_id})
+    if not scope_data:
+        raise Exception("关联的资产分组 (ID: {}) 已不存在，无法重启该监控任务".format(scope_id))
+
+    # 3. 目标完整性校验
+    target = task_data.get("target", "")
+    if not target or not str(target).strip():
+        raise Exception("任务目标为空，无法重新下发")
+
+    # 4. 预建任务记录：立即落库，保证重启动作可追踪，派发失败可回滚
+    monitor_options = options.copy()
+    monitor_options.pop("scheduler_id", None)  # 一次性重扫不绑定调度器
+
+    new_task_data = {
+        "name": utils.truncate_string(task_data["name"]),
+        "target": target,
+        "start_time": "-",
+        "status": TaskStatus.WAITING,
+        "type": task_type,
+        "task_tag": task_tag or TaskTag.MONITOR,
+        "end_time": "-",
+        "service": [],
+        "options": monitor_options,
+        "celery_id": ""
+    }
+    insert_result = utils.conn_db('task').insert_one(new_task_data)
+    new_task_id = str(insert_result.inserted_id)
+    new_task_data["task_id"] = new_task_id
+
+    # 5. 路由调度：克隆新建并派发至 Celery（worker 收养预建记录，不重复落库）
+    celery_task_data = {
+        "domain": target,
+        "scope_id": str(scope_id),
+        "type": task_type,
+        "monitor_options": monitor_options,
+        "name": new_task_data["name"],
+        "task_id": new_task_id
+    }
+    celery_action = (CeleryAction.ONESHOT_DOMAIN_EXEC_TASK
+                     if task_type == TaskType.DOMAIN
+                     else CeleryAction.ONESHOT_IP_EXEC_TASK)
+    celery_options = {
+        "celery_action": celery_action,
+        "data": celery_task_data
+    }
+    try:
+        celery_id = celerytask.arl_task.apply_async(
+            kwargs={'options': celery_options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
+    except Exception:
+        # 派发失败：删除预建工单，避免残留永远无法执行的死任务
+        utils.conn_db('task').delete_one({"_id": bson.ObjectId(new_task_id)})
+        raise
+
+    # 6. 回写快递单号
+    values = {"$set": {"celery_id": str(celery_id)}}
+    new_task_data["celery_id"] = str(celery_id)
+    utils.conn_db('task').update_one({"_id": bson.ObjectId(new_task_id)}, values)
+
+    # 7. 标记资产分组探测状态
+    if task_type == TaskType.IP:
+        for ip in str(target).split():
+            update_scope_domain_status(str(scope_id), ip, "scanning", new_task_id)
+    else:
+        update_scope_domain_status(str(scope_id), str(target), "scanning", new_task_id)
+
+    return new_task_data

@@ -103,7 +103,7 @@ class PortScanner(object):
 
         # regex used to detect nmap (http or https)
         regex = re.compile(
-            'Nmap version [0-9]*\.[0-9]*[^ ]* \( http(|s)://.* \)'
+            r'Nmap version [0-9]*\.[0-9]*[^ ]* \( http(|s)://.* \)'
         )
         # launch 'nmap -V', we wait after
         # 'Nmap version 5.0 ( http://nmap.org )'
@@ -139,8 +139,8 @@ class PortScanner(object):
             if regex.match(line) is not None:
                 is_nmap_found = True
                 # Search for version number
-                regex_version = re.compile('[0-9]+')
-                regex_subversion = re.compile('\.[0-9]+')
+                regex_version = re.compile(r'[0-9]+')
+                regex_subversion = re.compile(r'\.[0-9]+')
 
                 rv = regex_version.search(line)
                 rsv = regex_subversion.search(line)

@@ -366,7 +366,6 @@ def sync_assets_to_scope(scope_name: str, assets: list[str]) -> str:
     payload = {
         "name": scope_name,
         "scope": scope_str,
-        "black_scope": "",
         "scope_type": "mixed"
     }
     res = _request("POST", "/asset_scope/", json_data=payload)

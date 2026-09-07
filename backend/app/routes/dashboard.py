@@ -211,6 +211,29 @@ class DashboardSysInfo(ARLResource):
         mem_percent = mem.percent
         disk = psutil.disk_usage('/')
         disk_percent = disk.percent
+
+        # 1b. 内存明细与真实指标 (去 mem_limit 硬限制后的宿主机可观测补偿)
+        try:
+            mem_used_gb = round((mem.total - mem.available) / (1024 ** 3), 2)
+        except Exception:
+            mem_used_gb = 0
+        try:
+            mem_available_gb = round(mem.available / (1024 ** 3), 2)
+        except Exception:
+            mem_available_gb = 0
+        try:
+            swap = psutil.swap_memory()
+            swap_percent = swap.percent
+            swap_total_gb = round(swap.total / (1024 ** 3), 2)
+        except Exception:
+            swap_percent = 0
+            swap_total_gb = 0
+        if mem_percent >= 90:
+            mem_alert = "critical"
+        elif mem_percent >= 80:
+            mem_alert = "warning"
+        else:
+            mem_alert = "ok"
         
         # 2. Background Tasks (task & github_task)
         non_running_statuses = [TaskStatus.DONE, TaskStatus.WAITING, TaskStatus.ERROR, TaskStatus.STOP]
@@ -263,6 +286,11 @@ class DashboardSysInfo(ARLResource):
             "cpu_count": psutil.cpu_count(logical=True),
             "mem_percent": mem_percent,
             "mem_total_gb": round(mem.total / (1024 ** 3), 2),
+            "mem_used_gb": mem_used_gb,
+            "mem_available_gb": mem_available_gb,
+            "mem_alert": mem_alert,
+            "swap_percent": swap_percent,
+            "swap_total_gb": swap_total_gb,
             "disk_percent": disk_percent,
             "tasks": {
                 "running": running_tasks,

@@ -44,7 +44,6 @@ def create_index():
         "asset_cip": "scope_id",
         "asset_nuclei_result": "scope_id",
         "asset_stat_finger": "scope_id",
-        "poc": "plugin_name",
         "asset_wih": ["scope_id", "record_type", "fnv_hash"],
         "dict_upload_task": "task_id",
     }
@@ -73,46 +72,82 @@ def create_index():
         "stat_finger": [("task_id", 1), ("name", 1)],
         "cip": [("task_id", 1), ("cidr_ip", 1)],
         "wih": [("task_id", 1), ("site", 1), ("fnv_hash", 1)],
-        "asset_wih": [("scope_id", 1), ("site", 1), ("fnv_hash", 1)]
+        "asset_wih": [("scope_id", 1), ("site", 1), ("fnv_hash", 1)],
+        "poc": [("plugin_name", 1)],
+        "fingerprint_deleted": [("name", 1)],
     }
+
+    def _deduplicate_and_create_unique(col, keys, drop_idx=None):
+        import logging
+        # 🛡️【无损兼容】在去重前，为存量数据自动平滑生成新标准 Hash 补齐，避免 null 误聚合
+        if col in ["wih", "asset_wih"]:
+            try:
+                from app.services.wih.fnv1a import fnv1a_64
+                cursor = conn_db(col).find(
+                    {"$or": [{"fnv_hash": {"$exists": False}}, {"fnv_hash": None}, {"fnv_hash": ""}]},
+                    batch_size=500
+                )
+                for doc in cursor:
+                    content = doc.get("content", "")
+                    new_hash = fnv1a_64(content) if content else f"fallback_{doc['_id']}"
+                    conn_db(col).update_one({"_id": doc["_id"]}, {"$set": {"fnv_hash": new_hash}})
+            except Exception as inner_ex:
+                logging.getLogger().error(f"Failed to migrate missing fnv_hash for {col}: {inner_ex}")
+
+        try:
+            group_id = {k[0]: f"${k[0]}" for k in keys}
+            pipeline = [
+                {"$group": {"_id": group_id, "dups": {"$push": "$_id"}, "count": {"$sum": 1}}},
+                {"$match": {"count": {"$gt": 1}}}
+            ]
+            for doc in conn_db(col).aggregate(pipeline, allowDiskUse=True):
+                dups = doc['dups'][1:]
+                if dups:
+                    conn_db(col).delete_many({"_id": {"$in": dups}})
+
+            if drop_idx:
+                try:
+                    conn_db(col).drop_index(drop_idx)
+                except Exception as drop_e:
+                    logging.getLogger().warning(f"Failed to drop old index {drop_idx} on {col}: {drop_e}")
+            else:
+                # 兜底：若未指定 drop_idx，清理同字段的旧非唯一索引
+                try:
+                    target_keys = [(k, int(d)) for k, d in keys]
+                    for name, info in conn_db(col).index_information().items():
+                        if [(k, int(d)) for k, d in info.get("key", [])] == target_keys and not info.get("unique", False):
+                            conn_db(col).drop_index(name)
+                except Exception:
+                    pass
+
+            conn_db(col).create_index(keys, unique=True, background=True)
+            logging.getLogger().info(f"Successfully deduplicated and created unique index on {col}")
+        except Exception as de:
+            logging.getLogger().error(f"Failed to deduplicate or create unique index on {col}: {de}")
 
     for col, keys in unique_indexes.items():
         try:
-            conn_db(col).create_index(keys, unique=True, background=True)
+            # 🛡️【平滑演进】主动探测：若存量库已存在同字段非唯一索引（如老版 poc.plugin_name），先去重并平滑置换为唯一索引
+            target_keys = [(k, int(d)) for k, d in keys]
+            existing_indexes = conn_db(col).index_information()
+            conflict_idx_name = None
+            for idx_name, info in existing_indexes.items():
+                if [(k, int(d)) for k, d in info.get("key", [])] == target_keys and not info.get("unique", False):
+                    conflict_idx_name = idx_name
+                    break
+
+            if conflict_idx_name:
+                import logging
+                logging.getLogger().info(f"Detected legacy non-unique index {conflict_idx_name} on {col}, upgrading to unique...")
+                _deduplicate_and_create_unique(col, keys, drop_idx=conflict_idx_name)
+            else:
+                conn_db(col).create_index(keys, unique=True, background=True)
         except Exception as e:
             import logging
-            if "E11000" in str(e) or "duplicate key error" in str(e).lower():
-                logging.getLogger().warning(f"Duplicate key error on {col}, attempting to deduplicate...")
-                
-                # 🛡️【无损兼容】在去重前，为存量数据自动平滑生成新标准 Hash 补齐，避免 null 误聚合
-                if col in ["wih", "asset_wih"]:
-                    try:
-                        from app.services.wih.fnv1a import fnv1a_64
-                        cursor = conn_db(col).find(
-                            {"$or": [{"fnv_hash": {"$exists": False}}, {"fnv_hash": None}, {"fnv_hash": ""}]},
-                            batch_size=500
-                        )
-                        for doc in cursor:
-                            content = doc.get("content", "")
-                            new_hash = fnv1a_64(content) if content else f"fallback_{doc['_id']}"
-                            conn_db(col).update_one({"_id": doc["_id"]}, {"$set": {"fnv_hash": new_hash}})
-                    except Exception as inner_ex:
-                        logging.getLogger().error(f"Failed to migrate missing fnv_hash for {col}: {inner_ex}")
-
-                try:
-                    group_id = {k[0]: f"${k[0]}" for k in keys}
-                    pipeline = [
-                        {"$group": {"_id": group_id, "dups": {"$push": "$_id"}, "count": {"$sum": 1}}},
-                        {"$match": {"count": {"$gt": 1}}}
-                    ]
-                    for doc in conn_db(col).aggregate(pipeline, allowDiskUse=True):
-                        dups = doc['dups'][1:]
-                        if dups:
-                            conn_db(col).delete_many({"_id": {"$in": dups}})
-                    conn_db(col).create_index(keys, unique=True, background=True)
-                    logging.getLogger().info(f"Successfully deduplicated and created unique index on {col}")
-                except Exception as de:
-                    logging.getLogger().error(f"Failed to deduplicate {col}: {de}")
+            err_msg = str(e).lower()
+            if "e11000" in err_msg or "duplicate key error" in err_msg or "different options" in err_msg or "conflict" in err_msg:
+                logging.getLogger().warning(f"Index conflict or duplicate key on {col} ({e}), attempting to deduplicate and migrate...")
+                _deduplicate_and_create_unique(col, keys)
             else:
                 logging.getLogger().warning(f"Failed to create unique index on {col}: {e}")
 
@@ -168,6 +203,24 @@ def migrate_asset_scope_domain_status():
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def cleanup_asset_scope_dead_fields():
+    """
+    🧹【平滑演进】下线资产黑名单功能后，清理存量 asset_scope 文档中的死字段 black_scope / black_scope_array
+    该字段自引入起仅存储、从未被扫描/监控链路读取，$unset 无任何行为影响；重复执行幂等
+    """
+    import logging
+    logger = logging.getLogger()
+    try:
+        result = conn_db('asset_scope').update_many(
+            {"$or": [{"black_scope": {"$exists": True}}, {"black_scope_array": {"$exists": True}}]},
+            {"$unset": {"black_scope": "", "black_scope_array": ""}}
+        )
+        if result.modified_count:
+            logger.info(f"Cleaned up dead black_scope fields from {result.modified_count} asset_scope documents.")
+    except Exception as e:
+        logger.error(f"Failed to cleanup asset_scope dead black_scope fields: {e}")
+
+
 def ensure_builtin_dicts():
     """确保核心内置字典文件存在（防止升级后因持久化数据卷隔离缺失新增的内置字典）"""
     import os
@@ -184,6 +237,96 @@ def ensure_builtin_dicts():
             logging.getLogger().info("Successfully auto-seeded missing domain_top300.txt into dicts volume.")
         except Exception as e:
             logging.getLogger().warning(f"Failed to auto-seed domain_top300.txt: {e}")
+
+
+def fingerprint_info_update():
+    """
+    增量平滑同步内置 webapp.json 指纹到 MongoDB fingerprint 集合
+    确保存量升级的老用户自动获得新增与加固的指纹，同时完全保留用户在 UI 中添加的自定义指纹
+    """
+    import os
+    import json
+    import logging
+    from app.config import Config
+    from app.services.fingerprint_cache import finger_db_cache
+    from pymongo import UpdateOne
+    from app.utils import curr_date_obj
+
+    logger = logging.getLogger()
+    webapp_file = Config.web_app_rule
+    if not os.path.exists(webapp_file):
+        return
+
+    try:
+        with open(webapp_file, 'r', encoding='utf-8') as f:
+            web_app_rules = json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load webapp.json in fingerprint_info_update: {e}")
+        return
+
+    db = conn_db('fingerprint')
+    try:
+        db.create_index("name", unique=True, background=True)
+    except Exception:
+        pass
+
+    # 1. 若表完全为空，直接触发底层 auto_seed 初始全量灌入
+    if db.count_documents({}) == 0:
+        finger_db_cache._auto_seed_if_empty()
+        return
+
+    # 2. 存量环境执行增量自动补齐与核心系统指纹加固
+    try:
+        # 清理已废弃/合并的存量冗余规则（如 etcd-io 归并至 etcd）
+        db.delete_one({"name": "etcd-io"})
+
+        # 用户在 UI 主动删除的内置指纹黑名单：删除后不因增量同步自动复活
+        # （由 /fingerprint/delete/ 写入，重新添加/全量重灌时清除）
+        deleted_names = set(conn_db('fingerprint_deleted').distinct('name'))
+
+        # 核心加固指纹白名单：代码加固更新后强制同步最新规则
+        # 键名必须与 webapp.json 实际键名严格一致（如 Consul by HashiCorp / alibaba-nacos），
+        # 并尊重用户删除标记，避免强制复活已删除的核心指纹
+        core_system_rules = ["etcd", "Kubelet", "Consul by HashiCorp", "alibaba-nacos", "Kubernetes"]
+        updated_core_rules = {}
+        for rule_name in core_system_rules:
+            if (rule_name in web_app_rules and rule_name not in deleted_names
+                    and web_app_rules[rule_name].get("fofa_rule")):
+                updated_core_rules[rule_name] = web_app_rules[rule_name]["fofa_rule"]
+
+        existing_names = set(db.distinct('name'))
+        # 增量补齐缺失的内置指纹（排除已删除黑名单与待加固核心规则，确保 bulk_write 中每条规则指令严格唯一）
+        missing_rules = {
+            name: detail for name, detail in web_app_rules.items()
+            if name not in existing_names and name not in deleted_names
+            and name not in updated_core_rules and detail.get("fofa_rule")
+        }
+
+        operations = []
+        now_date = curr_date_obj()
+
+        # 增量补齐缺失的内置指纹
+        for name, detail in missing_rules.items():
+            operations.append(UpdateOne(
+                {"name": name},
+                {"$setOnInsert": {"name": name, "human_rule": detail["fofa_rule"], "update_date": now_date}},
+                upsert=True
+            ))
+
+        # 平滑同步核心加固指纹
+        for name, rule_str in updated_core_rules.items():
+            operations.append(UpdateOne(
+                {"name": name},
+                {"$set": {"human_rule": rule_str, "update_date": now_date}},
+                upsert=True
+            ))
+
+        if operations:
+            db.bulk_write(operations, ordered=False)
+            logger.info(f"Smoothly synced {len(operations)} fingerprint rules (new: {len(missing_rules)}) to MongoDB.")
+            finger_db_cache.update_cache(force=True)
+    except Exception as e:
+        logger.error(f"Failed to smoothly sync fingerprints: {e}")
 
 
 def cleanup_zombie_tasks():
@@ -233,10 +376,6 @@ def arl_update():
     if is_run_flask_routes():
         return
 
-    npoc_info_update()
-    
-    from app.services.fingerprint_cache import finger_db_cache
-    finger_db_cache._auto_seed_if_empty()
     import time
     db = conn_db('system_config')
     now = time.time()
@@ -280,8 +419,11 @@ def arl_update():
 
     try:
         ensure_builtin_dicts()
+        fingerprint_info_update()
         update_task_tag()
         create_index()
+        npoc_info_update()
+        cleanup_asset_scope_dead_fields()
         migrate_asset_scope_domain_status()
         cleanup_zombie_tasks()
         db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
@@ -298,11 +440,14 @@ lock = threading.Lock()
 def npoc_info_update():
     from app.services.npoc import NPoC
     with lock:
-        if conn_db('poc').count_documents({}) > 0:
-            return
-
         n = NPoC()
-        n.sync_to_db()
+        db = conn_db('poc')
+        existing_names = set(db.distinct('plugin_name'))
+        missing_names = set(n.plugin_name_list) - existing_names
+        if missing_names:
+            # 仅增量同步新增插件，避免全量 sync_to_db 覆盖既有插件元数据与 update_date
+            # 已通过 POST /poc/delete/ 删除的插件会同时移除磁盘脚本，重启后不再加载，天然不复活
+            n.sync_to_db(names=missing_names)
 
 
 # 判断是否是-m flask routes 模式运行

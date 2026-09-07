@@ -3,8 +3,8 @@ server {
     http2        on;
     server_name  localhost;
 
-    # 开启 HTTP Basic Auth 阻挡被动扫描
-    auth_basic "Restricted Access - AntiScan";
+    # 默认关闭 HTTP Basic Auth (可在 Web 顶部导航栏按需开启阻挡被动扫描)
+    auth_basic off;
     auth_basic_user_file /etc/nginx/.htpasswd;
 
     ssl_certificate      /certs/arl.crt;

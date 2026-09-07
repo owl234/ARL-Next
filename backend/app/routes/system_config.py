@@ -68,8 +68,8 @@ class Performance(ARLResource):
             "code": 200,
             "message": "success",
             "data": {
-                "celery_heavy_concurrency": config.get("celery_heavy_concurrency", 2),
-                "celery_light_concurrency": config.get("celery_light_concurrency", 3),
+                "celery_heavy_concurrency": config.get("celery_heavy_concurrency", 1),
+                "celery_light_concurrency": config.get("celery_light_concurrency", 1),
                 "osint_concurrency": config.get("osint_concurrency", 1)
             }
         }
@@ -81,8 +81,8 @@ class Performance(ARLResource):
         更新性能配置 (支持热扩缩容)
         """
         args = self.get_parser(performance_model).parse_args()
-        new_heavy = args.get('celery_heavy_concurrency', 2)
-        new_light = args.get('celery_light_concurrency', 3)
+        new_heavy = args.get('celery_heavy_concurrency', 1)
+        new_light = args.get('celery_light_concurrency', 1)
         new_osint = args.get('osint_concurrency', 1)
 
         if new_heavy < 1:
@@ -93,8 +93,8 @@ class Performance(ARLResource):
             new_osint = 1
 
         old_config = get_performance_config()
-        old_heavy = old_config.get("celery_heavy_concurrency", 2)
-        old_light = old_config.get("celery_light_concurrency", 3)
+        old_heavy = old_config.get("celery_heavy_concurrency", 1)
+        old_light = old_config.get("celery_light_concurrency", 1)
         old_osint = old_config.get("osint_concurrency", 1)
         
         diff_heavy = new_heavy - old_heavy

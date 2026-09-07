@@ -11,7 +11,7 @@ RUN apt-get update -o Acquire::Retries=10 && \
     ca-certificates make gcc g++ \
     automake autoconf libtool python3-dev \
     libxml2-dev libxslt1-dev zlib1g-dev libffi-dev libssl-dev \
-    libpcap-dev libssh2-1-dev \
+    libpcap-dev \
     python3 python3-pip python3-venv && \
     rm -rf /var/lib/apt/lists/*
 
@@ -21,9 +21,22 @@ RUN cd /tmp && \
     tar xvf v1.1.0.tar.gz && cd massdns-1.1.0 && make -j$(nproc) && \
     cp bin/massdns /usr/local/bin/massdns && cd /tmp && rm -rf massdns*
 
-# 3. Nmap 采用 apt-get 安装，避免在 ARM 宿主机上通过 QEMU 交叉编译 C++ 导致的崩溃
-RUN mkdir -p /usr/local/share/nmap && \
-    (wget -O /usr/local/share/nmap/nmap-service-probes https://fastly.jsdelivr.net/gh/nmap/nmap@master/nmap-service-probes || wget -O /usr/local/share/nmap/nmap-service-probes https://gh-proxy.com/https://raw.githubusercontent.com/nmap/nmap/master/nmap-service-probes)
+# 3. 编译 Nmap 7.95 (黄金 LTS 版本：补齐 2500+ 服务指纹与 336 种现代 OS 指纹，修复核心内存泄漏)
+# 针对 ARM64 / QEMU 交叉编译进行极致工程裁剪：
+# - 剥离无用的 zenmap, ndiff, nping (重型 C++ 模板), ncat
+# - 严格限制 make 并发数 (max 2)，彻底杜绝 QEMU 内存溢出与多线程竞态段错误
+# - 官方源与开源镜像双重兜底下载
+RUN cd /tmp && \
+    (wget -t 5 https://nmap.org/dist/nmap-7.95.tar.bz2 || \
+     wget -t 5 https://ftp2.osuosl.org/pub/blfs/conglomeration/nmap/nmap-7.95.tar.bz2) && \
+    bzip2 -cd nmap-7.95.tar.bz2 | tar xvf - && cd nmap-7.95 && \
+    ./configure --without-zenmap --without-ndiff --without-nping --without-ncat \
+                --without-libssh2 \
+                --with-liblua=included --with-libpcre=included && \
+    make -j$(nproc | awk '{print ($1 > 2 ? 2 : $1)}') && \
+    make install && \
+    strip -s /usr/local/bin/nmap || true && \
+    cd /tmp && rm -rf nmap*
 
 # 4. 下载 Nuclei 并预热模板
 RUN ARCH=$(dpkg --print-architecture) && \
@@ -55,21 +68,24 @@ FROM python:3.13-slim-bookworm
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
 ENV NODE_PATH=/usr/local/lib/node_modules
+ENV NMAPDIR=/usr/share/nmap
 
-# 1. 仅安装生产运行所需的必要库
+# 1. 仅安装生产运行所需的必要库 (移除臃肿的 apt nmap，仅保留纯净动态链接库)
 RUN apt-get update -o Acquire::Retries=10 && \
     apt-get install -y --no-install-recommends \
     wget curl tzdata ca-certificates \
-    libssl3 libxml2 libxslt1.1 zlib1g libffi8 nmap && \
+    libssl3 libxml2 libxslt1.1 zlib1g libffi8 libpcap0.8 libstdc++6 && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/locale/*
 
 # 2. 从 builder 层拉取二进制文件和虚拟环境
-# 注意：剥离已过时且编译易错的 ndiff 和 nping
+# 注意：ndiff / nping / ncat / zenmap 已在构建阶段经 configure --without-* 剥离，此处仅拉取运行所需的 nmap 二进制
 COPY --from=builder-c /usr/local/bin/massdns \
                     /usr/local/bin/nuclei \
+                    /usr/local/bin/nmap \
                     /usr/local/bin/
-COPY --from=builder-c /usr/local/share/nmap /usr/local/share/nmap
+COPY --from=builder-c /usr/local/share/nmap /usr/share/nmap
+RUN mkdir -p /usr/local/share && ln -s /usr/share/nmap /usr/local/share/nmap
 COPY --from=builder-py /code/backend/.venv-docker /code/backend/.venv-docker
 COPY --from=builder-c /root/nuclei-templates /root/nuclei-templates
 

@@ -203,7 +203,7 @@
 
             <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" :disabled="record.status !== 'done' && record.status !== 'stop' && record.status !== 'error'" @click="deleteSingleTask(record)">删 除</a-button>
 
-            <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" :disabled="record.status !== 'done' && record.status !== 'stop' && record.status !== 'error'" @click="restartTask(record)">重 启</a-button>
+            <a-button type="link" size="small" style="color: var(--arl-text-color); padding: 0 4px;" :loading="record.restarting" :disabled="(record.status !== 'done' && record.status !== 'stop' && record.status !== 'error') || record.restarting" @click="restartTask(record)">重 启</a-button>
           </a-space>
         </template>
 
@@ -1001,6 +1001,8 @@ const deleteSingleTask = (record) => {
 
 // 5. 重启任务 (Restart)
 const restartTask = async (record) => {
+  if (record.restarting) return;
+  record.restarting = true;
   try {
     // 对齐 Payload: 传数组
     const res = await request.post('/task/restart/', {
@@ -1008,13 +1010,21 @@ const restartTask = async (record) => {
     });
 
     if (res.code === 200) {
-      message.success('任务已重启，正在执行... 🚀');
-      fetchTasks(pagination.current, pagination.pageSize); // 刷新表格看到状态变为 processing
+      const newTaskId = res.data?.new_task_id?.[0];
+      if (newTaskId) {
+        message.success(`任务已重启，新任务 ID: ${newTaskId} 🚀`);
+      } else {
+        message.success('任务已重启，新任务已下发至列表首页！🚀');
+      }
+      fetchTasks(pagination.current, pagination.pageSize); // 保持在当前页并刷新表格
     } else {
-      message.error('重启失败: ' + (res.message || '未知错误'));
+      const errMsg = res.data?.error || res.message || '未知错误';
+      message.error('重启失败: ' + errMsg);
     }
   } catch (error) {
     message.error('网络异常，重启失败');
+  } finally {
+    record.restarting = false;
   }
 };
 

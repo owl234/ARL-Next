@@ -20,6 +20,7 @@ PORT = 8888
 
 update_thread = None
 dynamic_progress = {}
+progress_lock = threading.Lock()
 config_lock = threading.Lock()
 
 CGNAT_NET = ipaddress.ip_network('100.64.0.0/10')
@@ -321,7 +322,8 @@ class PollingHandler(BaseHTTPRequestHandler):
         with open(LOG_FILE, 'w', encoding='utf-8') as f:
             f.write("⏳ 正在初始化更新任务...\n")
         
-        dynamic_progress.clear()
+        with progress_lock:
+            dynamic_progress.clear()
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -360,10 +362,13 @@ class PollingHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                     
+            with progress_lock:
+                current_progress = dynamic_progress.copy()
+
             resp_data = {
                 "offset": new_offset,
                 "chunk": chunk,
-                "progress": dynamic_progress.copy(),
+                "progress": current_progress,
                 "done": "[DONE]" in full_log,
                 "error": "[ERROR]" in full_log
             }
@@ -388,13 +393,15 @@ class PollingHandler(BaseHTTPRequestHandler):
         else:
             content = "Waiting for logs...\n"
             
-        for layer, prog in dynamic_progress.items():
+        with progress_lock:
+            progress_items = list(dynamic_progress.items())
+        for layer, prog in progress_items:
             content += f"🔄 {layer}: {prog}\n"
             
         self.wfile.write(content.encode('utf-8'))
 
     def handle_auth_status(self):
-        enabled = True
+        enabled = False
         base_dir = get_base_dir()
         conf_prod = os.path.join(base_dir, "frontend", "default.conf.prod")
         
@@ -647,7 +654,7 @@ class PollingHandler(BaseHTTPRequestHandler):
         script_name = "start-prod.sh"
         script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", script_name))
 
-        self.log_append("[INFO] 📦 正在拉取核心镜像以提取最新架构配置...")
+        self.log_append("[INFO] 📦 [阶段 1/3] 正在拉取核心镜像以提取最新架构配置...")
         image_name = "crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest"
         
         max_retries = 3
@@ -685,9 +692,7 @@ class PollingHandler(BaseHTTPRequestHandler):
             self.log_append(f"[WARN] ⚠️ 核心镜像拉取遇到网络波动，正在进行第 {retry_count} 次重试 (等待 3 秒)...")
             time.sleep(3)
 
-        # 循环唯一出口为 break（pull_ok 恒为 True）或内部 return，此处无需重复兜底
-
-        self.log_append("[INFO] 📦 正在提取并覆盖最新基础架构文件...")
+        self.log_append("[INFO] 📦 核心镜像拉取完成，正在提取并覆盖最新基础架构文件...")
         cwd = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         copy_cmd = [
             "docker", "run", "--rm",
@@ -708,7 +713,7 @@ class PollingHandler(BaseHTTPRequestHandler):
         # 赋予可执行权限
         subprocess.run(["chmod", "+x", script_path])
         
-        self.log_append("[INFO] 📦 基础架构同步完毕，正在拉取其余 Docker 镜像并部署...")
+        self.log_append("[INFO] 📦 基础架构同步完毕，开始执行全量多服务部署...")
         self.log_append(f"[INFO] 🚀 开始执行 {script_name}，这可能需要几分钟...")
         
         success = self.run_command(["bash", script_path])
@@ -747,6 +752,7 @@ class PollingHandler(BaseHTTPRequestHandler):
         
         master, slave = pty.openpty()
         process = None
+        last_progress_log_time = time.time()
         try:
             try:
                 process = subprocess.Popen(
@@ -789,13 +795,30 @@ class PollingHandler(BaseHTTPRequestHandler):
                             layer_id = match.group(1)
                             status_word = match.group(2).lower()
                             
-                            # If it's a completion state, remove from dynamic_progress
-                            if any(x in status_word for x in ['complete', 'pulled', 'downloaded', 'exists']):
-                                if layer_id in dynamic_progress:
-                                    del dynamic_progress[layer_id]
-                            else:
-                                # Not complete, update progress
-                                dynamic_progress[layer_id] = line[match.start(2):].strip()
+                            active_items = []
+                            total_layers_count = 0
+                            with progress_lock:
+                                # If it's a completion state, remove from dynamic_progress
+                                if any(x in status_word for x in ['complete', 'pulled', 'downloaded', 'exists']):
+                                    if layer_id in dynamic_progress:
+                                        del dynamic_progress[layer_id]
+                                else:
+                                    # Not complete, update progress
+                                    dynamic_progress[layer_id] = line[match.start(2):].strip()
+                                
+                                total_layers_count = len(dynamic_progress)
+                                if total_layers_count > 0:
+                                    active_items = [f"{k[:8]}: {v}" for k, v in list(dynamic_progress.items())[:3]]
+                            
+                            # 聚合分层进度摘要（每3秒输出一次到日志，规避网络下载中长时间无日志造成的卡死焦虑）
+                            now_t = time.time()
+                            if now_t - last_progress_log_time >= 3.0 and active_items:
+                                summary_str = " | ".join(active_items)
+                                if total_layers_count > 3:
+                                    summary_str += f" (以及其他 {total_layers_count - 3} 个分层)"
+                                self.log_append(f"  ⚡ [分层传输] {summary_str}")
+                                last_progress_log_time = now_t
+
                             continue
                         
                         if any(x in line for x in ['Pulling fs layer', 'Already exists', 'Pull complete', 'Download complete', 'Digest:', 'Status: Downloaded newer image', 'Status: Image is up to date']):
@@ -826,7 +849,8 @@ class PollingHandler(BaseHTTPRequestHandler):
                 os.close(master)
             except OSError:
                 pass
-            dynamic_progress.clear()
+            with progress_lock:
+                dynamic_progress.clear()
 
     def verify_token(self, provided_token):
         if not provided_token:

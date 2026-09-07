@@ -142,10 +142,33 @@
             <a-skeleton :loading="initialLoading" active :paragraph="{ rows: 1 }" :title="false">
               <div class="sys-flex">
                 <div class="sys-info">
-                  <div class="sys-label">内存占用</div>
-                  <div class="sys-value" :style="{ color: sysInfo.mem_percent > 80 ? '#ff4d4f' : 'inherit' }">{{ sysInfo.mem_percent }}%</div>
+                  <div class="sys-label">
+                    内存占用
+                    <a-tag
+                      v-if="sysInfo.mem_alert === 'critical'"
+                      color="red"
+                      class="mem-alert-tag"
+                    >告警</a-tag>
+                    <a-tag
+                      v-else-if="sysInfo.mem_alert === 'warning'"
+                      color="orange"
+                      class="mem-alert-tag"
+                    >偏高</a-tag>
+                  </div>
+                  <div class="sys-value" :style="{ color: sysInfo.mem_alert === 'critical' ? '#ff4d4f' : 'inherit' }">{{ sysInfo.mem_percent }}%</div>
+                  <a-tooltip v-if="sysInfo.mem_total_gb" placement="bottom">
+                    <template #title>
+                      <div style="font-size: 12px; line-height: 1.6;">
+                        <div>宿主机物理内存：{{ sysInfo.mem_used_gb }} / {{ sysInfo.mem_total_gb }} GB（可用 {{ sysInfo.mem_available_gb }} GB）</div>
+                        <div>虚拟内存 (Swap)：使用率 {{ sysInfo.swap_percent }}%（总量 {{ sysInfo.swap_total_gb }} GB）</div>
+                        <div v-if="sysInfo.mem_alert === 'critical'" style="color: #ff4d4f; margin-top: 2px;">⚠️ 宿主机内存负载极高，建议关注扫描任务并发量</div>
+                        <div v-else-if="sysInfo.mem_alert === 'warning'" style="color: #faad14; margin-top: 2px;">⚡ 宿主机内存水位偏高，请留意整体资源负载</div>
+                      </div>
+                    </template>
+                    <div class="sub-label" style="cursor: help;">{{ sysInfo.mem_used_gb }} / {{ sysInfo.mem_total_gb }} GB</div>
+                  </a-tooltip>
                 </div>
-                <a-progress type="circle" :percent="sysInfo.mem_percent" :width="46" :strokeWidth="7" :strokeColor="sysInfo.mem_percent > 80 ? '#ff4d4f' : 'var(--arl-theme-color)'" :showInfo="false" />
+                <a-progress type="circle" :percent="sysInfo.mem_percent" :width="46" :strokeWidth="7" :strokeColor="sysInfo.mem_alert === 'critical' ? '#ff4d4f' : 'var(--arl-theme-color)'" :showInfo="false" />
               </div>
             </a-skeleton>
           </a-card>
@@ -467,6 +490,12 @@ const stats = ref({
 const sysInfo = ref({
   cpu_percent: 0,
   mem_percent: 0,
+  mem_total_gb: 0,
+  mem_used_gb: 0,
+  mem_available_gb: 0,
+  mem_alert: 'ok',
+  swap_percent: 0,
+  swap_total_gb: 0,
   disk_percent: 0,
   tasks: { running: 0, waiting: 0 },
   github_today: { leaks: 0, intel: 0 },
@@ -579,7 +608,8 @@ const fetchSysInfo = async () => {
   try {
     const res = await request.get('/api/dashboard/sysinfo');
     if (res.code === 200) {
-      sysInfo.value = res.data;
+      // 合并赋值保留默认值：滚动升级窗口期旧后端缺新字段时不展示降级
+      sysInfo.value = { ...sysInfo.value, ...res.data };
     }
   } catch (error) {
     console.error('Failed to fetch sysinfo:', error);
@@ -1141,6 +1171,14 @@ onUnmounted(() => {
   font-weight: 600;
   color: var(--arl-text-color);
   line-height: 1.1;
+}
+.mem-alert-tag {
+  margin-left: 6px;
+  font-size: 11px;
+  padding: 0 4px;
+  line-height: 18px;
+  height: 18px;
+  vertical-align: middle;
 }
 
 /* 分割数值区域 (Split Values) */

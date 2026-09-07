@@ -649,6 +649,8 @@ class TaskRestart(ARLResource):
         args = self.parse_args(restart_task_fields)
         task_id_list = args.pop('task_id')
 
+        new_task_id_list = []
+
         try:
             for task_id in task_id_list:
                 task_data = get_task_data(task_id)
@@ -659,13 +661,18 @@ class TaskRestart(ARLResource):
                 if task_data["status"] not in done_status:
                     return utils.build_ret(ErrorMsg.TaskIsRunning, {"task_id": task_id})
 
-                # 调用底层重启逻辑（通常是原样提取配置，生成一个新任务丢给 Celery）
-                restart_task(task_id)
+                # 调用底层重启逻辑（生成一个新任务丢给 Celery），并回传新任务标识便于前端追踪
+                new_task_data = restart_task(task_id)
+                new_task_id = (new_task_data or {}).get("task_id", task_id)
+                new_task_id_list.append(new_task_id)
 
         except Exception as e:
             return utils.build_ret(ErrorMsg.Error, {"error": str(e)})
 
-        return utils.build_ret(ErrorMsg.Success, {"task_id": task_id_list})
+        return utils.build_ret(ErrorMsg.Success, {
+            "task_id": task_id_list,
+            "new_task_id": new_task_id_list
+        })
 
 
 

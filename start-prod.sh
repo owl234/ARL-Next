@@ -258,6 +258,22 @@ check_and_configure_swap() {
     fi
 }
 
+# 5.5 宿主机内存预检 (已移除 mem_limit 硬限制后的部署侧补偿：只告警不阻断)
+check_host_memory() {
+    echo "⚙️ 正在检查宿主机物理内存..."
+    local total_mb=$(free -m | awk '/^Mem:/ {print $2}')
+    if [ -z "$total_mb" ]; then
+        echo "⚠️ 无法读取宿主机内存信息，跳过预检（首页内存占用卡片可实时查看）。"
+        return 0
+    fi
+    # 全栈软保留约 1.8G，低于 2G 的机器去掉硬限制后 burst 风险较高
+    if [ "$total_mb" -lt 2048 ] 2>/dev/null; then
+        echo "⚠️ 宿主机内存仅 ${total_mb}MB（全栈软保留约 1.8G）：已移除容器硬限制，大扫描时请盯紧首页「内存占用」卡片，超 90% 请降并发或加内存。"
+    else
+        echo "✅ 宿主机内存 ${total_mb}MB，满足去硬限制后的运行基线！"
+    fi
+}
+
 # 6. 宿主机内核防假死与扫描性能调优 (swappiness/vfs_cache_pressure/overcommit)
 tune_system_kernel_parameters() {
     echo "⚙️ 正在配置宿主机内核性能与防假死参数 (swappiness=10, vfs_cache_pressure=50, overcommit_memory=1)..."
@@ -378,6 +394,7 @@ check_disk_space
 check_docker_daemon || exit 1
 check_and_install_compose
 check_and_configure_swap
+check_host_memory
 tune_system_kernel_parameters
 
 # 1. 宿主机 Docker 守护进程性能调优 (userland-proxy)
@@ -505,18 +522,26 @@ if [ -d "./frontend/.htpasswd" ]; then
     rm -rf "./frontend/.htpasswd"
 fi
 if [ ! -f "./frontend/.htpasswd" ]; then
-    echo "⚠️ 提示：未检测到 ./frontend/.htpasswd 文件，正在生成默认防扫描凭证..."
+    echo "⚠️ 提示：未检测到 ./frontend/.htpasswd 文件，正在预置防扫描基础凭证..."
     mkdir -p ./frontend
     echo 'admin:$apr1$i/Qqu0mp$6rhjb2tWaFFEqpeDcr4Su/' > ./frontend/.htpasswd
-    echo "✅ 已生成默认 Basic Auth 凭证: 账号 admin / 密码 arl_next"
+    echo "✅ 已预置默认 Basic Auth 凭证: 账号 admin / 密码 arl_next (网关默认关闭，可在 Web 顶部导航栏按需开启)"
 fi
 
-echo "🐳 正在为当前运行版本创建稳定备份快照..."
-docker tag crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest arl-web:backup-stable 2>/dev/null || true
-docker tag crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-worker:latest arl-worker:backup-stable 2>/dev/null || true
-docker tag crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-frontend:latest arl-frontend:backup-stable 2>/dev/null || true
+echo "🐳 [1/3] 正在为当前运行版本创建稳定备份快照..."
+SNAPSHOT_SVCS=("arl-web" "arl-worker" "arl-frontend" "arl-puppeteer" "osint-service")
+for svc in "${SNAPSHOT_SVCS[@]}"; do
+    img="crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/${svc}:latest"
+    if docker image inspect "$img" >/dev/null 2>&1; then
+        docker tag "$img" "${svc}:backup-stable" 2>/dev/null || true
+        echo "  📦 已为 ${svc} 创建稳定快照 (${svc}:backup-stable)"
+    else
+        echo "  ℹ️  未检测到本地 ${svc} 历史镜像，跳过快照"
+    fi
+done
+echo "✅ 稳定版本镜像快照备份完毕！"
 
-echo "🐳 正在从阿里云镜像库极速拉取最新构建..."
+echo "🐳 [2/3] 正在从阿里云镜像库极速拉取最新构建 (前端、Web、Worker、Puppeteer等)..."
 MAX_RETRIES=3
 RETRY_COUNT=0
 DAEMON_RETRY=0
@@ -524,6 +549,7 @@ MAX_DAEMON_RETRY=2
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     PULL_LOG="/tmp/arl_pull_step.log"
     if (set -o pipefail; docker compose -f docker-compose.prod.yml pull 2>&1 | tee "$PULL_LOG"); then
+        echo "✅ 所有微服务镜像拉取完成！"
         break
     fi
 
@@ -559,7 +585,7 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     sleep 5
 done
 
-echo "🚀 正在启动生产多服务容器组并清理可能遗留的孤儿容器..."
+echo "🚀 [3/3] 正在启动生产多服务容器组并清理可能遗留的孤儿容器..."
 docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
 echo "⏳ 正在等待后端 API 就绪 (动态健康探针检测)..."
@@ -567,16 +593,16 @@ MAX_WAIT=90
 WAIT_TIME=0
 while [ $WAIT_TIME -lt $MAX_WAIT ]; do
     if docker exec arl-web-prod curl -s http://127.0.0.1:5000/ > /dev/null 2>&1; then
-        echo -e "\n✅ 后端服务已完全就绪 (耗时 $WAIT_TIME 秒)"
+        echo "✅ 后端服务已完全就绪 (耗时 $WAIT_TIME 秒)"
         break
     fi
     sleep 2
     WAIT_TIME=$((WAIT_TIME + 2))
-    echo -ne "   等待中... ($WAIT_TIME / $MAX_WAIT 秒)\r"
+    echo "  ⏳ 健康探针探测中... ($WAIT_TIME / $MAX_WAIT 秒)"
 done
 
 if [ $WAIT_TIME -ge $MAX_WAIT ]; then
-    echo -e "\n⚠️ 等待超时，服务可能仍在初始化或存在异常，请稍后重试。"
+    echo "⚠️ 等待超时，服务可能仍在初始化或存在异常，请稍后重试。"
 fi
 
 # 检查是否有容器处于 exited 或 restarting 状态
