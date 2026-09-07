@@ -706,6 +706,9 @@ class PollingHandler(BaseHTTPRequestHandler):
                 cp /host/docker-compose.prod.yml /host/docker-compose.prod.yml.bak_$(date +%Y%m%d%H%M%S) 2>/dev/null || true
             fi
             cp /code/docker-compose.prod.yml /host/docker-compose.prod.yml 2>/dev/null || true
+            cp /code/version.txt /host/version.txt 2>/dev/null || true
+            cp /code/CHANGELOG.md /host/CHANGELOG.md 2>/dev/null || true
+            mkdir -p /host/frontend && cp /code/frontend/default.conf.prod /host/frontend/default.conf.prod 2>/dev/null || true
             """
         ]
         self.run_command(copy_cmd)

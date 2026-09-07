@@ -4,6 +4,25 @@
 
 ---
 
+## [v1.3.2] - 2026-09-07
+
+### 🚀 新增功能
+- **正式确立 GNU GPL-3.0 开源协议与版权声明**：根目录正式引入 `LICENSE`（GNU General Public License v3.0）并完善 README 协议条款与权利义务说明，明确社区自由使用、修改定制、传染同协议开源与免责声明，规范二次开发衍生作品分发，促进社区合规共建。
+- **平台管理员密码强制重置机制 (`--reset`)**：`inject_user.py` 补充 `--reset` 参数控制逻辑，生产容器冷启动或常规重启时自动保护存量管理员口令不被覆盖；运维人员在遗忘密码时可通过终端显式传参（`--reset`）一键强制重置为默认口令 (`arlpass`)。
+
+### 🛠️ 性能与重构
+- **脚本执行路径与虚拟环境隔离加固**：`backend/inject_user.py` 内部引入基于 `__file__` 的绝对路径解析并注入 `sys.path`，摆脱对当前工作目录的隐式依赖；重置指令与单行直更指令全面对齐容器内专属虚拟环境解释器（`/code/backend/.venv-docker/bin/python3`），规避外部环境污染与模块加载缺失。
+- **更新守护进程全架构文件平滑同步**：`updater.py` 容器文件提取更新逻辑扩充同步 `version.txt`、`CHANGELOG.md` 及 Nginx 基础配置 `frontend/default.conf.prod`，确保存量宿主机在 Web 一键升级后版本元数据与网关规则即时生效，同时物理隔离保护宿主机现存 `frontend/.htpasswd` 凭据文件。
+
+### 🐛 问题修复与加固
+- **免 Git 一键部署与手动升级指令修复**：README 中 Ubuntu/CentOS 极速连缀安装指令补充 `docker cp` 提取 `frontend` 目录，规避 Nginx 网关启动时因缺失挂载目录引发的异常；手动升级指令同步补齐 `default.conf.prod` 平滑覆盖逻辑。
+- **规范化代码格式与 Whitespace 严苛清洗**：全面清理代码与文档尾部冗余空白字符与文件末尾多余空行，严格通过 `git diff --check` 格式校验。
+
+### 🛡️ 安全与配置
+- **管理员重置权限模型与盐值风险警示**：在 README 运维 FAQ 中补充 `[!CAUTION]` 安全警示，详述 `--reset` 传参与 Python 直更指令对 Docker Exec 权限的依赖性与免二次认证特性，提醒生产环境收敛宿主机 Docker 用户组权限并规避匿名 docker.sock 暴露。
+
+---
+
 ## [v1.3.1] - 2026-09-07
 
 ### 🚀 新增功能
