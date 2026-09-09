@@ -8,7 +8,12 @@
       <a-button type="primary" @click="isImportModalVisible = true">导入 PoC</a-button>
       <a-button type="primary" @click="downloadTemplate">下载导入模板</a-button>
 
-      <a-button type="primary" :loading="syncLoading" @click="handleSync">更新</a-button>
+      <a-tooltip title="扫描磁盘并同步 PoC 插件库至数据库">
+        <a-button type="primary" :loading="syncLoading" @click="handleSync">
+          <template #icon><sync-outlined /></template>
+          同步本地插件
+        </a-button>
+      </a-tooltip>
     </div>
 
     <div class="search-row" style="margin-bottom: 16px; ">
@@ -93,13 +98,19 @@
         :multiple="true"
         action="/api/poc/import/"
         :headers="uploadHeaders"
-        accept=".yml, .yaml, .py"
+        accept=".py"
         @change="handleUploadChange"
       >
         <p class="ant-upload-drag-icon"><inbox-outlined /></p>
         <p class="ant-upload-text">点击或将文件拖拽到这里上传</p>
-        <p class="ant-upload-hint">支持单文件或多文件批量上传，仅支持 .yml, .yaml, .py 格式</p>
+        <p class="ant-upload-hint">支持单文件或多文件批量上传，仅支持 .py 脚本格式</p>
       </a-upload-dragger>
+      <div style="margin-top: 12px; display: flex; justify-content: flex-end; align-items: center; font-size: 13px;">
+        <span style="color: var(--arl-text-color); opacity: 0.65;">还没有编写标准脚本？</span>
+        <a @click="downloadTemplate" style="margin-left: 6px; font-weight: 500;">
+          <download-outlined /> 下载标准 PoC 模板
+        </a>
+      </div>
     </a-modal>
 
     <!-- 详情抽屉 -->
@@ -220,7 +231,7 @@ import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
 import request from '../utils/request';
 import { message } from 'ant-design-vue';
-import { SearchOutlined, InboxOutlined, LinkOutlined } from '@ant-design/icons-vue';
+import { SearchOutlined, InboxOutlined, LinkOutlined, SyncOutlined, DownloadOutlined } from '@ant-design/icons-vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 
 const editExtensions = [python(), oneDark];
@@ -312,13 +323,21 @@ class Plugin(BasePlugin):
         self.app_name = "【必填】应用名称"
         self.scheme = [SchemeType.HTTPS, SchemeType.HTTP]
         
-        self.author = "作者"
-        self.severity = "High"
-        self.description = "描述"
+        # 富文本详情元数据 (选填)
+        self.author = "作者名称"
+        self.severity = "High"  # Critical, High, Medium, Low
+        self.description = "漏洞产生的原因及详细描述"
+        self.remediation = "升级至最新版本，或修复相关配置"
+        self.references = ["https://cve.mitre.org/..."]
 
     def verify(self, target):
+        # 1. 构造漏洞验证 URL
         url = target + "/vuln_path"
+
+        # 2. 发送探测请求
         conn = http_req(url)
+
+        # 3. 判断是否触发漏洞
         if conn.status_code == 200 and b"vuln_keyword" in conn.content:
             self.logger.success("发现漏洞 {}".format(target))
             return url
@@ -327,19 +346,44 @@ class Plugin(BasePlugin):
   python_brute: {
     ext: '.py',
     content: `from xing.core.BasePlugin import BasePlugin
+from xing.utils import http_req
 from xing.core import PluginType, SchemeType
 
 class Plugin(BasePlugin):
     def __init__(self):
         super(Plugin, self).__init__()
-        self.plugin_type = PluginType.POC
+        self.plugin_type = PluginType.BRUTE
         self.vul_name = "【必填】弱口令"
-        self.app_name = "【必填】应用"
+        self.app_name = "【必填】应用名称"
         self.scheme = [SchemeType.HTTPS, SchemeType.HTTP]
 
-    def verify(self, target):
-        # 实现爆破逻辑
-        pass
+        # 爆破字典（必填）：必须是 xing/dicts/ 下真实存在的文件名，
+        # 引擎 load_dict 直接 open()，写错会当场报错。此处以 tomcat 字典为示例，请换成目标服务的字典
+        self.username_file = "username_tomcat.txt"
+        self.password_file = "password_tomcat.txt"
+
+        self.author = "作者名称"
+        self.severity = "High"
+        self.description = "服务弱口令漏洞"
+
+    def check_app(self, target):
+        # 1. 指纹识别：判断目标是否为本插件针对的应用，返回 True 才会进入爆破循环
+        url = target + "/login"
+        conn = http_req(url)
+        if conn.status_code == 200 and b"login" in conn.content:
+            return True
+        return False
+
+    def login(self, target, user, passwd):
+        # 2. 构造登录验证请求
+        url = target + "/login"
+        payload = {"username": user, "password": passwd}
+        conn = http_req(url, "post", json=payload)
+
+        # 3. 验证凭据是否有效 (成功时返回 True)
+        if conn.status_code == 200 and b"login success" in conn.content:
+            return True
+        return False
 `
   }
 };
@@ -386,8 +430,8 @@ const createPocSource = async () => {
     message.warning('插件名称和内容不能为空');
     return;
   }
-  if (!/^[a-zA-Z0-9_]+$/.test(createForm.plugin_name)) {
-    message.warning('插件名称只能包含字母、数字和下划线');
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_]*$/.test(createForm.plugin_name)) {
+    message.warning('插件名称只允许英文字母、数字和下划线，且首字符必须为英文字母或数字');
     return;
   }
   
@@ -396,7 +440,8 @@ const createPocSource = async () => {
     const res = await request.post('/poc/create/', {
       plugin_name: createForm.plugin_name,
       content: createForm.content,
-      ext: createForm.ext
+      ext: createForm.ext,
+      plugin_type: createForm.templateType === 'python_brute' ? 'brute' : 'poc'
     });
     if (res.code === 200) {
       message.success('新建成功，已同步');
@@ -505,55 +550,25 @@ const handleUploadChange = (info) => {
   const status = info.file.status;
   if (status === 'done') {
     const res = info.file.response;
-    if (res.code === 200) {
-      if (res.data.fail_count > 0) {
-         message.warning(`${info.file.name} 导入存在失败：${res.data.fail_details[0].reason}`);
+    if (res && res.code === 200) {
+      if (res.data?.fail_count > 0) {
+        const detail = res.data.fail_details?.[0];
+        const reason = detail?.reason || '校验未通过';
+        message.warning(`${info.file.name} 导入未通过：${reason}`, 6);
       } else {
-         message.success(`${info.file.name} 导入并同步成功`);
+        message.success(`${info.file.name} 导入并同步成功`);
       }
       onSearch();
     } else {
-      message.error(`${info.file.name} 导入失败: ${res.message}`);
+      message.error(`${info.file.name} 导入失败: ${res?.error || res?.message || '未知错误'}`);
     }
   } else if (status === 'error') {
-    message.error(`${info.file.name} 上传异常`);
+    message.error(`${info.file.name} 上传网络异常`);
   }
 };
 
 const downloadTemplate = () => {
-  const templateStr = `from xing.core.BasePlugin import BasePlugin
-from xing.utils import http_req
-from xing.core import PluginType, SchemeType
-
-class Plugin(BasePlugin):
-    def __init__(self):
-        super(Plugin, self).__init__()
-        self.plugin_type = PluginType.POC
-        self.vul_name = "【必填】此处填写漏洞名称"
-        self.app_name = "【必填】应用名称"
-        self.scheme = [SchemeType.HTTPS, SchemeType.HTTP]
-        
-        # 富文本详情元数据 (选填)
-        self.author = "作者名称"
-        self.severity = "High" # High, Medium, Low, Critical
-        self.description = "漏洞产生的原因及详细描述"
-        self.remediation = "升级至 xxx 版本，或修改 xxx 配置"
-        self.references = ["https://cve.mitre.org/..."]
-
-
-    def verify(self, target):
-        # 1. 构造漏洞验证 URL
-        url = target + "/vuln_path"
-        
-        # 2. 发送请求
-        conn = http_req(url)
-        content = conn.content
-        
-        # 3. 判断是否触发漏洞
-        if conn.status_code == 200 and b"vuln_keyword" in content:
-            self.logger.success("发现漏洞 {}".format(self.target))
-            return url
-`;
+  const templateStr = templates.python_default.content;
   const blob = new Blob([templateStr], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -625,19 +640,19 @@ const resetSearch = () => {
 };
 const handleTableChange = (page, pageSize) => { pagination.current = page; pagination.pageSize = pageSize; fetchData(); };
 
-// ================= 同步更新逻辑 =================
+// ================= 同步插件逻辑 =================
 const handleSync = async () => {
   syncLoading.value = true;
   try {
-    const res = await request.get('/poc/sync/'); // 根据抓包，同步是一个无 payload 的 POST 请求
+    const res = await request.get('/poc/sync/');
     if (res.code === 200) {
-      message.success(`更新成功！共拉取 ${res.data?.plugin_cnt || 0} 个插件`);
+      message.success(`同步成功！共载入 ${res.data?.plugin_cnt || 0} 个插件`);
       onSearch(); // 刷新列表
     } else {
-      message.error('更新失败: ' + res.message);
+      message.error('同步失败: ' + res.message);
     }
   } catch (error) {
-    message.error('请求异常，更新失败');
+    message.error('请求异常，同步失败');
   } finally {
     syncLoading.value = false;
   }

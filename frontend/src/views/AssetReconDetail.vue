@@ -61,6 +61,9 @@
               {{ text || '-' }}
             </div>
           </template>
+          <template v-else-if="column.key === 'serviceName' || column.key === 'name'">
+            {{ record.serviceName || record.name || '-' }}
+          </template>
           <template v-else-if="column.key === 'raw'">
             <a-popover title="原始数据" trigger="click" placement="left">
               <template #content>
@@ -234,6 +237,16 @@ const baseIcpColumns = [
   { title: '详情', key: 'raw', width: 80 }
 ];
 
+const mobileIcpColumns = [
+  { title: '应用名称', dataIndex: 'serviceName', key: 'serviceName', width: 200 },
+  { title: '服务备案号', dataIndex: 'serviceLicence', key: 'serviceLicence', width: 200 },
+  { title: '主办单位名称', dataIndex: 'unitName', key: 'unitName', width: 220 },
+  { title: '主备案号', dataIndex: 'mainLicence', key: 'mainLicence', width: 180 },
+  { title: '前置审批/类型', dataIndex: 'contentTypeName', key: 'contentTypeName', width: 150 },
+  { title: '审核日期', dataIndex: 'updateRecordTime', key: 'updateRecordTime', width: 140 },
+  { title: '详情', key: 'raw', width: 80 }
+];
+
 const genericColumns = [
   { title: '名称', dataIndex: 'filterName', key: 'filterName', width: 200 },
   { title: '详情', key: 'raw', width: 80 }
@@ -252,7 +265,8 @@ const dynamicColumns = computed(() => {
     else if (activeTab.value === 'app') cols = appColumns;
     else cols = genericColumns;
   } else {
-    if (['web', 'app', 'mapp', 'kapp'].includes(activeTab.value)) cols = baseIcpColumns;
+    if (activeTab.value === 'web') cols = baseIcpColumns;
+    else if (['app', 'mapp', 'kapp'].includes(activeTab.value)) cols = mobileIcpColumns;
     else cols = genericColumns;
   }
 

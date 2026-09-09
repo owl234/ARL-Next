@@ -57,6 +57,16 @@ def create_index():
     # Scheduler 核心轮询复合索引
     conn_db('scheduler').create_index([("status", 1), ("next_run_time", 1)], background=True)
 
+    # icp_asset 核心多维查询与排序复合索引（解决 COLLSCAN 与 32MB 内存排序超限）
+    # 逐个兜底：索引属增益型优化，任一构建异常都不得阻断后续增量迁移步骤
+    for icp_keys in ([("task_id", 1), ("query_type", 1), ("updateRecordTime", -1)],
+                     [("task_id", 1), ("query_type", 1), ("examineDate", -1)]):
+        try:
+            conn_db('icp_asset').create_index(icp_keys, background=True)
+        except Exception as ex:
+            import logging
+            logging.getLogger().warning(f"Failed to create icp_asset index {icp_keys}: {ex}")
+
     # 兜底：创建联合唯一索引，彻底解决极端并发下的重复写入问题
     unique_indexes = {
         "site": [("task_id", 1), ("site", 1)],
@@ -417,15 +427,23 @@ def arl_update():
     if result.modified_count == 0:
         return
 
+    def _run_step(name, func):
+        """单步兜底：任一增量步骤异常都不得连带跳过其后的迁移/清理，且必须留痕便于定位毒插件"""
+        try:
+            func()
+        except Exception as e:
+            import logging
+            logging.getLogger().error(f"arl_update step '{name}' failed: {e}", exc_info=True)
+
     try:
-        ensure_builtin_dicts()
-        fingerprint_info_update()
-        update_task_tag()
-        create_index()
-        npoc_info_update()
-        cleanup_asset_scope_dead_fields()
-        migrate_asset_scope_domain_status()
-        cleanup_zombie_tasks()
+        _run_step("ensure_builtin_dicts", ensure_builtin_dicts)
+        _run_step("fingerprint_info_update", fingerprint_info_update)
+        _run_step("update_task_tag", update_task_tag)
+        _run_step("create_index", create_index)
+        _run_step("npoc_info_update", npoc_info_update)
+        _run_step("cleanup_asset_scope_dead_fields", cleanup_asset_scope_dead_fields)
+        _run_step("migrate_asset_scope_domain_status", migrate_asset_scope_domain_status)
+        _run_step("cleanup_zombie_tasks", cleanup_zombie_tasks)
         db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
     except Exception as e:
         import logging

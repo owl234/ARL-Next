@@ -827,7 +827,9 @@ const tabConfig = reactive({
       {
         label: '记录类型',
         key: 'record_type',
-        operator: '='
+        operator: '等于',
+        hasOperatorSelect: true,
+        operators: ['等于', '不等于']
       },
       { label: '内容', key: 'content', operator: '=' },
       { label: '来源 JS', key: 'source', operator: '=' },

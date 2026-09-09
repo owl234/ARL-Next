@@ -11,6 +11,7 @@ logger = get_logger()
 
 base_search_fields = {
     'record_type': fields.String(required=False, description="记录类型"),
+    'record_type__eq': fields.String(required=False, description="记录类型精确匹配"),
     'record_type__neq': fields.String(required=False, description="记录类型不等于（全匹配）"),
     'record_type__not': fields.String(required=False, description="记录类型不包含"),
     'content': fields.String(description="内容"),

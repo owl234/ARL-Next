@@ -81,6 +81,13 @@ async def run_icp_job(options):
     await insert_syslog("info", "ICP查询", f"任务开始运行，目标: {target}，类型: {query_types}")
 
     for idx, qt in enumerate(query_types):
+        # 实时检测任务是否被主动终止
+        task_info = await db['icp_task'].find_one({"_id": ObjectId(task_id)}, {"status": 1})
+        if task_info and task_info.get("status") == "stop":
+            await insert_syslog("warning", "任务中止", "检测到 ICP 查询任务已被手动停止，退出执行流程。")
+            logger.info(f"ICP task {task_id} manually stopped.")
+            return
+
         if idx > 0:
             await asyncio.sleep(random.uniform(2.0, 5.0))
             
@@ -90,25 +97,41 @@ async def run_icp_job(options):
                 res = await handlers[qt](target, "", "", proxy=None)
                 if res.get("code") == 200 and res.get("params"):
                     assets = res["params"].get("list", [])
-                    for asset in assets:
-                        asset['task_id'] = task_id
-                        asset['query_type'] = qt
-                        await db['icp_asset'].insert_one(asset)
+                    if assets:
+                        for asset in assets:
+                            asset.pop('_id', None)
+                            asset['task_id'] = task_id
+                            asset['query_type'] = qt
+                        await db['icp_asset'].insert_many(assets, ordered=False)
                     total_assets += len(assets)
                     counts[qt] += len(assets)
                     await update_stats()
                     await insert_syslog("info", f"{qt}查询", f"获取完成，共计 {len(assets)} 条资产")
+
+                    # 详情降级可观测：上游在 params 上回传缺口量，避免"任务成功但列大面积空白"
+                    missing = res["params"].get("_detail_missing") or 0
+                    if missing:
+                        reason = "触发创宇盾风控熔断" if res["params"].get("_detail_waf") else "详情接口未返回有效数据"
+                        error_msg.append(f"{qt}: {reason}，{missing} 条详情缺失")
+                        await insert_syslog(
+                            "warning", f"{qt}查询",
+                            f"数据已入库但详情不完整：{missing} 条缺失（{reason}），可稍后重跑本任务补全"
+                        )
                 elif res.get("code") != 200:
-                    error_msg.append(f"{qt}: {res.get('msg', 'error')}")
-                    await insert_syslog("warning", f"{qt}查询", f"接口返回异常: {res.get('msg', 'error')}")
+                    err_text = res.get('msg') or res.get('message') or 'error'
+                    error_msg.append(f"{qt}: {err_text}")
+                    await insert_syslog("warning", f"{qt}查询", f"接口返回异常: {err_text}")
             except Exception as e:
                 logger.error(f"ICP Query exception for {qt}: {e}")
                 error_msg.append(f"{qt} error: {str(e)}")
                 await insert_syslog("error", f"{qt}查询", f"执行过程发生异常: {str(e)}")
         
+    # 只要成功抓取到了资产（total_assets > 0），状态即设为 done，确保前端【同步】资产组按钮畅通；
+    # 仅在无任何资产入库且存在致命错误时标记为 error
+    task_status = "error" if (error_msg and total_assets == 0) else "done"
     update_data = {
         "$set": {
-            "status": "done" if not error_msg else "error", 
+            "status": task_status,
             "end_time": curr_date(),
             "statistic": {
                 "asset_cnt": total_assets,
@@ -121,7 +144,7 @@ async def run_icp_job(options):
     }
     if error_msg:
         update_data["$set"]["error_msg"] = "; ".join(error_msg)
-    await db['icp_task'].update_one({"_id": ObjectId(task_id)}, update_data)
+    await db['icp_task'].update_one({"_id": ObjectId(task_id), "status": {"$ne": "stop"}}, update_data)
     await insert_syslog("info", "任务完成", f"ICP查询任务执行结束，共获取 {total_assets} 条资产")
     logger.info(f"ICP query task {task_id} completed.")
 

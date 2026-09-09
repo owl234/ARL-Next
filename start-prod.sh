@@ -28,8 +28,8 @@ cleanup_temp_files() {
     rm -f /tmp/arl_pull_step.log /tmp/arl_deploy_step.log 2>/dev/null || true
 }
 trap cleanup_temp_files EXIT
-# INT/TERM 时清理后显式退出，避免 handler 返回后脚本在 set -e 豁免位置继续执行
-trap 'cleanup_temp_files; exit 130' INT TERM
+# INT/TERM 时清理后显式退出，exit 会自然触发 EXIT 信号完成 cleanup_temp_files
+trap 'exit 130' INT TERM
 
 # ==================== 通用加载动画指示器 ====================
 run_with_spinner() {
@@ -125,8 +125,27 @@ check_and_install_python3() {
     if command -v python3 &>/dev/null; then
         echo "✅ Python 3 安装成功！"
     else
-        echo "❌ 错误：Python 3 自动安装失败，请手动安装后重试。"
-        exit 1
+        # 若安装失败且系统为 CentOS 7，尝试自动切换至阿里云 Vault 归档源后重试
+        if [ "$PKG_MANAGER" = "yum" ] && grep -qi "CentOS Linux release 7" /etc/redhat-release 2>/dev/null; then
+            echo "⚠️ 检测到 CentOS 7 官方源可能已停更 (EOL)，正在自动切换至阿里云 Vault 归档源重试..."
+            # 健壮性防抖：原子下载机制，确认文件非空合法后再覆盖，避免断网导致原生 yum 源永久损坏
+            if curl -s -f -o /tmp/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-7.repo && [ -s /tmp/CentOS-Base.repo ]; then
+                mv -f /tmp/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo
+                sed -i -e '/aliyuncs.com/d' -e '/mirrorlist.centos.org/d' /etc/yum.repos.d/CentOS-Base.repo 2>/dev/null || true
+                sed -i -e 's/mirror.centos.org\/centos\/$releasever/mirrors.aliyun.com\/centos-vault\/7.9.2009/g' /etc/yum.repos.d/CentOS-Base.repo 2>/dev/null || true
+                yum makecache >/dev/null 2>&1 || true
+                yum install -y python3 >/dev/null 2>&1 || true
+            else
+                echo "⚠️ 无法下载阿里云 Vault 归档源配置，跳过自动替换。"
+            fi
+        fi
+
+        if command -v python3 &>/dev/null; then
+            echo "✅ Python 3 安装成功！"
+        else
+            echo "❌ 错误：Python 3 自动安装失败，请手动安装后重试。"
+            exit 1
+        fi
     fi
 }
 
@@ -473,15 +492,91 @@ if [ -f "./ssl-certs/arl.crt" ]; then
 fi
 echo "✅ 证书目录与文件权限已配置完毕！"
 
-# 3. 部署并启动系统更新服务 (updater)
-echo "🔄 正在配置并启动系统底层更新服务 (arl-updater)..."
-UPDATER_DIR="$(pwd)/updater"
-UPDATER_SCRIPT="$UPDATER_DIR/updater.py"
-SERVICE_FILE="/etc/systemd/system/arl-updater.service"
+# 2.5 宿主机防火墙与 Docker 网桥互通加固 (针对 CentOS/RHEL/Firewalld 等环境)
+configure_firewall_and_network() {
+    if command -v firewall-cmd &>/dev/null && systemctl is-active firewalld &>/dev/null; then
+        echo "⚙️ 检测到宿主机 Firewalld 运行中，正在自动加固网络与端口放行..."
+        local need_reload=0
+        local fw_ports
+        fw_ports=$(firewall-cmd --list-ports 2>/dev/null || true)
 
-if [ -f "$UPDATER_SCRIPT" ]; then
+        # 1. 自动放行 5173/tcp (前端 HTTPS 访问网关)
+        if ! echo "$fw_ports" | grep -qw "5173/tcp"; then
+            echo "  👉 正在永久放行前端核心端口 5173/tcp..."
+            firewall-cmd --permanent --add-port=5173/tcp >/dev/null 2>&1 || true
+            need_reload=1
+        fi
+
+        # 2. 自动放行 8888/tcp (更新守护服务探针)
+        if ! echo "$fw_ports" | grep -qw "8888/tcp"; then
+            echo "  👉 正在永久放行更新服务端口 8888/tcp..."
+            firewall-cmd --permanent --add-port=8888/tcp >/dev/null 2>&1 || true
+            need_reload=1
+        fi
+
+        # 3. 将 docker0 虚拟网桥加入 trusted 信任域，彻底杜绝防火墙拦截容器间通信与 DNS 出网
+        local trusted_interfaces
+        trusted_interfaces=$(firewall-cmd --zone=trusted --list-interfaces 2>/dev/null || true)
+        if ! echo "$trusted_interfaces" | grep -qw "docker0"; then
+            echo "  👉 正在将 docker0 网卡加入 Firewalld trusted 信任域..."
+            firewall-cmd --permanent --zone=trusted --add-interface=docker0 >/dev/null 2>&1 || true
+            need_reload=1
+        fi
+
+        # 若规则发生变更，重载防火墙并联动重启 Docker 恢复内核 iptables 转发链
+        if [ $need_reload -eq 1 ]; then
+            echo "⚙️ 正在重载 Firewalld 并联动恢复 Docker 内核转发链..."
+            firewall-cmd --reload >/dev/null 2>&1 || true
+            if (run_cmd_with_timeout 30 systemctl restart docker &>/dev/null || run_cmd_with_timeout 30 service docker restart &>/dev/null) && wait_docker_daemon; then
+                echo "✅ Firewalld 规则与 Docker 转发链已同步加固就绪！"
+            else
+                echo "⚠️ 警告：重载防火墙后 Docker 重启延迟，将在部署末尾由自愈探针兜底校验。"
+            fi
+        else
+            echo "✅ 宿主机 Firewalld 端口与网络配置已是最新状态。"
+        fi
+    fi
+}
+
+configure_firewall_and_network
+
+# 3. 部署并启动系统更新服务 (updater)
+deploy_and_start_updater() {
+    echo "🔄 正在配置并启动系统底层更新服务 (arl-updater)..."
+    local updater_dir="$(pwd)/updater"
+    local updater_script="$updater_dir/updater.py"
+    local service_file="/etc/systemd/system/arl-updater.service"
+
+    if [ ! -f "$updater_script" ]; then
+        echo "⚠️ 警告：未找到更新服务脚本 $updater_script，将跳过更新服务的配置。"
+        return 0
+    fi
+
+    # Firewalld 端口放行已在 configure_firewall_and_network 中统一管理与加固
+
+    # 检查 8888 端口是否被非 arl-updater 外部/遗留进程占用
+    local occupied_pid=""
+    if command -v ss &>/dev/null; then
+        # 补充 head -n 1 截断，防止 IPv4/IPv6 双栈多行导致数组越界抛出 integer expression expected 语法错误
+        occupied_pid=$(ss -tlnp 2>/dev/null | awk '/:8888 / {print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | head -n 1 || true)
+    elif command -v netstat &>/dev/null; then
+        occupied_pid=$(netstat -tlnp 2>/dev/null | awk '/:8888 / {print $NF}' | cut -d'/' -f1 | head -n 1 || true)
+    fi
+
+    if [ -n "$occupied_pid" ] && [ "$occupied_pid" -gt 10 ] 2>/dev/null; then
+        local proc_cmd
+        proc_cmd=$(ps -p "$occupied_pid" -o cmd= 2>/dev/null || true)
+        # 防御性判断：确保 proc_cmd 非空、严格筛除 updater 且禁止操作 PID <= 10 的核心线程
+        if [ -n "$proc_cmd" ] && echo "$proc_cmd" | grep -qv "updater.py"; then
+            echo "⚠️ 警告：检测到 8888 端口被外部/遗留进程占用 (PID: $occupied_pid, 命令: $proc_cmd)，正在清理以解除冲突..."
+            kill "$occupied_pid" 2>/dev/null || true
+            sleep 1
+            kill -9 "$occupied_pid" 2>/dev/null || true
+        fi
+    fi
+
     if [ -d "/etc/systemd/system" ] && command -v systemctl &>/dev/null; then
-        cat > "$SERVICE_FILE" <<EOF
+        cat > "$service_file" <<EOF
 [Unit]
 Description=ARL-Next Update Service
 After=network.target docker.service
@@ -489,8 +584,8 @@ After=network.target docker.service
 [Service]
 Type=simple
 User=root
-WorkingDirectory=$UPDATER_DIR
-ExecStart=/usr/bin/env python3 $UPDATER_SCRIPT
+WorkingDirectory=$updater_dir
+ExecStart=/usr/bin/env python3 $updater_script
 Restart=always
 RestartSec=3
 
@@ -502,16 +597,30 @@ EOF
         if [ "$ARL_UPDATER_SKIP_RESTART" != "1" ]; then
             systemctl enable arl-updater.service >/dev/null 2>&1
             systemctl restart arl-updater.service
-            echo "✅ 系统更新服务启动成功！"
+
+            # 严格健康校验：等待并检测更新守护进程实际存活状态
+            sleep 2
+            if systemctl is-active arl-updater.service &>/dev/null; then
+                echo "✅ 系统更新服务 (arl-updater) 启动成功且运行正常！"
+            else
+                echo "❌ 错误：系统更新服务 (arl-updater) 启动失败，处于异常状态！"
+                echo "==================== ❌ 详细报错日志 (journalctl) ===================="
+                journalctl -u arl-updater.service -n 15 --no-pager 2>/dev/null || true
+                echo "====================================================================="
+                if ! command -v python3 &>/dev/null; then
+                    echo "👉 核心根因：宿主机未检测到 python3，请先安装 python3 后重试。"
+                fi
+                exit 1
+            fi
         else
             echo "✅ 跳过重启当前正在执行的更新服务..."
         fi
     else
         echo "⚠️ 警告：当前系统不支持 systemd，跳过系统更新服务的配置。"
     fi
-else
-    echo "⚠️ 警告：未找到更新服务脚本 $UPDATER_SCRIPT，将跳过更新服务的配置。"
-fi
+}
+
+deploy_and_start_updater
 
 # （旧版镜像预拉取函数已废除，转为基于阿里云仓库全量拉取）
 
@@ -623,6 +732,41 @@ else
     echo "✅ 磁盘空间清理完成！"
 fi
 
+# 4.7 验证前端 5173 端口连通性，若内核转发异常则自动自愈
+verify_and_heal_port_forwarding() {
+    echo "🔍 正在对前端 5173 端口进行连通性探针测试..."
+    local probe_ok=0
+    local max_retries=5
+
+    # 以真实的 TLS 握手测试作为唯一基准（Ground Truth），循环重试以消除容器慢启动竞态
+    for ((i=1; i<=max_retries; i++)); do
+        if curl -k -s -m 3 -o /dev/null https://127.0.0.1:5173/ 2>/dev/null; then
+            probe_ok=1
+            break
+        fi
+        sleep 2
+    done
+
+    # 若多次探测均失败（常见于防火墙操作清空了内核 iptables 转发链），触发自动自愈
+    if [ $probe_ok -eq 0 ]; then
+        echo "⚠️ 警告：检测到前端 5173 端口握手失败（常见于防火墙操作清空了内核转发链）！"
+        echo "🛠️ 正在执行全自动网络链自愈修复 (重启 Docker 恢复内核转发规则)..."
+        if (run_cmd_with_timeout 30 systemctl restart docker &>/dev/null || run_cmd_with_timeout 30 service docker restart &>/dev/null) && wait_docker_daemon; then
+            sleep 3
+            if curl -k -s -m 5 -o /dev/null https://127.0.0.1:5173/ 2>/dev/null; then
+                echo "✅ 端口转发与 NAT 规则全自动自愈成功！5173 端口已恢复秒级连通。"
+            else
+                echo "⚠️ 自愈复检存在轻微延迟，后台服务正在就绪中。"
+            fi
+        else
+            echo "⚠️ 自动重启 Docker 失败，若外部无法访问请手动执行 'systemctl restart docker'。"
+        fi
+    else
+        echo "✅ 前端端口 (5173) 内核 NAT 转发与 TLS 握手链路健康！"
+    fi
+}
+verify_and_heal_port_forwarding
+
 # 5. 获取本地与公网真实 IP 并展示
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 if [ -z "$LOCAL_IP" ]; then
@@ -646,3 +790,13 @@ echo "   - 本地/局域网访问: https://$LOCAL_IP:5173"
 if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "$LOCAL_IP" ]; then
     echo "   - 公网访问:        https://$PUBLIC_IP:5173"
 fi
+
+echo ""
+echo "┌────────────────────────────────────────────────────────────┐"
+echo "│ 💡 生产运维特别提示 (CentOS / RHEL / Firewalld 环境)：      │"
+echo "│ 若后续您手动启动、重启或修改过宿主机防火墙 (firewalld/     │"
+echo "│ iptables)，防火墙会自动清空内核中的 Docker 转发链，         │"
+echo "│ 此时请务必紧接着执行一次：                                 │"
+echo "│ 👉 systemctl restart docker                                │"
+echo "│ 即可立即自动恢复所有容器的网络映射与正常访问！             │"
+echo "└────────────────────────────────────────────────────────────┘"

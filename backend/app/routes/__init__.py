@@ -19,7 +19,8 @@ base_query_fields = {
 EQUAL_FIELDS = [
     "task_id", "task_tag", "ip_type", "scope_id", "type", "query_type",
     "status", "schedule_status", "schedule_type", "source",
-    "plg_type", "plugin_type", "vuln_severity", "port_scan_type"
+    "plg_type", "plugin_type", "vuln_severity", "port_scan_type",
+    "record_type"
 ]
 
 

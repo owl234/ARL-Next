@@ -84,41 +84,53 @@ class NPoC(object):
     def gen_poc_info(self):
         info_list = []
         for p in self.plugins:
-            info = dict()
-            info["plugin_name"] = getattr(p, "_plugin_name", "")
-            if p.plugin_type == PluginType.SNIFFER:
-                self.sniffer_plugin_name_set.add(info["plugin_name"])
-                continue
+            try:
+                info = dict()
+                info["plugin_name"] = getattr(p, "_plugin_name", "")
+                if p.plugin_type == PluginType.SNIFFER:
+                    self.sniffer_plugin_name_set.add(info["plugin_name"])
+                    continue
 
-            info["app_name"] = p.app_name
-            info["scheme"] = ",".join(p.scheme)
-            info["vul_name"] = p.vul_name
-            info["plugin_type"] = p.plugin_type
-            
-            # 提取富文本元数据
-            info["severity"] = getattr(p, "severity", "") or ""
-            info["description"] = getattr(p, "description", "") or ""
-            info["remediation"] = getattr(p, "remediation", "") or ""
-            info["references"] = getattr(p, "references", []) or []
-            info["author"] = getattr(p, "author", "") or ""
-
-
-            if p.plugin_type == PluginType.POC:
-                info["category"] = PoCCategory.POC
-                self.poc_plugin_name_set.add(info["plugin_name"])
-
-            if p.plugin_type == PluginType.BRUTE:
-                self.brute_plugin_name_set.add(info["plugin_name"])
-                if "http" in info["scheme"]:
-                    info["category"] = PoCCategory.WEBB_RUTE
+                # 纵深防御：安全解析 scheme，防止外置非法插件引发 TypeError 阻断启动迁移或插件库同步
+                scheme = getattr(p, "scheme", None)
+                if isinstance(scheme, (list, tuple, set)):
+                    info["scheme"] = ",".join(str(s) for s in scheme if s)
+                elif isinstance(scheme, str):
+                    info["scheme"] = scheme
                 else:
-                    info["category"] = PoCCategory.SYSTEM_BRUTE
+                    logger.warning(f"插件 {info['plugin_name']} scheme 无效 ({scheme})，跳过该插件")
+                    continue
 
-            if info["plugin_name"] in self.plugin_name_set:
-                logger.warning("plugin {} already exists".format(info["plugin_name"]))
+                info["app_name"] = getattr(p, "app_name", "") or ""
+                info["vul_name"] = getattr(p, "vul_name", "") or ""
+                info["plugin_type"] = p.plugin_type
+
+                # 提取富文本元数据
+                info["severity"] = getattr(p, "severity", "") or ""
+                info["description"] = getattr(p, "description", "") or ""
+                info["remediation"] = getattr(p, "remediation", "") or ""
+                info["references"] = getattr(p, "references", []) or []
+                info["author"] = getattr(p, "author", "") or ""
+
+                if p.plugin_type == PluginType.POC:
+                    info["category"] = PoCCategory.POC
+                    self.poc_plugin_name_set.add(info["plugin_name"])
+
+                if p.plugin_type == PluginType.BRUTE:
+                    self.brute_plugin_name_set.add(info["plugin_name"])
+                    if "http" in info["scheme"]:
+                        info["category"] = PoCCategory.WEBB_RUTE
+                    else:
+                        info["category"] = PoCCategory.SYSTEM_BRUTE
+
+                if info["plugin_name"] in self.plugin_name_set:
+                    logger.warning("plugin {} already exists".format(info["plugin_name"]))
+                    continue
+                self.plugin_name_set.add(info["plugin_name"])
+                info_list.append(info)
+            except Exception as e:
+                logger.error(f"解析插件 {getattr(p, '_plugin_name', p)} 失败: {e}，跳过此插件")
                 continue
-            self.plugin_name_set.add(info["plugin_name"])
-            info_list.append(info)
 
         return info_list
 

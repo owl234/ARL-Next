@@ -189,8 +189,11 @@ class TycTask(ARLResource):
 base_search_icp_asset_fields = {
     'task_id': fields.String(description="任务ID"),
     'unitName': fields.String(description="主办单位名称"),
+    'natureName': fields.String(description="单位性质(ICP)"),
     'domain': fields.String(description="域名"),
     'mainLicence': fields.String(description="主备案号"),
+    'serviceLicence': fields.String(description="服务备案号(APP/小程序/快应用)"),
+    'contentTypeName': fields.String(description="前置审批/内容类型"),
     'companyName': fields.String(description="TYC主办单位"),
     'ym': fields.String(description="TYC域名"),
     'liscense': fields.String(description="TYC主备案号"),
@@ -432,76 +435,84 @@ class IcpTaskBatchRestart(ARLResource):
 
 from flask import make_response
 
+def _build_excel_response(assets, filename="export.xlsx"):
+    import openpyxl
+    from io import BytesIO
+    from flask import make_response
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)  # 移除默认的 Sheet
+
+    headers = {
+        'web': (['主办单位名称', '单位性质', '主备案号', '域名', '网站名称', '服务许可', '更新时间/审核日期'],
+                ['unitName|companyName', 'natureName|companyType', 'mainLicence|liscense', 'domain|ym', 'serviceName|webName', 'serviceLicence', 'updateRecordTime|examineDate']),
+        'app': (['APP名称', '主办单位名称', '单位性质/分类', '主备案号/应用类型', 'APP备案号', '前置审批/内容类型', '审核时间', '简介'],
+                ['name|serviceName', 'unitName', 'natureName|classes', 'mainLicence|type', 'serviceLicence', 'contentTypeName', 'updateRecordTime|examineDate', 'brief']),
+        'invest': (['投资公司名称', '法定代表人', '注册资本', '投资比例(%)'], ['name', 'legalPersonName', 'amount', 'percent']),
+        'trademark': (['商标名称', '注册号', '分类', '状态'], ['tmName', 'regNo', 'intCls', 'status']),
+        'wechat': (['公众号名称', '微信号', '简介'], ['title', 'publicNum', 'recommend']),
+        'weibo': (['微博名称', '微博链接'], ['name', 'href']),
+        'mapp': (['小程序名称', '主办单位名称', '主备案号', '小程序备案号', '前置审批/内容类型', '审核时间', '简介'],
+                ['name|serviceName', 'unitName|companyName', 'mainLicence', 'serviceLicence|serviceFilingNumber', 'contentTypeName', 'updateRecordTime|examineDate', 'brief']),
+        'kapp': (['快应用名称', '主办单位名称', '主备案号', '快应用备案号', '前置审批/内容类型', '审核时间', '简介'],
+                ['name|serviceName', 'unitName|companyName', 'mainLicence', 'serviceLicence', 'contentTypeName', 'updateRecordTime|examineDate', 'brief']),
+    }
+
+    grouped_assets = {}
+    for item in assets:
+        qt = item.get('query_type', 'unknown')
+        if qt not in grouped_assets:
+            grouped_assets[qt] = []
+        # 兼容移动端应用在不同接口下的名称字段
+        if qt in ('app', 'mapp', 'kapp') and not item.get('name'):
+            item['name'] = item.get('serviceName', '')
+        grouped_assets[qt].append(item)
+
+    for qt, items in grouped_assets.items():
+        if qt in headers:
+            h_labels, h_keys = headers[qt]
+        else:
+            h_labels = ['数据名称']
+            h_keys = ['name']
+
+        ws = wb.create_sheet(title=qt)
+        ws.append(h_labels)
+        for item in items:
+            row = []
+            for k in h_keys:
+                if '|' in k:
+                    k1, k2 = k.split('|')
+                    val = item.get(k1) if item.get(k1) else item.get(k2, '')
+                else:
+                    val = item.get(k, '')
+                row.append(str(val))
+            ws.append(row)
+
+    if len(wb.sheetnames) == 0:
+        ws = wb.create_sheet(title='Empty')
+        ws.append(['无数据'])
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    response = make_response(output.getvalue())
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return response
+
+
 @ns.route('/export/<string:task_id>')
 class IcpTaskExport(ARLResource):
     @auth
     def get(self, task_id):
         """导出 ICP/TYC 资产 (多表单 Excel)"""
         try:
-            import openpyxl
-            from io import BytesIO
-
             assets = list(conn_db('icp_asset').find({"task_id": task_id}))
-            wb = openpyxl.Workbook()
-            wb.remove(wb.active) # 移除默认的 Sheet
-
-            headers = {
-                'web': (['主办单位名称', '单位性质', '主备案号', '域名', '网站名称', '服务许可', '更新时间/审核日期'],
-                        ['unitName|companyName', 'natureName|companyType', 'mainLicence|liscense', 'domain|ym', 'serviceName|webName', 'serviceLicence', 'updateRecordTime|examineDate']),
-                'app': (['APP名称', '主办单位名称', '单位性质/分类', '主备案号/应用类型', 'APP备案号', '审核时间', '简介'],
-                        ['name|serviceName', 'unitName', 'natureName|classes', 'mainLicence|type', 'serviceLicence', 'updateRecordTime|examineDate', 'brief']),
-                'invest': (['投资公司名称', '法定代表人', '注册资本', '投资比例(%)'], ['name', 'legalPersonName', 'amount', 'percent']),
-                'trademark': (['商标名称', '注册号', '分类', '状态'], ['tmName', 'regNo', 'intCls', 'status']),
-                'wechat': (['公众号名称', '微信号', '简介'], ['title', 'publicNum', 'recommend']),
-                'weibo': (['微博名称', '微博链接'], ['name', 'href']),
-                'mapp': (['小程序名称/备案号', '审核日期/简介'], ['name|serviceName', 'examineDate|serviceFilingNumber']),
-                'kapp': (['快应用名称', '简介'], ['name', 'brief']),
-            }
-
-            grouped_assets = {}
-            for item in assets:
-                qt = item.get('query_type', 'unknown')
-                if qt not in grouped_assets:
-                    grouped_assets[qt] = []
-                # 兼容 mapp 的新老接口字段
-                if qt == 'mapp' and not item.get('name'):
-                    item['name'] = item.get('serviceName', '')
-                grouped_assets[qt].append(item)
-
-            for qt, items in grouped_assets.items():
-                if qt in headers:
-                    h_labels, h_keys = headers[qt]
-                else:
-                    h_labels = ['数据名称']
-                    h_keys = ['name']
-
-                ws = wb.create_sheet(title=qt)
-                ws.append(h_labels)
-                for item in items:
-                    row = []
-                    for k in h_keys:
-                        if '|' in k:
-                            k1, k2 = k.split('|')
-                            val = item.get(k1) if item.get(k1) else item.get(k2, '')
-                        else:
-                            val = item.get(k, '')
-                        row.append(str(val))
-                    ws.append(row)
-
-            if len(wb.sheetnames) == 0:
-                ws = wb.create_sheet(title='Empty')
-                ws.append(['无数据'])
-
-            output = BytesIO()
-            wb.save(output)
-            output.seek(0)
-
-            response = make_response(output.getvalue())
-            response.headers["Content-Disposition"] = f"attachment; filename=export.xlsx"
-            response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            return response
+            return _build_excel_response(assets, filename=f"export_{task_id}.xlsx")
         except Exception as e:
             return build_ret(ErrorMsg.Error, {"error": str(e)})
+
 
 batch_export_fields = ns.model('IcpBatchExport', {
     "task_id": fields.List(fields.String(description="任务 ID"), required=True)
@@ -514,75 +525,13 @@ class IcpTaskBatchExport(ARLResource):
     def post(self):
         """批量导出 ICP/TYC 资产 (多表单 Excel)"""
         try:
-            import openpyxl
-            from io import BytesIO
-            
             args = self.parse_args(batch_export_fields)
             task_id_list = args.get("task_id", [])
-            
             if not task_id_list:
                 return build_ret(ErrorMsg.Error, {"error": "未提供任务 ID 列表"})
 
             assets = list(conn_db('icp_asset').find({"task_id": {"$in": task_id_list}}))
-            wb = openpyxl.Workbook()
-            wb.remove(wb.active) # 移除默认的 Sheet
-            
-            headers = {
-                'web': (['主办单位名称', '单位性质', '主备案号', '域名', '网站名称', '服务许可', '更新时间/审核日期'],
-                        ['unitName|companyName', 'natureName|companyType', 'mainLicence|liscense', 'domain|ym', 'serviceName|webName', 'serviceLicence', 'updateRecordTime|examineDate']),
-                'app': (['APP名称', '主办单位名称', '单位性质/分类', '主备案号/应用类型', 'APP备案号', '审核时间', '简介'],
-                        ['name|serviceName', 'unitName', 'natureName|classes', 'mainLicence|type', 'serviceLicence', 'updateRecordTime|examineDate', 'brief']),
-                'invest': (['投资公司名称', '法定代表人', '注册资本', '投资比例(%)'], ['name', 'legalPersonName', 'amount', 'percent']),
-                'trademark': (['商标名称', '注册号', '分类', '状态'], ['tmName', 'regNo', 'intCls', 'status']),
-                'wechat': (['公众号名称', '微信号', '简介'], ['title', 'publicNum', 'recommend']),
-                'weibo': (['微博名称', '微博链接'], ['name', 'href']),
-                'mapp': (['小程序名称/备案号', '审核日期/简介'], ['name|serviceName', 'examineDate|serviceFilingNumber']),
-                'kapp': (['快应用名称', '简介'], ['name', 'brief']),
-            }
-
-            grouped_assets = {}
-            for item in assets:
-                qt = item.get('query_type', 'unknown')
-                if qt not in grouped_assets:
-                    grouped_assets[qt] = []
-                # 兼容 mapp 的新老接口字段
-                if qt == 'mapp' and not item.get('name'):
-                    item['name'] = item.get('serviceName', '')
-                grouped_assets[qt].append(item)
-
-            for qt, items in grouped_assets.items():
-                if qt in headers:
-                    h_labels, h_keys = headers[qt]
-                else:
-                    h_labels = ['数据名称']
-                    h_keys = ['name']
-
-                ws = wb.create_sheet(title=qt)
-                ws.append(h_labels)
-                for item in items:
-                    row = []
-                    for k in h_keys:
-                        if '|' in k:
-                            k1, k2 = k.split('|')
-                            val = item.get(k1) if item.get(k1) else item.get(k2, '')
-                        else:
-                            val = item.get(k, '')
-                        row.append(str(val))
-                    ws.append(row)
-
-            if len(wb.sheetnames) == 0:
-                ws = wb.create_sheet(title='Empty')
-                ws.append(['无数据'])
-
-            output = BytesIO()
-            wb.save(output)
-            output.seek(0)
-
-            from flask import make_response
-            response = make_response(output.getvalue())
-            response.headers["Content-Disposition"] = f"attachment; filename=batch_export.xlsx"
-            response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            return response
+            return _build_excel_response(assets, filename="batch_export.xlsx")
         except Exception as e:
             return build_ret(ErrorMsg.Error, {"error": str(e)})
 

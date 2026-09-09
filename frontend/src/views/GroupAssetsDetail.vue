@@ -524,7 +524,7 @@ const openCidrDetail = (record) => {
 // 💡 针对分组详情定制的 Config (以站点为例，去掉了截图，加了更新时间)
 // 💡 完整版的 Config：涵盖站点、域名、IP、WIH
 // 💡 修复版 Config：使用 asset_ 前缀的专属接口，并修正日期字段
-const tabConfig = {
+const tabConfig = reactive({
   site: {
     url: '/asset_site/', // 🚨 核心修复：加了 asset_ 前缀
     exportUrl: '/asset_site/export/', // 🚨 绑定抓包里的导出 URL
@@ -611,7 +611,9 @@ const tabConfig = {
       {
         label: '记录类型',
         key: 'record_type',
-        operator: '='
+        operator: '等于',
+        hasOperatorSelect: true,
+        operators: ['等于', '不等于']
       },
       { label: '内容', key: 'content', operator: '=' },
       { label: '来源 JS', key: 'source', operator: '=' },
@@ -798,7 +800,7 @@ const tabConfig = {
       { title: '更新时间', key: 'update_date', width: 180 }
     ]
   }
-};
+});
 
 const columns = ref(tabConfig.site.cols);
 

@@ -112,12 +112,23 @@
         :label-col="{ style: { width: '90px' } }"
         :wrapper-col="{ style: { width: 'calc(100% - 90px)' } }"
     >
+      <a-alert
+        v-if="isDomainTarget && hasMobileQueryType"
+        type="warning"
+        show-icon
+        style="margin-bottom: 16px;"
+      >
+        <template #message>
+          <span>提示：工信部系统要求按<b>主办单位全称</b>（企业名称）检索 APP/小程序/快应用。当前目标为域名，将无法检索到移动端应用，建议输入企业全称（如：深圳市腾讯计算机系统有限公司）。</span>
+        </template>
+      </a-alert>
+
       <a-form-item label="任务名称" name="name" :rules="[{ required: true, message: '请输入任务名称' }]">
         <a-input v-model:value="formState.name" placeholder="请输入任务名称" />
       </a-form-item>
 
       <a-form-item label="查询目标" name="target" :rules="[{ required: true, message: '请输入查询目标' }]">
-        <a-input v-model:value="formState.target" placeholder="请输入查询目标" />
+        <a-input v-model:value="formState.target" placeholder="企业全称（如：深圳市腾讯计算机系统有限公司）或网站域名" />
       </a-form-item>
 
       <a-form-item label="查询类型" name="query_type" :rules="[{ required: true, message: '请至少选择一种查询类型' }]">
@@ -286,7 +297,7 @@
 <script setup>
 defineOptions({ name: 'AssetRecon' });
 
-import { ref, reactive, onMounted, watch, onActivated } from 'vue';
+import { ref, reactive, computed, onMounted, watch, onActivated } from 'vue';
 import dayjs from 'dayjs';
 import { useSticky } from '../utils/useSticky';
 const actionBarRef = ref(null);
@@ -441,11 +452,29 @@ const formState = reactive({
   query_type: ["web"]
 });
 
+const isDomainTarget = computed(() => {
+  let t = (formState.target || '').trim();
+  if (!t) return false;
+  // 清洗可能粘贴的协议前缀、端口与路径后缀
+  t = t.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
+  if (/\s/.test(t)) return false; // 排除含有空格的英文公司名缩写（如 Apple Inc.）
+  return /^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/.test(t);
+});
+
+const hasMobileQueryType = computed(() => {
+  const qt = formState.query_type || [];
+  return qt.includes('app') || qt.includes('mapp') || qt.includes('kapp');
+});
+
 const showModal = () => { visible.value = true; };
 
 const handleOk = async () => {
   try {
     await formRef.value.validate();
+    if (isDomainTarget.value && hasMobileQueryType.value && !formState.query_type.includes('web')) {
+      message.warning('检测到查询目标为域名，工信部移动端查询需输入企业全称');
+      return;
+    }
     submitLoading.value = true;
     const res = await request.post('/icp/task', formState);
     if (res.code === 200) {

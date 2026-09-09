@@ -50,7 +50,7 @@
 | :--- | :--- | :--- |
 | **系统稳定性** | 扫描海量目标时 Celery 阻塞假死、内存泄漏 OOM | **微服务解耦** (截图/OSINT独立)，全栈解除内存硬限，批量入库彻底根除假死 |
 | **AI 原生集成** | 无 AI 接口，仅限人工手动点击 | **原生 MCP 支持**，AI Agent 一句话接管资产挖掘与分析 |
-| **企业资产穿透** | 无企业资产查询功能 | **天眼查股权穿透 + ICP 深度下钻**，一键秒级打通集团与子公司全量资产 (护网友好) |
+| **企业资产穿透** | 无企业资产查询功能 | **天眼查股权穿透 + 全维度 ICP 深度下钻**，一键秒级打通集团子公司及**移动端 (APP/小程序/快应用)** 全量资产 (护网友好) |
 | **部署与构建** | 依赖过时容易报错，需拉取海量外网包 | **阿里云国内预构建镜像**，多阶段构建，2分钟一键秒启动 |
 | **现代化技术栈** | Python 3.6 / Vue2 / MongoDB 3.x / Nmap 7.70 严重脱节 | **Python 3.13 / Vue 3.5 / MongoDB 7.0 / Nmap 7.95 LTS** 现代底层全线跨代 |
 | **敏感信息挖掘** | Go WIH 编译依赖沉重，跨平台常编译报错 | **纯 Python WIH 引擎** 零外部二进制依赖，内置三级风险评估与流式解析 |
@@ -63,7 +63,7 @@
 
 * 🤖 **AI 原生赋能**：内置标准化 MCP 服务，直接接入 Claude / Cursor / Open-WebUI，实现用自然语言下发扫描与导出 13 维资产全景大盘。（👉 [MCP 配置指南](./mcp-server/README.md)）
 * 🚀 **高并发极速引擎**：耗时截图与 OSINT 全面剥离为独立微服务；核心落库升级为 `bulk_write` 批量入库；**全栈解除 Docker 容器内存硬限制**，大内存机器全速释放，轻松吞吐数十万级资产。
-* 🌐 **全维度企业资产闭环**：深度打通企业 ICP 备案与天眼查股权穿透，自动化构建从“集团公司 ➔ 控股子公司 ➔ 域名 ➔ IP ➔ 端口 ➔ Web/组件 ➔ 漏洞”的完整链条。
+* 🌐 **全维度企业资产闭环**：深度打通企业 ICP 备案（域名/网站/移动端 APP/微信小程序/快应用全覆盖）与天眼查股权穿透，自动化构建从“集团公司 ➔ 控股子公司 ➔ 域名/移动端 ➔ IP ➔ 端口 ➔ Web/组件 ➔ 漏洞”的完整链条。
 * 🔍 **现代测绘与敏感挖掘**：升级 **Nmap 7.95 黄金 LTS 稳定版**（扩充 2500+ 服务指纹与 336 种现代化 OS 指纹并裁剪段错误风险）；内置**纯 Python WIH 敏感信息提取引擎**，毫秒级流式解析云凭据、AK/SK 与私钥。
 * 🛡️ **威胁情报与代码雷达**：内置 GitHub CVE 与代码泄露监控引擎，毫秒级原子锁防重复告警，实时感知外部威胁。
 * ⚡ **极简运维与自愈机制**：提供开箱即用的 2 分钟极速部署包，内置容器健康巡检与自愈机制，支持 Web 后台平滑热更新与 Basic Auth 前置防御。
@@ -84,7 +84,7 @@
 
 <br/>
 
-* **企业级 OSINT 资产侦察**：支持企业 ICP 备案穿透与天眼查股权穿透，一键关联并同步下发多维探测任务。
+* **企业级 OSINT 资产侦察**：支持企业 ICP 备案（网站/移动端 APP/微信小程序/快应用）穿透与天眼查股权穿透，一键关联并同步下发多维探测任务。
   
   <p align="center">
     <img src="./img/enterprise-asset-search.png" alt="企业资产侦察" width="800">
@@ -214,6 +214,7 @@ docker cp arl-temp:/code/start-prod.sh ./ && \
 docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
+docker cp arl-temp:/code/CHANGELOG.md ./ && \
 docker cp arl-temp:/code/frontend ./ && \
 docker rm arl-temp && \
 # 3. 赋予权限并启动
@@ -223,7 +224,9 @@ bash start-prod.sh
 
 **CentOS / RHEL / Alibaba Cloud Linux / TencentOS 系统**：
 ```bash
-# 1. 安装基础工具并创建目录 (Docker 与 Compose 将由 start-prod.sh 自动补齐)
+# 1. 安装基础工具、自动补齐 Docker 并创建目录
+(command -v docker &>/dev/null || curl -fsSL https://get.docker.com | bash -s docker --mirror Aliyun) && \
+systemctl enable --now docker 2>/dev/null || true && \
 yum install -y openssl curl && \
 mkdir -p ~/ARL-Next && cd ~/ARL-Next && \
 # 2. 从阿里云国内镜像中提取全套部署编排
@@ -234,6 +237,7 @@ docker cp arl-temp:/code/start-prod.sh ./ && \
 docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
+docker cp arl-temp:/code/CHANGELOG.md ./ && \
 docker cp arl-temp:/code/frontend ./ && \
 docker rm arl-temp && \
 # 3. 赋予权限并启动
@@ -264,7 +268,8 @@ bash start-prod.sh
 | **第二层：ARL-Next 系统登录** | `admin` | `arlpass` | 平台主账号，首次登录后建议立即修改 |
 
 > [!TIP]
-> **商业证书替换 (可选)**：将您申请的真实 SSL 证书重命名为 `arl.crt` 和 `arl.key` 放至 `ssl-certs/` 目录，然后再次执行 `bash start-prod.sh` 即可。
+> - **网络与防火墙开放**：请确保云服务器控制台安全组及系统本地防火墙（如 `ufw allow 5173/tcp` 或 `firewall-cmd --permanent --add-port=5173/tcp && firewall-cmd --reload`）已放行 **5173** TCP 端口。
+> - **商业证书替换 (可选)**：将您申请的真实 SSL 证书重命名为 `arl.crt` 和 `arl.key` 放至 `ssl-certs/` 目录，然后再次执行 `bash start-prod.sh` 即可。
 
 ---
 

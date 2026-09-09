@@ -154,6 +154,55 @@ class beian:
         self._blocked_ip_cache = TTLCache(maxsize=1000, ttl=300)
         self._blocked_ip_lock = threading.Lock()
 
+        # WAF 熔断状态挂在实例上：同一任务内 web/app/mapp/kapp 共享，避免换类型就重新撞封禁
+        self._waf_block_ts = 0.0
+        self.waf_cooldown = 120  # 秒，到期后半开重试详情补全
+        self._token_lock = None
+
+    @property
+    def token_lock(self):
+        """惰性绑定当前事件循环的异步锁，用于 Token 续期 DCL"""
+        if self._token_lock is None:
+            self._token_lock = asyncio.Lock()
+        return self._token_lock
+
+    def _waf_open(self):
+        """熔断是否处于开启态（冷却期内不再发起详情请求）"""
+        return (time.time() - self._waf_block_ts) < self.waf_cooldown
+
+    def _waf_trip(self, scene):
+        """开启熔断，仅在首次触发时打印告警，避免批内刷屏"""
+        first_trip = not self._waf_open()
+        self._waf_block_ts = time.time()
+        if first_trip:
+            logger.warning(
+                f"{scene}触发创宇盾拦截，启动熔断降级：跳过后续详情请求，冷却 {self.waf_cooldown}s"
+            )
+
+    def _session_local_ip(self, session):
+        """
+        取回本次会话实际绑定的出口地址。
+        优先读 get_session 打上的 _arl_local_ip 标记，不依赖 aiohttp 私有属性；
+        仅在标记缺失时按版本回退探测（3.9 的 _local_addr / 3.12+ 的 _local_addr_infos）。
+        """
+        connector = getattr(session, "_connector", None)
+        if connector is None:
+            return None
+        ip = getattr(connector, "_arl_local_ip", None)
+        if ip:
+            return ip
+        addr = getattr(connector, "_local_addr", None) or getattr(connector, "_local_addr_infos", None)
+        try:
+            if isinstance(addr, (list, tuple)) and addr:
+                first = addr[0]
+                if isinstance(first, (list, tuple)) and first:
+                    return first[-1][0]
+                if isinstance(first, str):
+                    return first
+        except (IndexError, KeyError, TypeError, AttributeError):
+            return None
+        return None
+
 
     def _add_blocked_ip(self, ip):
         """将IP添加到黑名单缓存"""
@@ -217,6 +266,8 @@ class beian:
         
         # 为每个session创建独立的连接器
         connector = await self._get_connector(local_ipv6)
+        # 标记本会话真实出口地址，供 WAF 拦截时精确归因（跨 aiohttp 版本稳定）
+        connector._arl_local_ip = local_ipv6
         
         session = aiohttp.ClientSession(
             timeout=self.timeout,
@@ -231,7 +282,7 @@ class beian:
             await session.close()
             await connector.close()
 
-    async def get_token(self, proxy=""):
+    async def get_token(self, proxy="", force=False):
         base_header = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.41 Safari/537.36 Edg/101.0.1210.32",
             "Origin": "https://beian.miit.gov.cn",
@@ -240,44 +291,49 @@ class beian:
             "Accept": "application/json, text/plain, */*",
         }
         
-        if self.token_expire > int(time.time() * 1000):
+        now_ms = int(time.time() * 1000)
+        if not force and (self.token_expire - now_ms > 60000):
             return True, self.token, base_header
-        
-        timeStamp = round(time.time() * 1000)
-        authSecret = "testtest" + str(timeStamp)
-        authKey = hashlib.md5(authSecret.encode(encoding="UTF-8")).hexdigest()
-        auth_data = {"authKey": authKey, "timeStamp": timeStamp}
-        
-        try:
-            async with self.get_session(proxy) as session:
-                current_ip = None
-                if hasattr(session, '_connector') and hasattr(session._connector, '_local_addr'):
-                    current_ip = session._connector._local_addr[0] if session._connector._local_addr else None
-                async with session.post(self.url, data=auth_data, headers=base_header, proxy=proxy if proxy else None) as req:
-                    req_text = await req.text()
 
-            if "当前访问疑似黑客攻击" in req_text:
-                if current_ip:
-                    self._add_blocked_ip(current_ip)
-                elif not proxy and self.local_ipv6_addresses:
-                    # 如果无法直接获取IP，使用当前轮询的IPv6
-                    with self._ipv6_lock:
-                        blocked_index = (self.ipv6_index - 1) % len(self.local_ipv6_addresses)
-                        blocked_ip = self.local_ipv6_addresses[blocked_index]
-                        self._add_blocked_ip(blocked_ip)
-                return False, "当前访问已被创宇盾拦截", ""
+        if not hasattr(self, '_token_async_lock'):
+            self._token_async_lock = asyncio.Lock()
+
+        async with self._token_async_lock:
+            now_ms = int(time.time() * 1000)
+            if not force and (self.token_expire - now_ms > 60000):
+                return True, self.token, base_header
+
+            timeStamp = round(time.time() * 1000)
+            authSecret = "testtest" + str(timeStamp)
+            authKey = hashlib.md5(authSecret.encode(encoding="UTF-8")).hexdigest()
+            auth_data = {"authKey": authKey, "timeStamp": timeStamp}
             
-            t = ujson.loads(req_text)
-            token = t["params"]["bussiness"]
-            expire = int(time.time() * 1000) + t["params"]["expire"]
-            
-            self.token = token
-            self.token_expire = expire
-            
-            return True, token, base_header
-        except Exception as e:
-            logger.warning(f"get_token Faile : {e}")
-            return False, str(e), ""
+            try:
+                async with self.get_session(proxy) as session:
+                    current_ip = self._session_local_ip(session)
+                    async with session.post(self.url, data=auth_data, headers=base_header, proxy=proxy if proxy else None) as req:
+                        req_text = await req.text()
+
+                if "当前访问疑似黑客攻击" in req_text:
+                    if current_ip:
+                        self._add_blocked_ip(current_ip)
+                    else:
+                        # 无法定位真实出口地址时不做索引猜测：并发下 ipv6_index 已被其它协程推进，
+                        # 按 index-1 归因会误封健康 IP，交由 _arl_local_ip 精确标记处理
+                        logger.warning("WAF 拦截但未能定位出口地址，跳过黑名单写入")
+                    return False, "当前访问已被创宇盾拦截", ""
+
+                t = ujson.loads(req_text)
+                token = t["params"]["bussiness"]
+                expire = int(time.time() * 1000) + t["params"]["expire"]
+
+                self.token = token
+                self.token_expire = expire
+
+                return True, token, base_header
+            except Exception as e:
+                logger.warning(f"get_token Faile : {e}")
+                return False, str(e), ""
 
     async def get_cookie(self, proxy=""):
         async with await self.get_session(proxy) as session:
@@ -437,7 +493,9 @@ class beian:
             detail_header.pop("Content-Length", None)
 
         # 优先使用传入的会话，否则创建新会话
+        current_ip = None
         if session:
+            current_ip = self._session_local_ip(session)
             if getattr(getattr(config, 'captcha', object()), 'enable', False):
                 async with session.post(self.queryDetailByAppAndMiniId,
                                         data=ujson.dumps(info, ensure_ascii=False),
@@ -452,6 +510,7 @@ class beian:
                     res = await req.text()
         else:
             async with self.get_session(proxy) as session:
+                current_ip = self._session_local_ip(session)
                 if getattr(getattr(config, 'captcha', object()), 'enable', False):
                     async with session.post(self.queryDetailByAppAndMiniId,
                                             data=ujson.dumps(info, ensure_ascii=False),
@@ -464,7 +523,22 @@ class beian:
                                             headers=detail_header,
                                             proxy=proxy if proxy else None) as req:
                         res = await req.text()
-        return True, ujson.loads(res)
+        if "当前访问疑似黑客攻击" in res or "已被创宇盾拦截" in res:
+            logger.warning("详情获取触发创宇盾拦截，记录黑名单IP并熔断")
+            if current_ip:
+                self._add_blocked_ip(current_ip)
+            else:
+                # 无法定位真实出口地址时不做索引猜测：并发下 ipv6_index 已被其它协程推进，
+                # 按 index-1 归因会误封健康 IP，交由 _arl_local_ip 精确标记处理
+                logger.warning("WAF 拦截但未能定位出口地址，跳过黑名单写入")
+            return False, {"code": 403, "msg": "当前访问已被创宇盾拦截", "success": False}
+
+        try:
+            return True, ujson.loads(res)
+        except Exception as e:
+            logger.warning(f"解析详情响应失败: {e}, 响应文本截断: {res[:100]}")
+            return False, {"code": 500, "msg": f"解析异常: {e}", "success": False}
+
 
     def _is_auto_pagination(self, pageNum, pageSize):
         """未显式传分页参数时，默认拉取全部页。"""
@@ -503,8 +577,7 @@ class beian:
             base_header.update({"Content-Length": length, "uuid": p_uuid, "token": token, "sign": sign})
             
             async with self.get_session(proxy) as session:
-                if hasattr(session, '_connector') and hasattr(session._connector, '_local_addr'):
-                    current_ip = session._connector._local_addr[0] if session._connector._local_addr else None
+                current_ip = self._session_local_ip(session)
                 async with session.post(self.queryByCondition,
                                         data=ujson.dumps(info, ensure_ascii=False),
                                         headers=base_header,
@@ -520,27 +593,32 @@ class beian:
             base_header.update({"token": token, "sign": self.sign})
 
             async with self.get_session(proxy) as session:
-                current_ip = None
-                if hasattr(session, '_connector') and hasattr(session._connector, '_local_addr'):
-                    current_ip = session._connector._local_addr[0] if session._connector._local_addr else None
+                current_ip = self._session_local_ip(session)
                 async with session.post(f"{self.queryByCondition}/",
                                         json=info,
                                         headers=base_header,
                                         proxy=proxy if proxy else None) as req:
                     res = await req.text()
 
-        if "当前访问疑似黑客攻击" in res:
+        if "当前访问疑似黑客攻击" in res or "已被创宇盾拦截" in res:
+            # 熔断只取决于"是否被封"，不依赖出口地址能否归因（未启用 IPv6 池时同样需要止血）
+            self._waf_trip("列表查询")
             if current_ip:
                 self._add_blocked_ip(current_ip)
-            elif not proxy and self.local_ipv6_addresses:
-                # 如果无法直接获取IP，使用当前轮询的IPv6
-                with self._ipv6_lock:
-                    blocked_index = (self.ipv6_index - 1) % len(self.local_ipv6_addresses)
-                    blocked_ip = self.local_ipv6_addresses[blocked_index]
-                    self._add_blocked_ip(blocked_ip)
+            else:
+                # 无法定位真实出口地址时不做索引猜测：并发下 ipv6_index 已被其它协程推进，
+                # 按 index-1 归因会误封健康 IP，交由 _arl_local_ip 精确标记处理
+                logger.warning("WAF 拦截但未能定位出口地址，跳过黑名单写入")
             return False, "当前访问已被创宇盾拦截", None
-        
-        result = ujson.loads(res)
+
+        try:
+            result = ujson.loads(res)
+        except Exception as e:
+            # 创宇盾拦截页常为 HTML，与详情侧保持同款容错，避免异常被 autoget 吞成无信息 code=122
+            snippet = (res or "")[:120].replace("\n", " ")
+            logger.warning(f"列表查询响应解析失败: {e}, 响应片段: {snippet}")
+            return False, f"列表查询响应解析失败: {e}", None
+
         detail_context = {
             "p_uuid": p_uuid,
             "token": token,
@@ -559,59 +637,106 @@ class beian:
             if not items:
                 return result
                 
-            logger.info(f"需要并发获取详细信息数量: {len(items)}")
-            
-            # 使用现有的detail_concurrency配置，默认值5
+            # 使用现有的 detail_concurrency 配置，合理收敛单节点并发
             max_concurrency = min(
                 getattr(getattr(config, "system", object()), "detail_concurrency", 5),
                 len(items),
-                20  # 最大并发限制
+                10
             )
+            max_concurrency = max(1, max_concurrency)
             sem = asyncio.Semaphore(max_concurrency)
-            
+            stats = {"enriched": 0}
+            pending_cnt = sum(1 for it in items if "dataId" in it)
+
+            async def ensure_token_valid():
+                # captcha 模式下 p_uuid/sign 与旧 token 成对签发，中途换 token 会使鉴权三元组失配
+                if getattr(getattr(config, 'captcha', object()), 'enable', False):
+                    return
+                now_ms = int(time.time() * 1000)
+                # 第一次快检：若 token 剩余时间充足（>=60s），无需争抢锁直接放行
+                if self.token_expire - now_ms >= 60000:
+                    return
+                # 双检锁（DCL）：仅允许首个获锁协程真正发起刷新，其余并发协程获锁后复检直接复用最新 token
+                async with self.token_lock:
+                    now_ms = int(time.time() * 1000)
+                    if self.token_expire - now_ms >= 60000:
+                        detail_context["token"] = self.token
+                        return
+                    try:
+                        logger.info("ICP Token 即将过期，正在自动刷新 Token...")
+                        tok_ok, new_tok, _ = await self.get_token(proxy)
+                        if tok_ok:
+                            # 仅替换 token，保留 base_header 以维持 __jsluid_s 会话身份连续
+                            detail_context["token"] = new_tok
+                            logger.info("ICP Token 自动刷新成功")
+                    except Exception as e:
+                        logger.warning(f"刷新 Token 异常: {e}")
+
             async def fetch_detail(item):
-                if "dataId" not in item:
+                if self._waf_open() or "dataId" not in item:
                     return item
-                    
+
                 serviceType = 6 if sp == 1 else (7 if sp == 2 else 8)
                 try:
                     async with sem:
-                        # 每个详情请求使用独立会话
+                        if self._waf_open():
+                            return item
+                        await ensure_token_valid()
                         d_success, d_data = await self.getAppAndMiniDetail(
                             item["dataId"], serviceType, detail_context["p_uuid"],
                             detail_context["token"], detail_context["sign"],
                             detail_context["base_header"], proxy
                         )
-                    
-                    if d_success and d_data.get("success"):
-                        return d_data["params"]
+
+                    if d_success and isinstance(d_data, dict) and d_data.get("success") and d_data.get("params"):
+                        merged_item = item.copy()
+                        merged_item.update(d_data["params"])
+                        stats["enriched"] += 1
+                        return merged_item
                     else:
-                        logger.warning(f"详情获取失败 dataId={item.get('dataId')}")
+                        if isinstance(d_data, dict) and (d_data.get("code") == 403 or "已被创宇盾拦截" in str(d_data)):
+                            self._waf_trip("详情获取")
+                        else:
+                            logger.warning(f"详情获取未成功 dataId={item.get('dataId')}")
                         return item
                 except Exception as e:
                     logger.error(f"详情获取异常 dataId={item.get('dataId')} err={e}")
                     return item
 
-            # 改为串行慢速获取，避免瞬间并发触发 403 防火墙
-            batch_size = 1
+            # 采用受控批次并发执行，每批次间留有短暂安全间隔维持平稳速率
+            batch_size = max_concurrency
             detailed_list = []
-            
+
             for i in range(0, len(items), batch_size):
-                await asyncio.sleep(1.0)  # 强制请求间隔
+                if self._waf_open():
+                    # 遭遇 WAF 拦截，平滑降级，将剩余未请求的原始条目直接填充并终止
+                    detailed_list.extend(items[i:])
+                    break
+
                 batch = items[i:i + batch_size]
                 tasks = [fetch_detail(item) for item in batch]
                 batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # 处理异常结果
+
+                # 处理结果
                 for j, res in enumerate(batch_results):
                     if isinstance(res, Exception):
                         logger.error(f"批次任务异常: {res}")
-                        detailed_list.append(batch[j])  # 返回原始数据
+                        detailed_list.append(batch[j])
                     else:
                         detailed_list.append(res)
-            
+
+                if i + batch_size < len(items) and not self._waf_open():
+                    await asyncio.sleep(0.3)
+
             result["params"]["list"] = detailed_list
-            logger.info(f"并发详情完成，总计 {len(detailed_list)} 条")
+            missing = max(pending_cnt - stats["enriched"], 0)
+            if missing:
+                # 降级可观测：缺口量沿调用链上抛，供任务侧标记与用户感知
+                result["params"]["_detail_missing"] = missing
+                result["params"]["_detail_waf"] = self._waf_open()
+            logger.info(
+                f"并发详情获取完成，总计 {len(detailed_list)} 条 (详情缺失: {missing}, WAF熔断: {self._waf_open()})"
+            )
             
         return result
 
@@ -677,9 +802,7 @@ class beian:
                 {"Content-Length": length, "uuid": p_uuid, "token": token, "sign": sign}
             )
             async with self.get_session(proxy) as session:
-                current_ip = None
-                if hasattr(session, '_connector') and hasattr(session._connector, '_local_addr'):
-                    current_ip = session._connector._local_addr[0] if session._connector._local_addr else None
+                current_ip = self._session_local_ip(session)
                 async with session.post((self.blackqueryByCondition if sp == 0 else self.blackappAndMiniByCondition),
                                          data=ujson.dumps(info, ensure_ascii=False),
                                          headers=base_header, proxy=proxy if proxy else None) as req:
@@ -695,9 +818,7 @@ class beian:
             base_header.update({"token": token, "sign": self.sign})
 
             async with self.get_session(proxy) as session:
-                current_ip = None
-                if hasattr(session, '_connector') and hasattr(session._connector, '_local_addr'):
-                    current_ip = session._connector._local_addr[0] if session._connector._local_addr else None
+                current_ip = self._session_local_ip(session)
                 async with session.post((f"{self.blackqueryByCondition}/" if sp == 0 else f"{self.blackappAndMiniByCondition}/"),
                                             json=info, 
                                             headers=base_header, proxy=proxy if proxy else None) as req:
@@ -706,12 +827,10 @@ class beian:
         if "当前访问疑似黑客攻击" in res:
             if current_ip:
                 self._add_blocked_ip(current_ip)
-            elif not proxy and self.local_ipv6_addresses:
-                # 如果无法直接获取IP，使用当前轮询的IPv6
-                with self._ipv6_lock:
-                    blocked_index = (self.ipv6_index - 1) % len(self.local_ipv6_addresses)
-                    blocked_ip = self.local_ipv6_addresses[blocked_index]
-                    self._add_blocked_ip(blocked_ip)
+            else:
+                # 无法定位真实出口地址时不做索引猜测：并发下 ipv6_index 已被其它协程推进，
+                # 按 index-1 归因会误封健康 IP，交由 _arl_local_ip 精确标记处理
+                logger.warning("WAF 拦截但未能定位出口地址，跳过黑名单写入")
             return False, "当前访问已被创宇盾拦截"
 
         return True,ujson.loads(res)
