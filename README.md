@@ -1,11 +1,11 @@
 <div align="center">
 
   # ARL-Next
-  **AI 原生自动化资产侦察与漏洞监控平台**
+  **下一代 AI 原生全域资产测绘与漏洞监控基座**
 
-  *Next-Generation AI-Native Asset Reconnaissance & Vulnerability Monitoring Platform*
+  *Next-Generation AI-Native Attack Surface Reconnaissance & Asset Intelligence Platform*
 
-  <p><b>告别任务假死与内存泄漏 · 拥抱 AI Agent 自动化调度 · 极速 2 分钟一键开箱即用</b></p>
+  <p><b>企业全域穿透 · 全链路拓扑画像 · AI 原生协同调度 · 极速 2 分钟开箱自愈</b></p>
 
   <p>
     <a href="https://github.com/owl234/ARL-Next/releases"><img src="https://img.shields.io/github/v/release/owl234/ARL-Next?style=flat-square&color=blue" alt="Release"></a>
