@@ -43,6 +43,21 @@ class ARLCert(ARLResource):
         return data
 
 
+@ns.route('/export/')
+class ARLCertExport(ARLResource):
+    parser = get_arl_parser(base_search_fields, location='args')
+
+    @auth
+    @ns.expect(parser)
+    def get(self):
+        """
+        SSL证书导出
+        """
+        args = self.parser.parse_args()
+        response = self.send_export_file(args=args, _type="cert")
+        return response
+
+
 delete_cert_fields = ns.model('deleteCertFields',  {
     '_id': fields.List(fields.String(required=True, description="证书 _id"))
 })

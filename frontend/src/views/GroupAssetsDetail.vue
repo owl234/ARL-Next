@@ -12,6 +12,7 @@
     </a-page-header>
 
         <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs" style="margin-bottom: 16px;">
+      <a-tab-pane key="site_chain" tab="全链路画像"></a-tab-pane>
       <a-tab-pane key="site" tab="站点"></a-tab-pane>
       <a-tab-pane key="domain" tab="子域名"></a-tab-pane>
       <a-tab-pane key="ip" tab="IP"></a-tab-pane>
@@ -19,13 +20,40 @@
       <a-tab-pane key="service" tab="服务"></a-tab-pane>
       <a-tab-pane key="fileleak" tab="文件泄露"></a-tab-pane>
       <a-tab-pane key="url" tab="URL信息"></a-tab-pane>
-      <a-tab-pane key="vuln" tab="风险"></a-tab-pane>
-      <a-tab-pane key="npoc_service" tab="服务（python）"></a-tab-pane>
       <a-tab-pane key="cip" tab="C段"></a-tab-pane>
-      <a-tab-pane key="nuclei_result" tab="nuclei"></a-tab-pane>
       <a-tab-pane key="stat_finger" tab="指纹统计"></a-tab-pane>
       <a-tab-pane key="wih" tab="WIH"></a-tab-pane>
+      <a-tab-pane key="vuln" tab="风险"></a-tab-pane>
+      <a-tab-pane key="npoc_service" tab="服务（python）"></a-tab-pane>
+      <a-tab-pane key="nuclei_result" tab="nuclei"></a-tab-pane>
     </a-tabs>
+
+    <!-- 全链路画像专属搜索栏 -->
+    <div v-if="activeTab === 'site_chain'" style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+      <span style="font-weight: 500; font-size: 14px; color: var(--arl-text-color);">子域名/IP 查询：</span>
+      <a-auto-complete
+        v-model:value="chainSearchDomain"
+        :options="domainSuggestions"
+        style="width: 360px;"
+        placeholder="请输入或选择子域名/IP（回车直接搜索）"
+        allow-clear
+        @select="(val) => handleChainSearch(val)"
+        @search="handleDomainSearchInput"
+        @pressEnter="() => handleChainSearch()"
+      />
+      <a-button type="primary" :loading="chainLoading" @click="() => handleChainSearch()">
+        <template #icon><search-outlined /></template>
+        查 询
+      </a-button>
+      <a-button @click="resetChainSearch">清 除</a-button>
+      <a-button v-if="chainData" @click="downloadChainJson">
+        <template #icon><download-outlined /></template>
+        导出画像 (JSON)
+      </a-button>
+      <span v-if="chainData" style="font-size: 13px; color: var(--arl-text-secondary); margin-left: 8px;">
+        已命中关联 IP: <b style="color: var(--arl-primary-color); font-family: monospace;">{{ chainData.resolved_ips?.length || 0 }}</b> 个
+      </span>
+    </div>
 
     <div v-if="tabConfig[activeTab]?.searchFields" style="margin-bottom: 16px;">
       <a-form :model="searchForm" layout="inline" style="row-gap: 16px;">
@@ -106,7 +134,7 @@
       </a-form>
     </div>
 
-    <div style="margin-bottom: 16px; display: flex; gap: 8px;">
+    <div v-if="activeTab !== 'site_chain'" style="margin-bottom: 16px; display: flex; gap: 8px;">
       <a-button @click="resetSearch">清 除</a-button>
       <a-button :disabled="!hasSelected" @click="handleBatchDelete">批量删除</a-button>
       <a-button v-if="activeTab === 'site'" type="primary" @click="openAddSiteModal">添加站点</a-button>
@@ -122,7 +150,7 @@
     </div>
     </div>
 
-    <a-table :sticky="stickyConfig" :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange }" :loading="loading" :dataSource="dataSource" :columns="columns" :pagination="false" :scroll="{ x: 'max-content' }" size="middle" :rowKey="(record) => record._id || record.id">
+    <a-table v-if="activeTab !== 'site_chain'" :sticky="stickyConfig" :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange }" :loading="loading" :dataSource="dataSource" :columns="columns" :pagination="false" :scroll="{ x: 'max-content' }" size="middle" :rowKey="(record) => record._id || record.id">
       <template #bodyCell="{ column, record, index }">
 
         <template v-if="column.key === 'index'">
@@ -131,14 +159,61 @@
 
         <template v-else-if="column.key === 'site'">
           <div class="site-header">
-            <a :href="record.site || record.url" target="_blank" style="font-weight: 500;">
-              <img v-if="record.favicon && record.favicon.data" :src="`data:image/png;base64,${record.favicon.data}`" class="site-img" />
-              {{ record.site || record.url }}
-            </a>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <a :href="record.site || record.url" target="_blank" style="font-weight: 500; word-break: break-all;">
+                <img v-if="record.favicon && record.favicon.data" :src="`data:image/png;base64,${record.favicon.data}`" class="site-img" />
+                {{ record.site || record.url }}
+              </a>
+              <a-button type="link" size="small" style="padding: 0; height: auto; font-size: 12px; flex-shrink: 0;" @click="jumpToChain(record.hostname || record.site)">
+                <compass-outlined />画像
+              </a-button>
+            </div>
             <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
-              <a-tag v-if="record.tag && record.tag.includes('入口')" closable style="background: var(--arl-bg-light); color: var(--arl-text-color); border-color: var(--arl-border-color);">入口</a-tag>
-              <template v-for="(t, idx) in (record.tag || [])" :key="idx">
-                <a-tag v-if="t !== '入口'" closable style="background: var(--arl-bg-light); color: var(--arl-text-color); border-color: var(--arl-border-color);">{{ t }}</a-tag>
+              <!-- 1. 置顶渲染「待测试」标签，主题色自适应柔和质感 + Popconfirm 防误触删除 -->
+              <a-popconfirm
+                v-if="getTags(record).includes('待测试')"
+                title="确定移除「待测试」标签吗？"
+                ok-text="确认"
+                cancel-text="取消"
+                @confirm="handleDeleteTag(record, '待测试')"
+              >
+                <a-tag
+                  closable
+                  class="tag-pending-test"
+                  @close.prevent
+                >待测试</a-tag>
+              </a-popconfirm>
+
+              <!-- 2. 渲染「入口」标签 -->
+              <a-popconfirm
+                v-if="getTags(record).includes('入口')"
+                title="确定移除「入口」标签吗？"
+                ok-text="确认"
+                cancel-text="取消"
+                @confirm="handleDeleteTag(record, '入口')"
+              >
+                <a-tag
+                  closable
+                  style="background: var(--arl-bg-light); color: var(--arl-text-color); border-color: var(--arl-border-color);"
+                  @close.prevent
+                >入口</a-tag>
+              </a-popconfirm>
+
+              <!-- 3. 渲染其余业务自定义标签 -->
+              <template v-for="(t, idx) in getTags(record)" :key="idx">
+                <a-popconfirm
+                  v-if="t !== '待测试' && t !== '入口'"
+                  :title="`确定移除「${t}」标签吗？`"
+                  ok-text="确认"
+                  cancel-text="取消"
+                  @confirm="handleDeleteTag(record, t)"
+                >
+                  <a-tag
+                    closable
+                    style="background: var(--arl-bg-light); color: var(--arl-text-color); border-color: var(--arl-border-color);"
+                    @close.prevent
+                  >{{ t }}</a-tag>
+                </a-popconfirm>
               </template>
               <span class="add-tag" @click="openTagModal(record)" style="cursor: pointer;">添加标签</span>
             </div>
@@ -197,14 +272,31 @@
           <span v-else>-</span>
         </template>
 
+        <template v-else-if="column.key === 'ip'">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="font-weight: 500; font-family: monospace;">{{ record.ip }}</span>
+            <a-button type="link" size="small" style="padding: 0; height: auto; font-size: 12px; flex-shrink: 0;" @click="jumpToChain(record.ip)">
+              <compass-outlined />画像
+            </a-button>
+          </div>
+        </template>
+
         <template v-else-if="column.key === 'port_info'">
           <span>{{ record.port_info && record.port_info.length ? record.port_info.map(p => p.port_id).join(', ') : '-' }}</span>
         </template>
         <template v-else-if="column.key === 'os_info'"><span>{{ record.os_info?.name || '-' }}</span></template>
-        <template v-else-if="column.key === 'geo_city'"><span>{{ record.geo_city ? `${record.geo_city.country_name || 'null'} / ${record.geo_city.city || 'null'}` : '-' }}</span></template>
+        <template v-else-if="column.key === 'geo_city'"><span>{{ formatGeo(record.geo_city) }}</span></template>
         <template v-else-if="column.key === 'geo_asn'"><span>{{ record.geo_asn?.organization || '-' }}</span></template>
-        <template v-else-if="column.key === 'domain' && Array.isArray(record.domain)">
-          <div v-for="(dom, i) in record.domain" :key="i">{{ dom }}</div>
+        <template v-else-if="column.key === 'domain'">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <div v-if="Array.isArray(record.domain)">
+              <div v-for="(dom, i) in record.domain" :key="i">{{ dom }}</div>
+            </div>
+            <span v-else style="font-weight: 500;">{{ record.domain }}</span>
+            <a-button v-if="!Array.isArray(record.domain)" type="link" size="small" style="padding: 0; height: auto; font-size: 12px; flex-shrink: 0;" @click="jumpToChain(record.domain)">
+              <compass-outlined />画像
+            </a-button>
+          </div>
         </template>
 
         <template v-else-if="column.key === 'source'">
@@ -251,13 +343,33 @@
         </template>
         <template v-else-if="column.key === 'ip_port'">
           <div v-if="record.service_info && record.service_info.length">
-            <div v-for="(info, i) in record.service_info" :key="i" style="line-height: 1.8;">{{ info.ip }}:{{ info.port_id }}</div>
+            <div v-for="(info, i) in record.service_info.slice(0, 3)" :key="i" style="line-height: 1.8; font-family: monospace;">
+              {{ info.ip }}:{{ info.port_id }}
+            </div>
+            <div v-if="record.service_info.length > 3" style="margin-top: 4px;">
+              <a-button
+                type="link"
+                size="small"
+                style="padding: 0; height: auto; font-size: 12px;"
+                @click="openServiceDetailModal(record)"
+              >
+                查看全部 (共 {{ record.service_info.length }} 项) &gt;&gt;
+              </a-button>
+            </div>
           </div>
           <span v-else>-</span>
         </template>
         <template v-else-if="column.key === 'product'">
           <div v-if="record.service_info && record.service_info.length">
-            <div v-for="(info, i) in record.service_info" :key="i" style="line-height: 1.8;">{{ info.product || '-' }}</div>
+            <div v-for="(info, i) in record.service_info.slice(0, 3)" :key="i" style="line-height: 1.8;">
+              {{ info.product || '-' }}
+            </div>
+            <div
+              v-if="record.service_info.length > 3"
+              style="margin-top: 4px; height: 22px; line-height: 22px; color: var(--arl-text-color); opacity: 0.45; font-size: 12px;"
+            >
+              ...
+            </div>
           </div>
           <span v-else>-</span>
         </template>
@@ -291,6 +403,507 @@
 
       </template>
     </a-table>
+
+    <!-- ================= 站点信息查询（全链路透视画像） ================= -->
+    <template v-if="activeTab === 'site_chain'">
+      <!-- 1. 初始未搜索：空白引导态 -->
+      <div v-if="!chainSearched" style="background: var(--arl-bg-white); border-radius: 8px; padding: 70px 24px; text-align: center; border: 1px dashed var(--arl-border-color); margin-top: 8px;">
+        <a-empty description="请输入或选择子域名展开全链路资产画像">
+          <template #image>
+            <compass-outlined style="font-size: 64px; color: var(--arl-theme-color); opacity: 0.75;" />
+          </template>
+          <div style="color: var(--arl-text-secondary); margin-top: 12px; font-size: 13px;">
+            自上而下顺次透视：站点元数据与截图 ➔ 子域名解析 ➔ 关联IP与归属 ➔ 关联C段网段 ➔ SSL证书 ➔ 开放服务与NPOC ➔ 敏感文件、URL与WIH ➔ 风险漏洞与Nuclei
+          </div>
+        </a-empty>
+      </div>
+
+      <!-- 2. 查询中或已有数据时的展示区 -->
+      <a-spin v-else :spinning="chainLoading" tip="正在全息聚合各资产板块数据...">
+        <div v-if="chainData" style="display: flex; flex-direction: column; gap: 16px; margin-top: 8px;">
+
+          <!-- 板块 1：站点基础信息与截图 (chainData.site) -->
+          <a-card :bordered="false" class="chain-card" :bodyStyle="{ padding: '16px 20px' }">
+            <template #title>
+              <div class="chain-card-header">
+                <global-outlined class="chain-icon" />
+                <span class="chain-title">站点基础信息</span>
+                <a-badge :count="chainData.site?.length || 0" :number-style="{ backgroundColor: '#1890ff' }" style="margin-left: 8px;" />
+              </div>
+            </template>
+
+            <div v-if="!chainData.site || chainData.site.length === 0" class="chain-empty-tip">
+              暂无关联站点记录
+            </div>
+            <div v-else style="display: flex; flex-direction: column; gap: 16px;">
+              <div v-for="siteItem in chainData.site" :key="siteItem._id || siteItem.site" class="chain-site-item">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap;">
+                  <!-- 站点详情信息 -->
+                  <div style="flex: 1; min-width: 320px;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                      <img v-if="siteItem.favicon && siteItem.favicon.data" :src="`data:image/png;base64,${siteItem.favicon.data}`" class="site-img" />
+                      <a :href="siteItem.site" target="_blank" style="font-size: 16px; font-weight: 600; color: var(--arl-theme-color); word-break: break-all;">
+                        {{ siteItem.site }}
+                      </a>
+                      <a-tag :color="siteItem.status === 200 ? 'success' : (siteItem.status >= 400 ? 'error' : 'default')">
+                        HTTP {{ siteItem.status || '-' }}
+                      </a-tag>
+                    </div>
+
+                    <div class="chain-info-grid">
+                      <div class="chain-info-row">
+                        <span class="chain-info-label">网页标题：</span>
+                        <span class="chain-info-value" style="font-weight: 500;">{{ siteItem.title || '-' }}</span>
+                      </div>
+                      <div class="chain-info-row">
+                        <span class="chain-info-label">Web Server：</span>
+                        <span class="chain-info-value">{{ siteItem.http_server || '-' }}</span>
+                      </div>
+                      <div class="chain-info-row">
+                        <span class="chain-info-label">关联 IP：</span>
+                        <span class="chain-info-value" style="font-family: monospace;">{{ siteItem.ip || '-' }}</span>
+                      </div>
+                      <div class="chain-info-row">
+                        <span class="chain-info-label">更新时间：</span>
+                        <span class="chain-info-value">{{ siteItem.update_date || siteItem.save_date || '-' }}</span>
+                      </div>
+                      <div class="chain-info-row">
+                        <span class="chain-info-label">指纹识别：</span>
+                        <div class="chain-info-value" style="display: flex; flex-wrap: wrap; gap: 4px;">
+                          <template v-if="siteItem.finger && siteItem.finger.length > 0">
+                            <a-tag v-for="f in siteItem.finger" :key="f.name" color="blue">{{ f.name }}</a-tag>
+                          </template>
+                          <span v-else>-</span>
+                        </div>
+                      </div>
+                      <div class="chain-info-row">
+                        <span class="chain-info-label">业务标签：</span>
+                        <div class="chain-info-value" style="display: flex; flex-wrap: wrap; gap: 4px;">
+                          <template v-if="getTags(siteItem) && getTags(siteItem).length > 0">
+                            <a-tag v-for="t in getTags(siteItem)" :key="t" color="orange">{{ t }}</a-tag>
+                          </template>
+                          <span v-else>-</span>
+                        </div>
+                      </div>
+                      <div v-if="siteItem.headers" class="chain-info-row">
+                        <span class="chain-info-label">响应标头：</span>
+                        <a-popover placement="bottomLeft" trigger="click">
+                          <template #content>
+                            <pre style="max-height: 250px; max-width: 500px; overflow: auto; font-size: 11px; margin: 0;">{{ siteItem.headers }}</pre>
+                          </template>
+                          <a-button type="link" size="small" style="padding: 0; height: auto;">查看 Headers</a-button>
+                        </a-popover>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 站点网页截图预览 -->
+                  <div style="width: 240px; text-align: center; flex-shrink: 0;">
+                    <div v-if="siteItem.screenshot" style="border: 1px solid var(--arl-border-color); border-radius: 4px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); cursor: pointer;" @click="handlePreview(`/api${siteItem.screenshot}`)">
+                      <img :src="`/api${siteItem.screenshot}`" style="width: 100%; height: 140px; object-fit: cover; object-position: top; display: block;" />
+                      <div style="background: var(--arl-bg-light); font-size: 11px; padding: 4px; color: var(--arl-text-secondary);">点击放大截图</div>
+                    </div>
+                    <div v-else style="width: 100%; height: 140px; border: 1px dashed var(--arl-border-color); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: var(--arl-text-secondary); font-size: 12px; background: var(--arl-bg-light);">
+                      暂无网页截图
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </a-card>
+
+          <!-- 板块 2：子域名与解析记录 (chainData.domain_records) -->
+          <a-card :bordered="false" class="chain-card" :bodyStyle="{ padding: '16px 20px' }">
+            <template #title>
+              <div class="chain-card-header">
+                <link-outlined class="chain-icon" />
+                <span class="chain-title">子域名与解析记录</span>
+                <a-badge :count="chainData.domain_records?.length || 0" :number-style="{ backgroundColor: '#52c41a' }" style="margin-left: 8px;" />
+              </div>
+            </template>
+            <a-table
+              :dataSource="chainData.domain_records || []"
+              :columns="chainDomainCols"
+              :pagination="false"
+              size="middle"
+              :rowKey="(record) => record._id || record.id || record.domain"
+              :locale="{ emptyText: '暂无子域名解析记录' }"
+            >
+              <template #bodyCell="{ column, record, index }">
+                <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+                <template v-else-if="column.key === 'domain'"><span style="font-weight: 500;">{{ record.domain }}</span></template>
+                <template v-else-if="column.key === 'record'">
+                  <div v-if="Array.isArray(record.record)"><div v-for="(r, i) in record.record" :key="i">{{ r }}</div></div>
+                  <span v-else>{{ record.record || '-' }}</span>
+                </template>
+                <template v-else-if="column.key === 'ips'">
+                  <div v-if="Array.isArray(record.ips)"><div v-for="(ip, i) in record.ips" :key="i" style="font-family: monospace;">{{ ip }}</div></div>
+                  <span v-else>{{ record.ips || '-' }}</span>
+                </template>
+              </template>
+            </a-table>
+          </a-card>
+
+          <!-- 板块 3：IP 与网络归属 (chainData.ip) -->
+          <a-card :bordered="false" class="chain-card" :bodyStyle="{ padding: '16px 20px' }">
+            <template #title>
+              <div class="chain-card-header">
+                <cloud-server-outlined class="chain-icon" />
+                <span class="chain-title">IP 与网络归属</span>
+                <a-badge :count="chainData.ip?.length || 0" :number-style="{ backgroundColor: '#722ed1' }" style="margin-left: 8px;" />
+              </div>
+            </template>
+            <a-table
+              :dataSource="chainData.ip || []"
+              :columns="chainIpCols"
+              :pagination="false"
+              :scroll="{ x: 'max-content' }"
+              size="middle"
+              :rowKey="(record) => record._id || record.id || record.ip"
+              :locale="{ emptyText: '暂无关联 IP 资产记录' }"
+            >
+              <template #bodyCell="{ column, record, index }">
+                <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+                <template v-else-if="column.key === 'ip'"><span style="font-weight: 500; font-family: monospace;">{{ record.ip }}</span></template>
+                <template v-else-if="column.key === 'port_info'">
+                  <span v-if="record.port_info && record.port_info.length">{{ record.port_info.map(p => p.port_id).join(', ') }}</span>
+                  <span v-else>-</span>
+                </template>
+                <template v-else-if="column.key === 'os_info'"><span>{{ record.os_info?.name || '-' }}</span></template>
+                <template v-else-if="column.key === 'domain'">
+                  <div v-if="Array.isArray(record.domain) && record.domain.length">
+                    <div v-for="(dom, i) in record.domain" :key="i" style="font-family: monospace;">{{ dom }}</div>
+                  </div>
+                  <span v-else-if="record.domain && !Array.isArray(record.domain)" style="font-family: monospace;">{{ record.domain }}</span>
+                  <span v-else>-</span>
+                </template>
+                <template v-else-if="column.key === 'geo_city'"><span>{{ formatGeo(record.geo_city) }}</span></template>
+                <template v-else-if="column.key === 'geo_asn'"><span>{{ record.geo_asn?.organization || '-' }}</span></template>
+              </template>
+            </a-table>
+          </a-card>
+
+          <!-- 板块 4：关联 C 段网段 (chainData.cip) -->
+          <a-card :bordered="false" class="chain-card" :bodyStyle="{ padding: '16px 20px' }">
+            <template #title>
+              <div class="chain-card-header">
+                <cluster-outlined class="chain-icon" />
+                <span class="chain-title">关联 C 段网段</span>
+                <a-badge :count="chainData.cip?.length || 0" :number-style="{ backgroundColor: '#eb2f96' }" style="margin-left: 8px;" />
+              </div>
+            </template>
+            <a-table
+              :dataSource="chainData.cip || []"
+              :columns="chainCipCols"
+              :pagination="false"
+              size="middle"
+              :rowKey="(record) => record._id || record.id || record.cidr_ip"
+              :locale="{ emptyText: '暂无关联 C 段资产记录' }"
+            >
+              <template #bodyCell="{ column, record, index }">
+                <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+                <template v-else-if="column.key === 'cidr_ip'">
+                  <a style="cursor: pointer; font-family: monospace; font-size: 14px; font-weight: 600; color: var(--arl-primary-color);" @click="openCidrDetail(record)">
+                    {{ record.cidr_ip || '-' }}
+                  </a>
+                </template>
+                <template v-else-if="column.key === 'ip_count'">
+                  <a-tag color="purple" style="font-family: monospace;">
+                    {{ record.ip_count ?? (record.ip_list ? record.ip_list.length : 0) }} 个 IP
+                  </a-tag>
+                </template>
+                <template v-else-if="column.key === 'domain_count'">
+                  <a-tag color="blue" style="font-family: monospace;">
+                    {{ record.domain_count ?? (record.domain_list ? record.domain_list.length : 0) }} 个域名
+                  </a-tag>
+                </template>
+                <template v-else-if="column.key === 'update_date'">
+                  <span style="font-size: 13px; color: var(--arl-text-secondary);">
+                    {{ record.update_date || record.save_date || '-' }}
+                  </span>
+                </template>
+                <template v-else-if="column.key === 'action'">
+                  <a-button type="link" size="small" @click="openCidrDetail(record)">
+                    查看详情
+                  </a-button>
+                </template>
+              </template>
+            </a-table>
+          </a-card>
+
+          <!-- 板块 5：SSL 证书 (chainData.cert) -->
+          <a-card :bordered="false" class="chain-card" :bodyStyle="{ padding: '16px 20px' }">
+            <template #title>
+              <div class="chain-card-header">
+                <safety-certificate-outlined class="chain-icon" />
+                <span class="chain-title">SSL 证书</span>
+                <a-badge :count="chainData.cert?.length || 0" :number-style="{ backgroundColor: '#13c2c2' }" style="margin-left: 8px;" />
+              </div>
+            </template>
+            <a-table
+              :dataSource="chainData.cert || []"
+              :columns="chainCertCols"
+              :pagination="false"
+              size="middle"
+              :rowKey="(record) => record._id || record.id"
+              :locale="{ emptyText: '暂无关联 SSL 证书' }"
+            >
+              <template #bodyCell="{ column, record, index }">
+                <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+                <template v-else-if="column.key === 'host'"><span>{{ record.ip || record.host }}{{ record.port ? ':' + record.port : '' }}</span></template>
+                <template v-else-if="column.key === 'cert_detail'">
+                  <div v-if="record.cert" style="font-size: 12px; line-height: 1.6;">
+                    <div><b>主题名称：</b>{{ record.cert.subject_dn || '-' }}</div>
+                    <div><b>签发者：</b>{{ record.cert.issuer_dn || '-' }}</div>
+                    <div v-if="record.cert.extensions?.subjectAltName"><b>备用名 (SAN)：</b>{{ record.cert.extensions.subjectAltName }}</div>
+                    <div><b>有效期限：</b>{{ record.cert.validity?.start || '-' }} 至 {{ record.cert.validity?.end || '-' }}</div>
+                  </div>
+                  <span v-else>-</span>
+                </template>
+              </template>
+            </a-table>
+          </a-card>
+
+          <!-- 板块 6：开放服务与 NPOC (chainData.service & chainData.npoc_service) -->
+          <a-card :bordered="false" class="chain-card" :bodyStyle="{ padding: '16px 20px' }">
+            <template #title>
+              <div class="chain-card-header">
+                <api-outlined class="chain-icon" />
+                <span class="chain-title">开放服务与 NPOC</span>
+                <a-badge :count="(chainData.service?.length || 0) + (chainData.npoc_service?.length || 0)" :number-style="{ backgroundColor: '#fa8c16' }" style="margin-left: 8px;" />
+              </div>
+            </template>
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+              <div>
+                <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--arl-text-color);">
+                  🔌 资产系统服务 ({{ chainData.service?.length || 0 }})
+                </div>
+                <a-table
+                  :dataSource="chainData.service || []"
+                  :columns="chainServiceCols"
+                  :pagination="false"
+                  size="middle"
+                  :rowKey="(record) => record._id || record.id"
+                  :locale="{ emptyText: '暂无开放服务记录' }"
+                >
+                  <template #bodyCell="{ column, record, index }">
+                    <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+                    <template v-else-if="column.key === 'service_name'"><a-tag color="cyan">{{ record.service_name }}</a-tag></template>
+                    <template v-else-if="column.key === 'ip_port'">
+                      <div v-if="record.service_info && record.service_info.length">
+                        <div v-for="(info, i) in record.service_info" :key="i" style="font-family: monospace;">
+                          {{ info.ip }}:{{ info.port_id }}
+                        </div>
+                      </div>
+                      <span v-else>-</span>
+                    </template>
+                    <template v-else-if="column.key === 'product'">
+                      <div v-if="record.service_info && record.service_info.length">
+                        <div v-for="(info, i) in record.service_info" :key="i">
+                          {{ info.product || '-' }} {{ info.version ? `(${info.version})` : '' }}
+                        </div>
+                      </div>
+                      <span v-else>-</span>
+                    </template>
+                  </template>
+                </a-table>
+              </div>
+
+              <div>
+                <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--arl-text-color);">
+                  🐍 Python NPOC 探测服务 ({{ chainData.npoc_service?.length || 0 }})
+                </div>
+                <a-table
+                  :dataSource="chainData.npoc_service || []"
+                  :columns="chainNpocCols"
+                  :pagination="false"
+                  size="small"
+                  :rowKey="(record) => record._id || record.id"
+                  :locale="{ emptyText: '暂无 NPOC 探测服务记录' }"
+                >
+                  <template #bodyCell="{ column, record, index }">
+                    <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+                    <template v-else-if="column.key === 'scheme'"><a-tag color="purple">{{ record.scheme || '-' }}</a-tag></template>
+                    <template v-else-if="column.key === 'target'">
+                      <span style="font-family: monospace;">{{ record.target || '-' }}</span>
+                    </template>
+                  </template>
+                </a-table>
+              </div>
+            </div>
+          </a-card>
+
+          <!-- 板块 7：文件泄露、敏感 URL 与 WIH (chainData.fileleak & chainData.url & chainData.wih) -->
+          <a-card :bordered="false" class="chain-card" :bodyStyle="{ padding: '16px 20px' }">
+            <template #title>
+              <div class="chain-card-header">
+                <file-search-outlined class="chain-icon" />
+                <span class="chain-title">文件泄露、敏感 URL 与 WIH</span>
+                <a-badge :count="(chainData.fileleak?.length || 0) + (chainData.url?.length || 0) + (chainData.wih?.length || 0)" :number-style="{ backgroundColor: '#faad14' }" style="margin-left: 8px;" />
+              </div>
+            </template>
+
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+              <!-- 7.1 文件泄露 -->
+              <div>
+                <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--arl-text-color);">
+                  📄 疑似敏感文件泄露 ({{ chainData.fileleak?.length || 0 }})
+                </div>
+                <a-table
+                  :dataSource="chainData.fileleak || []"
+                  :columns="chainFileleakCols"
+                  :pagination="false"
+                  size="small"
+                  :rowKey="(record) => record._id || record.id || record.url"
+                  :locale="{ emptyText: '暂无文件泄露记录' }"
+                >
+                  <template #bodyCell="{ column, record, index }">
+                    <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+                    <template v-else-if="column.key === 'url'">
+                      <a :href="record.url" target="_blank" style="font-family: monospace; word-break: break-all;">
+                        {{ record.url }}
+                      </a>
+                    </template>
+                  </template>
+                </a-table>
+              </div>
+
+              <!-- 7.2 关联 URL -->
+              <div>
+                <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--arl-text-color);">
+                  🔗 关联探测 URL ({{ chainData.url?.length || 0 }})
+                </div>
+                <a-table
+                  :dataSource="chainData.url || []"
+                  :columns="chainUrlCols"
+                  :pagination="false"
+                  size="small"
+                  :rowKey="(record) => record._id || record.id || record.url"
+                  :locale="{ emptyText: '暂无关联 URL 记录' }"
+                >
+                  <template #bodyCell="{ column, record, index }">
+                    <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+                    <template v-else-if="column.key === 'url'">
+                      <a :href="record.url" target="_blank" style="font-family: monospace; word-break: break-all;">
+                        {{ record.url }}
+                      </a>
+                    </template>
+                  </template>
+                </a-table>
+              </div>
+
+              <!-- 7.3 WIH 敏感信息 -->
+              <div>
+                <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--arl-text-color);">
+                  🔍 WEB Info Hunter 泄露信息 ({{ chainData.wih?.length || 0 }})
+                </div>
+                <a-table
+                  :dataSource="chainData.wih || []"
+                  :columns="chainWihCols"
+                  :pagination="false"
+                  size="small"
+                  :rowKey="(record) => record._id || record.id"
+                  :locale="{ emptyText: '暂无 WIH 泄露记录' }"
+                >
+                  <template #bodyCell="{ column, record, index }">
+                    <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+                    <template v-else-if="column.key === 'content'">
+                      <span style="font-family: monospace; word-break: break-all; color: #fa8c16; font-weight: 500;">
+                        {{ record.content }}
+                      </span>
+                    </template>
+                    <template v-else-if="column.key === 'site' || column.key === 'source'">
+                      <a v-if="record[column.key]" :href="record[column.key]" target="_blank" style="font-family: monospace; word-break: break-all;">
+                        {{ record[column.key] }}
+                      </a>
+                      <span v-else>-</span>
+                    </template>
+                  </template>
+                </a-table>
+              </div>
+            </div>
+          </a-card>
+
+          <!-- 板块 8：风险漏洞与 Nuclei (chainData.vuln & chainData.nuclei_result) -->
+          <a-card :bordered="false" class="chain-card" :bodyStyle="{ padding: '16px 20px' }">
+            <template #title>
+              <div class="chain-card-header">
+                <bug-outlined class="chain-icon" />
+                <span class="chain-title">风险漏洞与 Nuclei 结果</span>
+                <a-badge :count="(chainData.vuln?.length || 0) + (chainData.nuclei_result?.length || 0)" :number-style="{ backgroundColor: '#f5222d' }" style="margin-left: 8px;" />
+              </div>
+            </template>
+
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+              <!-- 7.1 常规漏洞 / PoC 结果 -->
+              <div>
+                <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--arl-text-color);">
+                  🛡️ 应用与服务漏洞 ({{ chainData.vuln?.length || 0 }})
+                </div>
+                <a-table
+                  :dataSource="chainData.vuln || []"
+                  :columns="chainVulnCols"
+                  :pagination="false"
+                  size="small"
+                  :rowKey="(record) => record._id || record.id"
+                  :locale="{ emptyText: '暂无漏洞风险记录' }"
+                >
+                  <template #bodyCell="{ column, record, index }">
+                    <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+                    <template v-else-if="column.key === 'target'">
+                      <a v-if="record.target && (record.target.startsWith('http://') || record.target.startsWith('https://'))" :href="record.target" target="_blank" style="word-break: break-all;">{{ record.target }}</a>
+                      <span v-else style="font-family: monospace; word-break: break-all;">{{ record.target || '-' }}</span>
+                    </template>
+                    <template v-else-if="column.key === 'verify_data'">
+                      <div style="max-height: 80px; overflow-y: auto; color: #f5222d; font-family: monospace; font-size: 12px; word-break: break-all;">
+                        {{ record.verify_data || record.proof || '-' }}
+                      </div>
+                    </template>
+                  </template>
+                </a-table>
+              </div>
+
+              <!-- 7.2 Nuclei 命中结果 -->
+              <div>
+                <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--arl-text-color);">
+                  🎯 Nuclei 扫描发现 ({{ chainData.nuclei_result?.length || 0 }})
+                </div>
+                <a-table
+                  :dataSource="chainData.nuclei_result || []"
+                  :columns="chainNucleiCols"
+                  :pagination="false"
+                  size="small"
+                  :rowKey="(record) => record._id || record.id"
+                  :locale="{ emptyText: '暂无 Nuclei 扫描发现' }"
+                >
+                  <template #bodyCell="{ column, record, index }">
+                    <template v-if="column.key === 'index'">{{ index + 1 }}</template>
+                    <template v-else-if="column.key === 'vuln_severity'">
+                      <a-tag :color="getSeverityColor(record.vuln_severity || record.vul_severity)">
+                        {{ (record.vuln_severity || record.vul_severity || 'info').toUpperCase() }}
+                      </a-tag>
+                    </template>
+                    <template v-else-if="column.key === 'vuln_url'">
+                      <a v-if="(record.vuln_url || record.target) && ((record.vuln_url || record.target).startsWith('http://') || (record.vuln_url || record.target).startsWith('https://'))" :href="record.vuln_url || record.target" target="_blank" style="word-break: break-all;">
+                        {{ record.vuln_url || record.target }}
+                      </a>
+                      <span v-else style="font-family: monospace; word-break: break-all;">{{ record.vuln_url || record.target || '-' }}</span>
+                    </template>
+                    <template v-else-if="column.key === 'verify_command'">
+                      <div style="max-height: 80px; overflow-y: auto; background: var(--arl-bg-light); padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 11px; word-break: break-all;">
+                        {{ record.verify_command || record.curl_command || '-' }}
+                      </div>
+                    </template>
+                  </template>
+                </a-table>
+              </div>
+            </div>
+          </a-card>
+
+        </div>
+      </a-spin>
+    </template>
+
 
     <!-- 指纹统计关联站点弹窗 -->
     <a-modal v-model:open="fingerModalVisible" :title="`指纹关联站点：${currentFingerName}`" :footer="null" width="800px">
@@ -327,6 +940,9 @@
     <!-- 综合C段详情弹窗 (提取为组件) -->
     <CidrDetailModal v-model:open="cipDetailModalVisible" :record="currentCidrRecord" />
 
+    <!-- 系统服务端点详情弹窗 (提取为组件) -->
+    <ServiceDetailModal v-model:open="serviceDetailModalVisible" :record="currentServiceRecord" />
+
     <!-- 图片预览组件 -->
     <a-modal v-model:open="previewVisible" :footer="null" width="85vw" centered @cancel="previewVisible = false" :bodyStyle="{ padding: '16px' }">
       <img :src="previewImage" style="width: 100%; max-height: 85vh; object-fit: contain; display: block;" />
@@ -340,7 +956,7 @@
     </a-modal>
 
 
-    <div v-if="tabConfig[activeTab]" style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px; margin-top: 16px;">
+    <div v-if="tabConfig[activeTab] && activeTab !== 'site_chain'" style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px; margin-top: 16px;">
       <div style="color: var(--arl-text-color); opacity: 0.65;">共 {{ Math.ceil(pagination.total / pagination.pageSize) || 1 }} 页 / {{ pagination.total }} 条数据</div>
       <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" show-size-changer @change="handleTableChange" />
     </div>
@@ -403,22 +1019,314 @@ import { useSticky } from '../utils/useSticky';
 const actionBarRef = ref(null);
 const { stickyConfig } = useSticky(actionBarRef);
 
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
+import { formatGeo } from '../utils/formatGeo';
 import { message, Modal } from 'ant-design-vue';
 import * as echarts from 'echarts';
+import dayjs from 'dayjs';
 import CidrDetailModal from '../components/CidrDetailModal.vue';
-import { SearchOutlined , ExclamationCircleOutlined, LeftOutlined } from '@ant-design/icons-vue';
+import ServiceDetailModal from '../components/ServiceDetailModal.vue';
+import {
+  SearchOutlined,
+  ExclamationCircleOutlined,
+  LeftOutlined,
+  GlobalOutlined,
+  CloudServerOutlined,
+  SafetyCertificateOutlined,
+  ApiOutlined,
+  FileSearchOutlined,
+  BugOutlined,
+  CompassOutlined,
+  ClusterOutlined,
+  LinkOutlined,
+  DownloadOutlined
+} from '@ant-design/icons-vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
+import { createTabStateCache } from '../utils/useTabStateCache';
 
 const route = useRoute();
+const router = useRouter();
 // 🚨 修复 1：使用 computed，让路由参数具备真正的响应式
 const scope_id = computed(() => route.query.scope_id || '');
 const targetName = computed(() => route.query.targetName || '未知资产');
 
+const isScopeSwitching = ref(false);
 const activeTab = ref('site');
 const loading = ref(false);
 const dataSource = ref([]);
+
+// ================= 全链路子域名画像检索逻辑 =================
+const chainSearchDomain = ref('');
+const chainLoading = ref(false);
+const chainSearched = ref(false);
+const chainData = ref(null);
+const domainSuggestions = ref([]);
+
+const chainDomainCols = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: '子域名', dataIndex: 'domain', key: 'domain', width: 220 },
+  { title: '解析类型', dataIndex: 'type', key: 'type', width: 100, align: 'center' },
+  { title: '记录值', key: 'record', width: 250 },
+  { title: '关联IP', key: 'ips', width: 250 },
+  { title: '来源', dataIndex: 'source', key: 'source', width: 150 },
+  { title: '更新时间', dataIndex: 'update_date', key: 'update_date', width: 180 }
+];
+
+const chainIpCols = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: 'IP', dataIndex: 'ip', key: 'ip', width: 160 },
+  { title: '操作系统', key: 'os_info', width: 140 },
+  { title: '开放端口', key: 'port_info', width: 220 },
+  { title: '关联域名', key: 'domain', width: 250 },
+  { title: 'Geo 归属', key: 'geo_city', width: 180 },
+  { title: 'AS 归属', key: 'geo_asn', width: 260 },
+  { title: '更新时间', dataIndex: 'update_date', key: 'update_date', width: 180 }
+];
+
+const chainCipCols = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: 'C段网段', dataIndex: 'cidr_ip', key: 'cidr_ip', width: 220 },
+  { title: '关联 IP 数量', key: 'ip_count', width: 140, align: 'center' },
+  { title: '关联域名数量', key: 'domain_count', width: 140, align: 'center' },
+  { title: '更新时间', dataIndex: 'update_date', key: 'update_date', width: 180 },
+  { title: '操作', key: 'action', width: 120, align: 'center' }
+];
+
+const chainCertCols = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: 'HOST', key: 'host', width: 180 },
+  { title: '证书详情', key: 'cert_detail' },
+  { title: '更新时间', dataIndex: 'update_date', key: 'update_date', width: 180 }
+];
+
+const chainServiceCols = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: '服务', dataIndex: 'service_name', key: 'service_name', width: 120, align: 'center' },
+  { title: 'IP:端口', key: 'ip_port', width: 220 },
+  { title: 'Product / 版本', key: 'product', width: 300 },
+  { title: '更新时间', dataIndex: 'update_date', key: 'update_date', width: 180 }
+];
+
+const chainFileleakCols = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: 'URL', key: 'url' },
+  { title: '标题', dataIndex: 'title', key: 'title', width: 200 },
+  { title: '状态码', key: 'status_code', width: 90, align: 'center' },
+  { title: '更新时间', dataIndex: 'update_date', key: 'update_date', width: 180 }
+];
+
+const chainUrlCols = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: 'URL', key: 'url' },
+  { title: '标题', dataIndex: 'title', key: 'title', width: 200 },
+  { title: '状态码', key: 'status_code', width: 90, align: 'center' },
+  { title: '来源', dataIndex: 'source', key: 'source', width: 140 },
+  { title: '更新时间', dataIndex: 'update_date', key: 'update_date', width: 180 }
+];
+
+const chainVulnCols = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: '漏洞名称', dataIndex: 'vul_name', key: 'vul_name', width: 220 },
+  { title: '类别', dataIndex: 'vul_category', key: 'vul_category', width: 120 },
+  { title: '目标', key: 'target', width: 220 },
+  { title: '凭证', key: 'verify_data' },
+  { title: '发现时间', dataIndex: 'insert_time', key: 'insert_time', width: 160 }
+];
+
+const chainNucleiCols = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: '危害等级', key: 'vuln_severity', width: 100, align: 'center' },
+  { title: '模版ID', dataIndex: 'template_id', key: 'template_id', width: 180 },
+  { title: '漏洞名称', dataIndex: 'vuln_name', key: 'vul_name', width: 200 },
+  { title: '漏洞 URL', key: 'vuln_url', width: 260 },
+  { title: '验证命令', key: 'verify_command' },
+  { title: '保存时间', dataIndex: 'insert_time', key: 'insert_time', width: 160 }
+];
+
+const chainNpocCols = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: '协议', dataIndex: 'scheme', key: 'scheme', width: 120, align: 'center' },
+  { title: '主机', dataIndex: 'host', key: 'host', width: 180 },
+  { title: '端口', dataIndex: 'port', key: 'port', width: 90, align: 'center' },
+  { title: '目标', dataIndex: 'target', key: 'target', width: 220 },
+  { title: '保存时间', dataIndex: 'insert_time', key: 'insert_time', width: 180 }
+];
+
+const chainWihCols = [
+  { title: '序号', key: 'index', width: 60, align: 'center' },
+  { title: '类型', dataIndex: 'record_type', key: 'record_type', width: 120 },
+  { title: '敏感内容', dataIndex: 'content', key: 'content' },
+  { title: '来源 JS', dataIndex: 'source', key: 'source', width: 350 },
+  { title: '来源站点', dataIndex: 'site', key: 'site', width: 220 },
+  { title: '更新时间', dataIndex: 'update_date', key: 'update_date', width: 180 }
+];
+
+const syncChainQuery = (target) => {
+  const currentQuery = { ...route.query };
+  if (target) {
+    currentQuery.chain_target = target;
+  } else {
+    delete currentQuery.chain_target;
+  }
+  router.replace({ query: currentQuery });
+};
+
+const downloadChainJson = () => {
+  if (!chainData.value) {
+    message.warning('当前无画像数据可导出');
+    return;
+  }
+  try {
+    const jsonStr = JSON.stringify(chainData.value, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    const downloadAnchor = document.createElement('a');
+    const targetLabel = chainSearchDomain.value || 'target';
+    const filename = `arl_chain_${targetLabel}_${dayjs().format('YYYYMMDD_HHmmss')}.json`;
+    downloadAnchor.href = blobUrl;
+    downloadAnchor.download = filename;
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    URL.revokeObjectURL(blobUrl);
+    message.success(`已成功导出画像数据: ${filename}`);
+  } catch (err) {
+    message.error('导出画像数据失败');
+  }
+};
+
+const jumpToChain = (target) => {
+  if (!target) return;
+  let dom = String(target).trim();
+  if (dom.includes('://')) {
+    try {
+      dom = new URL(dom).hostname;
+    } catch (e) {
+      dom = dom.split('://')[1].split('/')[0];
+    }
+  } else if (dom.includes('/')) {
+    dom = dom.split('/')[0];
+  }
+  if (dom.includes(':') && !dom.startsWith('[')) {
+    dom = dom.split(':')[0];
+  }
+  dom = dom.replace(/^\[|\]$/g, '').trim().toLowerCase();
+  chainSearchDomain.value = dom;
+  activeTab.value = 'site_chain';
+  nextTick(() => {
+    handleChainSearch();
+  });
+};
+
+const getSeverityColor = (sev) => {
+  const s = String(sev || '').toLowerCase();
+  if (s === 'critical') return '#f5222d';
+  if (s === 'high') return '#fa541c';
+  if (s === 'medium') return '#fa8c16';
+  if (s === 'low') return '#faad14';
+  return '#1890ff';
+};
+
+const fetchDomainSuggestions = async (keyword = '') => {
+  if (!scope_id.value) return;
+  try {
+    const params = {
+      scope_id: scope_id.value,
+      page: 1,
+      size: 30
+    };
+    if (keyword && typeof keyword === 'string' && keyword.trim()) {
+      params.domain = keyword.trim();
+    }
+    const res = await request.get('/asset_domain/', { params });
+    if (res && res.items) {
+      const domains = Array.from(new Set(res.items.map(item => item.domain).filter(Boolean)));
+      domainSuggestions.value = domains.map(d => ({ value: d, label: d }));
+    }
+  } catch (err) {
+    console.error('获取子域名建议失败', err);
+  }
+};
+
+let domainSuggestTimer = null;
+const handleDomainSearchInput = (value) => {
+  if (domainSuggestTimer) clearTimeout(domainSuggestTimer);
+  domainSuggestTimer = setTimeout(() => {
+    fetchDomainSuggestions(value);
+  }, 300);
+};
+
+onUnmounted(() => {
+  if (domainSuggestTimer) {
+    clearTimeout(domainSuggestTimer);
+    domainSuggestTimer = null;
+  }
+});
+
+const handleChainSearch = async (val) => {
+  if (typeof val === 'string' && val.trim()) {
+    chainSearchDomain.value = val.trim();
+  }
+  const queryDomain = (chainSearchDomain.value || '').trim();
+  if (!queryDomain) {
+    message.warning('请输入或选择子域名/IP进行查询');
+    return;
+  }
+  if (!scope_id.value) {
+    message.warning('资产组 ID 不存在');
+    return;
+  }
+
+  syncChainQuery(queryDomain);
+
+  chainLoading.value = true;
+  chainSearched.value = true;
+  try {
+    const res = await request.get('/asset_site/subdomain_chain/', {
+      params: {
+        scope_id: scope_id.value,
+        domain: queryDomain
+      }
+    });
+
+    if (res.code === 200) {
+      chainData.value = res.data || {};
+      const d = chainData.value;
+      const totalFound = (
+        (d.site?.length || 0) +
+        (d.domain_records?.length || 0) +
+        (d.ip?.length || 0) +
+        (d.cip?.length || 0) +
+        (d.cert?.length || 0) +
+        (d.service?.length || 0) +
+        (d.npoc_service?.length || 0) +
+        (d.fileleak?.length || 0) +
+        (d.url?.length || 0) +
+        (d.wih?.length || 0) +
+        (d.vuln?.length || 0) +
+        (d.nuclei_result?.length || 0)
+      );
+      if (totalFound === 0) {
+        message.info('未检索到该子域名/IP的关联资产记录');
+      }
+    } else {
+      message.error(res.message || '查询失败');
+    }
+  } catch (err) {
+    message.error('请求全链路资产画像异常');
+  } finally {
+    chainLoading.value = false;
+  }
+};
+
+const resetChainSearch = () => {
+  chainSearchDomain.value = '';
+  chainSearched.value = false;
+  chainData.value = null;
+  syncChainQuery('');
+  fetchDomainSuggestions();
+};
 
 const previewVisible = ref(false);
 const previewImage = ref('');
@@ -451,19 +1359,36 @@ const openTagModal = (record) => {
   tagVisible.value = true;
 };
 
+const getTags = (record) => {
+  if (!record || !record.tag) return [];
+  return Array.isArray(record.tag) ? record.tag : [record.tag];
+};
+
 const submitTag = async () => {
   if (!newTagValue.value.trim()) {
-    return message.warning('标签名称不能为空');
+    message.warning('标签内容不能为空');
+    return;
   }
   tagSubmitLoading.value = true;
   try {
-    const res = await request.post('/site/add_tag/', {
-      _id: currentTagRecord.value._id || currentTagRecord.value.id,
-      tag: newTagValue.value.trim()
+    const targetId = currentTagRecord.value?._id || currentTagRecord.value?.id;
+    const tag = newTagValue.value.trim();
+    const res = await request.post('/asset_site/add_tag/', {
+      _id: targetId,
+      tag: tag
     });
     if (res.code === 200) {
       message.success('添加标签成功');
       tagVisible.value = false;
+      if (currentTagRecord.value) {
+        if (!Array.isArray(currentTagRecord.value.tag)) {
+          currentTagRecord.value.tag = currentTagRecord.value.tag ? [currentTagRecord.value.tag] : [];
+        }
+        if (!currentTagRecord.value.tag.includes(tag)) {
+          currentTagRecord.value.tag.push(tag);
+        }
+      }
+      tabCache.invalidateMemoryCache(activeTab.value);
       fetchData(); // 重新加载数据
     } else {
       message.error(res.message || '添加标签失败');
@@ -472,6 +1397,26 @@ const submitTag = async () => {
     message.error('请求异常');
   } finally {
     tagSubmitLoading.value = false;
+  }
+};
+
+const handleDeleteTag = async (record, tag) => {
+  const targetId = record?._id || record?.id;
+  if (!targetId) return;
+  try {
+    const res = await request.post('/asset_site/delete_tag/', {
+      _id: targetId,
+      tag: tag
+    });
+    if (res.code === 200) {
+      message.success(`已移除标签「${tag}」`);
+      const currentTags = Array.isArray(record.tag) ? record.tag : (record.tag ? [record.tag] : []);
+      record.tag = currentTags.filter(t => t !== tag);
+    } else {
+      message.error(res.message || '删除标签失败');
+    }
+  } catch (error) {
+    message.error('请求异常');
   }
 };
 
@@ -520,6 +1465,15 @@ const openCidrDetail = (record) => {
   cipDetailModalVisible.value = true;
 };
 
+// 系统服务端点详情弹窗
+const serviceDetailModalVisible = ref(false);
+const currentServiceRecord = ref(null);
+
+const openServiceDetailModal = (record) => {
+  currentServiceRecord.value = record;
+  serviceDetailModalVisible.value = true;
+};
+
 
 // 💡 针对分组详情定制的 Config (以站点为例，去掉了截图，加了更新时间)
 // 💡 完整版的 Config：涵盖站点、域名、IP、WIH
@@ -531,7 +1485,6 @@ const tabConfig = reactive({
     tabName: '站点',
     searchFields: [
       { label: '站点', key: 'site', operator: '=' },
-      { label: '主机名', key: 'hostname', operator: '=' },
       { label: '标题', key: 'title', operator: '=' },
       { label: 'Web Server', key: 'http_server', operator: '=' },
       { label: '状态码', key: 'status', operator: '=' },
@@ -799,15 +1752,26 @@ const tabConfig = reactive({
       { title: '数量', dataIndex: 'cnt', key: 'cnt', width: 200 },
       { title: '更新时间', key: 'update_date', width: 180 }
     ]
+  },
+  site_chain: {
+    tabName: '全链路画像'
   }
+});
+
+const tabCache = createTabStateCache({
+  getStorageKey: () => scope_id.value ? `ARL_GROUP_TAB_STATE_${scope_id.value}` : null,
+  tabConfig,
+  defaultTab: 'site'
 });
 
 const columns = ref(tabConfig.site.cols);
 
 const fetchData = async () => {
+  if (activeTab.value === 'site_chain') return;
   const config = tabConfig[activeTab.value];
   if (!config) return;
 
+  const currentReqTab = activeTab.value;
   loading.value = true;
   try {
     // 🚨 修复 2：获取 computed 响应式对象的最新值
@@ -815,6 +1779,10 @@ const fetchData = async () => {
 
     for (const key in searchForm.value) {
       if (searchForm.value[key] !== '' && searchForm.value[key] != null) {
+        const fieldConfig = config.searchFields?.find(f => f.key === key);
+        // 🚨 防御幽灵过滤：若该字段不在当前 Tab 的契约中，直接丢弃
+        if (config.searchFields && !fieldConfig) continue;
+
         // 如果是时间范围数组，则特殊处理给后端
         if (key === 'update_date' && Array.isArray(searchForm.value[key])) {
           // 🚨 核心对齐：精准替换为 ARL 专属的 __dgt 和 __dlt 参数名，并格式化为全时分秒
@@ -822,7 +1790,6 @@ const fetchData = async () => {
           params.update_date__dlt = searchForm.value[key][1].format('YYYY-MM-DD HH:mm:ss');
         } else {
           let paramKey = key;
-          const fieldConfig = config.searchFields?.find(f => f.key === key);
           if (fieldConfig && fieldConfig.hasOperatorSelect) {
             if (fieldConfig.operator === '大于') paramKey += '__gt';
             else if (fieldConfig.operator === '小于') paramKey += '__lt';
@@ -835,21 +1802,45 @@ const fetchData = async () => {
       }
     }
     const res = await request.get(config.url, { params });
+    // 竞态防御：若响应到达时 Tab 已切换，丢弃过期响应
+    if (activeTab.value !== currentReqTab) return;
+
     if (res.code === 200) {
       dataSource.value = res.items || [];
       pagination.total = res.total || 0;
       selectedRowKeys.value = [];
+      // 更新当前 Tab 内存数据缓存并持久化轻量搜索状态
+      tabCache.updateMemoryCache(activeTab.value, dataSource.value, pagination.total);
+      tabCache.saveCurrentTab(activeTab.value, searchForm.value, pagination.current);
     }
   } catch (error) {
-    message.error('加载数据失败');
+    if (activeTab.value === currentReqTab) {
+      message.error('加载数据失败');
+    }
   } finally {
-    loading.value = false;
+    if (activeTab.value === currentReqTab) {
+      loading.value = false;
+    }
   }
 };
 
-const onSearch = () => { pagination.current = 1; fetchData(); };
-const resetSearch = () => { searchForm.value = {}; onSearch(); };
-const handleTableChange = (page, pageSize) => { pagination.current = page; pagination.pageSize = pageSize; fetchData(); };
+const onSearch = () => {
+  pagination.current = 1;
+  tabCache.saveCurrentTab(activeTab.value, searchForm.value, 1);
+  fetchData();
+};
+const resetSearch = () => {
+  searchForm.value = {};
+  tabCache.resetTabState(activeTab.value);
+  pagination.current = 1;
+  fetchData();
+};
+const handleTableChange = (page, pageSize) => {
+  pagination.current = page;
+  pagination.pageSize = pageSize;
+  tabCache.saveCurrentTab(activeTab.value, searchForm.value, page);
+  fetchData();
+};
 
 // ================= 批量删除功能 (兼容所有 Tab) =================
 const handleBatchDelete = () => {
@@ -865,8 +1856,8 @@ const handleBatchDelete = () => {
         const config = tabConfig[activeTab.value];
         if (!config || !config.url) return;
 
-        // 🚨 动态拼接删除 API 路径：例如 /asset_domain/ -> /asset_domain/delete/
-        const deleteUrl = `${config.url}delete/`;
+        // 🚨 优先读取专用配置，否则动态拼接删除 API 路径：例如 /asset_domain/ -> /asset_domain/delete/
+        const deleteUrl = config.deleteUrl || `${config.url}delete/`;
 
         // 🚨 严格按照抓包 Payload：键名为 _id
         const res = await request.post(deleteUrl, {
@@ -882,6 +1873,7 @@ const handleBatchDelete = () => {
           }
 
           selectedRowKeys.value = []; // 清空选中状态
+          tabCache.invalidateMemoryCache(activeTab.value);
           fetchData(); // 🚨 完美对齐抓包里的第二个请求：自动刷新表格数据
         } else {
           message.error('删除失败: ' + res.message);
@@ -894,20 +1886,97 @@ const handleBatchDelete = () => {
 };
 const openAction = (action) => { message.info(`准备开发弹窗: ${action}`); };
 
-watch(activeTab, (newVal) => {
+watch(activeTab, (newVal, oldVal) => {
+  if (oldVal && tabConfig[oldVal] && !isScopeSwitching.value) {
+    // 离开旧选项卡前，仅在非切组且有效交互时保存当前搜索表单、操作符和页码
+    tabCache.saveCurrentTab(oldVal, searchForm.value, pagination.current);
+  }
+
+  if (newVal === 'site_chain') {
+    fetchDomainSuggestions();
+    if (route.query.chain_target && !chainSearchDomain.value) {
+      chainSearchDomain.value = String(route.query.chain_target);
+      nextTick(() => {
+        handleChainSearch();
+      });
+    }
+    return;
+  }
+
   if (tabConfig[newVal]) {
     columns.value = tabConfig[newVal].cols;
-    searchForm.value = {};
-    pagination.current = 1;
-    fetchData();
+    selectedRowKeys.value = [];
+
+    // 恢复新选项卡的搜索表单、操作符与页码
+    searchForm.value = tabCache.getTabSearchForm(newVal);
+    tabCache.applyTabOperators(newVal);
+    pagination.current = tabCache.getTabPage(newVal);
+
+    // 检查内存数据缓存：若已加载过则直接秒开渲染，不重复向后端发请求
+    const cached = tabCache.getMemoryCache(newVal);
+    if (cached) {
+      dataSource.value = cached.dataSource;
+      pagination.total = cached.total;
+    } else {
+      fetchData();
+    }
   }
 });
 
 // 🚨 修复 3：监听 scope_id 的变化，无论是初次进入还是组件复用，只要 ID 变了就刷新数据！
 watch(scope_id, (newId) => {
   if (newId) {
-    pagination.current = 1;
-    fetchData();
+    isScopeSwitching.value = true;
+    dataSource.value = [];
+    selectedRowKeys.value = [];
+    resetChainSearch();
+
+    // 若路由携带 chain_target，直接深链穿透至全链路画像并触发拉取
+    if (route.query.chain_target) {
+      activeTab.value = 'site_chain';
+      chainSearchDomain.value = String(route.query.chain_target);
+      nextTick(() => {
+        isScopeSwitching.value = false;
+        fetchDomainSuggestions();
+        handleChainSearch();
+      });
+      return;
+    }
+
+    const restoredTab = tabCache.init();
+    if (restoredTab && tabConfig[restoredTab] && restoredTab !== activeTab.value) {
+      activeTab.value = restoredTab;
+      nextTick(() => {
+        isScopeSwitching.value = false;
+        if (activeTab.value === 'site_chain') {
+          fetchDomainSuggestions();
+        }
+      });
+    } else {
+      if (activeTab.value === 'site_chain') {
+        fetchDomainSuggestions();
+        nextTick(() => {
+          isScopeSwitching.value = false;
+        });
+      } else {
+        if (tabConfig[activeTab.value]) {
+          columns.value = tabConfig[activeTab.value].cols;
+          searchForm.value = tabCache.getTabSearchForm(activeTab.value);
+          tabCache.applyTabOperators(activeTab.value);
+          pagination.current = tabCache.getTabPage(activeTab.value);
+        }
+        const cached = tabCache.getMemoryCache(activeTab.value);
+        if (cached) {
+          dataSource.value = cached.dataSource;
+          pagination.total = cached.total;
+        } else {
+          fetchData();
+        }
+        nextTick(() => {
+          isScopeSwitching.value = false;
+        });
+      }
+    }
   }
 }, { immediate: true }); // immediate: true 完美替代了 onMounted 的作用
 
@@ -921,7 +1990,7 @@ const handleExport = async () => {
     message.loading({ content: `正在生成导出文件...`, key: 'export_data' });
 
     // 🚨 动态映射真实的 tabIndex
-    const tabIndexMap = { site: 0, domain: 1, ip: 2, wih: 3, cert: 4, service: 5, fileleak: 6, url: 7, vuln: 8, npoc_service: 9, cip: 10, nuclei_result: 11, stat_finger: 12 };
+    const tabIndexMap = { site: 0, domain: 1, ip: 2, cert: 3, service: 4, fileleak: 5, url: 6, cip: 7, stat_finger: 8, wih: 9, vuln: 10, npoc_service: 11, nuclei_result: 12 };
 
     // 🚨 完美对齐 WIH 抓包：size 扩大到十万级 100000，并带上动态的 tabIndex
     const params = {
@@ -935,12 +2004,15 @@ const handleExport = async () => {
     // 🚨 补全缺失的搜索参数：确保用户过滤后导出的数据也是精准的！
     for (const key in searchForm.value) {
       if (searchForm.value[key] !== '' && searchForm.value[key] != null) {
+        const fieldConfig = config.searchFields?.find(f => f.key === key);
+        // 🚨 防御幽灵过滤：若该字段不在当前 Tab 的契约中，直接丢弃
+        if (config.searchFields && !fieldConfig) continue;
+
         if (key === 'update_date' && Array.isArray(searchForm.value[key])) {
           params.update_date__dgt = searchForm.value[key][0].format('YYYY-MM-DD HH:mm:ss');
           params.update_date__dlt = searchForm.value[key][1].format('YYYY-MM-DD HH:mm:ss');
         } else {
           let paramKey = key;
-          const fieldConfig = config.searchFields?.find(f => f.key === key);
           if (fieldConfig && fieldConfig.hasOperatorSelect) {
             if (fieldConfig.operator === '大于') paramKey += '__gt';
             else if (fieldConfig.operator === '小于') paramKey += '__lt';
@@ -1074,6 +2146,7 @@ const submitAddSite = async () => {
     if (res.code === 200) {
       message.success('添加站点成功！');
       addSiteVisible.value = false;
+      tabCache.invalidateAllMemoryCaches();
       fetchData(); // 刷新表格
     } else if (res.code === 802) {
       message.error(res.message); // 弹出 "任务目标不在资产组中"
@@ -1222,6 +2295,7 @@ const submitAddDomain = async () => {
     if (res.code === 200) {
       message.success('添加子域名成功！');
       addDomainVisible.value = false;
+      tabCache.invalidateAllMemoryCaches();
       fetchData(); // 自动刷新当前页面的域名列表
     } else if (res.code === 701) {
       message.error(res.message); // 原汁原味抛出：域名不在给定的资产范围中
@@ -1247,7 +2321,73 @@ const submitAddDomain = async () => {
 .site-header { line-height: 1.5; word-break: break-all; }
 .site-img { width: 16px; height: 16px; margin-right: 8px; vertical-align: middle; }
 .add-tag { color: var(--arl-text-color); cursor: pointer; font-size: 12px; border: 1px dashed var(--arl-border-color); padding: 0 7px; border-radius: 2px; background: var(--arl-bg-light); transition: all 0.3s; }
-.add-tag:hover {  }
+.add-tag:hover { color: var(--arl-theme-color); border-color: var(--arl-theme-color); }
 .mt5 { margin-top: 5px; }
+
+.tag-pending-test {
+  background: color-mix(in srgb, var(--arl-theme-color) 15%, transparent) !important;
+  color: var(--arl-theme-color) !important;
+  border-color: var(--arl-theme-color) !important;
+  font-weight: 500;
+  transition: all 0.3s;
+}
+.tag-pending-test :deep(.anticon-close) {
+  color: var(--arl-theme-color) !important;
+}
+.tag-pending-test :deep(.anticon-close:hover) {
+  opacity: 0.75;
+}
+
+.chain-card {
+  border-radius: 6px;
+  background: var(--arl-bg-white);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--arl-border-color);
+}
+.chain-card-header {
+  display: flex;
+  align-items: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--arl-text-color);
+}
+.chain-icon {
+  margin-right: 8px;
+  color: var(--arl-theme-color);
+  font-size: 16px;
+}
+.chain-empty-tip {
+  color: var(--arl-text-secondary);
+  text-align: center;
+  padding: 24px 0;
+  font-size: 13px;
+}
+.chain-site-item {
+  padding: 16px;
+  background: var(--arl-bg-light);
+  border-radius: 6px;
+  border: 1px solid var(--arl-border-color);
+}
+.chain-info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.chain-info-row {
+  display: flex;
+  align-items: baseline;
+  line-height: 1.6;
+}
+.chain-info-label {
+  width: 95px;
+  color: var(--arl-text-secondary);
+  flex-shrink: 0;
+}
+.chain-info-value {
+  flex: 1;
+  color: var(--arl-text-color);
+  word-break: break-all;
+}
 
 </style>

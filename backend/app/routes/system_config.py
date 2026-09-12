@@ -45,9 +45,9 @@ class SecurityPolicy(ARLResource):
         black_ips = args.get('black_ips', [])
         forbidden_domains = args.get('forbidden_domains', [])
 
-        # 简单过滤空值并去重
-        black_ips = list(set([ip.strip() for ip in black_ips if ip.strip()]))
-        forbidden_domains = list(set([domain.strip() for domain in forbidden_domains if domain.strip()]))
+        # 过滤空值并去重
+        black_ips = list({ip.strip() for ip in black_ips if ip.strip()})
+        forbidden_domains = list({domain.strip() for domain in forbidden_domains if domain.strip()})
 
         update_security_policy(black_ips, forbidden_domains)
 
@@ -61,16 +61,36 @@ class Performance(ARLResource):
     @auth
     def get(self):
         """
-        获取性能配置
+        获取性能配置及实时运行进程数
         """
         config = get_performance_config()
+        runtime_heavy = None
+        runtime_light = None
+
+        try:
+            from app.celerytask import celery as celery_app
+            stats = celery_app.control.inspect(timeout=1.0).stats()
+            if stats:
+                for node, node_stats in stats.items():
+                    pool_info = node_stats.get('pool', {})
+                    processes = pool_info.get('processes')
+                    concurrency = len(processes) if processes is not None else pool_info.get('max-concurrency', 0)
+                    if 'arltask_heavy' in node:
+                        runtime_heavy = (runtime_heavy or 0) + concurrency
+                    elif 'arltask_light' in node:
+                        runtime_light = (runtime_light or 0) + concurrency
+        except Exception:
+            pass
+
         return {
             "code": 200,
             "message": "success",
             "data": {
                 "celery_heavy_concurrency": config.get("celery_heavy_concurrency", 1),
                 "celery_light_concurrency": config.get("celery_light_concurrency", 1),
-                "osint_concurrency": config.get("osint_concurrency", 1)
+                "osint_concurrency": config.get("osint_concurrency", 1),
+                "runtime_heavy_concurrency": runtime_heavy,
+                "runtime_light_concurrency": runtime_light
             }
         }
 
@@ -78,12 +98,12 @@ class Performance(ARLResource):
     @ns.expect(performance_model)
     def post(self):
         """
-        更新性能配置 (支持热扩缩容)
+        更新性能配置 (支持热扩缩容与精准状态反馈)
         """
         args = self.get_parser(performance_model).parse_args()
-        new_heavy = args.get('celery_heavy_concurrency', 1)
-        new_light = args.get('celery_light_concurrency', 1)
-        new_osint = args.get('osint_concurrency', 1)
+        new_heavy = args.get('celery_heavy_concurrency') or 1
+        new_light = args.get('celery_light_concurrency') or 1
+        new_osint = args.get('osint_concurrency') or 1
 
         if new_heavy < 1:
             new_heavy = 1
@@ -93,48 +113,74 @@ class Performance(ARLResource):
             new_osint = 1
 
         old_config = get_performance_config()
-        old_heavy = old_config.get("celery_heavy_concurrency", 1)
-        old_light = old_config.get("celery_light_concurrency", 1)
-        old_osint = old_config.get("osint_concurrency", 1)
+        old_heavy = old_config.get("celery_heavy_concurrency") or 1
+        old_light = old_config.get("celery_light_concurrency") or 1
+        old_osint = old_config.get("osint_concurrency") or 1
         
         diff_heavy = new_heavy - old_heavy
         diff_light = new_light - old_light
-        new_osint - old_osint
+        diff_osint = new_osint - old_osint
 
         update_performance_config(new_heavy, new_light, new_osint)
 
-        msg = "性能配置更新成功。"
-        
-        # 热扩缩容重任务
+        feedback_messages = ["性能配置已保存。"]
+
+        # 热扩缩容 Celery 重/轻任务
         if diff_heavy != 0 or diff_light != 0:
             try:
                 from app.celerytask import celery as celery_app
-                active_nodes = celery_app.control.inspect().ping()
+                active_nodes = celery_app.control.inspect(timeout=1.5).ping()
                 if active_nodes:
-                    heavy_nodes = [node for node in active_nodes.keys() if node.startswith('celery@arltask_heavy')]
-                    light_nodes = [node for node in active_nodes.keys() if node.startswith('celery@arltask_light')]
-                    
-                    if heavy_nodes:
-                        if diff_heavy > 0:
-                            celery_app.control.broadcast('pool_grow', n=diff_heavy, destination=heavy_nodes)
-                        elif diff_heavy < 0:
-                            celery_app.control.broadcast('pool_shrink', n=abs(diff_heavy), destination=heavy_nodes)
-                    
-                    if light_nodes:
-                        if diff_light > 0:
-                            celery_app.control.broadcast('pool_grow', n=diff_light, destination=light_nodes)
-                        elif diff_light < 0:
-                            celery_app.control.broadcast('pool_shrink', n=abs(diff_light), destination=light_nodes)
-                    
-                    msg += " 并发进程热扩缩容指令已下发！"
+                    heavy_nodes = [node for node in active_nodes.keys() if 'arltask_heavy' in node]
+                    light_nodes = [node for node in active_nodes.keys() if 'arltask_light' in node]
+
+                    def dispatch_pool_adjust(target_nodes, diff, label):
+                        if not target_nodes or diff == 0:
+                            return ""
+                        try:
+                            if diff > 0:
+                                celery_app.control.pool_grow(n=diff, destination=target_nodes, reply=True, timeout=1.5)
+                                return f"{label}已下发扩容 {diff} 个并发进程；"
+                            else:
+                                shrink_n = abs(diff)
+                                res = celery_app.control.pool_shrink(n=shrink_n, destination=target_nodes, reply=True, timeout=1.5)
+                                is_busy = False
+                                if res and isinstance(res, list):
+                                    for item in res:
+                                        for _, r in item.items():
+                                            if isinstance(r, dict) and ('busy' in str(r.get('error', '')).lower() or 'busy' in str(r).lower()):
+                                                is_busy = True
+                                if is_busy:
+                                    return f"{label}当前有任务正在执行，空闲进程已优先缩容，其余将在当前任务完成后自动释放；"
+                                else:
+                                    return f"{label}已下发缩容 {shrink_n} 个并发进程；"
+                        except Exception as e:
+                            return f"{label}热扩缩容执行异常({str(e)})；"
+
+                    if heavy_nodes and diff_heavy != 0:
+                        msg_heavy = dispatch_pool_adjust(heavy_nodes, diff_heavy, "重任务")
+                        if msg_heavy:
+                            feedback_messages.append(msg_heavy)
+                    elif diff_heavy != 0:
+                        feedback_messages.append("未检测到在线的重任务 Worker 节点，将在下次重启生效；")
+
+                    if light_nodes and diff_light != 0:
+                        msg_light = dispatch_pool_adjust(light_nodes, diff_light, "轻任务")
+                        if msg_light:
+                            feedback_messages.append(msg_light)
+                    elif diff_light != 0:
+                        feedback_messages.append("未检测到在线的轻任务 Worker 节点，将在下次重启生效；")
                 else:
-                    msg += " Celery未响应，并发改变将在下次重启生效。"
-            except Exception:
-                msg += " 热扩缩容执行异常，请重启容器。"
+                    feedback_messages.append("Celery 服务未响应，并发改变将在下次重启生效。")
+            except Exception as e:
+                feedback_messages.append(f"热扩缩容通信异常({str(e)})，请稍后重试或重启容器。")
+
+        if diff_osint != 0:
+            feedback_messages.append("OSINT 任务并发将在 10 秒内由后台看门狗自动更新。")
 
         return {
             "code": 200,
-            "message": msg
+            "message": " ".join(feedback_messages)
         }
 
 
@@ -153,6 +199,7 @@ class GeneralConfig(ARLResource):
             "mongo_db": Config.MONGO_DB,
             "geoip_city": Config.GEOIP_CITY,
             "geoip_asn": Config.GEOIP_ASN,
+            "geoip_ip2region": getattr(Config, "GEOIP_IP2REGION", ""),
 
             "fofa_key": Config.FOFA_KEY,
             "fofa_url": Config.FOFA_URL,

@@ -10,12 +10,12 @@
       <a-tab-pane key="service" tab="服务"></a-tab-pane>
       <a-tab-pane key="fileleak" tab="文件泄露"></a-tab-pane>
       <a-tab-pane key="url" tab="URL信息"></a-tab-pane>
-      <a-tab-pane key="vuln" tab="风险"></a-tab-pane>
-      <a-tab-pane key="npoc_service" tab="服务（python）"></a-tab-pane>
       <a-tab-pane key="cip" tab="C段"></a-tab-pane>
-      <a-tab-pane key="nuclei_result" tab="nuclei"></a-tab-pane>
       <a-tab-pane key="stat_finger" tab="指纹统计"></a-tab-pane>
       <a-tab-pane key="wih" tab="WIH"></a-tab-pane>
+      <a-tab-pane key="vuln" tab="风险"></a-tab-pane>
+      <a-tab-pane key="npoc_service" tab="服务（python）"></a-tab-pane>
+      <a-tab-pane key="nuclei_result" tab="nuclei"></a-tab-pane>
     </a-tabs>
 <div v-if="tabConfig[activeTab]?.searchFields" style="margin-bottom: 16px;">
       <a-form :model="searchForm" layout="inline" style="row-gap: 16px;">
@@ -238,7 +238,7 @@
           <span v-else>-</span>
         </template>
         <template v-else-if="column.key === 'geo_city'">
-          <span>{{ record.geo_city ? `${record.geo_city.country_name || 'null'} / ${record.geo_city.city || 'null'}` : '-' }}</span>
+          <span>{{ formatGeo(record.geo_city) }}</span>
         </template>
         <template v-else-if="column.key === 'geo_asn'">
           <span>{{ record.geo_asn?.organization || '-' }}</span>
@@ -440,7 +440,7 @@
 
 <script setup>
 
-import { ref, onMounted, reactive, watch, onUnmounted, computed } from 'vue';
+import { ref, onMounted, reactive, watch, onUnmounted, computed, nextTick } from 'vue';
 import { useSticky } from '../utils/useSticky';
 const actionBarRef = ref(null);
 const { stickyConfig, actionBarHeight } = useSticky(actionBarRef);
@@ -450,6 +450,8 @@ import { message } from 'ant-design-vue';
 import { SearchOutlined } from '@ant-design/icons-vue';
 import CidrDetailModal from '../components/CidrDetailModal.vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
+import { createTabStateCache } from '../utils/useTabStateCache';
+import { formatGeo } from '../utils/formatGeo';
 
 const windowHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 900);
 const onWindowResize = () => {
@@ -465,6 +467,7 @@ const tableScrollY = computed(() => {
 });
 
 const route = useRoute();
+const isHydrating = ref(true);
 const activeTab = ref(route.query.tab || 'site');
 const loading = ref(false);
 const dataSource = ref([]);
@@ -845,6 +848,12 @@ const tabConfig = reactive({
   }
 });
 
+const tabCache = createTabStateCache({
+  getStorageKey: () => 'ARL_ASSET_SEARCH_TAB_STATE',
+  tabConfig,
+  defaultTab: 'site'
+});
+
 const columns = ref(tabConfig[activeTab.value]?.cols || tabConfig.site.cols);
 
 // 🚨 核心逻辑调整：去掉 task_id 参数，纯净的全局搜索
@@ -852,6 +861,7 @@ const fetchData = async () => {
   const config = tabConfig[activeTab.value];
   if (!config) return;
 
+  const currentReqTab = activeTab.value;
   loading.value = true;
   try {
     const params = { page: pagination.current, size: pagination.pageSize };
@@ -870,14 +880,23 @@ const fetchData = async () => {
       }
     }
     const res = await request.get(config.url, { params });
+    // 竞态防御：若响应到达时 Tab 已切换，丢弃过期响应
+    if (activeTab.value !== currentReqTab) return;
+
     if (res.code === 200) {
       dataSource.value = res.items || [];
       pagination.total = res.total || 0;
+      tabCache.updateMemoryCache(activeTab.value, dataSource.value, pagination.total);
+      tabCache.saveCurrentTab(activeTab.value, searchForm.value, pagination.current);
     }
   } catch (error) {
-    message.error('加载资产数据失败');
+    if (activeTab.value === currentReqTab) {
+      message.error('加载资产数据失败');
+    }
   } finally {
-    loading.value = false;
+    if (activeTab.value === currentReqTab) {
+      loading.value = false;
+    }
   }
 };
 
@@ -918,37 +937,104 @@ const handleExport = async () => {
   }
 };
 
-const onSearch = () => { pagination.current = 1; fetchData(); };
-const resetSearch = () => { searchForm.value = {}; onSearch(); };
-const handleTableChange = (page, pageSize) => { pagination.current = page; pagination.pageSize = pageSize; fetchData(); };
+const onSearch = () => {
+  pagination.current = 1;
+  tabCache.saveCurrentTab(activeTab.value, searchForm.value, 1);
+  fetchData();
+};
+const resetSearch = () => {
+  searchForm.value = {};
+  tabCache.resetTabState(activeTab.value);
+  pagination.current = 1;
+  fetchData();
+};
+const handleTableChange = (page, pageSize) => {
+  pagination.current = page;
+  pagination.pageSize = pageSize;
+  tabCache.saveCurrentTab(activeTab.value, searchForm.value, page);
+  fetchData();
+};
 
-watch(activeTab, (newVal) => {
+watch(activeTab, (newVal, oldVal) => {
+  if (oldVal && tabConfig[oldVal] && !isHydrating.value) {
+    tabCache.saveCurrentTab(oldVal, searchForm.value, pagination.current);
+  }
+
   if (tabConfig[newVal]) {
     columns.value = tabConfig[newVal].cols;
-    searchForm.value = {};
-    pagination.current = 1;
-    fetchData();
+
+    // 恢复新选项卡的搜索表单、操作符与页码
+    searchForm.value = tabCache.getTabSearchForm(newVal);
+    tabCache.applyTabOperators(newVal);
+    pagination.current = tabCache.getTabPage(newVal);
+
+    // 检查 URL query 是否为当前 Tab 提供了下钻参数覆盖
+    let hasQueryOverrides = false;
+    if (route.query && (route.query.tab === newVal || (!route.query.tab && newVal === 'site'))) {
+      for (const key in route.query) {
+        if (key !== 'tab') {
+          searchForm.value[key] = route.query[key];
+          hasQueryOverrides = true;
+        }
+      }
+      if (hasQueryOverrides) {
+        tabCache.saveCurrentTab(newVal, searchForm.value, pagination.current);
+      }
+    }
+
+    // 检查内存数据缓存（若有外部 query 下钻参数则强制穿透缓存）
+    const cached = !hasQueryOverrides ? tabCache.getMemoryCache(newVal) : null;
+    if (cached) {
+      dataSource.value = cached.dataSource;
+      pagination.total = cached.total;
+    } else {
+      fetchData();
+    }
   }
 });
 
 onMounted(() => {
-  // Read query parameters to set initial tab and search form
-  if (route.query.tab && tabConfig[route.query.tab]) {
-    columns.value = tabConfig[route.query.tab].cols;
-  } else if (route.query.tab) {
-    activeTab.value = 'site';
-    columns.value = tabConfig.site.cols;
-  }
+  const restoredTab = tabCache.init();
   
-  // Set search form values from query parameters if they exist
-  for (const key in route.query) {
-    if (key !== 'tab') {
-      searchForm.value[key] = route.query[key];
+  // 优先级：若 URL 带了 tab 参数则以 URL 为准，否则以 SessionStorage 恢复的为准
+  const targetTab = (route.query.tab && tabConfig[route.query.tab])
+    ? route.query.tab
+    : ((restoredTab && tabConfig[restoredTab]) ? restoredTab : 'site');
+
+  window.addEventListener('resize', onWindowResize);
+
+  if (activeTab.value !== targetTab) {
+    activeTab.value = targetTab;
+  } else {
+    columns.value = tabConfig[targetTab].cols;
+    searchForm.value = tabCache.getTabSearchForm(targetTab);
+    tabCache.applyTabOperators(targetTab);
+    pagination.current = tabCache.getTabPage(targetTab);
+
+    // 若 URL query 有额外搜索参数，覆盖进 searchForm 并保存
+    let hasQueryOverrides = false;
+    for (const key in route.query) {
+      if (key !== 'tab') {
+        searchForm.value[key] = route.query[key];
+        hasQueryOverrides = true;
+      }
+    }
+    if (hasQueryOverrides) {
+      tabCache.saveCurrentTab(targetTab, searchForm.value, 1);
+    }
+
+    const cached = !hasQueryOverrides ? tabCache.getMemoryCache(targetTab) : null;
+    if (cached) {
+      dataSource.value = cached.dataSource;
+      pagination.total = cached.total;
+    } else {
+      fetchData();
     }
   }
-  
-  window.addEventListener('resize', onWindowResize);
-  fetchData();
+
+  nextTick(() => {
+    isHydrating.value = false;
+  });
 });
 
 onUnmounted(() => {

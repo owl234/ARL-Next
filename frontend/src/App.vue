@@ -111,22 +111,45 @@ onMounted(() => {
     isDarkMode.value = true;
   }
   
-  dbHelper.get('bgImage').then((savedBgImage) => {
-    if (savedBgImage) {
-      currentBgImage.value = savedBgImage;
-      requestAnimationFrame(() => {
-        document.body.style.backgroundImage = `url(${savedBgImage})`;
-        document.body.style.backgroundSize = 'cover';
-        document.body.style.backgroundPosition = 'center';
-        document.body.style.backgroundAttachment = 'fixed';
-        document.body.classList.add('has-bg-image');
-        document.documentElement.classList.add('has-bg-image');
-      });
-    } else {
+  // 应急逃生与安全自愈机制：URL 携带 reset_bg=1 时静默抹除本地背景缓存
+  const urlParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '');
+  const shouldResetBg = urlParams.get('reset_bg') === '1' || hashParams.get('reset_bg') === '1';
+
+  if (shouldResetBg) {
+    dbHelper.remove('bgImage').catch(() => {});
+    dbHelper.clear().catch(() => {});
+    currentBgImage.value = '';
+    document.body.style.backgroundImage = 'none';
+    document.body.classList.remove('has-bg-image');
+    document.documentElement.classList.remove('has-bg-image');
+    document.body.style.backgroundColor = isDarkMode.value ? '#000000' : '#f1f5f9';
+    document.documentElement.style.backgroundColor = isDarkMode.value ? '#000000' : '#f1f5f9';
+    try {
+      const cleanUrl = window.location.href.replace(/[?&]reset_bg=1/, '');
+      window.history.replaceState({}, document.title, cleanUrl);
+    } catch (e) {}
+  } else {
+    dbHelper.get('bgImage').then((savedBgImage) => {
+      if (savedBgImage) {
+        currentBgImage.value = savedBgImage;
+        requestAnimationFrame(() => {
+          document.body.style.backgroundImage = `url(${savedBgImage})`;
+          document.body.style.backgroundSize = 'cover';
+          document.body.style.backgroundPosition = 'center';
+          document.body.style.backgroundAttachment = 'fixed';
+          document.body.classList.add('has-bg-image');
+          document.documentElement.classList.add('has-bg-image');
+        });
+      } else {
+        document.body.style.backgroundColor = isDarkMode.value ? '#000000' : '#f1f5f9';
+        document.documentElement.style.backgroundColor = isDarkMode.value ? '#000000' : '#f1f5f9';
+      }
+    }).catch(() => {
       document.body.style.backgroundColor = isDarkMode.value ? '#000000' : '#f1f5f9';
       document.documentElement.style.backgroundColor = isDarkMode.value ? '#000000' : '#f1f5f9';
-    }
-  });
+    });
+  }
   
   window.addEventListener('theme-changed', handleThemeChange);
   window.addEventListener('dark-mode-changed', handleDarkModeChange);
@@ -213,16 +236,35 @@ body.has-bg-image .ant-menu-sub {
   background-color: transparent !important;
 }
 
+/* 自定义背景模式下的容器透明度适配：
+   由于外层 .glass-overlay 已提供全局毛玻璃模糊层，内部组件无需在细粒度元素上重复堆叠 backdrop-filter。
+   严禁对 .ant-table、.ant-table-tbody > tr > td、.ant-card 等递归追加 backdrop-filter，
+   否则当表格渲染数百条资产数据时会导致 GPU 离屏渲染管道雪崩并直接卡死页面。
+*/
 body.has-bg-image .ant-card,
+body.has-bg-image .ant-tabs-nav {
+  background: var(--arl-bg-white) !important;
+}
+
 body.has-bg-image .ant-table-wrapper,
-body.has-bg-image .ant-table,
-body.has-bg-image .ant-table-thead > tr > th,
-body.has-bg-image .ant-table-tbody > tr > td,
-body.has-bg-image .ant-tabs-nav,
+body.has-bg-image .ant-table {
+  background: transparent !important;
+}
+
+body.has-bg-image .ant-table-thead > tr > th {
+  background: var(--arl-bg-light) !important;
+}
+
+body.has-bg-image .ant-table-tbody > tr > td {
+  background: transparent !important;
+}
+
+/* 浮层弹窗保留独立的毛玻璃层次感 */
 body.has-bg-image .ant-modal-content,
 body.has-bg-image .ant-drawer-content {
   background: var(--arl-bg-white) !important;
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 body.has-bg-image .ant-modal-header,

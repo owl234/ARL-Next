@@ -161,6 +161,17 @@ class SyncAsset(object):
             if old is None:
                 data["save_date"] = utils.curr_date_obj()
                 data["update_date"] = data["save_date"]
+                if category == 'site':
+                    raw_tags = data.get("tag") or []
+                    if isinstance(raw_tags, str):
+                        raw_tags = [raw_tags]
+                    elif not isinstance(raw_tags, list):
+                        raw_tags = []
+                    tags = list(dict.fromkeys(raw_tags))
+                    if "待测试" not in tags:
+                        tags.append("待测试")
+                    data["tag"] = tags
+
                 logger.debug("sync {}, insert {}  {} -> {}".format(
                     category, data_content, self.task_id, self.scope_id))
 
@@ -175,10 +186,40 @@ class SyncAsset(object):
                 curr_date = utils.curr_date_obj()
                 data["save_date"] = old.get("save_date", curr_date)
                 data["update_date"] = curr_date
+
+                # [第一性原理：资产溯源防降级保护]
+                # 若资产库原有资产已有具体技术来源（非 monitor），而新进入的记录来源为空或仅为 monitor，则严禁覆盖原有真实来源
+                if category in ['domain', 'url']:
+                    old_source = old.get("source")
+                    new_source = data.get("source")
+                    if old_source and old_source != 'monitor' and (not new_source or new_source == 'monitor'):
+                        data["source"] = old_source
+
                 if category == 'ip':
                     if data.get("domain") and old.get("domain"):
                         old["domain"].extend(data["domain"])
                         data["domain"] = list(set(old["domain"]))
+                elif category == 'cip':
+                    old_ip_list = old.get("ip_list") or []
+                    new_ip_list = data.get("ip_list") or []
+                    if isinstance(old_ip_list, str):
+                        old_ip_list = [old_ip_list]
+                    if isinstance(new_ip_list, str):
+                        new_ip_list = [new_ip_list]
+                    merged_ip_list = list(dict.fromkeys(old_ip_list + new_ip_list))
+
+                    old_domain_list = old.get("domain_list") or []
+                    new_domain_list = data.get("domain_list") or []
+                    if isinstance(old_domain_list, str):
+                        old_domain_list = [old_domain_list]
+                    if isinstance(new_domain_list, str):
+                        new_domain_list = [new_domain_list]
+                    merged_domain_list = list(dict.fromkeys(old_domain_list + new_domain_list))
+
+                    data["ip_list"] = merged_ip_list
+                    data["ip_count"] = len(merged_ip_list)
+                    data["domain_list"] = merged_domain_list
+                    data["domain_count"] = len(merged_domain_list)
                 elif category == 'service':
                     if data.get("service_info") and old.get("service_info"):
                         existing_keys = {f"{item['ip']}:{item['port_id']}" for item in old["service_info"] if 'ip' in item and 'port_id' in item}
@@ -186,6 +227,52 @@ class SyncAsset(object):
                             if f"{new_item.get('ip')}:{new_item.get('port_id')}" not in existing_keys:
                                 old["service_info"].append(new_item)
                         data["service_info"] = old["service_info"]
+                elif category == 'site':
+                    old_tags = old.get("tag") or []
+                    if isinstance(old_tags, str):
+                        old_tags = [old_tags]
+                    elif not isinstance(old_tags, list):
+                        old_tags = []
+                    new_tags = data.get("tag") or []
+                    if isinstance(new_tags, str):
+                        new_tags = [new_tags]
+                    elif not isinstance(new_tags, list):
+                        new_tags = []
+                    merged_tags = list(dict.fromkeys(old_tags + new_tags))
+
+                    # 🛡️【特征对比判断】：存量站点日常扫描不复活「待测试」；仅当探测到新指纹、标题变更或状态码变动时重新打标
+                    def _extract_finger_names(finger_data):
+                        if not finger_data:
+                            return set()
+                        if isinstance(finger_data, str):
+                            return {finger_data}
+                        if not isinstance(finger_data, list):
+                            return set()
+                        names = set()
+                        for item in finger_data:
+                            if isinstance(item, dict) and item.get("name"):
+                                names.add(item["name"])
+                            elif isinstance(item, str):
+                                names.add(item)
+                        return names
+
+                    old_fingers = _extract_finger_names(old.get("finger"))
+                    new_fingers = _extract_finger_names(data.get("finger"))
+                    has_new_finger = bool(new_fingers - old_fingers)
+
+                    old_title = old.get("title") or ""
+                    new_title = data.get("title") or ""
+                    has_title_change = bool(new_title and new_title != old_title)
+
+                    old_status = old.get("status")
+                    new_status = data.get("status")
+                    has_status_change = bool(new_status and new_status != old_status)
+
+                    if has_new_finger or has_title_change or has_status_change:
+                        if "待测试" not in merged_tags:
+                            merged_tags.append("待测试")
+
+                    data["tag"] = merged_tags
 
                 if category in self.update_asset_map:
                     if self.update_asset_counter[category] < self.max_record_asset_count:

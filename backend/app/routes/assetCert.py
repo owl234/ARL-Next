@@ -20,6 +20,7 @@ base_search_fields = {
     'cert.fingerprint.sha256': fields.String(description="SHA-256"),
     'cert.fingerprint.sha1': fields.String(description="SHA-1"),
     'cert.fingerprint.md5': fields.String(description="MD5"),
+    'cert.extensions.subjectAltName': fields.String(description="备用名称"),
     "update_date__dgt": fields.String(description="更新时间大于"),
     "update_date__dlt": fields.String(description="更新时间小于"),
     "insert_time__dgt": fields.String(description="插入时间大于"),

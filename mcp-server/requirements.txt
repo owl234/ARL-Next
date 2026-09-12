@@ -1,3 +1,2 @@
-mcp>=1.0.0,<2.0.0
-requests>=2.28.0
-urllib3>=1.26.0
+# ARL-Next MCP v2.0 - 零第三方依赖 (Zero External Dependencies)
+# 仅依赖 Python 3.8+ 内置标准库 (sys, json, urllib, ssl)，无需 pip 安装任何包！

@@ -551,7 +551,9 @@ admin123
               此处的配置用于精细化控制轻/重任务队列的并发处理能力。
             </span>
             <div>
-
+              <a-button @click="fetchPerformanceConfig" :loading="performanceLoading" style="margin-right: 8px;">
+                刷新状态
+              </a-button>
               <a-button type="primary" @click="savePerformanceConfig" :loading="performanceSaveLoading">
                 保存性能配置
               </a-button>
@@ -564,7 +566,11 @@ admin123
                   <a-card title="⚙️ 重任务 (Heavy Task) 调度" size="small" style="margin-bottom: 16px; border-radius: 6px; border-left: 4px solid #ff4d4f;">
                     <a-form-item>
                       <template #label>
-                        重任务并发数
+                        <span>重任务并发数</span>
+                        <a-tag v-if="runtimePerformance.runtime_heavy_concurrency !== null" color="blue" style="margin-left: 8px; font-size: 12px;">
+                          实时运行: {{ runtimePerformance.runtime_heavy_concurrency }} 进程
+                        </a-tag>
+                        <a-tag v-else color="default" style="margin-left: 8px; font-size: 12px;">Worker 离线</a-tag>
                         <a-popover placement="right">
                           <template #content>
                             <div style="max-width: 320px;">
@@ -590,7 +596,11 @@ admin123
                   <a-card title="⚡ 轻任务 (Light Task) 调度" size="small" style="margin-bottom: 16px; border-radius: 6px; border-left: 4px solid #52c41a;">
                     <a-form-item>
                       <template #label>
-                        轻任务并发数
+                        <span>轻任务并发数</span>
+                        <a-tag v-if="runtimePerformance.runtime_light_concurrency !== null" color="green" style="margin-left: 8px; font-size: 12px;">
+                          实时运行: {{ runtimePerformance.runtime_light_concurrency }} 进程
+                        </a-tag>
+                        <a-tag v-else color="default" style="margin-left: 8px; font-size: 12px;">Worker 离线</a-tag>
                         <a-popover placement="right">
                           <template #content>
                             <div style="max-width: 320px;">
@@ -999,6 +1009,9 @@ admin123
                     <a-descriptions-item label="GeoIP ASN数据绝对路径">
                       <code style="word-break: break-all;">{{ generalForm.geoip_asn }}</code>
                     </a-descriptions-item>
+                    <a-descriptions-item label="ip2region 离线高精库绝对路径">
+                      <code style="word-break: break-all;">{{ generalForm.geoip_ip2region || '-' }}</code>
+                    </a-descriptions-item>
                   </a-descriptions>
                 </div>
               </a-form-item>
@@ -1398,6 +1411,7 @@ const generalForm = ref({
   mongo_db: '',
   geoip_city: '',
   geoip_asn: '',
+  geoip_ip2region: '',
   
   fofa_key: '',
   fofa_url: '',
@@ -2205,6 +2219,7 @@ const saveSecurityPolicy = async () => {
 
 // ======================= 性能配置管理逻辑 =======================
 const performanceForm = ref({ celery_heavy_concurrency: 1, celery_light_concurrency: 1, osint_concurrency: 1 });
+const runtimePerformance = ref({ runtime_heavy_concurrency: null, runtime_light_concurrency: null });
 const performanceLoading = ref(false);
 const performanceSaveLoading = ref(false);
 
@@ -2216,6 +2231,8 @@ const fetchPerformanceConfig = async () => {
       performanceForm.value.celery_heavy_concurrency = res.data.celery_heavy_concurrency || 1;
       performanceForm.value.celery_light_concurrency = res.data.celery_light_concurrency || 1;
       performanceForm.value.osint_concurrency = res.data.osint_concurrency || 1;
+      runtimePerformance.value.runtime_heavy_concurrency = res.data.runtime_heavy_concurrency ?? null;
+      runtimePerformance.value.runtime_light_concurrency = res.data.runtime_light_concurrency ?? null;
     } else {
       message.error(res.message || '获取性能配置失败');
     }
@@ -2237,7 +2254,7 @@ const savePerformanceConfig = async () => {
     });
     
     if (res.code === 200) {
-      message.success(res.message || '性能配置更新成功！');
+      message.success(res.message || '性能配置更新成功！', 5);
       fetchPerformanceConfig();
     } else {
       message.error(res.message || '保存失败');

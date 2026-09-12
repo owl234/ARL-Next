@@ -73,11 +73,14 @@ class FingerPrintCache:
                 finger.build_parsed()
                 
             for word in finger.literals['body']:
-                self.ac_body.add_word(word, word)
+                w = word.lower()
+                self.ac_body.add_word(w, w)
             for word in finger.literals['header']:
-                self.ac_header.add_word(word, word)
+                w = word.lower()
+                self.ac_header.add_word(w, w)
             for word in finger.literals['title']:
-                self.ac_title.add_word(word, word)
+                w = word.lower()
+                self.ac_title.add_word(w, w)
                 
         self.ac_body.make_automaton()
         self.ac_header.make_automaton()
@@ -114,17 +117,30 @@ def finger_db_identify(variables: dict) -> [str]:
     finger_name_list = []
 
     matched_literals = {'body': set(), 'header': set(), 'title': set()}
+
+    # 预先将文本字段统一转为小写，避免多规则重复调用 .lower()，提升匹配效率并保证大小写不敏感
+    scan_vars = {
+        'body': variables.get('body', '').lower() if isinstance(variables.get('body'), str) else '',
+        'header': variables.get('header', '').lower() if isinstance(variables.get('header'), str) else '',
+        'title': variables.get('title', '').lower() if isinstance(variables.get('title'), str) else ''
+    }
+
     if finger_db_cache.has_ahocorasick:
         # scan using AC
         for key, ac_tree in [('body', finger_db_cache.ac_body), 
                              ('header', finger_db_cache.ac_header), 
                              ('title', finger_db_cache.ac_title)]:
-            if key in variables and variables[key] and isinstance(variables[key], str):
+            text = scan_vars[key]
+            if text:
                 try:
-                    for end_index, original_value in ac_tree.iter(variables[key]):
+                    for end_index, original_value in ac_tree.iter(text):
                         matched_literals[key].add(original_value)
                 except Exception:
                     pass
+
+    # 将已转小写的文本变量与原始变量（如 icon_hash）合并用于求值
+    eval_vars = dict(variables)
+    eval_vars.update(scan_vars)
 
     for finger in finger_list:
         try:
@@ -142,7 +158,7 @@ def finger_db_identify(variables: dict) -> [str]:
                 if has_any_literals and not found_any_match:
                     continue  # Short circuit!
 
-            if finger.identify(variables):
+            if finger.identify(eval_vars):
                 finger_name_list.append(finger.app_name)
         except Exception as e:
             logger.warning("error on identify {} {}".format(finger.app_name, e))

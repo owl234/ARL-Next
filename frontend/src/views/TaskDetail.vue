@@ -27,12 +27,12 @@
       <a-tab-pane key="service" :tab="query.task_id ? `服务 - ${queryCounts.service}` : '服务'"></a-tab-pane>
       <a-tab-pane key="fileleak" :tab="query.task_id ? `文件泄露 - ${queryCounts.fileleak}` : '文件泄露'"></a-tab-pane>
       <a-tab-pane key="url" :tab="query.task_id ? `URL信息 - ${queryCounts.url}` : 'URL信息'"></a-tab-pane>
-      <a-tab-pane key="vuln" :tab="query.task_id ? `风险 - ${queryCounts.vuln}` : '风险'"></a-tab-pane>
-      <a-tab-pane key="npoc_service" :tab="query.task_id ? `服务（python） - ${queryCounts.npoc_service}` : '服务（python）'"></a-tab-pane>
       <a-tab-pane key="cip" :tab="query.task_id ? `C段 - ${queryCounts.cip}` : 'C段'"></a-tab-pane>
-      <a-tab-pane key="nuclei_result" :tab="query.task_id ? `nuclei - ${queryCounts.nuclei_result}` : 'nuclei'"></a-tab-pane>
       <a-tab-pane key="stat_finger" :tab="query.task_id ? `指纹统计 - ${queryCounts.stat_finger}` : '指纹统计'"></a-tab-pane>
       <a-tab-pane key="wih" :tab="query.task_id ? `WIH - ${queryCounts.wih}` : 'WIH'"></a-tab-pane>
+      <a-tab-pane key="vuln" :tab="query.task_id ? `风险 - ${queryCounts.vuln}` : '风险'"></a-tab-pane>
+      <a-tab-pane key="npoc_service" :tab="query.task_id ? `服务（python） - ${queryCounts.npoc_service}` : '服务（python）'"></a-tab-pane>
+      <a-tab-pane key="nuclei_result" :tab="query.task_id ? `nuclei - ${queryCounts.nuclei_result}` : 'nuclei'"></a-tab-pane>
       <a-tab-pane v-if="query.task_id" key="syslog" tab="任务日志"></a-tab-pane>
     </a-tabs>
 
@@ -262,7 +262,7 @@
           <span v-else>-</span>
         </template>
         <template v-else-if="column.key === 'geo_city'">
-          <span>{{ record.geo_city ? `${record.geo_city.country_name || 'null'} / ${record.geo_city.city || 'null'}` : '-' }}</span>
+          <span>{{ formatGeo(record.geo_city) }}</span>
         </template>
         <template v-else-if="column.key === 'geo_asn'">
           <span>{{ record.geo_asn?.organization || '-' }}</span>
@@ -349,16 +349,32 @@
 
         <template v-else-if="column.key === 'ip_port'">
           <div v-if="record.service_info && record.service_info.length">
-            <div v-for="(info, i) in record.service_info" :key="i" style="line-height: 1.8;">
+            <div v-for="(info, i) in record.service_info.slice(0, 3)" :key="i" style="line-height: 1.8; font-family: monospace;">
               {{ info.ip }}:{{ info.port_id }}
+            </div>
+            <div v-if="record.service_info.length > 3" style="margin-top: 4px;">
+              <a-button
+                type="link"
+                size="small"
+                style="padding: 0; height: auto; font-size: 12px;"
+                @click="openServiceDetailModal(record)"
+              >
+                查看全部 (共 {{ record.service_info.length }} 项) &gt;&gt;
+              </a-button>
             </div>
           </div>
           <span v-else>-</span>
         </template>
         <template v-else-if="column.key === 'product'">
           <div v-if="record.service_info && record.service_info.length">
-            <div v-for="(info, i) in record.service_info" :key="i" style="line-height: 1.8;">
+            <div v-for="(info, i) in record.service_info.slice(0, 3)" :key="i" style="line-height: 1.8;">
               {{ info.product || '-' }}
+            </div>
+            <div
+              v-if="record.service_info.length > 3"
+              style="margin-top: 4px; height: 22px; line-height: 22px; color: var(--arl-text-color); opacity: 0.45; font-size: 12px;"
+            >
+              ...
             </div>
           </div>
           <span v-else>-</span>
@@ -445,6 +461,9 @@
 
     <!-- 综合C段详情弹窗 (提取为组件) -->
     <CidrDetailModal v-model:open="cipDetailModalVisible" :record="currentCidrRecord" />
+
+    <!-- 系统服务端点详情弹窗 (提取为组件) -->
+    <ServiceDetailModal v-model:open="serviceDetailModalVisible" :record="currentServiceRecord" />
 
     <!-- 指纹统计关联站点弹窗 -->
     <a-modal v-model:open="fingerModalVisible" :title="`指纹关联站点：${currentFingerName}`" :footer="null" width="800px">
@@ -570,9 +589,12 @@ import {
   ExclamationCircleOutlined
 } from '@ant-design/icons-vue';
 import CidrDetailModal from '../components/CidrDetailModal.vue';
+import ServiceDetailModal from '../components/ServiceDetailModal.vue';
 import { useSticky } from '../utils/useSticky';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import { copyText as copyToClipboard } from '../utils/clipboard';
+import { createTabStateCache } from '../utils/useTabStateCache';
+import { formatGeo } from '../utils/formatGeo';
 
 // 更新差异弹窗状态
 const diffModalVisible = ref(false);
@@ -638,6 +660,15 @@ const currentCidrRecord = ref(null);
 const openCidrDetail = (record) => {
   currentCidrRecord.value = record;
   cipDetailModalVisible.value = true;
+};
+
+// 系统服务端点详情弹窗
+const serviceDetailModalVisible = ref(false);
+const currentServiceRecord = ref(null);
+
+const openServiceDetailModal = (record) => {
+  currentServiceRecord.value = record;
+  serviceDetailModalVisible.value = true;
 };
 
 // 弹窗状态与方法
@@ -711,6 +742,7 @@ const submitTag = async () => {
     if (res.code === 200) {
       message.success('添加标签成功');
       tagVisible.value = false;
+      tabCache.invalidateMemoryCache(activeTab.value);
       fetchData(); // 重新加载数据
     } else {
       message.error(res.message || '添加标签失败');
@@ -731,6 +763,10 @@ const displayTitle = computed(() => {
   if (list.length <= 1) return `${targetName.value} 相关资产`;
   return `${list[0]} 等 ${list.length} 个目标相关资产`;
 });
+const taskStatus = ref('');
+const isTaskRunning = computed(() => !!query.task_id && !['done', 'error', 'stop'].includes(taskStatus.value));
+const isHydrating = ref(true);
+
 const activeTab = ref('site');
 const loading = ref(false);
 const dataSource = ref([]);
@@ -788,7 +824,6 @@ const tabConfig = reactive({
     searchFields: [
       { label: '站点', key: 'site', operator: '=' },
       { label: 'IP', key: 'ip', operator: '=' },
-      { label: '主机名', key: 'hostname', operator: '=' },
       { label: '标题', key: 'title', operator: '=' },
       { label: 'Web Server', key: 'http_server', operator: '=' },
       { label: '状态码', key: 'status', operator: '=' },
@@ -869,6 +904,8 @@ const tabConfig = reactive({
   cert: {
     url: '/cert/',
     deleteUrl: '/cert/delete/',
+    exportUrl: '/cert/export/',
+    exportName: 'SSL证书信息',
     searchFields: [
       { label: 'IP字段', key: 'ip', operator: '=' },
       { label: '签发者名称', key: 'cert.issuer_dn', operator: '=' },
@@ -1086,6 +1123,13 @@ const tabConfig = reactive({
   }
 });
 
+const tabCache = createTabStateCache({
+  getStorageKey: () => query.task_id ? `ARL_TASK_TAB_STATE_${query.task_id}` : 'ARL_TASK_TAB_STATE_GLOBAL',
+  tabConfig,
+  defaultTab: 'site',
+  canUseMemoryCache: () => !isTaskRunning.value
+});
+
 const columns = ref(tabConfig.site.cols);
 
 // 加载数据 (兼容单任务与全局查看)
@@ -1099,6 +1143,7 @@ const fetchData = async (isPolling = false) => {
     return;
   }
 
+  const currentReqTab = activeTab.value;
   if (!isPolling) {
     loading.value = true;
   }
@@ -1111,8 +1156,11 @@ const fetchData = async (isPolling = false) => {
 
     for (const key in searchForm.value) {
       if (searchForm.value[key] !== '' && searchForm.value[key] != null) {
-        let paramKey = key;
         const fieldConfig = config.searchFields?.find(f => f.key === key);
+        // 🚨 防御幽灵过滤：若该字段不在当前 Tab 的契约中，直接丢弃
+        if (config.searchFields && !fieldConfig) continue;
+
+        let paramKey = key;
         if (fieldConfig && fieldConfig.hasOperatorSelect) {
           if (fieldConfig.operator === '大于') paramKey += '__gt';
           else if (fieldConfig.operator === '小于') paramKey += '__lt';
@@ -1125,17 +1173,22 @@ const fetchData = async (isPolling = false) => {
     }
 
     const res = await request.get(config.url, { params });
+    // 竞态防御：若响应到达时 Tab 已切换，丢弃过期响应
+    if (activeTab.value !== currentReqTab) return;
+
     if (res.code === 200) {
       dataSource.value = res.items || [];
       pagination.total = res.total || 0;
       selectedRowKeys.value = [];
+      tabCache.updateMemoryCache(activeTab.value, dataSource.value, pagination.total);
+      tabCache.saveCurrentTab(activeTab.value, searchForm.value, pagination.current);
     }
   } catch (error) {
-    if (!isPolling) {
+    if (!isPolling && activeTab.value === currentReqTab) {
       message.error('加载资产数据失败');
     }
   } finally {
-    if (!isPolling) {
+    if (!isPolling && activeTab.value === currentReqTab) {
       loading.value = false;
     }
   }
@@ -1158,8 +1211,11 @@ const handleExport = async () => {
     if (query.task_id) params.task_id = query.task_id;
     for (const key in searchForm.value) {
       if (searchForm.value[key] !== '' && searchForm.value[key] != null) {
-        let paramKey = key;
         const fieldConfig = config.searchFields?.find(f => f.key === key);
+        // 🚨 防御幽灵过滤：若该字段不在当前 Tab 的契约中，直接丢弃
+        if (config.searchFields && !fieldConfig) continue;
+
+        let paramKey = key;
         if (fieldConfig && fieldConfig.hasOperatorSelect) {
           if (fieldConfig.operator === '大于') paramKey += '__gt';
           else if (fieldConfig.operator === '小于') paramKey += '__lt';
@@ -1231,6 +1287,7 @@ const handleBatchDelete = () => {
         if (res.code === 200) {
           message.success(`成功删除 ${validKeys.length} 项资产！`);
           selectedRowKeys.value = []; // 清空勾选
+          tabCache.invalidateMemoryCache(activeTab.value);
           fetchData(); // 重新拉取表格数据更新界面
         } else {
           message.error('删除失败: ' + (res.message || '未知错误'));
@@ -1244,17 +1301,21 @@ const handleBatchDelete = () => {
 
 const onSearch = () => {
   pagination.current = 1;
+  tabCache.saveCurrentTab(activeTab.value, searchForm.value, 1);
   fetchData();
 };
 
 const resetSearch = () => {
   searchForm.value = {};
-  onSearch();
+  tabCache.resetTabState(activeTab.value);
+  pagination.current = 1;
+  fetchData();
 };
 
 const handleTableChange = (page, pageSize) => {
   pagination.current = page;
   pagination.pageSize = pageSize;
+  tabCache.saveCurrentTab(activeTab.value, searchForm.value, page);
   fetchData();
 };
 
@@ -1276,6 +1337,7 @@ const fetchSyslog = async (isPolling = false) => {
         _t: Date.now()
       }
     });
+    if (activeTab.value !== 'syslog') return;
     if (res.code === 200) {
       syslogList.value = res.items || [];
       if (!pauseScroll.value) {
@@ -1337,9 +1399,18 @@ const fetchTaskStats = async () => {
       queryCounts.stat_finger = stat.stat_finger_cnt ?? task.stat_finger_cnt ?? 0;
       queryCounts.wih = stat.wih_cnt ?? task.wih_cnt ?? 0;
 
-      // 如果任务已结束，停止轮询
+      const previousStatus = taskStatus.value;
+      taskStatus.value = task.status || '';
+
+      // 如果任务刚变为结束状态，停止轮询，失效旧缓存并自动拉取最新完成数据
       if (task.status === 'done' || task.status === 'error' || task.status === 'stop') {
         stopTaskStatusTimer();
+        if (previousStatus && !['done', 'error', 'stop'].includes(previousStatus)) {
+          tabCache.invalidateAllMemoryCaches();
+          if (activeTab.value !== 'syslog') {
+            fetchData();
+          }
+        }
       }
     }
   } catch (err) {
@@ -1362,16 +1433,34 @@ const stopTaskStatusTimer = () => {
   }
 };
 
-watch(activeTab, (newVal) => {
+watch(activeTab, (newVal, oldVal) => {
+  if (oldVal === 'syslog') {
+    stopSyslogTimer();
+  } else if (oldVal && tabConfig[oldVal] && !isHydrating.value) {
+    tabCache.saveCurrentTab(oldVal, searchForm.value, pagination.current);
+  }
+
   if (newVal === 'syslog') {
     stopSyslogTimer();
     startSyslogTimer();
   } else if (tabConfig[newVal]) {
     stopSyslogTimer();
     columns.value = tabConfig[newVal].cols;
-    searchForm.value = {};
-    pagination.current = 1;
-    fetchData();
+    selectedRowKeys.value = [];
+
+    // 恢复新选项卡的搜索表单、操作符与页码
+    searchForm.value = tabCache.getTabSearchForm(newVal);
+    tabCache.applyTabOperators(newVal);
+    pagination.current = tabCache.getTabPage(newVal);
+
+    // 检查内存数据缓存（运行中任务会自动穿透并强制请求）
+    const cached = tabCache.getMemoryCache(newVal);
+    if (cached) {
+      dataSource.value = cached.dataSource;
+      pagination.total = cached.total;
+    } else {
+      fetchData();
+    }
   } else {
     stopSyslogTimer();
     dataSource.value = [];
@@ -1380,10 +1469,32 @@ watch(activeTab, (newVal) => {
 });
 
 onMounted(() => {
-  if (activeTab.value === 'syslog') {
-    startSyslogTimer();
+  const restoredTab = tabCache.init();
+  if (restoredTab && tabConfig[restoredTab] && restoredTab !== activeTab.value) {
+    activeTab.value = restoredTab;
+    nextTick(() => {
+      isHydrating.value = false;
+    });
   } else {
-    fetchData();
+    if (activeTab.value === 'syslog') {
+      startSyslogTimer();
+    } else if (tabConfig[activeTab.value]) {
+      columns.value = tabConfig[activeTab.value].cols;
+      searchForm.value = tabCache.getTabSearchForm(activeTab.value);
+      tabCache.applyTabOperators(activeTab.value);
+      pagination.current = tabCache.getTabPage(activeTab.value);
+
+      const cached = tabCache.getMemoryCache(activeTab.value);
+      if (cached) {
+        dataSource.value = cached.dataSource;
+        pagination.total = cached.total;
+      } else {
+        fetchData();
+      }
+    }
+    nextTick(() => {
+      isHydrating.value = false;
+    });
   }
   startTaskStatusTimer();
 });

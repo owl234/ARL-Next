@@ -52,18 +52,36 @@ def get_compiled_pattern(pattern):
     return re.compile(pattern, re.IGNORECASE)
 
 # 定义操作符
-def safe_regex_match(x, pattern):
+def safe_regex_match(pattern, text):
     try:
-        clean_pat = pattern.strip('"')
+        clean_pat = str(pattern).strip('"')
         compiled_pat = get_compiled_pattern(clean_pat)
-        return bool(compiled_pat.search(str(x)))
+        return bool(compiled_pat.search(str(text)))
     except Exception:
         return False
 
+def str_contains(needle, haystack):
+    if isinstance(needle, str) and isinstance(haystack, str):
+        return needle.lower() in haystack.lower()
+    return needle in haystack
+
+
+def str_not_contains(needle, haystack):
+    if isinstance(needle, str) and isinstance(haystack, str):
+        return needle.lower() not in haystack.lower()
+    return needle not in haystack
+
+
+def str_equals(x, y):
+    if isinstance(x, str) and isinstance(y, str):
+        return x.lower() == y.lower()
+    return x == y
+
+
 operators = {
-    '==': lambda x, y: x == y,
-    '!=': lambda x, y: x not in y,
-    '=': lambda x, y: x in y,
+    '==': str_equals,
+    '!=': str_not_contains,
+    '=': str_contains,
     '~=': safe_regex_match,
     '~': safe_regex_match,
     '!': lambda x: not x,
@@ -87,17 +105,22 @@ def unquote_string(s):
     return s
 
 
+REGEX_INDICATOR = re.compile(r"(\(\?:|\[[a-zA-Z0-9_\-\\\\.]{3,}\]|\\[dws]\+|\.\*|\.\+|\\\b|\(\?[iIsSmMxX]\))")
+
+
 def preprocess_expression(expr: str) -> str:
     """
     [指纹规则预处理器]
     1. 自动重映射变量: 比如将 server="xxx" 转换为 header="xxx"（在 ARL 中 Server 通常也包含在 Header 中），
        从而避免 Unknown variable 报错并能有效比对。
     2. 解决嵌套双引号冲突: 匹配 body="<a href="http://...">" 形式的不规范双引号，将内部嵌套的引号进行反斜杠转义。
+    3. 自动识别伪正则: 历史遗留规则中常有将正则直接包裹在 ="" 中（如 server: nginx(?:/([\\d.]+))?），
+       自动提升为 ~= 正则操作符，彻底激活失效规则。
     """
     # 1. 变量映射
-    expr = re.sub(r'\bserver\s*(=|==|!=)\s*', r'header\1', expr)
+    expr = re.sub(r'\bserver\s*(=|==|!=|~=|~)\s*', r'header\1', expr)
 
-    # 2. 引号转义处理
+    # 2. 引号转义处理与正则操作符提升
     pattern = r'\b([a-zA-Z0-9_\-]+)\s*(=|==|!=|~=|~)\s*"'
     pos = 0
     result = []
@@ -121,6 +144,8 @@ def preprocess_expression(expr: str) -> str:
             close_quote_idx = close_match.start()
             content = rem[:close_quote_idx]
             content_cleaned = content.replace('\\"', '"').replace('"', '\\"')
+            if op in ('=', '==') and REGEX_INDICATOR.search(content_cleaned):
+                op = '~='
             result.append(f'{var_name}{op}"{content_cleaned}"')
             pos = pos + match.end() + close_quote_idx + 1
         else:
@@ -128,6 +153,8 @@ def preprocess_expression(expr: str) -> str:
             if last_quote_idx != -1:
                 content = rem[:last_quote_idx]
                 content_cleaned = content.replace('\\"', '"').replace('"', '\\"')
+                if op in ('=', '==') and REGEX_INDICATOR.search(content_cleaned):
+                    op = '~='
                 result.append(f'{var_name}{op}"{content_cleaned}"')
                 result.append(rem[last_quote_idx + 1:])
                 pos = pos + match.end() + len(rem)

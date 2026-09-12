@@ -145,17 +145,15 @@ body.dark-mode .ant-table-wrapper .ant-table-tbody > tr.ant-table-row-selected >
     font-weight: 500 !important;
 }
 
-/* 8. 美化表格固定列，使用高级毛玻璃特效解决文字穿透，告别生硬的纯色背景 */
+/* 8. 美化表格固定列，解决文字穿透，使用动态底色告别生硬纯白 */
 .ant-table .ant-table-cell-fix-left,
 .ant-table .ant-table-cell-fix-right,
 .ant-table .ant-table-cell-fix-left-first,
 .ant-table .ant-table-cell-fix-left-last,
 .ant-table .ant-table-cell-fix-right-first,
 .ant-table .ant-table-cell-fix-right-last {
-    /* 使用支持双端的动态底色，完美契合整体表格玻璃态 */
+    /* 使用支持双端的动态底色，告别高开销重复模糊以释放 GPU 渲染压力 */
     background: var(--arl-bg-white) !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
 }
 
 /* 增加微妙的分割阴影，提升层次感（无论深浅模式） */
@@ -176,13 +174,12 @@ body.dark-mode .ant-table .ant-table-cell-fix-left {
     box-shadow: 4px 0 16px -6px rgba(0, 0, 0, 0.8) !important;
 }
 
-/* 确保固定列悬浮和选中时，毛玻璃效果仍然生效，并融合主题色 */
+/* 确保固定列悬浮和选中时底色协调融合 */
 .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:hover > td.ant-table-cell-fix-right,
 .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:hover > td.ant-table-cell-fix-left,
 .ant-table-tbody > tr.ant-table-row-selected > td.ant-table-cell-fix-right,
 .ant-table-tbody > tr.ant-table-row-selected > td.ant-table-cell-fix-left {
     background: color-mix(in srgb, var(--arl-theme-color) 8%, rgba(255, 255, 255, 0.95)) !important;
-    backdrop-filter: blur(12px) !important;
 }
 
 body.dark-mode .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:hover > td.ant-table-cell-fix-right,
@@ -190,6 +187,5 @@ body.dark-mode .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:hover > td
 body.dark-mode .ant-table-tbody > tr.ant-table-row-selected > td.ant-table-cell-fix-right,
 body.dark-mode .ant-table-tbody > tr.ant-table-row-selected > td.ant-table-cell-fix-left {
     /* 极致纯黑冷淡风，悬浮时使用纯灰半透明底色 */
-    background: rgba(26, 26, 26, 0.85) !important;
-    backdrop-filter: blur(12px) !important;
+    background: rgba(26, 26, 26, 0.95) !important;
 }

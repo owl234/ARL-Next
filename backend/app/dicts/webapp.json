@@ -84565,14 +84565,15 @@
             1111
         ],
         "headers": [
-            "server: nginx(?:/([\\d.]+))?",
+            "server: nginx",
+            "server: byte-nginx",
             "x-fastcgi-cache: "
         ],
         "html": [],
         "title": [],
         "icon": "default.png",
         "website": "",
-        "fofa_rule": "header=\"server: nginx(?:/([\\d.]+))?\" || header=\"x-fastcgi-cache: \""
+        "fofa_rule": "header=\"server: nginx\" || header=\"server: byte-nginx\" || header=\"x-fastcgi-cache: \" || header~=\"server:\\s*(?:byte-)?nginx(?:/([\\d.]+))?\""
     },
     "Niagahoster": {
         "cats": [
@@ -123824,11 +123825,14 @@
         "headers": [
             "server: TLB"
         ],
-        "html": [],
+        "html": [
+            "<center>TLB</center>",
+            "<hr><center>TLB</center>"
+        ],
         "title": [],
         "icon": "default.png",
         "website": "https://www.bytedance.com/",
-        "fofa_rule": "header=\"server: TLB\""
+        "fofa_rule": "header=\"server: TLB\" || body=\"<center>TLB</center>\" || body=\"<hr><center>TLB</center>\""
     },
     "Volcengine-DCDN": {
         "cats": [
@@ -123885,5 +123889,18 @@
         "icon": "default.png",
         "website": "https://www.dongchedi.com/",
         "fofa_rule": "title=\"认证中心\" || body=\"passport.snssdk.com\" || body=\"passport.dcdapp.com\""
+    },
+    "Byte-nginx": {
+        "cats": [
+            1111
+        ],
+        "headers": [
+            "server: byte-nginx"
+        ],
+        "html": [],
+        "title": [],
+        "icon": "default.png",
+        "website": "",
+        "fofa_rule": "header=\"server: byte-nginx\""
     }
 }

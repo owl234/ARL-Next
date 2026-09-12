@@ -54,7 +54,7 @@ class FingerPrint:
                             if clean_val:
                                 # 长度太短的字面量不作为短路条件，防止短路失败率过高
                                 if len(clean_val) >= 2:
-                                    self.literals[var].add(clean_val)
+                                    self.literals[var].add(clean_val.lower())
                 return
 
         # Fallback for unexpected structure

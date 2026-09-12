@@ -231,6 +231,83 @@ def cleanup_asset_scope_dead_fields():
         logger.error(f"Failed to cleanup asset_scope dead black_scope fields: {e}")
 
 
+def migrate_asset_site_pending_test_tag():
+    """
+    全量为存量资产组站点幂等补齐 '待测试' 标签（单次迁移，后续重启不再复活已删除标签）
+    使用原生 $addToSet 原子批量更新，毫秒级完成且保留所有既有自定义标签
+    """
+    import logging
+    import time
+    logger = logging.getLogger()
+    sys_db = conn_db("system_config")
+
+    # 🛡️【迁移哨兵】：若存量迁移已完成，直接跳过，防止系统重启时复活用户已测试并手动移除的标签
+    migration_record = sys_db.find_one({"_id": "migration_asset_site_pending_test_tag"})
+    if migration_record and migration_record.get("status") == "completed":
+        return
+
+    try:
+        # 🛡️【扁平化自愈】：若存在历史嵌套数组 tag（如 [['入口'], '待测试']），原子展平并去重
+        try:
+            conn_db("asset_site").update_many(
+                {"tag.0": {"$type": 4}},
+                [{
+                    "$set": {
+                        "tag": {
+                            "$reduce": {
+                                "input": "$tag",
+                                "initialValue": [],
+                                "in": {
+                                    "$setUnion": [
+                                        "$$value",
+                                        {"$cond": [{"$isArray": "$$this"}, "$$this", ["$$this"]]}
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }]
+            )
+        except Exception as e:
+            logger.warning(f"Flattening nested tags failed: {e}")
+
+        # 🛡️【类型防御】若 tag 本身为纯字符串（非数组），转为单元素数组
+        try:
+            conn_db("asset_site").update_many(
+                {"$expr": {"$eq": [{"$type": "$tag"}, "string"]}},
+                [{"$set": {"tag": ["$tag"]}}]
+            )
+        except Exception as e:
+            logger.warning(f"Pipeline update for string tags failed, falling back to cursor update: {e}")
+            cursor = conn_db("asset_site").find({"$expr": {"$eq": [{"$type": "$tag"}, "string"]}}, {"_id": 1, "tag": 1}, batch_size=500)
+            from pymongo import UpdateOne
+            bulk_ops = []
+            for doc in cursor:
+                val = doc.get("tag")
+                tag_list = [val] if val else []
+                bulk_ops.append(UpdateOne({"_id": doc["_id"]}, {"$set": {"tag": tag_list}}))
+                if len(bulk_ops) >= 500:
+                    conn_db("asset_site").bulk_write(bulk_ops, ordered=False)
+                    bulk_ops = []
+            if bulk_ops:
+                conn_db("asset_site").bulk_write(bulk_ops, ordered=False)
+
+        query = {"$or": [{"tag": {"$exists": False}}, {"tag": {"$ne": "待测试"}}]}
+        res = conn_db("asset_site").update_many(query, {"$addToSet": {"tag": "待测试"}})
+        modified_count = res.modified_count if res else 0
+        if modified_count:
+            logger.info(f"migrate_asset_site_pending_test_tag: successfully updated {modified_count} asset sites with '待测试' tag.")
+
+        # 标记全量迁移完成
+        sys_db.update_one(
+            {"_id": "migration_asset_site_pending_test_tag"},
+            {"$set": {"status": "completed", "completed_at": time.time(), "modified_count": modified_count}},
+            upsert=True
+        )
+    except Exception as e:
+        logger.error(f"migrate_asset_site_pending_test_tag error: {e}")
+
+
 def ensure_builtin_dicts():
     """确保核心内置字典文件存在（防止升级后因持久化数据卷隔离缺失新增的内置字典）"""
     import os
@@ -297,7 +374,10 @@ def fingerprint_info_update():
         # 核心加固指纹白名单：代码加固更新后强制同步最新规则
         # 键名必须与 webapp.json 实际键名严格一致（如 Consul by HashiCorp / alibaba-nacos），
         # 并尊重用户删除标记，避免强制复活已删除的核心指纹
-        core_system_rules = ["etcd", "Kubelet", "Consul by HashiCorp", "alibaba-nacos", "Kubernetes"]
+        core_system_rules = [
+            "etcd", "Kubelet", "Consul by HashiCorp", "alibaba-nacos", "Kubernetes",
+            "Nginx", "Byte-nginx", "ByteDance-TLB"
+        ]
         updated_core_rules = {}
         for rule_name in core_system_rules:
             if (rule_name in web_app_rules and rule_name not in deleted_names
@@ -382,6 +462,198 @@ def cleanup_zombie_tasks():
         logger.error(f"Failed to cleanup zombie tasks: {e}")
 
 
+def migrate_asset_cip_merge():
+    """
+    🛡️【第一性原理：资产组 C 段存量聚合与并集自愈】
+    修复历史版本中跨任务资产同步时 ReplaceOne 覆盖导致的 C 段 IP/域名丢失问题。
+    从 asset_ip 溯源，按 (scope_id, c_segment) 聚合完整的 IP 集合与关联域名集合，并补全回 asset_cip。
+    """
+    import logging
+    from app import utils
+    logger = logging.getLogger()
+    try:
+        pipeline = [
+            {"$match": {"c_segment": {"$exists": True, "$ne": ""}, "scope_id": {"$exists": True, "$ne": ""}}},
+            {
+                "$group": {
+                    "_id": {
+                        "scope_id": "$scope_id",
+                        "cidr_ip": "$c_segment"
+                    },
+                    "all_ips": {"$addToSet": "$ip"},
+                    "all_domains": {"$push": "$domain"}
+                }
+            }
+        ]
+
+        cursor = conn_db('asset_ip').aggregate(pipeline, allowDiskUse=True)
+        updated_count = 0
+        for doc in cursor:
+            group = doc.get("_id", {})
+            scope_id = group.get("scope_id")
+            cidr_ip = group.get("cidr_ip")
+            if not scope_id or not cidr_ip:
+                continue
+
+            all_ips = [ip for ip in doc.get("all_ips", []) if ip]
+
+            domain_set = set()
+            for dom_entry in doc.get("all_domains", []):
+                if isinstance(dom_entry, list):
+                    for d in dom_entry:
+                        if d and isinstance(d, str):
+                            domain_set.add(d.strip())
+                elif isinstance(dom_entry, str) and dom_entry.strip():
+                    domain_set.add(dom_entry.strip())
+
+            existing_cip = conn_db('asset_cip').find_one({"scope_id": scope_id, "cidr_ip": cidr_ip})
+            if existing_cip:
+                curr_ips = existing_cip.get("ip_list") or []
+                curr_domains = existing_cip.get("domain_list") or []
+
+                merged_ips = list(dict.fromkeys(curr_ips + all_ips))
+                merged_domains = list(dict.fromkeys(curr_domains + list(domain_set)))
+
+                if set(merged_ips) != set(curr_ips) or set(merged_domains) != set(curr_domains):
+                    conn_db('asset_cip').update_one(
+                        {"_id": existing_cip["_id"]},
+                        {
+                            "$set": {
+                                "ip_list": merged_ips,
+                                "ip_count": len(merged_ips),
+                                "domain_list": merged_domains,
+                                "domain_count": len(merged_domains),
+                                "update_date": utils.curr_date_obj()
+                            }
+                        }
+                    )
+                    updated_count += 1
+            else:
+                now = utils.curr_date_obj()
+                new_cip = {
+                    "scope_id": scope_id,
+                    "cidr_ip": cidr_ip,
+                    "ip_list": all_ips,
+                    "ip_count": len(all_ips),
+                    "domain_list": list(domain_set),
+                    "domain_count": len(domain_set),
+                    "save_date": now,
+                    "update_date": now
+                }
+                conn_db('asset_cip').insert_one(new_cip)
+                updated_count += 1
+
+        if updated_count > 0:
+            logger.info(f"Successfully migrated/repaired {updated_count} asset_cip records.")
+    except Exception as e:
+        logger.error(f"migrate_asset_cip_merge failed: {e}", exc_info=True)
+
+
+def migrate_geo_ip_data():
+    """
+    🛡️【第一性原理：全量存量 IP 资产高精度 Geo 数据后台异步平滑自愈】
+    基于 ip2region + GeoLite2 双轨高精引擎，在后台异步守护线程中执行。
+    增加 system_config 全局状态位幂等控制，彻底杜绝服务每次重启时的重复无意义扫描。
+    增加 no_cursor_timeout 防中断保护，采用 bulk_write 批量写入（每批 1000 条），
+    彻底杜绝主启动流程超时（60s 锁抢占）与阻塞。
+    """
+    import logging
+    import time
+    import threading
+    from pymongo import UpdateOne
+    from .ip import get_ip_city, get_ip_asn
+
+    logger = logging.getLogger()
+    sys_coll = conn_db('system_config')
+    mig_record = sys_coll.find_one({"_id": "geo_ip2region_migrated_v1"})
+    if mig_record and mig_record.get("status") == "completed":
+        return
+
+    def _worker():
+        try:
+            sys_coll.update_one(
+                {"_id": "geo_ip2region_migrated_v1"},
+                {"$set": {"status": "processing", "start_time": time.time()}},
+                upsert=True
+            )
+            missing_geo_query = {
+                "ip_type": "PUBLIC",
+                "$or": [
+                    {"geo_city.city": None},
+                    {"geo_city.city": "null"},
+                    {"geo_city": {}},
+                    {"geo_city": {"$exists": False}}
+                ]
+            }
+
+            total_migrated = 0
+            for coll_name in ("ip", "asset_ip"):
+                cursor = None
+                try:
+                    coll = conn_db(coll_name)
+                    total_need = coll.count_documents(missing_geo_query)
+                    if total_need == 0:
+                        continue
+
+                    logger.info(f"Start background migrating geo data for {total_need} documents in '{coll_name}'...")
+                    cursor = coll.find(missing_geo_query, {"_id": 1, "ip": 1}, no_cursor_timeout=True)
+                    operations = []
+                    migrated_count = 0
+
+                    for doc in cursor:
+                        curr_ip = doc.get("ip")
+                        if not curr_ip:
+                            continue
+
+                        new_geo = get_ip_city(curr_ip)
+                        new_asn = get_ip_asn(curr_ip)
+
+                        update_fields = {}
+                        if new_geo:
+                            update_fields["geo_city"] = new_geo
+                        if new_asn:
+                            update_fields["geo_asn"] = new_asn
+                            if new_asn.get("organization"):
+                                update_fields["as_organization"] = new_asn["organization"]
+                            if new_asn.get("number"):
+                                update_fields["asn"] = new_asn["number"]
+
+                        if update_fields:
+                            operations.append(UpdateOne({"_id": doc["_id"]}, {"$set": update_fields}))
+
+                        if len(operations) >= 1000:
+                            coll.bulk_write(operations, ordered=False)
+                            migrated_count += len(operations)
+                            operations = []
+
+                    if operations:
+                        coll.bulk_write(operations, ordered=False)
+                        migrated_count += len(operations)
+
+                    total_migrated += migrated_count
+                    logger.info(f"Successfully migrated geo data for {migrated_count} documents in '{coll_name}'.")
+                except Exception as e:
+                    logger.error(f"migrate_geo_ip_data failed for collection '{coll_name}': {e}", exc_info=True)
+                finally:
+                    if cursor is not None:
+                        try:
+                            cursor.close()
+                        except Exception:
+                            pass
+
+            sys_coll.update_one(
+                {"_id": "geo_ip2region_migrated_v1"},
+                {"$set": {"status": "completed", "completed_at": time.time(), "total_migrated": total_migrated}},
+                upsert=True
+            )
+            logger.info("migrate_geo_ip_data fully completed and marked in system_config.")
+        except Exception as e:
+            logger.error(f"migrate_geo_ip_data background worker error: {e}", exc_info=True)
+
+    t = threading.Thread(target=_worker, name="arl-geo-migration", daemon=True)
+    t.start()
+
+
 def arl_update():
     if is_run_flask_routes():
         return
@@ -443,6 +715,9 @@ def arl_update():
         _run_step("npoc_info_update", npoc_info_update)
         _run_step("cleanup_asset_scope_dead_fields", cleanup_asset_scope_dead_fields)
         _run_step("migrate_asset_scope_domain_status", migrate_asset_scope_domain_status)
+        _run_step("migrate_asset_site_pending_test_tag", migrate_asset_site_pending_test_tag)
+        _run_step("migrate_asset_cip_merge", migrate_asset_cip_merge)
+        _run_step("migrate_geo_ip_data", migrate_geo_ip_data)
         _run_step("cleanup_zombie_tasks", cleanup_zombie_tasks)
         db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
     except Exception as e:

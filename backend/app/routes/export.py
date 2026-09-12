@@ -196,13 +196,15 @@ class SaveTask(object):
                 port_ids = [str(x["port_id"]) for x in item["port_info"]]
                 row.append(" \r\n".join(port_ids))
                 row.append(len(item["port_info"]))
-                if "country_name" in item["geo_city"]:
-                    row.append("{}/{}".format(item["geo_city"]["country_name"],
-                                              item["geo_city"]["region_name"]))
-                    row.append(item["geo_asn"].get("organization", ""))
-                else:
-                    row.append("")
-                    row.append("")
+                raw_geo = item.get("geo_city")
+                geo_city = raw_geo if isinstance(raw_geo, dict) else {}
+                geo_parts = [c for c in [geo_city.get("country_name"), geo_city.get("region_name"), geo_city.get("city")] if c and c not in ("None", "null", "0")]
+                clean_parts = []
+                for p in geo_parts:
+                    if not clean_parts or clean_parts[-1] != p:
+                        clean_parts.append(p)
+                row.append("/".join(clean_parts))
+                row.append(item.get("geo_asn", {}).get("organization", "") if isinstance(item.get("geo_asn"), dict) else "")
 
                 osname = ""
                 if item.get("os_info"):
@@ -228,13 +230,15 @@ class SaveTask(object):
                 row.append(" \r\n".join(port_ids))
 
                 row.append(len(item["port_info"]))
-                if "country_name" in item["geo_city"]:
-                    row.append("{}/{}".format(item["geo_city"]["country_name"],
-                                              item["geo_city"]["region_name"]))
-                    row.append(item["geo_asn"].get("organization", ""))
-                else:
-                    row.append("")
-                    row.append("")
+                raw_geo = item.get("geo_city")
+                geo_city = raw_geo if isinstance(raw_geo, dict) else {}
+                geo_parts = [c for c in [geo_city.get("country_name"), geo_city.get("region_name"), geo_city.get("city")] if c and c not in ("None", "null", "0")]
+                clean_parts = []
+                for p in geo_parts:
+                    if not clean_parts or clean_parts[-1] != p:
+                        clean_parts.append(p)
+                row.append("/".join(clean_parts))
+                row.append(item.get("geo_asn", {}).get("organization", "") if isinstance(item.get("geo_asn"), dict) else "")
 
                 row.append(" \r\n".join(item.get("domain", [])))
 

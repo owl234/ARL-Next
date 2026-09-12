@@ -129,6 +129,7 @@ class Config(object, metaclass=ConfigMeta):
 
     GEOIP_ASN = ""
     GEOIP_CITY = ""
+    GEOIP_IP2REGION = ""
 
     _FILE_LEAK_TOP_2k = os.path.join(basedir, 'dicts/file_top_2000.txt')
     FILE_LEAK_TOP_200 = os.path.join(basedir, 'dicts/file_top_200.txt')
@@ -208,6 +209,7 @@ try:
     # *** GEOIP 配置 ***
     Config.GEOIP_CITY = y["GEOIP"]["CITY"]
     Config.GEOIP_ASN = y["GEOIP"]["ASN"]
+    Config.GEOIP_IP2REGION = y["GEOIP"].get("IP2REGION", "")
 
     Config._AUTH = y["ARL"]["AUTH"]
     Config._API_KEY = y["ARL"]["API_KEY"]

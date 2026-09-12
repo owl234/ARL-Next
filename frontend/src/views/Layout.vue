@@ -275,6 +275,10 @@ const handleThemeChange = async (e) => {
 };
 
 const handleUploadBackground = async (file) => {
+  if (file.size > 25 * 1024 * 1024) {
+    message.warning('图片大小不能超过 25MB，请重新选择');
+    return false;
+  }
   // 由于读取和提取可能较慢，可以给个 Loading 提示
   const hide = message.loading('正在提取主题色并设置高清背景...', 0);
   try {
@@ -287,11 +291,11 @@ const handleUploadBackground = async (file) => {
     window.dispatchEvent(new CustomEvent('theme-changed', { detail: color }));
     window.dispatchEvent(new CustomEvent('bg-image-changed', { detail: base64 }));
     
-    hide();
     message.success('自定义高清主题背景设置成功！');
   } catch (e) {
+    message.error('提取颜色或设置失败：' + (e.message || '未知错误'));
+  } finally {
     hide();
-    message.error('提取颜色或设置失败：' + e.message);
   }
   return false; // 拦截默认上传行为
 };
@@ -313,11 +317,19 @@ onMounted(() => {
     isDarkMode.value = true;
   }
   
-  dbHelper.get('bgImage').then((bgImage) => {
-    if (bgImage) {
-      hasBgImage.value = true;
-    }
-  });
+  const urlParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '');
+  const shouldResetBg = urlParams.get('reset_bg') === '1' || hashParams.get('reset_bg') === '1';
+
+  if (shouldResetBg) {
+    hasBgImage.value = false;
+  } else {
+    dbHelper.get('bgImage').then((bgImage) => {
+      if (bgImage) {
+        hasBgImage.value = true;
+      }
+    }).catch(() => {});
+  }
   
   window.addEventListener('bg-image-changed', handleBgImageEvent);
   document.addEventListener('click', restoreUI);

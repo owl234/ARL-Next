@@ -500,6 +500,15 @@ class Domain2SiteMonitor(object):
             curr_date = utils.curr_date_obj()
             site_info["save_date"] = curr_date
             site_info["update_date"] = curr_date
+            raw_tags = site_info.get("tag") or []
+            if isinstance(raw_tags, str):
+                raw_tags = [raw_tags]
+            elif not isinstance(raw_tags, list):
+                raw_tags = []
+            tags = list(dict.fromkeys(raw_tags))
+            if "待测试" not in tags:
+                tags.append("待测试")
+            site_info["tag"] = tags
             utils.conn_db('asset_site').insert_one(site_info)
         logger.info("save asset_site {} to {}".format(len(self.site_info_list), self.scope_id))
 

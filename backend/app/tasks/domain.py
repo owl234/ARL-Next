@@ -481,6 +481,7 @@ class DomainTask(CommonTask):
         self.service_info_list = []
         # 用来区分是正常任务还是监控任务
         self.task_tag = "task"
+        self.domain_source_map = {}  # 记录域名与其具体发现来源映射 (domain -> source)
 
         # 用来存放泛解析域名映射的IP
         self._not_found_domain_ips = None
@@ -571,7 +572,9 @@ class DomainTask(CommonTask):
         for domain_info_obj in domain_info_list:
             domain_info = domain_info_obj.dump_json(flag=False)
             domain_info["task_id"] = self.task_id
-            domain_info["source"] = source
+            dom_name = domain_info["domain"].lower().strip()
+            resolved_source = getattr(domain_info_obj, "source", None) or self.domain_source_map.get(dom_name) or source
+            domain_info["source"] = resolved_source
             domain_parsed = utils.domain_parsed(domain_info["domain"])
             if domain_parsed:
                 domain_info["fld"] = domain_parsed["fld"]
@@ -583,6 +586,8 @@ class DomainTask(CommonTask):
                                         wildcard_domain_ip=self.not_found_domain_ips)
 
         domain_info_list = self.clear_domain_info_by_record(domain_info_list)
+        for info in domain_info_list:
+            self.domain_source_map[info.domain.lower().strip()] = CollectSource.DOMAIN_BRUTE
         if self.task_tag == "task":
             self.save_domain_info_list(domain_info_list, source=CollectSource.DOMAIN_BRUTE)
         self.domain_info_list.extend(domain_info_list)
@@ -615,6 +620,10 @@ class DomainTask(CommonTask):
         arl_t1 = time.time()
         logger.info("start arl fetch {}".format(self.base_domain))
         arl_all_domains = utils.arl_domain(self.base_domain)
+        for d in arl_all_domains:
+            dom = d.get("domain") if isinstance(d, dict) else d
+            if dom:
+                self.domain_source_map[dom.lower().strip()] = CollectSource.ARL
         domain_info_list = self.build_domain_info(arl_all_domains)
         if self.task_tag == "task":
             domain_info_list = self.clear_domain_info_by_record(domain_info_list)
@@ -696,6 +705,11 @@ class DomainTask(CommonTask):
         # 没有结果，直接返回
         if len(alt_dns_out) <= 0:
             return
+
+        for d in alt_dns_out:
+            dom = d.get("domain") if isinstance(d, dict) else d
+            if dom:
+                self.domain_source_map[dom.lower().strip()] = CollectSource.ALTDNS
 
         alt_domain_info_list = self.build_domain_info(alt_dns_out)
         if self.task_tag == "task":
@@ -821,6 +835,8 @@ class DomainTask(CommonTask):
             cert_domains.update(extracted)
 
         if cert_domains:
+            for d in cert_domains:
+                self.domain_source_map[d.lower().strip()] = "ssl_cert"
             logger.info(f"extracted {len(cert_domains)} subdomains from SSL certs for {self.base_domain}")
             cert_domain_info_list = self.build_domain_info(list(cert_domains))
             if self.task_tag == "task":
@@ -860,6 +876,7 @@ class DomainTask(CommonTask):
         for result in results:
             domain = result["domain"]
             source = result["source"]
+            self.domain_source_map[domain.lower().strip()] = source
             source_domains = sources_map.get(source, [])
             source_domains.append(domain)
             sources_map[source] = source_domains
@@ -961,6 +978,8 @@ class DomainTask(CommonTask):
 
         if recursive_discovered:
             recursive_discovered = list(set(recursive_discovered))
+            for d in recursive_discovered:
+                self.domain_source_map[d.lower().strip()] = "recursive_brute"
             logger.info("recursive_domain_brute found {} raw candidates".format(len(recursive_discovered)))
             domain_info_list = self.build_domain_info(recursive_discovered)
             if self.task_tag == "task":
@@ -1130,6 +1149,8 @@ class DomainTask(CommonTask):
         # 可能发现新的域名， 这里保存起来
         domain_info_list = []
         if len(domains) > 0:
+            for d in domains:
+                self.domain_source_map[d.lower().strip()] = CollectSource.SEARCHENGINE
             domain_info_list = self.build_domain_info(domains)
             if self.task_tag == "task":
                 domain_info_list = self.clear_domain_info_by_record(domain_info_list)
@@ -1169,6 +1190,8 @@ class DomainTask(CommonTask):
             
             logger.info("wih_domain_update iteration {} found {} new domains".format(iteration, len(new_domains)))
             
+            for d in new_domains:
+                self.domain_source_map[d.lower().strip()] = "wih"
             domain_info_list = self.build_domain_info(new_domains)
             if self.task_tag in ["task", "monitor"]:
                 domain_info_list = self.clear_domain_info_by_record(domain_info_list)

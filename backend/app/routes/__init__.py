@@ -433,6 +433,8 @@ class ARLResource(Resource):
             "url": "url",
             "cip": "cidr_ip",
             "wih": "content",
+            "cert": "ip",
+            "asset_cert": "ip",
         }
 
         # 2. 复用之前讲过的总调度室 build_data，去数据库里把符合条件的数据全捞出来
@@ -450,8 +452,15 @@ class ARLResource(Resource):
             # 如果找到了需要提取的字段名，并且这条数据里刚好有这个字段
             if filed_name and filed_name in item:
 
-                # 5. 【特殊处理】如果当前导出的是 ip 类型的数据
-                if filed_name == "ip":
+                # 5. 【特殊处理】如果当前导出的是证书类型 (cert / asset_cert)
+                if _type in ("cert", "asset_cert"):
+                    curr_ip = item.get("ip")
+                    if curr_ip:
+                        port = item.get("port") or 443
+                        items_set.add(f"{curr_ip}:{port}")
+
+                # 【特殊处理】如果当前导出的是 ip 类型的数据
+                elif filed_name == "ip":
                     curr_ip = item[filed_name]  # 先拿到基础 IP (比如 192.168.1.1)
 
                     # 因为一个 IP 可能开了多个端口，所以要遍历它的 port_info 列表

@@ -50,7 +50,7 @@
 | :--- | :--- | :--- |
 | **系统稳定性** | 扫描海量目标时 Celery 阻塞假死、内存泄漏 OOM | **微服务解耦** (截图/OSINT独立)，全栈解除内存硬限，批量入库彻底根除假死 |
 | **AI 原生集成** | 无 AI 接口，仅限人工手动点击 | **原生 MCP 支持**，AI Agent 一句话接管资产挖掘与分析 |
-| **企业资产穿透** | 无企业资产查询功能 | **天眼查股权穿透 + 全维度 ICP 深度下钻**，一键秒级打通集团子公司及**移动端 (APP/小程序/快应用)** 全量资产 (护网友好) |
+| **企业资产穿透** | 无企业资产查询功能 | **公司股权穿透 + 全维度 ICP 深度下钻**，一键秒级打通集团子公司及**移动端 (APP/小程序/快应用)** 全量资产 (护网友好) |
 | **部署与构建** | 依赖过时容易报错，需拉取海量外网包 | **阿里云国内预构建镜像**，多阶段构建，2分钟一键秒启动 |
 | **现代化技术栈** | Python 3.6 / Vue2 / MongoDB 3.x / Nmap 7.70 严重脱节 | **Python 3.13 / Vue 3.5 / MongoDB 7.0 / Nmap 7.95 LTS** 现代底层全线跨代 |
 | **敏感信息挖掘** | Go WIH 编译依赖沉重，跨平台常编译报错 | **纯 Python WIH 引擎** 零外部二进制依赖，内置三级风险评估与流式解析 |
@@ -63,7 +63,7 @@
 
 * 🤖 **AI 原生赋能**：内置标准化 MCP 服务，直接接入 Claude / Cursor / Open-WebUI，实现用自然语言下发扫描与导出 13 维资产全景大盘。（👉 [MCP 配置指南](./mcp-server/README.md)）
 * 🚀 **高并发极速引擎**：耗时截图与 OSINT 全面剥离为独立微服务；核心落库升级为 `bulk_write` 批量入库；**全栈解除 Docker 容器内存硬限制**，大内存机器全速释放，轻松吞吐数十万级资产。
-* 🌐 **全维度企业资产闭环**：深度打通企业 ICP 备案（域名/网站/移动端 APP/微信小程序/快应用全覆盖）与天眼查股权穿透，自动化构建从“集团公司 ➔ 控股子公司 ➔ 域名/移动端 ➔ IP ➔ 端口 ➔ Web/组件 ➔ 漏洞”的完整链条。
+* 🌐 **全维度企业资产闭环**：深度打通企业 ICP 备案（域名/网站/移动端 APP/微信小程序/快应用全覆盖）与公司股权穿透，自动化构建从“集团公司 ➔ 控股子公司 ➔ 域名/移动端 ➔ IP ➔ 端口 ➔ Web/组件 ➔ 漏洞”的完整链条。
 * 🔍 **现代测绘与敏感挖掘**：升级 **Nmap 7.95 黄金 LTS 稳定版**（扩充 2500+ 服务指纹与 336 种现代化 OS 指纹并裁剪段错误风险）；内置**纯 Python WIH 敏感信息提取引擎**，毫秒级流式解析云凭据、AK/SK 与私钥。
 * 🛡️ **威胁情报与代码雷达**：内置 GitHub CVE 与代码泄露监控引擎，毫秒级原子锁防重复告警，实时感知外部威胁。
 * ⚡ **极简运维与自愈机制**：提供开箱即用的 2 分钟极速部署包，内置容器健康巡检与自愈机制，支持 Web 后台平滑热更新与 Basic Auth 前置防御。
@@ -84,7 +84,7 @@
 
 <br/>
 
-* **企业级 OSINT 资产侦察**：支持企业 ICP 备案（网站/移动端 APP/微信小程序/快应用）穿透与天眼查股权穿透，一键关联并同步下发多维探测任务。
+* **企业级 OSINT 资产侦察**：支持企业 ICP 备案（网站/移动端 APP/微信小程序/快应用）穿透与公司股权穿透，一键关联并同步下发多维探测任务。
   
   <p align="center">
     <img src="./img/enterprise-asset-search.png" alt="企业资产侦察" width="800">
@@ -131,7 +131,7 @@ graph TD
     MCP -->|"API Token 鉴权调用"| Backend
 
     %% 3. 调度与任务分流 (双轨解耦)
-    Backend -->|"1. 异步直调 (16181)"| OSINT["🧩 OSINT 微服务 (天眼查/ICP 协程池)"]
+    Backend -->|"1. 异步直调 (16181)"| OSINT["🧩 OSINT 微服务 "]
     Backend -->|"2. 生产扫描任务"| MQ(("⚡ RabbitMQ 3 (轻重/GitHub 多队列)"))
 
     %% 4. Celery Worker 扫描计算集群
@@ -169,7 +169,7 @@ graph TD
 
 1. 🖥️ **展示与网关 (Frontend / Nginx)**：基于 **Vue 3.5 + Nginx**，支持全站表格/操作栏 **Sticky 悬浮吸附**与 **Basic Auth 前置网关防御**。
 2. ⚙️ **业务与 AI 赋能 (Backend / MCP)**：基于 **Python 3.13 + Gunicorn**；内置 **原生 Python MCP** 赋能 AI Agent 调度与 13 维全景大盘导出。
-3. 🧩 **OSINT 独立微服务**：专职天眼查与 ICP 异步情报收集，由 Backend 直调协程池，**彻底脱离 Celery 队列杜绝假死**。
+3. 🧩 **OSINT 独立微服务**：专职公司资产与 ICP 异步情报收集，由 Backend 直调协程池，**彻底脱离 Celery 队列杜绝假死**。
 4. ⚡ **多队列 Worker 集群**：拆分**轻量/重载/威胁情报**独立队列；重任务严格限制子进程生命周期彻底根除内存泄露；**底座升级 Nmap 7.95 黄金 LTS 稳定版**。
 5. 🛡️ **微服务与自愈守护 (Puppeteer / Autoheal)**：独立容器专职无头截图并支持滚动自愈；**Autoheal 实时探针秒级恢复容器死锁**；纯 Python WIH 引擎高效解析敏感凭据。
 6. 🗄️ **高吞吐持久层与性能释放 (MongoDB 7.0)**：全线升级 `bulk_write` 批量落库，核心表覆盖联合唯一索引并设 1GB 内存池保护；**全栈解除 Docker 容器内存硬限制 (`mem_limit`)**，充分释放机器硬件算力。
@@ -412,6 +412,9 @@ ARL-Next 的持续高频迭代离不开社区伙伴的慷慨支持。特别致�
   </a>
   <a href="https://github.com/123lpone" target="_blank">
     <img src="https://github.com/123lpone.png" width="48" height="48" style="border-radius: 50%; margin: 0 8px;" alt="123lpone" title="感谢 123lpone 的支持！"/>
+  </a>
+  <a href="https://github.com/ZQ-Rookie-Hacker" target="_blank">
+    <img src="https://github.com/ZQ-Rookie-Hacker.png" width="48" height="48" style="border-radius: 50%; margin: 0 8px;" alt="ZQ-Rookie-Hacker" title="感谢 ZQ-Rookie-Hacker 的支持！"/>
   </a>
 </p>
 

@@ -205,6 +205,11 @@ class DomainExecutor(DomainTask):
         self.update_task_field("start_time", utils.curr_date())
         
         self.domain_fetch()
+
+        if self.options.get("search_engines"):
+            with self.safe_phase("search_engines", base_update):
+                self.search_engines()
+
         for domain_info in self.domain_info_list:
             self.domain_set.add(domain_info.domain)
 
@@ -262,9 +267,20 @@ class DomainExecutor(DomainTask):
 
     def set_scope_domain(self):
         """
-        查询资产库中域名
+        查询资产库中域名，并继承已有资产的原始 source 溯源信息
         """
-        self.scope_domain_set = set(utils.get_asset_domain_by_id(self.scope_id))
+        self.scope_domain_set = set()
+        if not self.scope_id:
+            return
+        cursor = conn('asset_domain').find({"scope_id": str(self.scope_id)}, {"domain": 1, "source": 1})
+        for item in cursor:
+            d = item.get("domain")
+            if d:
+                d_lower = d.lower().strip()
+                self.scope_domain_set.add(d_lower)
+                # 存量资产如果之前已有真实来源，记录在 domain_source_map 中，避免被覆盖
+                if d_lower not in self.domain_source_map and item.get("source"):
+                    self.domain_source_map[d_lower] = item.get("source")
 
     def set_domain_info_list(self):
         """

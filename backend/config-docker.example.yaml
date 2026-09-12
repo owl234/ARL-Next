@@ -8,8 +8,9 @@ MONGO:
 
 #GeoIP 数据库文件配置项
 GEOIP:
-  CITY: '/code/GeoLite2/GeoLite2-City.mmdb'
-  ASN: '/code/GeoLite2/GeoLite2-ASN.mmdb'
+  CITY: '/code/backend/GeoLite2/GeoLite2-City.mmdb'
+  ASN: '/code/backend/GeoLite2/GeoLite2-ASN.mmdb'
+  IP2REGION: '/code/backend/GeoLite2/ip2region_v4.xdb'
 
 
 #Fofa API 配置项
