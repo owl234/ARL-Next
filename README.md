@@ -19,7 +19,7 @@
     <img src="https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
     <img src="https://img.shields.io/badge/Nmap-7.95%20LTS-blue?style=flat-square" alt="Nmap">
     <img src="https://img.shields.io/badge/MongoDB-7.0-47A248?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB">
-    <img src="https://img.shields.io/badge/Vue-3.x-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue">
+    <img src="https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue">
     <img src="https://img.shields.io/badge/MCP-Native-purple?style=flat-square" alt="MCP">
   </p>
 
@@ -61,13 +61,13 @@
 
 ### <span id="core-features"></span>✨ 核心特性矩阵
 
-* 🤖 **AI 原生赋能**：内置标准化 MCP 服务，直接接入 Claude / Cursor / Open-WebUI，实现用自然语言下发扫描与导出 13 维资产全景大盘。（👉 [MCP 配置指南](./mcp-server/README.md)）
-* 🚀 **高并发极速引擎**：耗时截图与 OSINT 全面剥离为独立微服务；核心落库升级为 `bulk_write` 批量入库；**全栈解除 Docker 容器内存硬限制**，大内存机器全速释放，轻松吞吐数十万级资产。
-* 🌐 **全维度企业资产闭环**：深度打通企业 ICP 备案（域名/网站/移动端 APP/微信小程序/快应用全覆盖）与公司股权穿透，自动化构建从“集团公司 ➔ 控股子公司 ➔ 域名/移动端 ➔ IP ➔ 端口 ➔ Web/组件 ➔ 漏洞”的完整链条。
-* 🔍 **现代测绘与敏感挖掘**：升级 **Nmap 7.95 黄金 LTS 稳定版**（扩充 2500+ 服务指纹与 336 种现代化 OS 指纹并裁剪段错误风险）；内置**纯 Python WIH 敏感信息提取引擎**，毫秒级流式解析云凭据、AK/SK 与私钥。
-* 🛡️ **威胁情报与代码雷达**：内置 GitHub CVE 与代码泄露监控引擎，毫秒级原子锁防重复告警，实时感知外部威胁。
-* ⚡ **极简运维与自愈机制**：提供开箱即用的 2 分钟极速部署包，内置容器健康巡检与自愈机制，支持 Web 后台平滑热更新与 Basic Auth 前置防御。
-* 🇨🇳 **国内网络深度优化**：全线镜像预构建并托管于阿里云国内私库，彻底告别海外网络阻断与 Pip/Docker 依赖拉取失败。
+* 🤖 **AI 原生调度**：内置标准化 MCP 服务，支持自然语言一键下发探测与 13 维资产全景大盘导出。（👉 [MCP 配置指南](./mcp-server/README.md)）
+* 🚀 **高并发零假死**：微服务解耦与批量落库，全栈解除内存硬限制，海量资产吞吐平稳无阻。
+* 🌐 **企业全域穿透**：覆盖股权穿透与全维度 ICP（网站/APP/小程序/快应用），自动化打通母子公司资产闭环。
+* 🔍 **现代测绘引擎**：升级 Nmap 7.95 黄金 LTS 测绘基线；内置纯 Python WIH 敏感信息与凭证流式提取。
+* 🛡️ **威胁情报雷达**：全球最新 CVE 漏洞与 GitHub 敏感凭证秒级原子去重监听，主动感知外部风险。
+* ⚡ **开箱自愈运维**：2 分钟极速部署，容器级健康探针自动秒级排障，支持管理后台一键平滑热更。
+* 🇨🇳 **国内极速拉取**：全线镜像预构建并托管于阿里云国内私库，免梯直连、零依赖拉取报错。
 
 ---
 
@@ -123,7 +123,7 @@ ARL-Next 采用前后端解耦、异步分布式任务队列与轻量微服务�
 ```mermaid
 graph TD
     %% 1. 接入层
-    User["👨‍💻 安全分析师 (浏览器)"] -->|"HTTPS / Basic Auth (5173)"| Nginx["🖥️ Frontend (Nginx + Vue 3)"]
+    User["👨‍💻 安全分析师 (浏览器)"] -->|"HTTPS / Basic Auth (5173)"| Nginx["🖥️ Frontend (Nginx + Vue 3.5)"]
     Agent["🤖 AI Agent (Claude / Cursor)"] -.->|"MCP 协议 (Stdio)"| MCP["🤖 MCP Server (Python 原生)"]
 
     %% 2. API 网关层
@@ -131,7 +131,7 @@ graph TD
     MCP -->|"API Token 鉴权调用"| Backend
 
     %% 3. 调度与任务分流 (双轨解耦)
-    Backend -->|"1. 异步直调 (16181)"| OSINT["🧩 OSINT 微服务 "]
+    Backend -->|"1. 异步直调 (16181)"| OSINT["🧩 OSINT 微服务"]
     Backend -->|"2. 生产扫描任务"| MQ(("⚡ RabbitMQ 3 (轻重/GitHub 多队列)"))
 
     %% 4. Celery Worker 扫描计算集群
@@ -206,7 +206,7 @@ graph TD
 # 1. 安装基础工具并创建目录
 apt-get update && apt-get install -y docker.io openssl curl && \
 mkdir -p ~/ARL-Next && cd ~/ARL-Next && \
-# 2. 从阿里云国内镜像中提取全套部署编排
+# 2. 从阿里云国内镜像提取全套部署编排并启动
 docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
 docker rm -f arl-temp 2>/dev/null || true && \
 docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
@@ -216,10 +216,8 @@ docker cp arl-temp:/code/updater ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
 docker cp arl-temp:/code/frontend ./ && \
-docker rm arl-temp && \
-# 3. 赋予权限并启动
-chmod +x start-prod.sh && \
-bash start-prod.sh
+docker rm -f arl-temp && \
+chmod +x start-prod.sh && bash start-prod.sh
 ```
 
 **CentOS / RHEL / Alibaba Cloud Linux / TencentOS 系统**：
@@ -229,7 +227,7 @@ bash start-prod.sh
 systemctl enable --now docker 2>/dev/null || true && \
 yum install -y openssl curl && \
 mkdir -p ~/ARL-Next && cd ~/ARL-Next && \
-# 2. 从阿里云国内镜像中提取全套部署编排
+# 2. 从阿里云国内镜像提取全套部署编排并启动
 docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
 docker rm -f arl-temp 2>/dev/null || true && \
 docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
@@ -239,10 +237,8 @@ docker cp arl-temp:/code/updater ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
 docker cp arl-temp:/code/frontend ./ && \
-docker rm arl-temp && \
-# 3. 赋予权限并启动
-chmod +x start-prod.sh && \
-bash start-prod.sh
+docker rm -f arl-temp && \
+chmod +x start-prod.sh && bash start-prod.sh
 ```
 
 ##### 方法二：GitHub 源码克隆部署（适用于海外服务器 / 源码部署）
@@ -323,15 +319,13 @@ ARL-Next 支持 **Web 管理后台一键热更新**（在「系统设置」中�
 <summary><b>Q2: 忘记系统登录密码或 Basic Auth 防爆破凭证怎么办？</b></summary>
 <br/>
 
-**A:** 在服务器终端执行以下命令即可一键重置：
+**A:** 在服务器终端执行以下操作即可一键重置：
 - **重置平台管理员账号 (admin / arlpass)**：
-  > 系统启动时会自动保护已存管理员密码，终端强制重置时需显式追加 `--reset` 参数（使用容器内专属虚拟环境 Python 执行）：
   ```bash
   docker exec -it arl-web-prod /code/backend/.venv-docker/bin/python3 /code/backend/inject_user.py --reset
   ```
-  *(备选方案：亦可通过 Python 单行直更数据库：`docker exec -it -w /code/backend arl-web-prod /code/backend/.venv-docker/bin/python3 -c "from app.utils.conn import conn_db; from app.utils import gen_md5; conn_db('user').update_one({'username': 'admin'}, {'\$set': {'password': gen_md5('arlsalt!@#arlpass')}}); print('✅ 管理员密码已重置为 arlpass')"`)*
-  > [!CAUTION]
-  > 上述 `--reset` 参数与 Python 单行直更均**免二次认证**直接改写 admin 密码，且直更命令中内嵌了默认盐值 `arlsalt!@#`（与登录校验共用同一盐值）。**任何拥有容器 `docker exec` 权限的人均可借此无感重置管理员密码**。请仅在服务器本机运维时使用，并妥善收敛宿主机 docker 权限（如仅限受信账户加入 `docker` 组、禁用匿名 docker.sock 暴露）。
+  > [!NOTE]
+  > 平台启动时默认保护现有密码，追加 `--reset` 参数将强制将 `admin` 密码重置为初始密码 `arlpass`。请在宿主机受信环境下执行。
 - **重置/查看 Basic Auth 凭据**：编辑工作目录下的 `frontend/.htpasswd`，或登录系统后在顶部导航栏「安全防护」图标中一键热开启/修改/关闭。
 </details>
 
