@@ -30,6 +30,24 @@ request.interceptors.request.use(
 // 全局防抖锁：防止并发 401 触发多次提示和跳转
 let isRedirecting = false;
 
+function triggerUnauthorizedRedirect() {
+    if (!isRedirecting) {
+        isRedirecting = true; // 上锁
+
+        message.warning('身份已过期或失效，请重新登录！');
+
+        // 撕毁所有过期门票
+        localStorage.removeItem('token');
+        localStorage.removeItem('userInfo');
+
+        // 延迟一点点跳转，让用户能看清 warning 提示词
+        setTimeout(() => {
+            window.location.href = '/login';
+            // 注意：跳转后页面会刷新，脚本会重新加载，锁自然就重置了
+        }, 1000);
+    }
+}
+
 // 响应拦截器：统一处理状态码
 request.interceptors.response.use(
     (response) => {
@@ -43,22 +61,7 @@ request.interceptors.response.use(
                 return res;
             }
 
-            // 如果锁没开启，说明是第一个报错的请求
-            if (!isRedirecting) {
-                isRedirecting = true; // 上锁
-
-                message.warning('身份已过期或失效，请重新登录！');
-
-                // 撕毁所有过期门票
-                localStorage.removeItem('token');
-                localStorage.removeItem('userInfo');
-
-                // 延迟一点点跳转，让用户能看清 warning 提示词
-                setTimeout(() => {
-                    window.location.href = '/login';
-                    // 注意：跳转后页面会刷新，脚本会重新加载，锁自然就重置了
-                }, 1000);
-            }
+            triggerUnauthorizedRedirect();
 
             // 拦截掉这个请求，不要让它抛到业务组件里去报错
             return Promise.reject(new Error('未登录或 Token 失效'));
@@ -71,6 +74,16 @@ request.interceptors.response.use(
         if (error.config && error.config.responseType === 'blob') {
             return Promise.reject(error);
         }
+
+        // 捕获真实 HTTP 401 状态码 (网关/代理层异常或标准 RESTful 鉴权失败)
+        if (error.response && error.response.status === 401) {
+            if (error.config && error.config.url && error.config.url.includes('/user/login')) {
+                return Promise.reject(error);
+            }
+            triggerUnauthorizedRedirect();
+            return Promise.reject(new Error('未登录或 Token 失效'));
+        }
+
         // 处理真正的 HTTP 级别报错 (如 500, 502)
         message.error('网络请求异常，请检查后端服务！');
         return Promise.reject(error);

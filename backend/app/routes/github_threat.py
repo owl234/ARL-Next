@@ -13,8 +13,10 @@ def _require_auth():
     其余 /api/* 路由均由 @auth 装饰器逐个鉴权，本组通过 register_blueprint 注册，
     缺少统一校验，导致匿名用户可清空监控目标、篡改监控配置并触发外网扫描。
     """
+    if request.method == "OPTIONS":
+        return
     if Config.AUTH and not utils.user_login_header():
-        return jsonify({"message": "not login", "code": 401, "data": {}}), 401
+        return jsonify({"message": "not login", "code": 401, "data": {}})
 
 @github_threat_bp.route('/tools_target', methods=['GET'])
 def get_tools_target():
