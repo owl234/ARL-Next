@@ -1,8 +1,20 @@
-from flask import Blueprint, request
+from flask import Blueprint, request, jsonify
 from app import utils
+from app.config import Config
 from app.modules import ErrorMsg
 
 github_threat_bp = Blueprint('github_threat', __name__)
+
+
+@github_threat_bp.before_request
+def _require_auth():
+    """本 Blueprint 内所有端点(含删除、改配置、触发扫描)均需登录态。
+
+    其余 /api/* 路由均由 @auth 装饰器逐个鉴权，本组通过 register_blueprint 注册，
+    缺少统一校验，导致匿名用户可清空监控目标、篡改监控配置并触发外网扫描。
+    """
+    if Config.AUTH and not utils.user_login_header():
+        return jsonify({"message": "not login", "code": 401, "data": {}}), 401
 
 @github_threat_bp.route('/tools_target', methods=['GET'])
 def get_tools_target():
