@@ -505,6 +505,36 @@
               <span class="task-target-text" :title="record.target">{{ record.target }}</span>
             </template>
 
+            <template v-else-if="column.key === 'policy_options'">
+              <a-tooltip v-if="hasEnterpriseOptions(record)" placement="bottom">
+                <template #title>
+                  <div class="options-tooltip-content">
+                    <div class="tooltip-header">
+                      {{ record.task_type === 'tyc' ? '天眼查测绘策略' : '工信部ICP查询策略' }}
+                    </div>
+                    <template v-if="record.task_type === 'tyc'">
+                      <div class="tooltip-section-title">穿透策略</div>
+                      <div class="option-item-line">• 投资穿透层级: {{ record.depth || 1 }} 层</div>
+                      <div class="option-item-line">• 出资比例阈值: ≥ {{ record.invest_ratio !== undefined && record.invest_ratio !== null ? record.invest_ratio : 50 }}%</div>
+                      <div class="option-item-line">• 工信部ICP双轨: {{ record.enable_icp !== false ? '已开启' : '未开启' }}</div>
+                      <div class="tooltip-section-title" style="margin-top: 6px;">测绘维度</div>
+                    </template>
+                    <div v-for="(item, idx) in getEnterpriseQueryTypeLabels(record)" :key="idx" class="option-item-line">
+                      • {{ item }}
+                    </div>
+                  </div>
+                </template>
+                <span class="options-badge-trigger">
+                  <setting-outlined style="margin-right: 4px; font-size: 11px;" />
+                  <span>{{ formatEnterpriseOptionsSummary(record) }}</span>
+                </span>
+              </a-tooltip>
+              <span v-else class="options-badge-trigger" style="cursor: default; opacity: 0.65;">
+                <setting-outlined style="margin-right: 4px; font-size: 11px;" />
+                <span>默认配置</span>
+              </span>
+            </template>
+
             <template v-else-if="column.key === 'status'">
               <a-tag :color="getEnterpriseStatusColor(record.status)" class="task-status-tag">
                 <component :is="getEnterpriseStatusIcon(record.status)" :spin="record.status === 'running'" />
@@ -1316,10 +1346,63 @@ const resetReconSearch = () => {
 
 const handleEnterpriseTableChange = (page, pageSize) => fetchEnterpriseTasks(page, pageSize);
 
+const TYC_QUERY_TYPE_LABELS = {
+  invest: '对外投资',
+  web: '网站备案',
+  app: '移动APP',
+  mapp: '微信小程序',
+  wechat: '微信公众号',
+  weibo: '企业微博',
+  trademark: '企业商标'
+};
+
+const ICP_QUERY_TYPE_LABELS = {
+  web: '网站备案',
+  app: '移动APP',
+  mapp: '微信小程序',
+  kapp: '快应用'
+};
+
+const hasEnterpriseOptions = (record) => {
+  if (!record) return false;
+  return Boolean(
+    (Array.isArray(record.query_type) && record.query_type.length > 0) ||
+    record.depth !== undefined ||
+    record.invest_ratio !== undefined ||
+    record.task_type === 'tyc'
+  );
+};
+
+const getEnterpriseQueryTypeLabels = (record) => {
+  const queryType = Array.isArray(record.query_type) ? record.query_type : [];
+  const map = record.task_type === 'tyc' ? TYC_QUERY_TYPE_LABELS : ICP_QUERY_TYPE_LABELS;
+  if (!queryType.length) return ['默认查询'];
+  return queryType.map(k => map[k] || k);
+};
+
+const formatEnterpriseOptionsSummary = (record) => {
+  if (!record) return '默认配置';
+  const queryCount = Array.isArray(record.query_type) ? record.query_type.length : 0;
+
+  if (record.task_type === 'tyc') {
+    let activeCount = queryCount;
+    if (record.depth !== undefined) activeCount++;
+    if (record.invest_ratio !== undefined) activeCount++;
+    if (record.enable_icp !== false) activeCount++;
+    return `已配置 ${activeCount} 项策略`;
+  }
+
+  if (queryCount > 0) {
+    return `${queryCount} 项查询维度`;
+  }
+  return '默认配置';
+};
+
 const enterpriseColumns = [
   { title: '任务名称', dataIndex: 'name', key: 'name', width: 220, ellipsis: true },
   { title: '查询目标', dataIndex: 'target', key: 'target', width: 200, ellipsis: true },
   { title: '类型', dataIndex: 'task_type', key: 'task_type', width: 100, customRender: ({ text }) => text === 'tyc' ? '天眼查' : '工信部ICP' },
+  { title: '策略配置', key: 'policy_options', width: 140 },
   { title: '状态', dataIndex: 'status', key: 'status', width: 120 },
   { title: '核心/投资', key: 'statistic', width: 140 },
   { title: '同步状态', key: 'sync_status', width: 150 },
@@ -2834,6 +2917,15 @@ onUnmounted(() => {
 
 .option-item-line {
   font-size: 12px;
+}
+
+.tooltip-section-title {
+  font-size: 11px;
+  color: var(--arl-primary-light, #91caff);
+  font-weight: 600;
+  margin-top: 4px;
+  margin-bottom: 2px;
+  letter-spacing: 0.5px;
 }
 
 /* 状态标签 */
