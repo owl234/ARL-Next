@@ -176,8 +176,28 @@ def create_index():
                 conn_db('syslog').create_index([("create_time", 1)], expireAfterSeconds=2592000, background=True)
                 # 为 task_id 建立索引，防止前端查看任务日志时触发全表扫描（COLLSCAN）拖垮系统
                 conn_db('syslog').create_index([("task_id", 1)], background=True)
-                # 字典异步上传任务记录 7 天自动过期清理 (604800 秒)
-                conn_db('dict_upload_task').create_index([("create_time", 1)], expireAfterSeconds=604800, background=True)
+                # 兼容历史记录：旧版本 create_time 是 Unix 整数，先转换为
+                # BSON Date 类型的绝对过期时间，再建立 TTL=0 索引。
+                conn_db('dict_upload_task').update_many(
+                    {
+                        "expire_at": {"$exists": False},
+                        "create_time": {"$type": ["int", "long", "double", "decimal"]}
+                    },
+                    [
+                        {"$set": {
+                            "expire_at": {
+                                "$dateAdd": {
+                                    "startDate": {"$toDate": {"$multiply": ["$create_time", 1000]}},
+                                    "unit": "day",
+                                    "amount": 7
+                                }
+                            }
+                        }}
+                    ]
+                )
+                conn_db('dict_upload_task').create_index(
+                    [("expire_at", 1)], expireAfterSeconds=0, background=True
+                )
                 logging.getLogger().info("Syslog & dict upload indexes created successfully.")
                 return
             except Exception as e:

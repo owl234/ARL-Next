@@ -2,6 +2,7 @@ import os
 import time
 import threading
 import uuid
+from datetime import datetime, timedelta, timezone
 from app.utils import get_logger
 from app.utils import conn_db as conn
 from app.utils.dict_utils import file_lock, count_file_lines, hash_dict_entry, dict_lock
@@ -27,7 +28,11 @@ def background_process_dict(task_id, temp_file_path, target_dict_path):
                 "total_lines": 0,
                 "inserted_lines": 0,
                 "ignored_lines": 0,
-                "create_time": now
+                "create_time": now,
+                # TTL indexes require a BSON date. Keep create_time as the
+                # existing integer field used by the UI, and use a dedicated
+                # absolute expiry field for automatic cleanup.
+                "expire_at": datetime.now(timezone.utc) + timedelta(days=7)
             }},
             upsert=True
         )
