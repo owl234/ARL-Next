@@ -10,7 +10,7 @@ from app import services
 from app import modules
 from app.modules import ScanPortType, get_scan_ports, DomainDictType, CollectSource, TaskStatus
 from app.services import fetchCert, run_risk_cruising, run_sniffer, BaseUpdateTask
-from app.services.commonTask import CommonTask, WebSiteFetch, build_url_item
+from app.services.commonTask import CommonTask, WebSiteFetch, build_url_item, TaskHeartbeat
 from app.helpers.domain import find_private_domain_by_task_id, find_public_ip_by_task_id
 from app.services.findVhost import find_vhost
 from app.services.dns_query import run_query_plugin
@@ -1224,6 +1224,10 @@ class DomainTask(CommonTask):
         self.update_services("wih_domain_update", elapse)
 
     def run(self):
+        with TaskHeartbeat(self.task_id, interval=60):
+            self._run_phases()
+
+    def _run_phases(self):
         base_update = self.base_update_task
         self.update_task_field("start_time", utils.curr_date())
 

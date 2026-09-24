@@ -22,9 +22,11 @@ logger = utils.get_logger()
 
 class TaskHeartbeat(object):
     """
-    轻量级后台心跳守护器：在任务阶段执行期间，每隔 interval 秒向 MongoDB
-    刷新一次 update_date 与 last_updated 时间戳，确保超长任务（如持续数天的 Nuclei 扫描）
-    具有持续的心跳可观测性，并规避极端异常重启时的误判定。
+    轻量级后台心跳守护器：
+    1. 进入阶段（__enter__）立即执行一次心跳落库（Zero-delay Flush），消除短阶段与冷启动空白；
+    2. 运行期间每隔 interval 秒由后台守护线程向 MongoDB 刷新 last_updated 与 update_date；
+    3. 退出阶段（__exit__）补齐最终一次心跳 Flush，确保多阶段无缝衔接；
+    4. 兼顾常规扫描任务（task）与 GitHub 任务（github_task）。
     """
     def __init__(self, task_id: str, interval: int = 60):
         self.task_id = str(task_id) if task_id else None
@@ -32,9 +34,30 @@ class TaskHeartbeat(object):
         self._stop_event = threading.Event()
         self._thread = None
 
+    def _flush_heartbeat(self):
+        if not self.task_id or self.task_id == "global":
+            return
+        from bson import ObjectId
+        try:
+            now_ts = time.time()
+            curr_d = utils.curr_date()
+            ret = utils.conn_db('task').update_one(
+                {"_id": ObjectId(self.task_id)},
+                {"$set": {"last_updated": now_ts, "update_date": curr_d}}
+            )
+            if ret.matched_count == 0:
+                utils.conn_db('github_task').update_one(
+                    {"_id": ObjectId(self.task_id)},
+                    {"$set": {"last_updated": now_ts, "update_date": curr_d}}
+                )
+        except Exception:
+            pass
+
     def __enter__(self):
         if not self.task_id or self.task_id == "global":
             return self
+        # 1. 进入时立即执行一次心跳落库
+        self._flush_heartbeat()
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -43,20 +66,14 @@ class TaskHeartbeat(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self._thread:
             self._stop_event.set()
+        # 2. 退出时补齐最后一次心跳落库
+        self._flush_heartbeat()
         return False
 
     def _run(self):
-        from bson import ObjectId
         while not self._stop_event.wait(self.interval):
-            try:
-                now_ts = time.time()
-                curr_d = utils.curr_date()
-                utils.conn_db('task').update_one(
-                    {"_id": ObjectId(self.task_id)},
-                    {"$set": {"last_updated": now_ts, "update_date": curr_d}}
-                )
-            except Exception:
-                pass
+            self._flush_heartbeat()
+
 
 
 # 任务类中一些相关公共类

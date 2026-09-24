@@ -12,6 +12,7 @@ from app.services import sync_asset, build_domain_info, sync_asset
 import time
 from app.scheduler import update_scheduler_run
 from app.services import webhook
+from app.services.commonTask import TaskHeartbeat
 
 logger = utils.get_logger()
 
@@ -230,8 +231,13 @@ class DomainExecutor(DomainTask):
         self.wildcard_map = {}
 
     def run(self):
+        with TaskHeartbeat(self.task_id, interval=60):
+            return self._run_phases()
+
+    def _run_phases(self):
         base_update = self.base_update_task
         self.update_task_field("start_time", utils.curr_date())
+
         
         self.domain_fetch()
 

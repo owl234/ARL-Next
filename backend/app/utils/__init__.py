@@ -498,6 +498,41 @@ def clean_task_data(task_id):
         except Exception as e:
             logger.error(f"Error cleaning screenshot dir for task {task_id}: {e}")
 
+
+def clean_task_tmp_files(task_id):
+    """
+    仅清理指定任务在磁盘上遗留的临时中间文件与截图目录，
+    严禁清理 MongoDB 中的已入库资产，确保半程成果可留存、可追溯
+    """
+    import shutil
+    import os
+    from app.config import Config
+    logger = get_logger()
+    logger.info(f"Cleaning temporary disk files for task {task_id}")
+
+    # 1. 清理任务截图目录
+    try:
+        screenshot_path = os.path.join(Config.SCREENSHOT_DIR, str(task_id))
+        if os.path.exists(screenshot_path):
+            shutil.rmtree(screenshot_path, ignore_errors=True)
+    except Exception as e:
+        logger.warning(f"Error cleaning screenshot dir for task {task_id}: {e}")
+
+    # 2. 清理 TMP_PATH 下包含 task_id 的中间文件 (如 nuclei/massdns 临时文件)
+    try:
+        tmp_dir = Config.TMP_PATH
+        if os.path.exists(tmp_dir):
+            for fname in os.listdir(tmp_dir):
+                if str(task_id) in fname:
+                    fpath = os.path.join(tmp_dir, fname)
+                    if os.path.isfile(fpath) or os.path.islink(fpath):
+                        os.unlink(fpath)
+                    elif os.path.isdir(fpath):
+                        shutil.rmtree(fpath, ignore_errors=True)
+    except Exception as e:
+        logger.warning(f"Error cleaning tmp files for task {task_id}: {e}")
+
+
 def safe_insert_asset(collection, unique_keys, item):
     """
     通用资产安全入库函数，防止重复数据。

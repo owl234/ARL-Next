@@ -6,7 +6,7 @@ from app.config import Config
 import time
 from bson import ObjectId
 from urllib.parse import urlparse
-from app.services.commonTask import CommonTask, WebSiteFetch
+from app.services.commonTask import CommonTask, WebSiteFetch, TaskHeartbeat
 
 logger = utils.get_logger()
 
@@ -220,12 +220,14 @@ class RiskCruising(CommonTask):
                 web_site_fetch.run_func("nuclei_scan", web_site_fetch.nuclei_scan)
 
     def run(self):
-        try:
-            self.update_task_field("start_time", utils.curr_date())
-            self.work()
-            self.update_task_field("status", TaskStatus.DONE)
-        except Exception as e:
-            self.update_task_field("status", TaskStatus.ERROR)
-            logger.exception(e)
+        with TaskHeartbeat(self.task_id, interval=60):
+            try:
+                self.update_task_field("start_time", utils.curr_date())
+                self.work()
+                self.update_task_field("status", TaskStatus.DONE)
+            except Exception as e:
+                self.update_task_field("status", TaskStatus.ERROR)
+                logger.exception(e)
 
-        self.update_task_field("end_time", utils.curr_date())
+            self.update_task_field("end_time", utils.curr_date())
+

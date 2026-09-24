@@ -160,7 +160,9 @@ class TestIssue47ZombieTasks(unittest.TestCase):
             "worker1@host": [{"id": celery_id, "name": "arl_task"}]
         }
 
-        with patch('app.scheduler.conn', side_effect=self._mock_conn),              patch('app.celerytask.celery.control.inspect', return_value=mock_inspector),              patch('app.utils.clean_task_data') as mock_clean:
+        with patch('app.scheduler.conn', side_effect=self._mock_conn), \
+             patch('app.celerytask.celery.control.inspect', return_value=mock_inspector), \
+             patch('app.utils.clean_task_tmp_files') as mock_clean:
             
             converged = scheduler.cleanup_zombie_tasks()
 
@@ -187,7 +189,9 @@ class TestIssue47ZombieTasks(unittest.TestCase):
         mock_inspector = MagicMock()
         mock_inspector.active.return_value = {}
 
-        with patch('app.scheduler.conn', side_effect=self._mock_conn),              patch('app.celerytask.celery.control.inspect', return_value=mock_inspector),              patch('app.utils.clean_task_data') as mock_clean:
+        with patch('app.scheduler.conn', side_effect=self._mock_conn), \
+             patch('app.celerytask.celery.control.inspect', return_value=mock_inspector), \
+             patch('app.utils.clean_task_tmp_files') as mock_clean:
             
             converged = scheduler.cleanup_zombie_tasks(window_seconds=1800)
 
@@ -212,7 +216,9 @@ class TestIssue47ZombieTasks(unittest.TestCase):
         mock_inspector = MagicMock()
         mock_inspector.active.return_value = {}
 
-        with patch('app.scheduler.conn', side_effect=self._mock_conn),              patch('app.celerytask.celery.control.inspect', return_value=mock_inspector),              patch('app.utils.clean_task_data') as mock_clean:
+        with patch('app.scheduler.conn', side_effect=self._mock_conn), \
+             patch('app.celerytask.celery.control.inspect', return_value=mock_inspector), \
+             patch('app.utils.clean_task_tmp_files') as mock_clean:
             
             converged = scheduler.cleanup_zombie_tasks(window_seconds=1800)
 
@@ -250,7 +256,9 @@ class TestIssue47ZombieTasks(unittest.TestCase):
 
         before_time = int(time.time())
 
-        with patch('app.scheduler.conn', side_effect=self._mock_conn),              patch('app.celerytask.celery.control.inspect', return_value=mock_inspector),              patch('app.utils.clean_task_data') as mock_clean:
+        with patch('app.scheduler.conn', side_effect=self._mock_conn), \
+             patch('app.celerytask.celery.control.inspect', return_value=mock_inspector), \
+             patch('app.utils.clean_task_tmp_files') as mock_clean:
             
             converged = scheduler.cleanup_zombie_tasks(window_seconds=1800)
 
@@ -294,7 +302,10 @@ class TestIssue47ZombieTasks(unittest.TestCase):
         # 模拟 inspect 抛出网络/连接异常
         mock_inspect = MagicMock(side_effect=Exception("RabbitMQ Broker Unreachable"))
 
-        with patch('app.scheduler.conn', side_effect=self._mock_conn),              patch('app.celerytask.celery.control.inspect', mock_inspect),              patch('app.utils.clean_task_data'):
+        with patch('app.scheduler.conn', side_effect=self._mock_conn), \
+             patch('app.celerytask.celery.control.inspect', mock_inspect), \
+             patch('app.utils.clean_task_tmp_files'):
+
             
             converged = scheduler.cleanup_zombie_tasks(window_seconds=1800)
 
@@ -325,7 +336,72 @@ class TestIssue47ZombieTasks(unittest.TestCase):
         default_val = sig.parameters['max_age_seconds'].default
         self.assertEqual(default_val, 604800)
 
+    def test_task5_task_heartbeat_zero_delay_flush_on_enter_and_exit(self):
+        """验证 TaskHeartbeat 在进入(__enter__)与退出(__exit__)时立即落库，无60秒等待空白"""
+        from app.services.commonTask import TaskHeartbeat
+        task_id = ObjectId("507f1f77bcf86cd799439098")
+        task_doc = {"_id": task_id, "status": "domain_brute"}
+        self.mock_task_col.docs = [task_doc]
+
+        with patch('app.utils.conn_db', side_effect=self._mock_conn):
+            # interval 设为 3600 秒，但依靠 __enter__ 立即落库
+            with TaskHeartbeat(str(task_id), interval=3600):
+                self.assertIsNotNone(task_doc.get("last_updated"), "Must immediately flush on enter!")
+                self.assertIsNotNone(task_doc.get("update_date"), "Must immediately flush on enter!")
+                first_ts = task_doc["last_updated"]
+
+        # 验证 __exit__ 也会补齐一次更新
+        self.assertGreaterEqual(len(self.mock_task_col.update_calls), 2)
+        self.assertGreaterEqual(task_doc["last_updated"], first_ts)
+
+    def test_task5_clean_task_tmp_files_only_cleans_disk_not_db(self):
+        """验证 clean_task_tmp_files 仅清理磁盘临时目录，严禁删除 MongoDB 资产数据"""
+        from app import utils
+        task_id = "507f1f77bcf86cd799439097"
+
+        with patch('shutil.rmtree') as mock_rmtree, \
+             patch('os.path.exists', return_value=True), \
+             patch('os.listdir', return_value=[f"{task_id}.tmp", "other.txt"]), \
+             patch('os.unlink') as mock_unlink, \
+             patch('app.utils.conn_db', side_effect=self._mock_conn):
+
+            utils.clean_task_tmp_files(task_id)
+
+            # 验证磁盘清理调用
+            self.assertTrue(mock_rmtree.called or mock_unlink.called)
+            # 验证 MongoDB 绝对未被调用 delete
+            self.assertEqual(len(self.mock_task_col.delete_calls), 0)
+
+    def test_task5_cleanup_zombie_tasks_uses_timeout_5(self):
+        """验证 Celery Inspect 探针超时设置为 5.0 秒"""
+        task_id = ObjectId("507f1f77bcf86cd799439096")
+        self.mock_task_col.docs = [{
+            "_id": task_id,
+            "status": "port_scan",
+            "celery_id": "dummy-celery-1",
+            "start_time": utils.time2date(time.time() - 3600)
+        }]
+        mock_inspect = MagicMock()
+        mock_inspect.return_value.active.return_value = {}
+
+        with patch('app.scheduler.conn', side_effect=self._mock_conn), \
+             patch('app.celerytask.celery.control.inspect', mock_inspect), \
+             patch('app.utils.clean_task_tmp_files'):
+            scheduler.cleanup_zombie_tasks(window_seconds=1800)
+
+        mock_inspect.assert_called_with(timeout=5.0)
+
+
+    def test_task5_scheduler_run_forever_has_10min_periodic_clean(self):
+        """验证 run_forever 包含每 10 分钟 (600秒) 周期性巡检收敛逻辑"""
+        import inspect
+        source = inspect.getsource(scheduler.run_forever)
+        self.assertIn("last_zombie_clean", source)
+        self.assertIn("600", source)
+        self.assertIn("cleanup_zombie_tasks(window_seconds=1800)", source)
+
 
 if __name__ == '__main__':
     unittest.main()
+
 

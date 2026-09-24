@@ -2,7 +2,7 @@ from app import services
 from app.modules import ScanPortType, get_scan_ports, TaskStatus
 from app.services import fetchCert, run_risk_cruising, run_sniffer
 from app import utils
-from app.services.commonTask import CommonTask, BaseUpdateTask, WebSiteFetch
+from app.services.commonTask import CommonTask, BaseUpdateTask, WebSiteFetch, TaskHeartbeat
 
 
 logger = utils.get_logger()
@@ -244,6 +244,10 @@ class IPTask(CommonTask):
             utils.safe_insert_asset_many('vuln', ['task_id', 'target', 'plugin_name'], result)
 
     def run(self):
+        with TaskHeartbeat(self.task_id, interval=60):
+            self._run_phases()
+
+    def _run_phases(self):
         base_update = self.base_update_task
         base_update.update_task_field("start_time", utils.curr_date())
         

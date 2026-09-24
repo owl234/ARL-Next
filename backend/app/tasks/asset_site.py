@@ -1,6 +1,6 @@
 from bson import ObjectId
 from app import utils
-from app.services.commonTask import CommonTask, WebSiteFetch
+from app.services.commonTask import CommonTask, WebSiteFetch, TaskHeartbeat
 from app.modules import TaskStatus
 from app.tasks.poc import RiskCruising
 from app.services import webhook
@@ -99,11 +99,13 @@ class AssetSiteUpdateTask(CommonTask):
             webhook.site_asset_web_hook(task_id=self.task_id, scope_id=self.scope_id)
 
     def run(self):
-        self.set_start_time()
-        self.monitor()
-        self.insert_task_stat()
-        self.update_status(TaskStatus.DONE)
-        self.set_end_time()
+        with TaskHeartbeat(self.task_id, interval=60):
+            self.set_start_time()
+            self.monitor()
+            self.insert_task_stat()
+            self.update_status(TaskStatus.DONE)
+            self.set_end_time()
+
 
 
 # 资产站点更新监控任务

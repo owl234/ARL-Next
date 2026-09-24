@@ -398,7 +398,7 @@ def cleanup_zombie_tasks(window_seconds=1800):
     active_celery_ids = set()
     try:
         from app.celerytask import celery as celery_app
-        inspector = celery_app.control.inspect(timeout=2.0)
+        inspector = celery_app.control.inspect(timeout=5.0)
         active_map = inspector.active() if inspector else None
         if active_map:
             for worker_name, tasks in active_map.items():
@@ -437,10 +437,12 @@ def cleanup_zombie_tasks(window_seconds=1800):
             f"celery_id: {celery_id}, elapsed since activity: {now - (latest_act or 0):.1f}s"
         )
 
+        # 仅物理清理该任务在磁盘上的临时文件与截图，严禁删除 MongoDB 13 维已入库资产
         try:
-            utils.clean_task_data(task_id)
+            utils.clean_task_tmp_files(task_id)
         except Exception as e:
-            logger.warning(f"Failed to clean temporary task data for zombie task {task_id}: {e}")
+            logger.warning(f"Failed to clean temporary disk files for zombie task {task_id}: {e}")
+
 
         curr_date = utils.curr_date()
         is_monitor = (task.get("task_tag") == "monitor")
@@ -528,6 +530,7 @@ def run_forever():
     cleanup_orphan_tmp_files()
     
     last_tmp_clean = time.time()
+    last_zombie_clean = time.time()
 
     while True:
         # Threat Intelligence (CVE/Tools/Hackers) 独立任务调度
@@ -549,9 +552,15 @@ def run_forever():
             cleanup_orphan_tmp_files()
             last_tmp_clean = curr_time
 
+        # 每 10 分钟 (600秒) 周期性巡检并收敛因 Worker 异常崩溃遗留的僵尸任务
+        if curr_time - last_zombie_clean > 600:
+            cleanup_zombie_tasks(window_seconds=1800)
+            last_zombie_clean = curr_time
+
         # logger.debug(time.time())
         # sleep 时间不能超过60S，Github 里的任务可能运行不了。
         time.sleep(58)
+
 
 
 if __name__ == '__main__':
