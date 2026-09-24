@@ -237,6 +237,9 @@ class DictionaryAppend(Resource):
         if not content.strip():
             return {'code': 400, 'message': '追加内容不能为空'}
 
+        if len(content.encode('utf-8')) > 10 * 1024 * 1024:
+            return {'code': 400, 'message': '单次同步追加内容超过 10MB 限制，请使用【文件上传】走后台异步流式通道'}
+
         try:
             total_submitted, added = append_to_dict_file(path, content)
             return {

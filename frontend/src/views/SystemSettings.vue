@@ -255,7 +255,7 @@
           <a-tabs v-model:activeKey="appendMode" style="margin-bottom: 16px;">
             <a-tab-pane key="text" tab="手动粘贴">
               <div style="margin-bottom: 12px; color: var(--arl-text-color); font-size: 13px;">请粘贴要追加的条目（每行一个）：</div>
-              <a-textarea v-model:value="newEntries" :rows="22" placeholder="例如：
+              <a-textarea v-model:value="newEntries" :rows="22" @paste="handlePasteNewEntries" placeholder="例如：
 admin
 root" style="font-family: monospace; font-size: 12px; margin-bottom: 24px;" />
               <div style="display: flex; justify-content: flex-end; gap: 12px;">
@@ -1204,8 +1204,21 @@ const handlePasteContent = (e) => {
   const clipboardData = e.clipboardData || window.clipboardData;
   if (!clipboardData) return;
   const pastedText = clipboardData.getData('text') || '';
-  if (pastedText.length > 500 * 1024) {
+  if (pastedText.length > 2 * 1024 * 1024) {
+    e.preventDefault();
+    message.warning(`检测到粘贴了超大内容 (${(pastedText.length / 1024 / 1024).toFixed(1)} MB)，已阻断直接粘贴！在文本域渲染超大文本会导致浏览器卡死，请切换至【文件上传新建】Tab 进行上传！`, 6);
+  } else if (pastedText.length > 500 * 1024) {
     message.info(`检测到粘贴了较大内容 (${(pastedText.length / 1024 / 1024).toFixed(1)} MB)，点击【确定新建】时将自动启用后台流式导入。`);
+  }
+};
+
+const handlePasteNewEntries = (e) => {
+  const clipboardData = e.clipboardData || window.clipboardData;
+  if (!clipboardData) return;
+  const pastedText = clipboardData.getData('text') || '';
+  if (pastedText.length > 2 * 1024 * 1024) {
+    e.preventDefault();
+    message.warning(`检测到粘贴了超大内容 (${(pastedText.length / 1024 / 1024).toFixed(1)} MB)，已阻断直接粘贴！在文本域渲染超大文本会导致浏览器卡顿，建议切换至【文件上传】Tab 进行上传！`, 6);
   }
 };
 
@@ -1215,6 +1228,8 @@ const startDictPolling = (taskId, targetName, apiBase, isBrute, isAppend = false
   const MAX_POLL_COUNT = 300; // 最多轮询 300 次 (10分钟)
   let lastUpdateTime = null;
   let staleCount = 0;
+  let consecutive404Count = 0;
+  const MAX_CONSECUTIVE_404 = 5; // 容忍最多 5 次（10秒）404 排队/延迟窗口
 
   const timer = setInterval(async () => {
     pollCount++;
@@ -1229,7 +1244,13 @@ const startDictPolling = (taskId, targetName, apiBase, isBrute, isAppend = false
     try {
       const statusRes = await request.get(`${apiBase}/upload_status`, { params: { task_id: taskId } });
       if (statusRes.code === 200 && statusRes.data) {
+        consecutive404Count = 0; // 重置 404 计数
         const data = statusRes.data;
+
+        // 排队等待状态
+        if (data.status === 'pending') {
+          return;
+        }
 
         // 心跳停滞检测：若连续 60 次轮询（120秒）且 update_time 毫无变化，提示可能中断并熔断
         if (data.status === 'processing') {
@@ -1267,12 +1288,21 @@ const startDictPolling = (taskId, targetName, apiBase, isBrute, isAppend = false
           hideMsg();
           message.error(`导入 ${targetName} 失败: ${data.message || '未知错误'}`);
         }
+      } else if (statusRes.code === 404) {
+        // 允许排队空窗期容错：Worker 启动消费前可能存在短暂 404
+        consecutive404Count++;
+        if (consecutive404Count >= MAX_CONSECUTIVE_404) {
+          clearInterval(timer);
+          activeDictPollTimers.value.delete(timer);
+          hideMsg();
+          message.warning(`导入任务状态已丢失 (${statusRes.message || '任务不存在'})，请刷新页面后确认。`);
+        }
       } else {
-        // 任务不存在或状态丢失（如后端容器重启）
+        // 任务不存在或状态异常
         clearInterval(timer);
         activeDictPollTimers.value.delete(timer);
         hideMsg();
-        message.warning(`导入任务状态已丢失 (${statusRes.message || '任务不存在'})，请刷新页面后确认。`);
+        message.warning(`导入任务状态异常 (${statusRes.message || '未知错误'})，请刷新页面后确认。`);
       }
     } catch (e) {
       // 忽略轮询网络抖动
@@ -1298,7 +1328,8 @@ const handleCreateDictManual = async () => {
       formData.append('name', targetName);
 
       const res = await request.post(`${createDictApiBase.value}/upload_large`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000
       });
       if (res.code === 200) {
         message.info(`字典内容较大 (约 ${lineCount + 1} 行)，已自动转入后台高性能流式通道导入...`);
@@ -1360,7 +1391,8 @@ const handleCreateDictUpload = async () => {
   createDictLoading.value = true;
   try {
     const res = await request.post(`${createDictApiBase.value}/upload_large`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000
     });
     if (res.code === 200) {
       const apiBase = createDictApiBase.value;
@@ -1403,7 +1435,8 @@ const handleLargeUpload = async (info) => {
     const res = await request.post(uploadUrl, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
-      }
+      },
+      timeout: 300000
     });
 
     if (res.code === 200) {
@@ -1917,6 +1950,12 @@ const handleSearch = async () => {
 // 追加条目（自动路由），返回是否成功
 const handleAppend = async () => {
   if (!newEntries.value.trim()) return false;
+
+  const contentSize = new Blob([newEntries.value]).size;
+  if (contentSize > 2 * 1024 * 1024) {
+    message.warning('追加文本超过 2MB，单次文本框提交可能导致浏览器卡顿或请求超时，请切换至【文件上传】标签页进行高效导入');
+    return false;
+  }
 
   // 智能格式校验（阻断无效输入）
   const lines = newEntries.value.split('\n').map(s => s.trim()).filter(s => s);

@@ -25,6 +25,27 @@ def file_lock(f, exclusive=True):
         yield
 
 
+def get_dict_lock_path(dict_path: str) -> str:
+    """
+    获取字典专属的独立配套排他锁文件路径。
+    保持独立锁文件 inode 不可变，彻底消除 os.replace 替换原文件导致的锁失效与并发覆盖竞态。
+    """
+    return dict_path + ".lock"
+
+
+@contextlib.contextmanager
+def dict_lock(dict_path: str, exclusive: bool = True):
+    """
+    字典文件生命周期排他锁上下文管理器。
+    自动创建并持有 <dict_path>.lock 文件锁，完整覆盖从数据读取、临时文件写入到原子替换的全周期。
+    """
+    os.makedirs(os.path.dirname(dict_path), exist_ok=True)
+    lock_path = get_dict_lock_path(dict_path)
+    with open(lock_path, 'a') as f_lock:
+        with file_lock(f_lock, exclusive=exclusive):
+            yield
+
+
 # 系统内置核心资产字典白名单（严禁彻底物理删除，防止扫描任务中断）
 BUILTIN_ASSET_DICTS = {
     'domain_2w.txt',
@@ -170,11 +191,8 @@ def create_dict_file(path, content):
                         seen_hashes.add(h)
                         f_out.write(stripped + '\n')
                         count += 1
-            f_out.flush()
-
-        with open(tmp_path, 'r', encoding='utf-8', errors='ignore') as f_tmp:
-            with file_lock(f_tmp, exclusive=True):
-                os.replace(tmp_path, path)
+        with dict_lock(path, exclusive=True):
+            os.replace(tmp_path, path)
         return count
     except Exception as e:
         if os.path.exists(tmp_path):
@@ -196,8 +214,8 @@ def append_to_dict_file(path, new_entries_str):
 
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'a+', encoding='utf-8', errors='ignore') as f:
-            with file_lock(f, exclusive=True):
+        with dict_lock(path, exclusive=True):
+            with open(path, 'a+', encoding='utf-8', errors='ignore') as f:
                 f.seek(0)
                 existing_hashes = set()
                 for line in f:
@@ -250,22 +268,25 @@ def delete_entries_from_dict_file(path, entries_to_delete_set):
     tmp_path = os.path.join(dir_name, f".tmp_del_{base_name}_{uuid.uuid4().hex}")
 
     try:
-        with open(path, 'r', encoding='utf-8', errors='ignore') as f_in, \
-             open(tmp_path, 'w', encoding='utf-8', errors='ignore') as f_out:
-            with file_lock(f_in, exclusive=True):
+        with dict_lock(path, exclusive=True):
+            if not os.path.exists(path):
+                return 0
+
+            with open(path, 'r', encoding='utf-8', errors='ignore') as f_in, \
+                 open(tmp_path, 'w', encoding='utf-8', errors='ignore') as f_out:
                 for line in f_in:
                     stripped = line.strip().lstrip('\ufeff')
                     if stripped and hash_dict_entry(stripped) in delete_hashes:
                         deleted_count += 1
                     elif stripped:
                         f_out.write(stripped + '\n')
-            f_out.flush()
+                f_out.flush()
 
-        if deleted_count > 0:
-            os.replace(tmp_path, path)
-        else:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+            if deleted_count > 0:
+                os.replace(tmp_path, path)
+            else:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
 
         return deleted_count
     except Exception as e:

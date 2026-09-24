@@ -4,27 +4,33 @@ import threading
 import uuid
 from app.utils import get_logger
 from app.utils import conn_db as conn
-from app.utils.dict_utils import file_lock, count_file_lines, hash_dict_entry
+from app.utils.dict_utils import file_lock, count_file_lines, hash_dict_entry, dict_lock
 
 logger = get_logger()
 
 def background_process_dict(task_id, temp_file_path, target_dict_path):
     """
-    后台处理字典：分块统计、64位紧凑哈希去重并追加到目标字典中（具备排他文件锁与心跳进度上报）
+    后台处理字典：分块统计、64位紧凑哈希去重并追加到目标字典中（具备独立排他文件锁与心跳进度上报）
     """
     try:
-        # 初始化任务状态
-        conn('dict_upload_task').insert_one({
-            "task_id": task_id,
-            "status": "processing",
-            "progress": 0,
-            "total_lines": 0,
-            "inserted_lines": 0,
-            "ignored_lines": 0,
-            "message": "正在分析文件与现有字典...",
-            "create_time": int(time.time()),
-            "update_time": int(time.time())
-        })
+        # 平滑过渡为 processing 状态
+        now = int(time.time())
+        conn('dict_upload_task').update_one(
+            {"task_id": task_id},
+            {"$set": {
+                "status": "processing",
+                "message": "正在分析文件与现有字典...",
+                "update_time": now
+            },
+            "$setOnInsert": {
+                "progress": 0,
+                "total_lines": 0,
+                "inserted_lines": 0,
+                "ignored_lines": 0,
+                "create_time": now
+            }},
+            upsert=True
+        )
 
         # 确保目标目录存在
         os.makedirs(os.path.dirname(target_dict_path), exist_ok=True)
@@ -47,9 +53,9 @@ def background_process_dict(task_id, temp_file_path, target_dict_path):
             {"$set": {"total_lines": total_lines, "message": "正在流式导入与去重...", "update_time": int(time.time())}}
         )
 
-        # 3. 合并预加载与写入为单一排他锁段，消除并发空窗（TOCTOU）
-        with open(target_dict_path, 'a+', encoding='utf-8', errors='ignore') as fout:
-            with file_lock(fout, exclusive=True):
+        # 3. 合并预加载与写入为单一独立排他锁段，消除并发空窗（TOCTOU）
+        with dict_lock(target_dict_path, exclusive=True):
+            with open(target_dict_path, 'a+', encoding='utf-8', errors='ignore') as fout:
                 # 3a. 在排他锁内以 64 位紧凑哈希预加载现有字典用于去重（单条仅 8 字节）
                 fout.seek(0)
                 for line in fout:
@@ -139,6 +145,24 @@ def trigger_dict_upload_task(temp_file_path, target_dict_path):
     在 Celery 未启动或连接异常时平滑降级为守护线程。
     """
     task_id = str(uuid.uuid4())
+    now = int(time.time())
+
+    # 1. 原子前置写入 pending 状态文档，彻底消除 Worker 消费空窗期导致的 404 与前端轮询假死
+    try:
+        conn('dict_upload_task').insert_one({
+            "task_id": task_id,
+            "status": "pending",
+            "progress": 0,
+            "total_lines": 0,
+            "inserted_lines": 0,
+            "ignored_lines": 0,
+            "message": "任务已提交，正在等待队列调度...",
+            "create_time": now,
+            "update_time": now
+        })
+    except Exception as e:
+        logger.error(f"Failed to pre-insert pending status for dict upload task {task_id}: {e}")
+
     dispatched = False
     try:
         from app.celerytask import dict_import_celery_task
@@ -153,9 +177,16 @@ def trigger_dict_upload_task(temp_file_path, target_dict_path):
         logger.warning(f"Failed to dispatch dict upload task to Celery ({e}), falling back to background thread")
 
     if not dispatched:
-        t = threading.Thread(target=background_process_dict, args=(task_id, temp_file_path, target_dict_path))
-        t.daemon = True
-        t.start()
-        logger.info(f"Started dict upload task {task_id} in background daemon thread")
+        try:
+            t = threading.Thread(target=background_process_dict, args=(task_id, temp_file_path, target_dict_path))
+            t.daemon = True
+            t.start()
+            logger.info(f"Started dict upload task {task_id} in background daemon thread")
+        except Exception as e:
+            logger.error(f"Failed to start fallback thread for dict upload task {task_id}: {e}")
+            conn('dict_upload_task').update_one(
+                {"task_id": task_id},
+                {"$set": {"status": "error", "message": f"任务派发失败: {e}", "update_time": int(time.time())}}
+            )
 
     return task_id

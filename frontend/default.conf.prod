@@ -83,6 +83,8 @@ server {
 
         # 允许最大 200MB 请求体，放宽超大字典、PoC 脚本包等文件上传与文本提交
         client_max_body_size 200m;
+        client_body_timeout 300s;
+        send_timeout 300s;
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
 
