@@ -1,5 +1,8 @@
 from celery import current_task
+from celery.exceptions import MaxRetriesExceededError, Retry
 from bson import ObjectId
+from bson.errors import InvalidId
+from pymongo.errors import PyMongoError
 from app.utils import conn_db as conn, arl_task_id_var
 from .domain import DomainTask
 from .ip import IPTask
@@ -25,17 +28,33 @@ def domain_executors(base_domain=None, scheduler_id=None, scope_id=None, options
             logger.info("stop  domain_executors {}  scheduler_id {} is stop ".format(base_domain, scheduler_id))
             return
 
-        # 关口 3：Worker 消费端前置校验（核验目标是否仍属于当前资产组 - Issue #48）
+        # 关口 3：Worker 消费端前置校验（核验目标是否仍属于当前资产组 - Issue #48 Fail-Closed 加固）
         if scope_id:
             try:
                 scope_obj = utils.conn_db('asset_scope').find_one({"_id": ObjectId(str(scope_id))})
                 if not scope_obj or base_domain not in scope_obj.get("scope_array", []):
                     logger.warning("stop domain_executors: target {} is no longer in scope {}, dropping task.".format(base_domain, scope_id))
                     return
+            except InvalidId as ex:
+                logger.error(f"stop domain_executors: invalid scope_id '{scope_id}': {ex}. Dropping task.")
+                return
+            except PyMongoError as ex:
+                logger.warning(f"retry domain_executors: MongoDB error checking scope {scope_id}: {ex}")
+                task_obj = current_task._get_current_object() if current_task else None
+                if task_obj:
+                    try:
+                        task_obj.retry(exc=ex, countdown=30, max_retries=3)
+                    except MaxRetriesExceededError:
+                        logger.error(f"stop domain_executors: max retries exceeded for scope {scope_id}. Dropping task (fail-closed).")
+                        return
+                return
             except Exception as ex:
-                logger.error(f"check scope validity failed in domain_executors: {ex}")
+                logger.error(f"stop domain_executors: unexpected error checking scope {scope_id}: {ex}. Dropping task (fail-closed).")
+                return
 
         wrap_domain_executors(base_domain=base_domain, scheduler_id=scheduler_id, scope_id=scope_id, options=options, name=name)
+    except Retry:
+        raise
     except Exception as e:
         logger.exception(e)
 
@@ -644,7 +663,7 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options):
             logger.info("stop  ip_executors {}  scheduler_id {} is stop ".format(target, scheduler_id))
             return
 
-        # 关口 3：Worker 消费端前置校验（核验 IP 目标是否仍属于当前资产组 - Issue #48）
+        # 关口 3：Worker 消费端前置校验（核验 IP 目标是否仍属于当前资产组 - Issue #48 Fail-Closed 加固）
         if scope_id:
             try:
                 scope_obj = utils.conn_db('asset_scope').find_one({"_id": ObjectId(str(scope_id))})
@@ -657,10 +676,26 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options):
                     logger.warning(f"stop ip_executors: target(s) '{target}' no longer in scope {scope_id}, dropping task.")
                     return
                 target = " ".join(valid_targets)
+            except InvalidId as ex:
+                logger.error(f"stop ip_executors: invalid scope_id '{scope_id}': {ex}. Dropping task.")
+                return
+            except PyMongoError as ex:
+                logger.warning(f"retry ip_executors: MongoDB error checking scope {scope_id}: {ex}")
+                task_obj = current_task._get_current_object() if current_task else None
+                if task_obj:
+                    try:
+                        task_obj.retry(exc=ex, countdown=30, max_retries=3)
+                    except MaxRetriesExceededError:
+                        logger.error(f"stop ip_executors: max retries exceeded for scope {scope_id}. Dropping task (fail-closed).")
+                        return
+                return
             except Exception as ex:
-                logger.error(f"check scope validity failed in ip_executors: {ex}")
+                logger.error(f"stop ip_executors: unexpected error checking scope {scope_id}: {ex}. Dropping task (fail-closed).")
+                return
 
         update_scheduler_run(scheduler_id)
+    except Retry:
+        raise
     except Exception as e:
         logger.exception(e)
         return

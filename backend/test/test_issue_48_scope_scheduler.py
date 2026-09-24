@@ -4,6 +4,9 @@ import os
 import sys
 import time
 from bson import ObjectId
+from bson.errors import InvalidId
+from pymongo.errors import PyMongoError
+from celery.exceptions import MaxRetriesExceededError, Retry
 
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if backend_dir not in sys.path:
@@ -290,6 +293,138 @@ class TestIssue48ScopeScheduler(unittest.TestCase):
             # Should run with pruned target "192.168.1.1"
             MockIPExecutor.assert_called_with("192.168.1.1", ip_scope_id_str, "test", str(ip_sched_id), {})
             mock_instance.run.assert_called_once()
+
+    @patch("app.utils.conn_db")
+    def test_worker_domain_executors_drops_on_invalid_id(self, mock_conn_db):
+        mock_conn_db.side_effect = self.mock_conn
+
+        with patch("app.tasks.scheduler.wrap_domain_executors") as mock_wrap:
+            task_scheduler.domain_executors(
+                base_domain="alpha.example.com",
+                scheduler_id=str(self.mock_scheduler.docs[0]["_id"]),
+                scope_id="invalid-not-hex-id"
+            )
+            mock_wrap.assert_not_called()
+
+    @patch("app.utils.conn_db")
+    def test_worker_domain_executors_retries_on_pymongo_error(self, mock_conn_db):
+        mock_conn_db.side_effect = self.mock_conn
+
+        with patch("app.tasks.scheduler.wrap_domain_executors") as mock_wrap, \
+             patch("app.tasks.scheduler.current_task") as mock_celery_task, \
+             patch.object(self.mock_asset_scope, "find_one", side_effect=PyMongoError("DB connection error")):
+
+            mock_task_obj = MagicMock()
+            mock_task_obj.retry.side_effect = Retry("Simulated Celery Retry")
+            mock_celery_task._get_current_object.return_value = mock_task_obj
+
+            with self.assertRaises(Retry):
+                task_scheduler.domain_executors(
+                    base_domain="alpha.example.com",
+                    scheduler_id=str(self.mock_scheduler.docs[0]["_id"]),
+                    scope_id=self.scope_id_str
+                )
+            mock_task_obj.retry.assert_called_once()
+            self.assertEqual(mock_task_obj.retry.call_args[1].get("countdown"), 30)
+            self.assertEqual(mock_task_obj.retry.call_args[1].get("max_retries"), 3)
+            mock_wrap.assert_not_called()
+
+    @patch("app.utils.conn_db")
+    def test_worker_domain_executors_drops_on_max_retries_exceeded(self, mock_conn_db):
+        mock_conn_db.side_effect = self.mock_conn
+
+        with patch("app.tasks.scheduler.wrap_domain_executors") as mock_wrap, \
+             patch("app.tasks.scheduler.current_task") as mock_celery_task, \
+             patch.object(self.mock_asset_scope, "find_one", side_effect=PyMongoError("DB connection error")):
+
+            mock_task_obj = MagicMock()
+            mock_task_obj.retry.side_effect = MaxRetriesExceededError()
+            mock_celery_task._get_current_object.return_value = mock_task_obj
+
+            task_scheduler.domain_executors(
+                base_domain="alpha.example.com",
+                scheduler_id=str(self.mock_scheduler.docs[0]["_id"]),
+                scope_id=self.scope_id_str
+            )
+            mock_wrap.assert_not_called()
+
+    @patch("app.utils.conn_db")
+    @patch("app.tasks.scheduler.conn")
+    def test_worker_ip_executor_drops_on_invalid_id(self, mock_conn_scheduler, mock_conn_db):
+        mock_conn_db.side_effect = self.mock_conn
+        mock_conn_scheduler.side_effect = self.mock_conn
+
+        with patch("app.tasks.scheduler.IPExecutor") as MockIPExecutor, \
+             patch("app.tasks.scheduler.update_scheduler_run"):
+            mock_instance = MagicMock()
+            MockIPExecutor.return_value = mock_instance
+
+            task_scheduler.ip_executor(
+                target="1.1.1.1",
+                scope_id="invalid-not-hex-id",
+                task_name="test",
+                scheduler_id=str(self.mock_scheduler.docs[0]["_id"]),
+                options={}
+            )
+            mock_instance.run.assert_not_called()
+
+    @patch("app.utils.conn_db")
+    @patch("app.tasks.scheduler.conn")
+    def test_worker_ip_executor_retries_on_pymongo_error(self, mock_conn_scheduler, mock_conn_db):
+        mock_conn_db.side_effect = self.mock_conn
+        mock_conn_scheduler.side_effect = self.mock_conn
+
+        with patch("app.tasks.scheduler.IPExecutor") as MockIPExecutor, \
+             patch("app.tasks.scheduler.update_scheduler_run"), \
+             patch("app.tasks.scheduler.current_task") as mock_celery_task, \
+             patch.object(self.mock_asset_scope, "find_one", side_effect=PyMongoError("DB lost")):
+
+            mock_instance = MagicMock()
+            MockIPExecutor.return_value = mock_instance
+            mock_task_obj = MagicMock()
+            mock_task_obj.retry.side_effect = Retry("Simulated Celery Retry")
+            mock_celery_task._get_current_object.return_value = mock_task_obj
+
+            with self.assertRaises(Retry):
+                task_scheduler.ip_executor(
+                    target="1.1.1.1",
+                    scope_id=self.scope_id_str,
+                    task_name="test",
+                    scheduler_id=str(self.mock_scheduler.docs[0]["_id"]),
+                    options={}
+                )
+            mock_task_obj.retry.assert_called_once()
+            self.assertEqual(mock_task_obj.retry.call_args[1].get("countdown"), 30)
+            self.assertEqual(mock_task_obj.retry.call_args[1].get("max_retries"), 3)
+            mock_instance.run.assert_not_called()
+
+    @patch("app.utils.conn_db")
+    @patch("app.scheduler.conn")
+    def test_scheduler_gate2_preserves_on_pymongo_error_and_deletes_on_invalid_id(self, mock_conn_scheduler, mock_conn_db):
+        mock_conn_db.side_effect = self.mock_conn
+        mock_conn_scheduler.side_effect = self.mock_conn
+
+        sched_doc = {
+            "_id": ObjectId("6ab083827f11ac36493a9499"),
+            "scope_id": self.scope_id_str,
+            "domain": "alpha.example.com",
+            "scope_type": AssetScopeType.DOMAIN,
+            "status": SchedulerStatus.RUNNING,
+            "next_run_time": int(time.time()) - 50,
+            "interval": 3600
+        }
+        self.mock_scheduler.docs = [sched_doc]
+
+        # Case 1: PyMongoError during scheduler check -> should NOT delete scheduler
+        with patch.object(self.mock_asset_scope, "find_one", side_effect=PyMongoError("DB network error")):
+            scheduler.asset_monitor_scheduler()
+            self.assertEqual(len(self.mock_scheduler.docs), 1)
+
+        # Case 2: InvalidId -> should delete orphan scheduler
+        self.mock_scheduler.docs[0]["scope_id"] = "invalid-not-hex-id"
+        with patch.object(self.mock_asset_scope, "find_one", side_effect=InvalidId("Bad ObjectId")):
+            scheduler.asset_monitor_scheduler()
+            self.assertEqual(len(self.mock_scheduler.docs), 0)
 
 
 if __name__ == "__main__":

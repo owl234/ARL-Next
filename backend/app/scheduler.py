@@ -1,7 +1,9 @@
 import datetime
 import sys
 from bson import ObjectId
+from bson.errors import InvalidId
 from pymongo import UpdateOne
+from pymongo.errors import PyMongoError
 from app.utils import conn_db as conn
 from app import utils
 import time
@@ -234,11 +236,19 @@ def asset_monitor_scheduler():
             scheduler_id_str = str(item["_id"])
             scope_id_str = str(item.get("scope_id", ""))
 
-            # 关口 2：查验关联资产组有效性与监控目标包含关系 (自愈与盲派发阻断 - Issue #48)
+            # 关口 2：查验关联资产组有效性与监控目标包含关系 (自愈与盲派发阻断 - Issue #48 加固)
             try:
                 scope_obj = conn('asset_scope').find_one({"_id": ObjectId(scope_id_str)})
-            except Exception:
-                scope_obj = None
+            except InvalidId:
+                logger.warning(f"Invalid scope_id '{scope_id_str}' in scheduler {scheduler_id_str}. Auto-deleting orphan scheduler.")
+                conn('scheduler').delete_one({"_id": item["_id"]})
+                continue
+            except PyMongoError as ex:
+                logger.error(f"MongoDB error checking scope {scope_id_str} for scheduler {scheduler_id_str}: {ex}. Skipping this run.")
+                continue
+            except Exception as ex:
+                logger.error(f"Unexpected error checking scope {scope_id_str} for scheduler {scheduler_id_str}: {ex}. Skipping this run.")
+                continue
 
             if not scope_obj:
                 logger.warning(f"Orphan scheduler detected: scope_id '{scope_id_str}' not found in asset_scope. Auto-deleting scheduler {scheduler_id_str}.")
