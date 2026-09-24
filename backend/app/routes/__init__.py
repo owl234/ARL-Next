@@ -222,7 +222,51 @@ class ARLResource(Resource):
                 }
                 query_args[real_key] = raw_value
 
-            # 5. 普通字符串处理（如果没有上面那些花里胡哨的后缀）
+            # 5. 特殊语义识别：CDN 状态与厂商智能映射
+            elif key == "cdn_name":
+                val = str(args[key]).strip()
+                val_lower = val.lower()
+                if val_lower in ("独立", "独立源站", "源站", "非cdn", "非 cdn", "false", "0", "否"):
+                    query_args["is_cdn"] = {"$ne": True}
+                    query_args["cdn_name"] = {"$in": ["", None]}
+                elif val_lower in ("cdn节点", "cdn 节点"):
+                    or_cond = [
+                        {"is_cdn": True},
+                        {"cdn_name": {"$nin": ["", None]}}
+                    ]
+                    if "$or" not in query_args:
+                        query_args["$or"] = or_cond
+                    else:
+                        if "$and" not in query_args:
+                            query_args["$and"] = []
+                        query_args["$and"].append({"$or": query_args.pop("$or")})
+                        query_args["$and"].append({"$or": or_cond})
+                else:
+                    query_args["cdn_name"] = {
+                        "$regex": re.escape(val),
+                        '$options': "i"
+                    }
+
+            # 6. 特殊语义识别：is_cdn 布尔查询
+            elif key == "is_cdn":
+                val_str = str(args[key]).strip().lower()
+                if val_str in ("false", "0", "否"):
+                    query_args["is_cdn"] = {"$ne": True}
+                    query_args["cdn_name"] = {"$in": ["", None]}
+                elif val_str in ("true", "1", "是"):
+                    or_cond = [
+                        {"is_cdn": True},
+                        {"cdn_name": {"$nin": ["", None]}}
+                    ]
+                    if "$or" not in query_args:
+                        query_args["$or"] = or_cond
+                    else:
+                        if "$and" not in query_args:
+                            query_args["$and"] = []
+                        query_args["$and"].append({"$or": query_args.pop("$or")})
+                        query_args["$and"].append({"$or": or_cond})
+
+            # 7. 普通字符串处理（如果没有上面那些花里胡哨的后缀）
             elif isinstance(args[key], str):
                 actual_key = getattr(self, "query_field_map", {}).get(key, key)
                 
@@ -236,7 +280,7 @@ class ARLResource(Resource):
                         '$options': "i"
                     }
 
-            # 6. 其他类型（比如布尔值 True/False，或者普通的整数等），直接照搬
+            # 8. 其他类型（比如布尔值 True/False，或者普通的整数等），直接照搬
             else:
                 query_args[key] = args[key]
 

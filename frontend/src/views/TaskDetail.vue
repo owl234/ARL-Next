@@ -75,7 +75,7 @@
           <template v-else>
             <a-input
                 v-model:value="searchForm[field.key]"
-                :placeholder="`请输入${field.label}`"
+                :placeholder="field.placeholder || `请输入${field.label}`"
                 :bordered="false"
                 style="flex: 1; box-shadow: none;"
                 allowClear
@@ -961,7 +961,7 @@ const tabConfig = reactive({
       { label: '端口', key: 'port_info.port_id', operator: '=' },
       { label: '操作系统', key: 'os_info.name', operator: '=' },
       { label: '域名', key: 'domain', operator: '=' },
-      { label: 'CDN', key: 'cdn_name', operator: '=' },
+      { label: 'CDN', key: 'cdn_name', operator: '=', placeholder: '输入厂商或独立源站' },
       {
         label: 'IP类别',
         key: 'ip_type',

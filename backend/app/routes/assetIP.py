@@ -28,7 +28,8 @@ base_search_fields = {
     "update_date__dlt": fields.String(description="更新时间小于"),
     "scope_id": fields.String(description="资产范围ID"),
     "ip_type": fields.String(description="IP类型，公网(PUBLIC)和内网(PRIVATE)"),
-    "cdn_name": fields.String(description="CDN 厂商名称")
+    "cdn_name": fields.String(description="CDN 厂商名称"),
+    "is_cdn": fields.String(description="是否为CDN (true/false)")
 }
 
 # 合并分页排序基础字段

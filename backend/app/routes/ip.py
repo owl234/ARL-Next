@@ -23,7 +23,8 @@ base_search_fields = {
     "cdn_name": fields.String(description="CDN 厂商名称"),
     "geo_asn.number": fields.Integer(description="AS number"),
     "geo_asn.organization": fields.String(description="AS organization"),
-    "geo_city.region_name": fields.String(description="GEO region_name")
+    "geo_city.region_name": fields.String(description="GEO region_name"),
+    "is_cdn": fields.String(description="是否为CDN (true/false)")
 }
 
 base_search_fields.update(base_query_fields)
