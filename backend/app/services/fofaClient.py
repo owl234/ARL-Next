@@ -70,9 +70,16 @@ class FofaClient:
         return data
 
 
-def fofa_query(query, fields="host,ip,port",
-               page_size=Config.FOFA_PAGE_SIZE,
-               max_page=Config.FOFA_MAX_PAGE):
+def fofa_query(query, fields="host,ip,port", page_size=None, max_page=None):
+    # Resolve dynamic settings at call time. Config.FOFA_PAGE_SIZE and
+    # Config.FOFA_MAX_PAGE may be changed from the system settings UI while
+    # the process is already running; defaults in a function signature are
+    # evaluated only once at module import time.
+    if page_size is None:
+        page_size = Config.FOFA_PAGE_SIZE
+    if max_page is None:
+        max_page = Config.FOFA_MAX_PAGE
+
     ret = []
     try:
         if query == "test_mock" or Config.FOFA_KEY == "mock":
