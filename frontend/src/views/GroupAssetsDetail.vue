@@ -673,31 +673,8 @@
       </template>
 
       <template #emptyText>
-        <div v-if="scopeDomainList && scopeDomainList.length > 0 && activeTab !== 'stat_finger'" class="empty-actionable-card">
-          <div class="empty-icon-circle">
-            <rocket-outlined class="empty-icon" />
-          </div>
-          <div class="empty-title">当前「{{ tabConfig[activeTab]?.tabName || '网络暴露面' }}」暂无探测数据</div>
-          <div class="empty-desc">
-            检测到当前资产组已关联 <b>{{ scopeDomainList.length }}</b> 个企业备案主域名（例如：<span class="font-mono">{{ scopeDomainList.slice(0, 3).join(', ') }}{{ scopeDomainList.length > 3 ? ' 等' : '' }}</span>），尚未下发探测任务。
-          </div>
-          <div class="empty-actions">
-            <a-button type="primary" size="middle" @click="openQuickRecon">
-              <template #icon><rocket-outlined /></template>
-              一键下发探测任务
-            </a-button>
-            <a-button v-if="activeTab === 'domain'" size="middle" @click="openAddDomainModal">
-              <template #icon><plus-outlined /></template>
-              手动添加子域名
-            </a-button>
-            <a-button v-else-if="activeTab === 'site'" size="middle" @click="openAddSiteModal">
-              <template #icon><plus-outlined /></template>
-              手动添加站点
-            </a-button>
-          </div>
-        </div>
-        <div v-else class="empty-default-box">
-          <a-empty description="暂无资产记录" />
+        <div class="empty-default-box">
+          <a-empty description="暂无资产数据" />
         </div>
       </template>
     </a-table>
@@ -1348,20 +1325,8 @@
       @openBind="openBindModal"
       @refreshed="(newTid) => { if (newTid) { boundIcpTaskId = newTid; fetchBoundTaskDetail(newTid); } }"
     />
-    <div v-else class="empty-actionable-card" style="margin-top: 16px;">
-      <div class="empty-icon-circle">
-        <bank-outlined class="empty-icon" />
-      </div>
-      <div class="empty-title">当前资产组尚未关联企业主体</div>
-      <div class="empty-desc">
-        绑定企业主体后，系统可自动拉取天眼查工商画像、对外投资控股树、工信部ICP备案、移动APP、微信小程序与公众号等全域数字资产。
-      </div>
-      <div class="empty-actions">
-        <a-button type="primary" size="middle" @click="openBindModal">
-          <template #icon><link-outlined /></template>
-          立即绑定企业主体并测绘
-        </a-button>
-      </div>
+    <div v-else class="osint-unbound-box">
+      <a-empty description="尚未关联企业主体" />
     </div>
   </div>
 
@@ -1806,25 +1771,6 @@ const fetchAsmCounts = async () => {
       } catch (e) {}
     })
   );
-};
-
-const openQuickRecon = () => {
-  if (activeTab.value === 'domain') {
-    openAddDomainModal();
-    if (scopeDomainList.value && scopeDomainList.value.length > 0) {
-      addDomainForm.domain = scopeDomainList.value.join('\n');
-    }
-  } else if (activeTab.value === 'site') {
-    openAddSiteModal();
-    if (scopeDomainList.value && scopeDomainList.value.length > 0) {
-      addSiteForm.site = scopeDomainList.value.map(d => `http://${d}\nhttps://${d}`).join('\n');
-    }
-  } else {
-    openAddDomainModal();
-    if (scopeDomainList.value && scopeDomainList.value.length > 0) {
-      addDomainForm.domain = scopeDomainList.value.join('\n');
-    }
-  }
 };
 
 const bindModalVisible = ref(false);
@@ -3977,52 +3923,17 @@ onDeactivated(() => {
   gap: 6px;
 }
 
-/* ================= 可行动的空状态引导 (Actionable Empty State) ================= */
-.empty-actionable-card {
-  background: var(--arl-bg-white);
-  border: 1px dashed var(--arl-border-color);
-  border-radius: 8px;
-  padding: 48px 24px;
-  text-align: center;
-  max-width: 600px;
-  margin: 24px auto;
-}
-
-.empty-icon-circle {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--arl-theme-color) 12%, transparent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 16px auto;
-}
-
-.empty-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--arl-text-color);
-  margin-bottom: 8px;
-}
-
-.empty-desc {
-  font-size: 13px;
-  color: var(--arl-text-secondary);
-  line-height: 1.6;
-  margin-bottom: 24px;
-}
-
-.empty-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
+/* ================= 极简空状态 (Standard Empty State) ================= */
 .empty-default-box {
   padding: 40px 0;
+}
+
+.osint-unbound-box {
+  background: var(--arl-bg-white);
+  border-radius: 8px;
+  border: 1px solid var(--arl-border-color);
+  padding: 60px 0;
+  margin-top: 16px;
 }
 
 /* ================= 悬浮浮动操作条 (Floating Action Bar) ================= */

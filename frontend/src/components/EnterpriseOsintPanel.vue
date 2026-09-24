@@ -377,31 +377,10 @@
           </template>
         </template>
 
-        <!-- 可行动的空状态引导 (Actionable Empty State) -->
+        <!-- 标准表格空状态 -->
         <template #emptyText>
-          <div class="empty-actionable-card">
-            <div class="empty-icon-circle">
-              <bank-outlined class="empty-icon" />
-            </div>
-            <div class="empty-title">当前「{{ currentTabLabel }}」暂无生态数据</div>
-            <div class="empty-desc">
-              <template v-if="taskRecord.status === 'running'">
-                系统正在进行企业全域资产采集与比对，数据正在生成中，请稍候或查看实时测绘日志。
-              </template>
-              <template v-else>
-                当前主体在当前维度未收录资产记录。您可以点击「更新主体资产」重新拉取最新数据，或切换至其他维度进行查看。
-              </template>
-            </div>
-            <div class="empty-actions">
-              <a-button v-if="taskRecord.status === 'running'" type="primary" size="small" @click="activeTab = 'log'">
-                <template #icon><code-outlined /></template>
-                查看实时测绘日志
-              </a-button>
-              <a-button v-else type="primary" size="small" :loading="refreshLoading" @click="handleRefreshTask">
-                <template #icon><sync-outlined :spin="refreshLoading" /></template>
-                更新主体资产
-              </a-button>
-            </div>
+          <div class="empty-default-box">
+            <a-empty description="暂无生态数据" />
           </div>
         </template>
       </a-table>
@@ -501,7 +480,6 @@ import {
   RedoOutlined,
   CodeOutlined,
   CheckCircleFilled,
-  BankOutlined,
   LinkOutlined,
   FilterOutlined,
   DownOutlined,
@@ -1468,52 +1446,9 @@ defineExpose({
   gap: 6px;
 }
 
-/* ================= 可行动的空状态引导 (Actionable Empty State) ================= */
-.empty-actionable-card {
-  background: var(--arl-bg-white);
-  border: 1px dashed var(--arl-border-color);
-  border-radius: 8px;
-  padding: 48px 24px;
-  text-align: center;
-  max-width: 600px;
-  margin: 24px auto;
-}
-
-.empty-icon-circle {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--arl-theme-color) 12%, transparent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 16px auto;
-}
-
-.empty-icon {
-  font-size: 28px;
-  color: var(--arl-theme-color);
-}
-
-.empty-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--arl-text-color);
-  margin-bottom: 8px;
-}
-
-.empty-desc {
-  font-size: 13px;
-  color: var(--arl-text-secondary);
-  max-width: 460px;
-  margin: 0 auto 20px auto;
-  line-height: 1.6;
-}
-
-.empty-actions {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
+/* ================= 标准空状态 ================= */
+.empty-default-box {
+  padding: 40px 0;
 }
 
 /* ================= 悬浮浮动批处理条 (Floating Action Bar) ================= */
