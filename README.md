@@ -17,7 +17,7 @@
   <p>
     <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
-    <img src="https://img.shields.io/badge/Nmap-7.95%20LTS-blue?style=flat-square" alt="Nmap">
+    <img src="https://img.shields.io/badge/Nmap-7.95%20Stable-blue?style=flat-square" alt="Nmap">
     <img src="https://img.shields.io/badge/MongoDB-7.0-47A248?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB">
     <img src="https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue">
     <img src="https://img.shields.io/badge/MCP-Native-purple?style=flat-square" alt="MCP">
@@ -40,7 +40,7 @@
 ## 💡 什么是 ARL-Next？
 
 > **ARL-Next** 是基于经典开源项目 ARL (资产侦察灯塔) 进行架构重构与持续演进的资产测绘平台。
-> 针对大规模扫描场景下的任务队列阻塞、长时间运行内存增长以及历史依赖过时等工程瓶颈，系统实施了微服务拆分与异步任务解耦，全面升级现代运行底座与测绘工具链，并集成了 **Model Context Protocol (MCP)** 标准协议，支持自动化资产透视与 AI 协同调度。
+> 针对大规模扫描场景下的任务队列阻塞、长时间运行内存增长以及历史依赖过时等工程瓶颈，系统实施了微服务拆分与异步任务解耦，全面升级现代运行时环境与测绘工具链，并集成了 **Model Context Protocol (MCP)** 标准协议，支持自动化资产透视与 AI 协同分析。
 
 ---
 
@@ -49,31 +49,31 @@
 | 评估维度 | ARL 原始架构与实现 | ARL-Next 重构方案 |
 | :--- | :--- | :--- |
 | **并发与调度架构** | 任务执行共用单 Celery 队列，复杂任务高并发时易发生队列阻塞与假死 | **拆分 OSINT 与截图为独立微服务**，引入轻重分离队列与批量落库，显著收敛队列阻塞与并发瓶颈 |
-| **自动化协议集成** | 无标准化外部调度接口，仅支持 Web 控制台人工交互 | **内置原生 MCP Server**，支持通过标准协议进行资产检索与扫描任务调度 |
-| **企业资产拓扑** | 无关联企业与全渠道数字资产下钻链路 | **支持企业股权关联与全类型 ICP 检索**（网站 / APP / 小程序 / 快应用），构建组织多级资产拓扑 |
+| **自动化协议集成** | 无标准化外部调度接口，仅支持 Web 控制台人工交互 | **内置原生 MCP Server**，支持通过标准协议进行 13 维全景资产画像检索与统计分析 |
+| **企业资产拓扑** | 无关联企业与全类型数字资产下钻链路 | **资产分组融合管理**：支持企业股权关联与全类型 ICP 检索（网站 / APP / 小程序 / 快应用），构建多级集团拓扑与全景暴露面画像 |
 | **容器构建与部署** | 依赖陈旧且缺乏镜像加速，构建拉取易受外部网络波动影响 | **多阶段容器构建与阿里云国内镜像源预编译**，提升构建速度与部署稳定性 |
-| **底层技术栈基线** | Python 3.6 / Vue 2 / MongoDB 3.x / Nmap 7.70 | **Python 3.13 / Vue 3.5 / MongoDB 7.0 / Nmap 7.95 LTS** 现代运行底座全面对齐 |
+| **底层技术栈基线** | Python 3.6 / Vue 2 / MongoDB 3.x / Nmap 7.70 | **Python 3.13 / Vue 3.5 / MongoDB 7.0 / Nmap 7.95 稳定版** 现代运行环境基线全面对齐 |
 | **敏感信息提取** | 基于外部 Go 二进制工具，跨平台存在依赖与编译维护成本 | **纯 Python 原生提取引擎**，无外部二进制依赖，支持敏感凭证与信息的流式提取 |
-| **Web 交互体验** | 大数据长列表无固定表头，分页状态未持久化，配置管理层级深 | **表头与操作栏 Sticky 悬浮吸附**、分页状态本地持久化、三栏式字典管理器 |
+| **Web 交互体验** | 大数据长列表无固定表头，分页状态未持久化，字典与策略配置分散于多级子菜单 | **表头与操作栏 Sticky 悬浮吸附**、分页状态本地持久化、三栏式字典管理器 |
 | **威胁情报协同** | 缺乏持续情报同步机制，时间戳处理不统一易产生冗余告警 | **CVE 与 GitHub 代码泄露监听**、基于数据库原子更新锁去重、严格时区归一化 |
 
 ---
 
 ### <span id="core-features"></span>✨ 核心特性矩阵
 
-* 🤖 **MCP 标准协议集成**：内置标准化 Python MCP 服务，支持外部 Agent 对接下发任务与 13 维资产大盘数据导出。（👉 [MCP 配置指南](./mcp-server/README.md)）
+* 🤖 **MCP 标准协议集成**：内置基于 Python 标准库的原生 MCP 服务，支持外部 Agent 对接检索 13 维全景资产画像与统计大盘数据（任务下发与策略调度能力持续接入中）。（👉 [MCP 配置指南](./mcp-server/README.md)）
 * ⚙️ **异步解耦并发调度**：微服务拆分与独立任务队列分流，结合批量数据落库优化，保障高吞吐扫描平稳运行。
-* 🌐 **多层企业资产关联**：支持企业股权关系下钻与全类型 ICP（网站/APP/小程序/快应用）自动化关联，构建多级资产拓扑。
-* 🔍 **现代资产测绘基准**：基于 Nmap 7.95 LTS 稳定版；内置原生 Python 敏感凭据与信息流式提取引擎。
+* 🌐 **多级资产分组与全维融合**：企业资产查询深度融入资产分组管理架构，支持集团多级架构管理、全类型 ICP 与生态资产自动化关联及网络暴露面统一测绘。
+* 🔍 **现代资产测绘基准**：基于 Nmap 7.95 稳定版；内置原生 Python 敏感凭据与信息流式提取引擎。
 * 🛡️ **漏洞与代码泄露监控**：持续同步权威 CVE 漏洞情报，监听 GitHub 关联代码与凭据泄露，支持基于原子更新的去重机制。
-* ⚡ **高可用运维与自愈机制**：集成容器健康探活、就绪轮询与自动重启机制，支持管理后台在线平滑升级。
+* ⚡ **高可用运维与容错机制**：集成容器健康探活、就绪轮询与异常自动重启机制，支持管理后台在线平滑升级。
 * 📦 **预构建镜像加速**：提供阿里云国内镜像源预编译构建制品，规避跨国网络波动导致的镜像拉取与依赖安装失败。
 
 ---
 
 ## 📸 界面预览
 
-* **全局仪表盘 (Dashboard)**：实时监测宿主机物理内存与 Swap 水位、系统资源负载、扫描任务生命周期、多维风险态势大盘与全景操作日志流。
+* **全局仪表盘 (Dashboard)**：实时呈现资产暴露面态势、今日侦察动向、漏洞风险矩阵与威胁情报；集成系统资源占用（CPU/内存/磁盘）与扫描调度队列监控、风险演进趋势分析、全景安全调度日志流、Web 组件指纹 TOP 5 分布及实时侦察流水线追踪。
   
   <p align="center">
     <img src="./img/dashboard.png" alt="ARL-Next 全局仪表盘" width="850">
@@ -84,10 +84,22 @@
 
 <br/>
 
-* **企业级 OSINT 资产侦察**：支持企业 ICP 备案（网站/移动端 APP/微信小程序/快应用）穿透与公司股权穿透，一键关联并同步下发多维探测任务。
+* **多级资产分组与全景资产画像**：原企业资产查询现已深度整合至资产分组统一架构。支持集团多级组织架构管理、企业生态资产关联分析 (OSINT)、网络暴露面测绘 (ASM) 与 13 维全景资产画像下钻。
   
   <p align="center">
-    <img src="./img/enterprise-asset-search.png" alt="企业资产侦察" width="800">
+    <img src="./img/asset-group-overview.png" alt="集团多级资产分组与覆盖度" width="850">
+  </p>
+  
+  <p align="center">
+    <img src="./img/asset-group-osint.png" alt="企业生态资产 (OSINT) 维度" width="850">
+  </p>
+  
+  <p align="center">
+    <img src="./img/asset-group-asm.png" alt="网络暴露面 (ASM) 测绘" width="850">
+  </p>
+  
+  <p align="center">
+    <img src="./img/asset-group-profile.png" alt="13 维全景资产画像抽屉" width="850">
   </p>
 
 * **任务下发与策略调度**：深度联动 Nuclei、100+ 专属漏洞 PoC 插件池及近万级 Web 指纹库 (8800+)，支持全生命周期下发与追踪。
@@ -136,12 +148,12 @@ graph TD
 
     %% 4. Celery Worker 扫描计算集群
     subgraph WorkerCluster ["⚙️ Celery Worker 扫描与调度集群"]
-        MQ -->|"轻量队列 arltask_light"| W_Light["⚡ 轻任务 Worker (DNS/端口/指纹)"]
-        MQ -->|"重载队列 arltask_heavy"| W_Heavy["🔥 重任务 Worker (Nuclei/PoC/爬虫)"]
+        MQ -->|"轻量队列 arltask_light"| W_Light["⚡ 轻任务 Worker (空间测绘/单点更新/WIH/同步)"]
+        MQ -->|"重载队列 arltask_heavy"| W_Heavy["🔥 重任务 Worker (常规扫描/风险巡航/Nuclei/PoC)"]
         MQ -->|"威胁队列 arlgithub"| W_Git["🛡️ 威胁情报 Worker (CVE/代码泄露)"]
         
         Scheduler["⏰ 监控调度引擎 (Scheduler & Beat)"] -.->|"周期触发"| MQ
-        W_Heavy -->|"HTTP 截图渲染 (5005)"| Puppeteer["🧩 Puppeteer 微服务 (无头截图/滚动自愈)"]
+        W_Heavy -->|"HTTP 截图渲染 (5005)"| Puppeteer["🧩 Puppeteer 微服务 (无头截图/异常自动重启)"]
     end
 
     %% 5. 数据统一落库 (从上往下自然汇聚分流)
@@ -151,7 +163,7 @@ graph TD
     W_Heavy -->|"bulk_write 批量写入"| DB
     W_Git -->|"原子 upsert 写入"| DB
 
-    Autoheal["🛡️ Autoheal 守护探针"] -.->|"docker.sock 探活与自愈"| WorkerCluster
+    Autoheal["🛡️ Autoheal 守护探针"] -.->|"docker.sock 探活与异常重启"| WorkerCluster
 
     classDef default fill:#fbfbfb,stroke:#e0e0e0,stroke-width:1px;
     classDef core fill:#eef2ff,stroke:#6366f1,stroke-width:2px;
@@ -168,10 +180,10 @@ graph TD
 ### 核心架构要点：
 
 1. 🖥️ **展示与网关 (Frontend / Nginx)**：基于 **Vue 3.5 + Nginx**，支持全站表格与操作栏 **Sticky 悬浮吸附**及 **Basic Auth 前置网关防护**。
-2. ⚙️ **业务与协议接入 (Backend / MCP)**：基于 **Python 3.13 + Gunicorn**；内置 **原生 Python MCP** 服务，提供标准协议接口与 13 维资产数据模型导出能力。
+2. ⚙️ **业务与协议接入 (Backend / MCP)**：基于 **Python 3.13 + Gunicorn**；内置 **原生 Python MCP** 服务，提供标准协议接口与 13 维全景资产画像导出能力。
 3. 🧩 **OSINT 独立微服务**：专职企业资产与 ICP 异步情报采集，由 Backend 直调协程池，**独立于 Celery 扫描队列以规避长耗时任务阻塞**。
-4. ⚡ **多队列 Worker 集群**：划分**轻量/重载/威胁情报**独立队列；通过 Worker 子进程生命周期轮转机制控制内存增长；**测绘底座统一至 Nmap 7.95 LTS 稳定版**。
-5. 🛡️ **微服务与守护探针 (Puppeteer / Autoheal)**：无头截图容器化隔离并支持健康探活；**Autoheal 守护进程定时探活并处理异常状态容器**；纯 Python 引擎高效提取敏感信息。
+4. ⚡ **多队列 Worker 集群**：划分**轻量/重载/威胁情报**独立队列；通过 Worker 子进程生命周期轮转机制控制内存增长；**测绘执行引擎统一至 Nmap 7.95 稳定版**。
+5. 🛡️ **微服务与守护探针 (Puppeteer / Autoheal)**：无头截图容器化隔离并支持请求计数轮转；**Autoheal 守护进程定时探活扫描 Worker 并自动重启异常容器**；纯 Python 引擎高效提取敏感信息。
 6. 🗄️ **高吞吐持久层与并发优化 (MongoDB 7.0)**：数据写入全面迁移至 `bulk_write` 批量接口，核心集合覆盖联合唯一索引并设 1GB 内存池保护；解除不合理的内存硬限制，保障高吞吐扫描平稳性。
 
 ---
@@ -188,7 +200,7 @@ graph TD
 * 📦 **开箱即用**：预构建交付，无需在宿主机配置复杂编译链与工具库。
 * 🛡️ **双层安全防护**：内置 SSL 证书与 **Basic Auth 前置网关防护**，核心组件全私有网络隔离。
 * 🔄 **后台平滑热更**：支持直接在管理后台一键触发升级流程，自动同步编排脚本与最新镜像。
-* 🩺 **全自动健康探活**：内置 API 就绪轮询机制与 Swap 内存自愈探针，服务就绪再放行，保障启动稳定性。
+* 🩺 **服务健康探活**：内置 API 就绪轮询机制与内存防护配置，服务就绪再放行，保障启动稳定性。
 
 ---
 
@@ -205,6 +217,7 @@ graph TD
 ```bash
 # 1. 安装基础工具并创建目录
 apt-get update && apt-get install -y docker.io openssl curl && \
+(systemctl enable --now docker 2>/dev/null || service docker start 2>/dev/null || true) && \
 mkdir -p ~/ARL-Next && cd ~/ARL-Next && \
 # 2. 从阿里云国内镜像提取全套部署编排并启动
 docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
@@ -215,7 +228,7 @@ docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
-docker cp arl-temp:/code/frontend ./ && \
+mkdir -p ./frontend && docker cp arl-temp:/code/frontend/default.conf.prod ./frontend/ && \
 docker rm -f arl-temp && \
 chmod +x start-prod.sh && bash start-prod.sh
 ```
@@ -223,9 +236,9 @@ chmod +x start-prod.sh && bash start-prod.sh
 **CentOS / RHEL / Alibaba Cloud Linux / TencentOS 系统**：
 ```bash
 # 1. 安装基础工具、自动补齐 Docker 并创建目录
+yum install -y openssl curl && \
 (command -v docker &>/dev/null || curl -fsSL https://get.docker.com | bash -s docker --mirror Aliyun) && \
 systemctl enable --now docker 2>/dev/null || true && \
-yum install -y openssl curl && \
 mkdir -p ~/ARL-Next && cd ~/ARL-Next && \
 # 2. 从阿里云国内镜像提取全套部署编排并启动
 docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
@@ -236,7 +249,7 @@ docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
-docker cp arl-temp:/code/frontend ./ && \
+mkdir -p ./frontend && docker cp arl-temp:/code/frontend/default.conf.prod ./frontend/ && \
 docker rm -f arl-temp && \
 chmod +x start-prod.sh && bash start-prod.sh
 ```
@@ -260,7 +273,7 @@ bash start-prod.sh
 
 | 验证层级 | 默认账号 | 默认密码 | 说明 |
 | :--- | :--- | :--- | :--- |
-| **第一层：Nginx Basic Auth 网关** | `admin` | `arl_next` | 前置防扫描器爆破（默认关闭，可在顶部导航栏一键开启或修改） |
+| **第一层：Nginx Basic Auth 网关** | `admin` | `arl_next` | 前置防扫描器爆破（默认关闭，可在顶部导航栏通过安全开关一键热开启或关闭，修改密码可在关闭后重新开启配置） |
 | **第二层：ARL-Next 系统登录** | `admin` | `arlpass` | 平台主账号，首次登录后建议立即修改 |
 
 > [!TIP]
@@ -276,7 +289,7 @@ ARL-Next 支持 **Web 管理后台一键热更新**（在「系统设置」中�
 #### 方案一：Web 管理后台一键热更新（推荐）
 
 登录 ARL-Next 平台 ➔ 进入 **「系统设置」** 页面 ➔ 点击 **「一键系统更新」**。<br/>
-宿主机更新守护进程将自动拉取最新构建、同步最新编排脚本与版本文件，并在后台完成容器热重启与全量健康探活，全程无需登录终端。
+宿主机更新守护进程将自动拉取最新构建、同步最新编排脚本与版本文件，并在后台完成容器热重启与服务就绪检查，全程无需登录终端。
 
 #### 方案二：终端标准手动升级
 
@@ -292,7 +305,7 @@ ARL-Next 支持 **Web 管理后台一键热更新**（在「系统设置」中�
   ```bash
   cd ~/ARL-Next && \
   docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
-  docker run --rm -v $(pwd):/host crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest bash -c "cp /code/start-prod.sh /host/start-prod.sh && cp /code/docker-compose.prod.yml /host/docker-compose.prod.yml && cp /code/updater -r /host/updater 2>/dev/null || true; mkdir -p /host/frontend && cp /code/frontend/default.conf.prod /host/frontend/default.conf.prod 2>/dev/null || true; cp /code/version.txt /host/version.txt 2>/dev/null || true; cp /code/CHANGELOG.md /host/CHANGELOG.md 2>/dev/null || true" && \
+  docker run --rm -v $(pwd):/host crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest bash -c "cp /code/start-prod.sh /host/start-prod.sh && cp /code/docker-compose.prod.yml /host/docker-compose.prod.yml && mkdir -p /host/updater && cp -r /code/updater/. /host/updater/ 2>/dev/null || true; mkdir -p /host/frontend && cp /code/frontend/default.conf.prod /host/frontend/default.conf.prod 2>/dev/null || true; cp /code/version.txt /host/version.txt 2>/dev/null || true; cp /code/CHANGELOG.md /host/CHANGELOG.md 2>/dev/null || true" && \
   sudo bash start-prod.sh
   ```
 
@@ -326,7 +339,7 @@ ARL-Next 支持 **Web 管理后台一键热更新**（在「系统设置」中�
   ```
   > [!NOTE]
   > 平台启动时默认保护现有密码，追加 `--reset` 参数将强制将 `admin` 密码重置为初始密码 `arlpass`。请在宿主机受信环境下执行。
-- **重置/查看 Basic Auth 凭据**：编辑工作目录下的 `frontend/.htpasswd`，或登录系统后在顶部导航栏「安全防护」图标中一键热开启/修改/关闭。
+- **重置/查看 Basic Auth 凭据**：编辑工作目录下的 `frontend/.htpasswd`，或登录系统后在顶部导航栏通过安全开关一键热开启/关闭（修改密码可在关闭后重新开启配置）。
 </details>
 
 <details>
@@ -350,7 +363,7 @@ ARL-Next 支持 **Web 管理后台一键热更新**（在「系统设置」中�
 
 **A:** ARL-Next 支持**动态热调整并发**，无需重启容器！
 - 登录平台 ➔ 进入 **「系统设置」** 页面；
-- 可视化调整 **轻任务并发数**（DNS/端口/指纹）、**重任务并发数**（Nuclei/PoC）及 **OSINT 并发数**，保存后系统将自动热生效。
+- 可视化调整 **轻任务并发数**（空间测绘 / 单点更新 / WIH 提取 / 数据同步）、**重任务并发数**（常规域名 / IP 扫描、风险巡航、Nuclei/PoC 长线任务）及 **OSINT 并发数**，保存后系统将自动热生效。
 </details>
 
 <details>
