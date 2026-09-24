@@ -21,6 +21,8 @@ base_search_fields = {
     "c_segment": fields.String(description="C段"),
     "ip_type": fields.String(description="IP类型，公网(PUBLIC)和内网(PRIVATE)"),
     "cdn_name": fields.String(description="CDN 厂商名称"),
+    "cdn_type": fields.String(description="CDN过滤类型: all/origin/cdn"),
+    "is_cdn": fields.Boolean(description="是否CDN"),
     "geo_asn.number": fields.Integer(description="AS number"),
     "geo_asn.organization": fields.String(description="AS organization"),
     "geo_city.region_name": fields.String(description="GEO region_name")
@@ -29,8 +31,42 @@ base_search_fields = {
 base_search_fields.update(base_query_fields)
 
 
+class BaseIPResource(ARLResource):
+    """任务详情 IP 基础资源类：提供统一的 CDN 状态动态条件构造"""
+    def build_db_query(self, args):
+        args_copy = dict(args) if args else {}
+        cdn_type = args_copy.pop("cdn_type", None)
+        is_cdn = args_copy.pop("is_cdn", None)
+
+        # 归一化布尔判定，防止字符串/整型松散类型失效
+        is_origin_req = cdn_type == "origin" or is_cdn in (False, "false", "False", 0)
+        is_cdn_req = cdn_type == "cdn" or is_cdn in (True, "true", "True", 1)
+
+        # 防御幽灵参数互斥：当明确指定筛选独立源站时，剥离前端可能残留的 cdn_name 检索词
+        if is_origin_req:
+            args_copy.pop("cdn_name", None)
+
+        q = super().build_db_query(args_copy)
+
+        if is_origin_req:
+            q.setdefault("$and", []).extend([
+                {"$or": [{"is_cdn": False}, {"is_cdn": {"$exists": False}}]},
+                {"$or": [{"cdn_name": ""}, {"cdn_name": None}, {"cdn_name": {"$exists": False}}]}
+            ])
+        elif is_cdn_req:
+            # 采用 append 进入 $and 数组，彻底规避直接顶层赋值破坏原有 $or 查询条件的风险
+            q.setdefault("$and", []).append({
+                "$or": [
+                    {"is_cdn": True},
+                    {"cdn_name": {"$exists": True, "$nin": ["", None]}}
+                ]
+            })
+
+        return q
+
+
 @ns.route('/')
-class ARLIP(ARLResource):
+class ARLIP(BaseIPResource):
     parser = get_arl_parser(base_search_fields, location='args')
 
     @auth
@@ -46,7 +82,7 @@ class ARLIP(ARLResource):
 
 
 @ns.route('/export/')
-class ARLIPExport(ARLResource):
+class ARLIPExport(BaseIPResource):
     parser = get_arl_parser(base_search_fields, location='args')
 
     @auth
@@ -62,7 +98,7 @@ class ARLIPExport(ARLResource):
 
 
 @ns.route('/export_domain/')
-class ARLIPExportDomain(ARLResource):
+class ARLIPExportDomain(BaseIPResource):
     parser = get_arl_parser(base_search_fields, location='args')
 
     @auth
@@ -78,7 +114,7 @@ class ARLIPExportDomain(ARLResource):
 
 
 @ns.route('/export_ip/')
-class ARLIPExportIp(ARLResource):
+class ARLIPExportIp(BaseIPResource):
     parser = get_arl_parser(base_search_fields, location='args')
 
     @auth

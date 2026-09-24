@@ -179,6 +179,17 @@
                 导出{{ tabConfig[activeTab].tabName }}
               </a-button>
               <template v-if="activeTab === 'ip'">
+                <a-radio-group
+                  v-model:value="ipCdnFilter"
+                  size="small"
+                  button-style="solid"
+                  class="asm-cdn-radios"
+                  @change="handleCdnFilterChange"
+                >
+                  <a-radio-button value="all">全部</a-radio-button>
+                  <a-radio-button value="origin">仅独立源站</a-radio-button>
+                  <a-radio-button value="cdn">仅 CDN</a-radio-button>
+                </a-radio-group>
                 <a-button size="small" @click="handleIPExport('port')">导出端口</a-button>
                 <a-button size="small" @click="handleIPExport('domain')">导出域名</a-button>
                 <a-button type="primary" ghost size="small" @click="handleIPExport('ip')">
@@ -218,7 +229,7 @@
             <a-form :model="searchForm" class="filter-grid-form">
               <a-row :gutter="[12, 6]">
                 <a-col
-                  v-for="field in tabConfig[activeTab].searchFields"
+                  v-for="field in tabConfig[activeTab].searchFields.filter(f => !f.hidden)"
                   :key="field.key"
                   :xs="24" :sm="12" :md="8" :lg="6"
                 >
@@ -527,6 +538,27 @@
               <compass-outlined />画像
             </a-button>
           </div>
+        </template>
+
+        <template v-else-if="column.key === 'ip_cdn_tag'">
+          <a-tooltip :title="(record.is_cdn || record.cdn_name) ? '点击快速筛选此 CDN 资产' : '点击快速筛选独立源站资产'">
+            <a-tag
+              v-if="record.is_cdn || record.cdn_name"
+              color="blue"
+              style="cursor: pointer; user-select: none;"
+              @click.stop="handleCdnTagClick(record)"
+            >
+              {{ record.cdn_name || 'CDN节点' }}
+            </a-tag>
+            <a-tag
+              v-else
+              color="green"
+              style="cursor: pointer; user-select: none;"
+              @click.stop="handleCdnTagClick(record)"
+            >
+              独立源站
+            </a-tag>
+          </a-tooltip>
         </template>
 
         <template v-else-if="column.key === 'source'">
@@ -1706,6 +1738,7 @@ const activeFilterCount = computed(() => {
     const val = searchForm.value[k];
     if (val !== '' && val != null) {
       if (Array.isArray(val) && val.length === 0) continue;
+      if (k === 'cdn_type' && val === 'all') continue;
       cnt++;
     }
   }
@@ -2495,15 +2528,16 @@ const tabConfig = reactive({
       { label: '操作系统', key: 'os_info.name', operator: '=' }, // ARL 默认 OS 字段名
       { label: '域名', key: 'domain', operator: '=' },
       { label: 'CDN', key: 'cdn_name', operator: '=' },
-      { label: '更新时间', key: 'update_date', type: 'dateRange' }
+      { label: '更新时间', key: 'update_date', type: 'dateRange' },
+      { label: 'CDN类型', key: 'cdn_type', hidden: true }
     ],
-    // 🚨 修复：移除原本多余的 CDN 列，严格对齐截图列名
     cols: [
       { title: '序号', key: 'index', width: 60, align: 'center' },
       { title: 'IP', dataIndex: 'ip', key: 'ip', width: 160 },
       { title: '操作系统', key: 'os_info', width: 150 },
       { title: '开放端口', key: 'port_info', width: 200 },
       { title: '关联域名', key: 'domain', width: 250 },
+      { title: 'CDN状态', key: 'ip_cdn_tag', width: 150 },
       { title: 'Geo', key: 'geo_city', width: 180 },
       { title: 'AS', key: 'geo_asn', width: 280 },
       { title: '更新时间', dataIndex: 'update_date', key: 'update_date', width: 180 }
@@ -2736,6 +2770,7 @@ const fetchData = async () => {
         const fieldConfig = config.searchFields?.find(f => f.key === key);
         // 🚨 防御幽灵过滤：若该字段不在当前 Tab 的契约中，直接丢弃
         if (config.searchFields && !fieldConfig) continue;
+        if (key === 'cdn_type' && searchForm.value[key] === 'all') continue;
 
         // 如果是时间范围数组，则特殊处理给后端
         if (key === 'update_date' && Array.isArray(searchForm.value[key])) {
@@ -2777,6 +2812,45 @@ const fetchData = async () => {
       loading.value = false;
     }
   }
+};
+
+const ipCdnFilter = computed({
+  get: () => searchForm.value.cdn_type || 'all',
+  set: (val) => {
+    if (val === 'all') {
+      delete searchForm.value.cdn_type;
+    } else {
+      searchForm.value.cdn_type = val;
+    }
+    // 🚨 防御幽灵参数残留：切换离开 CDN 状态时，自动清理厂商检索词
+    if (val !== 'cdn') {
+      delete searchForm.value.cdn_name;
+    }
+  }
+});
+
+const handleCdnFilterChange = (e) => {
+  if (e?.target?.value && e.target.value !== 'cdn') {
+    delete searchForm.value.cdn_name;
+  }
+  pagination.current = 1;
+  tabCache.saveCurrentTab(activeTab.value, searchForm.value, 1);
+  fetchData();
+};
+
+const handleCdnTagClick = (record) => {
+  if (record.is_cdn || record.cdn_name) {
+    searchForm.value.cdn_type = 'cdn';
+    if (record.cdn_name) {
+      searchForm.value.cdn_name = record.cdn_name;
+    }
+  } else {
+    searchForm.value.cdn_type = 'origin';
+    delete searchForm.value.cdn_name;
+  }
+  pagination.current = 1;
+  tabCache.saveCurrentTab(activeTab.value, searchForm.value, 1);
+  fetchData();
 };
 
 const onSearch = () => {
@@ -3038,6 +3112,7 @@ const handleIPExport = async (type) => {
 
     for (const key in searchForm.value) {
       if (searchForm.value[key] !== '' && searchForm.value[key] != null) {
+        if (key === 'cdn_type' && searchForm.value[key] === 'all') continue;
         if (key === 'update_date' && Array.isArray(searchForm.value[key])) {
           params.update_date__dgt = searchForm.value[key][0].format('YYYY-MM-DD HH:mm:ss');
           params.update_date__dlt = searchForm.value[key][1].format('YYYY-MM-DD HH:mm:ss');
@@ -4211,6 +4286,16 @@ div:hover > .chain-action-btn {
 }
 .modern-clean-table :deep(.ant-table-tbody > tr:hover > td) {
   background: color-mix(in srgb, var(--arl-theme-color) 4%, var(--arl-bg-white)) !important;
+}
+
+.asm-cdn-radios {
+  margin-right: 4px;
+}
+.asm-cdn-radios :deep(.ant-radio-button-wrapper) {
+  font-size: 12px;
+  height: 24px;
+  line-height: 22px;
+  padding: 0 10px;
 }
 
 </style>
