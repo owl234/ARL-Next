@@ -176,6 +176,16 @@ def create_index():
                 conn_db('syslog').create_index([("create_time", 1)], expireAfterSeconds=2592000, background=True)
                 # 为 task_id 建立索引，防止前端查看任务日志时触发全表扫描（COLLSCAN）拖垮系统
                 conn_db('syslog').create_index([("task_id", 1)], background=True)
+
+                # 安全清理历史残留的失效 create_time_1 索引（整型时间戳无法触发 MongoDB 原生 TTL 监控）
+                try:
+                    existing_indexes = conn_db('dict_upload_task').index_information()
+                    if "create_time_1" in existing_indexes:
+                        conn_db('dict_upload_task').drop_index("create_time_1")
+                        logging.getLogger().info("Dropped legacy invalid TTL index create_time_1 on dict_upload_task.")
+                except Exception as ex:
+                    logging.getLogger().warning(f"Failed to check/drop legacy index create_time_1 on dict_upload_task: {ex}")
+
                 # 兼容历史记录：旧版本 create_time 是 Unix 整数，先转换为
                 # BSON Date 类型的绝对过期时间，再建立 TTL=0 索引。
                 conn_db('dict_upload_task').update_many(
