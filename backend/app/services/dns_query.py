@@ -83,6 +83,10 @@ def run_plugin(p, target) -> (str, list):
         query_key = Config.QUERY_PLUGIN_CONFIG
         source_name = p.source_name
         source_kwargs = query_key.get(source_name, {})
+        if isinstance(source_kwargs, dict):
+            # Do not mutate the shared Config.QUERY_PLUGIN_CONFIG object while
+            # consuming the per-plugin enable flag.
+            source_kwargs = source_kwargs.copy()
         if source_kwargs:
             if not isinstance(source_kwargs, dict):
                 logger.warning(f"{source_name} config {source_kwargs} is not dict")
