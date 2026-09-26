@@ -2,6 +2,7 @@ import os
 import time
 import threading
 import uuid
+from datetime import datetime, timedelta, timezone
 from app.utils import get_logger
 from app.utils import conn_db as conn
 from app.utils.dict_utils import file_lock, count_file_lines, hash_dict_entry, dict_lock
@@ -27,7 +28,11 @@ def background_process_dict(task_id, temp_file_path, target_dict_path):
                 "total_lines": 0,
                 "inserted_lines": 0,
                 "ignored_lines": 0,
-                "create_time": now
+                "create_time": now,
+                # TTL indexes require a BSON date. Keep create_time as the
+                # existing integer field used by the UI, and use a dedicated
+                # absolute expiry field for automatic cleanup.
+                "expire_at": datetime.now(timezone.utc) + timedelta(days=7)
             }},
             upsert=True
         )
@@ -146,6 +151,7 @@ def trigger_dict_upload_task(temp_file_path, target_dict_path):
     """
     task_id = str(uuid.uuid4())
     now = int(time.time())
+    expire_at = datetime.now(timezone.utc) + timedelta(days=7)
 
     # 1. 原子前置写入 pending 状态文档，彻底消除 Worker 消费空窗期导致的 404 与前端轮询假死
     try:
@@ -158,7 +164,8 @@ def trigger_dict_upload_task(temp_file_path, target_dict_path):
             "ignored_lines": 0,
             "message": "任务已提交，正在等待队列调度...",
             "create_time": now,
-            "update_time": now
+            "update_time": now,
+            "expire_at": expire_at
         })
     except Exception as e:
         logger.error(f"Failed to pre-insert pending status for dict upload task {task_id}: {e}")
