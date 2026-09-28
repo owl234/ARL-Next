@@ -317,6 +317,31 @@ ARL-Next 支持 **Web 管理后台一键热更新**（在「系统设置」中�
 
 ---
 
+## 🔌 API 调用约定
+
+- 后端接口统一以 `/api` 为前缀；Swagger 文档可在 `/api/doc` 查看。以下路径均相对于部署地址，例如 `https://<your-arl-host>:5173`。
+- 启用平台鉴权时，在请求头传入 `Token: <your-token>`；后端也接受查询参数 `?token=`，但 URL 容易进入访问日志与浏览器历史，建议优先使用请求头。**不要把 Token 写入公开 Issue、日志或命令历史。**
+- 若服务端配置关闭鉴权，则接口不会验证 Token；对外部署时请确认自己的网关与鉴权策略。
+- API 响应使用业务字段 `code` 和 `message`；不能仅凭 HTTP 200 判定操作成功。
+
+### 任务操作（注意 HTTP 方法）
+
+| 操作 | 方法及路径 | 参数 |
+| --- | --- | --- |
+| 查询任务 | `GET /api/task/` | 可选查询参数 `target`、`status`、`page`、`size` |
+| 停止单个任务 | `GET /api/task/stop/<task_id>` | 路径中的任务 ID；**这是会改变任务状态的操作** |
+| 批量停止 | `POST /api/task/batch_stop/` | 以接口文档所示请求体为准 |
+| 删除任务 | `POST /api/task/delete/` | JSON：`{"task_id": ["<task_id>"], "del_task_data": false}` |
+| 重启任务 | `POST /api/task/restart/` | JSON：`{"task_id": ["<task_id>"]}` |
+
+删除接口只接受状态为 `done`、`stop` 或 `error` 的任务；其他状态返回业务码 `104`（“任务运行中”）。如需删除，先核对任务状态，必要时通过停止接口结束任务，再调用删除。停止接口使用 **GET** 是现有实现，不应将它误认为只读查询；也不要猜测使用 `DELETE /api/task/<id>` 或 `POST /api/task/stop/`。
+
+### 查询结果的命名空间
+
+任务结果在 `/api/domain/`、`/api/ip/`、`/api/site/` 等接口下查询；同步到资产分组后的结果则位于 `/api/asset_domain/`、`/api/asset_ip/`、`/api/asset_site/` 等 `asset_*` 命名空间。两者不是同一数据集合：按任务查询时使用 `task_id`，按分组查询时使用 `scope_id`。具体字段、分页方式和其他维度请以 `/api/doc` 的当前接口定义为准。
+
+---
+
 ## ❓ 常见问题与运维排错 (FAQ)
 
 <details open>
