@@ -1,15 +1,23 @@
+# backend/app/celerytask.py
 import signal
 import time
 from bson import ObjectId
 from app.config import Config
 from celery import Celery, platforms, current_task
+from celery.schedules import crontab
 from app import utils
 from app import tasks as wrap_tasks
-from app.modules import CeleryAction, TaskSyncStatus, TaskStatus, CeleryRoutingKey
+from app.modules import (
+    CeleryAction, TaskSyncStatus, TaskStatus, CeleryRoutingKey,
+)
 
 logger = utils.get_logger()
 
 celery = Celery('task', broker=Config.CELERY_BROKER_URL)
+
+# ═══════════════════════════════════════════════════════════
+# Celery 配置
+# ═══════════════════════════════════════════════════════════
 
 celery.conf.update(
     task_acks_late=True,
@@ -18,8 +26,76 @@ celery.conf.update(
     task_soft_time_limit=2592000,
     task_time_limit=2592300,
     worker_prefetch_multiplier=1,
-    broker_transport_options={"max_retries": 3, "interval_start": 0, "interval_step": 0.2, "interval_max": 0.5},
+    broker_transport_options={
+        "max_retries": 3,
+        "interval_start": 0,
+        "interval_step": 0.2,
+        "interval_max": 0.5,
+    },
+
+    # ★ 漏洞平台聚合：任务路由
+    task_routes={
+        # 抓取类任务
+        "app.celerytask.vuln_platform_fetch_all": {
+            "queue": "platform_fetch",
+        },
+        "app.celerytask.vuln_platform_fetch_one": {
+            "queue": "platform_fetch",
+        },
+        # 扫描类任务
+        "app.celerytask.vuln_platform_execute_scan": {
+            "queue": "scan",
+        },
+        # 提交类任务
+        "app.celerytask.vuln_platform_auto_submit": {
+            "queue": "platform_fetch",
+        },
+        # 检查类任务
+        "app.celerytask.vuln_platform_check_scope": {
+            "queue": "platform_fetch",
+        },
+        "app.celerytask.vuln_platform_cookie_check": {
+            "queue": "platform_fetch",
+        },
+        # 复扫类任务
+        "app.celerytask.vuln_platform_weekly_rescan": {
+            "queue": "platform_fetch",
+        },
+        "app.celerytask.vuln_platform_daily_rescan": {
+            "queue": "platform_fetch",
+        },
+    },
+
+    # ★ 漏洞平台聚合：Beat 定时调度
+    beat_schedule={
+        # 每天凌晨 2 点抓取所有已启用平台
+        "vuln-platform-fetch-daily": {
+            "task": "app.celerytask.vuln_platform_fetch_all",
+            "schedule": crontab(hour=2, minute=0),
+        },
+        # 每 6 小时检查项目范围变化
+        "vuln-platform-check-scope": {
+            "task": "app.celerytask.vuln_platform_check_scope",
+            "schedule": crontab(minute=0, hour="*/6"),
+        },
+        # 每 6 小时检查 Cookie 有效性
+        "vuln-platform-cookie-check": {
+            "task": "app.celerytask.vuln_platform_cookie_check",
+            "schedule": crontab(minute=30, hour="*/6"),
+        },
+        # 每周一早上 8 点全量复扫
+        "vuln-platform-weekly-rescan": {
+            "task": "app.celerytask.vuln_platform_weekly_rescan",
+            "schedule": crontab(day_of_week=1, hour=8, minute=0),
+        },
+        # 每天中午 12 点增量复扫
+        "vuln-platform-daily-rescan": {
+            "task": "app.celerytask.vuln_platform_daily_rescan",
+            "schedule": crontab(hour=12, minute=0),
+        },
+    },
 )
+
 platforms.C_FORCE_ROOT = True
 
 from celery.signals import task_prerun, task_postrun, worker_process_init, task_failure
@@ -35,12 +111,18 @@ from app.utils import arl_task_id_var, MongoSyslogHandler
 import threading
 _token_local = threading.local()
 
+
+# ═══════════════════════════════════════════════════════════
+# Worker / Task 信号钩子
+# ═══════════════════════════════════════════════════════════
+
 @worker_process_init.connect
 def setup_worker_process(**kw):
     try:
         MongoSyslogHandler._ensure_worker()
     except Exception:
         pass
+
 
 @task_prerun.connect
 def setup_task_context(task_id, task, args, kwargs, **kw):
@@ -50,22 +132,28 @@ def setup_task_context(task_id, task, args, kwargs, **kw):
             options = args[0]
         elif kwargs and 'options' in kwargs:
             options = kwargs.get('options')
-            
+
         business_task_id = "global"
         if isinstance(options, dict):
             if "data" in options and isinstance(options["data"], dict):
-                business_task_id = options["data"].get("task_id") or options["data"].get("scheduler_id") or options["data"].get("_id") or "global"
+                business_task_id = (
+                    options["data"].get("task_id")
+                    or options["data"].get("scheduler_id")
+                    or options["data"].get("_id")
+                    or "global"
+                )
             elif "task_id" in options:
                 business_task_id = options.get("task_id") or "global"
             elif "scheduler_id" in options:
                 business_task_id = options.get("scheduler_id") or "global"
             elif "_id" in options:
                 business_task_id = options.get("_id") or "global"
-                
+
         token = arl_task_id_var.set(str(business_task_id))
         _token_local.token = token
     except Exception:
         pass
+
 
 @task_postrun.connect
 def teardown_task_context(**kw):
@@ -205,16 +293,22 @@ def handle_task_failure(sender=None, task_id=None, exception=None, args=None, kw
         logger.exception(f"Unexpected error in handle_task_failure: {e}")
 
 
+
+# ═══════════════════════════════════════════════════════════
+# 主任务入口（复用现有 arl_task）
+# ═══════════════════════════════════════════════════════════
+
 @celery.task(queue=CeleryRoutingKey.ASSET_TASK)
 def arl_task(options):
     # 这里不检验 celery_action， 调用的时候区分
     run_task(options)
 
 
-@celery.task(name='app.celerytask.dict_import_celery_task', queue=CeleryRoutingKey.ASSET_TASK_LIGHT)
+@celery.task(name='app.celerytask.dict_import_celery_task',
+             queue=CeleryRoutingKey.ASSET_TASK_LIGHT)
 def dict_import_celery_task(task_id, temp_file_path, target_dict_path):
     """
-    异步超大字典流式导入与去重写入（由 Celery Worker 容器独立调度执行，彻底规避 Web 容器 Worker 回收中断）
+    异步超大字典流式导入与去重写入
     """
     from app.services.dict_upload import background_process_dict
     background_process_dict(task_id, temp_file_path, target_dict_path)
@@ -225,12 +319,12 @@ def sigterm_handler(signum, frame):
         return
     celery_id = current_task.request.id
     routing_key = current_task.request.delivery_info['routing_key']
-    logger.info(f"Caught signal {signum}, celery_id:{celery_id} terminating {routing_key}...")
+    logger.info(
+        f"Caught signal {signum}, celery_id:{celery_id} "
+        f"terminating {routing_key}..."
+    )
 
     logger.info(f"{current_task.request}")
-    # Removed writing TaskStatus.STOP to database so that interrupted tasks remain RUNNING
-    # and can be automatically resumed/re-executed when RabbitMQ requeues them.
-
     utils.exit_gracefully(signum, frame)
 
 
@@ -238,6 +332,7 @@ def run_task(options):
     signal.signal(signal.SIGTERM, sigterm_handler)
     action = options.get("celery_action")
     data = options.get("data")
+
     action_map = {
         CeleryAction.DOMAIN_TASK_SYNC_TASK: domain_task_sync,
         CeleryAction.DOMAIN_EXEC_TASK: domain_exec,
@@ -257,8 +352,8 @@ def run_task(options):
         CeleryAction.GITHUB_THREAT_TOOLS: github_threat_tools_task,
         CeleryAction.GITHUB_THREAT_HACKERS: github_threat_hackers_task,
     }
+
     start_time = time.time()
-    # 这里监控任务 task_id 和 target 是空的
     logger.info("run_task action:{} time: {}".format(action, start_time))
     logger.info("name:{}, target:{}, task_id:{}".format(
         data.get("name"), data.get("target"), data.get("task_id")))
@@ -273,31 +368,42 @@ def run_task(options):
                 active_opts.append(f"{k}: {v}")
         if active_opts:
             logger.info(f"任务配置: {', '.join(active_opts)}")
-            
+
     task_id = data.get("task_id")
     if task_id:
         try:
-            # 校验任务是否已被人工主动停止或已结束
-            item = utils.conn_db('task').find_one({"_id": ObjectId(task_id)})
+            item = utils.conn_db('task').find_one(
+                {"_id": ObjectId(task_id)})
             if not item:
-                item = utils.conn_db('github_task').find_one({"_id": ObjectId(task_id)})
-                
-            if item and item.get("status") in [TaskStatus.STOP, TaskStatus.ERROR, TaskStatus.DONE]:
-                # 允许在任务完成后执行的后续操作（如同步资产、更新资产）
+                item = utils.conn_db('github_task').find_one(
+                    {"_id": ObjectId(task_id)})
+
+            if item and item.get("status") in [
+                TaskStatus.STOP, TaskStatus.ERROR, TaskStatus.DONE
+            ]:
                 allow_after_done = [
                     CeleryAction.DOMAIN_TASK_SYNC_TASK,
                     CeleryAction.ASSET_SITE_UPDATE,
                     CeleryAction.ASSET_WIH_UPDATE,
-                    CeleryAction.ADD_ASSET_SITE_TASK
+                    CeleryAction.ADD_ASSET_SITE_TASK,
                 ]
                 if action not in allow_after_done:
-                    logger.info(f"Task {task_id} has been stopped or ended manually, skip execution")
+                    logger.info(
+                        f"Task {task_id} has been stopped or ended "
+                        f"manually, skip execution"
+                    )
                     return
-            # 如果任务被系统中断后重试，清除上次产生的残余数据
-            if action in [CeleryAction.DOMAIN_TASK, CeleryAction.IP_TASK, CeleryAction.RUN_RISK_CRUISING, CeleryAction.FOFA_TASK]:
+
+            if action in [
+                CeleryAction.DOMAIN_TASK,
+                CeleryAction.IP_TASK,
+                CeleryAction.RUN_RISK_CRUISING,
+                CeleryAction.FOFA_TASK,
+            ]:
                 utils.clean_task_data(task_id)
         except Exception as e:
-            logger.error(f"Error checking or cleaning task {task_id}: {e}")
+            logger.error(
+                f"Error checking or cleaning task {task_id}: {e}")
 
     try:
         fun = action_map.get(action)
@@ -318,7 +424,9 @@ def arl_github(options):
     run_task(options)
 
 
-
+# ═══════════════════════════════════════════════════════════
+# 原有任务处理函数（保持不变）
+# ═══════════════════════════════════════════════════════════
 
 def domain_exec(options):
     """域名监测任务"""
@@ -327,8 +435,9 @@ def domain_exec(options):
     scheduler_id = options.get("scheduler_id")
     monitor_options = options.get("monitor_options")
     name = options.get("name")
-    wrap_tasks.domain_executors(base_domain=domain, scheduler_id=scheduler_id,
-                                scope_id=scope_id, options=monitor_options, name=name)
+    wrap_tasks.domain_executors(
+        base_domain=domain, scheduler_id=scheduler_id,
+        scope_id=scope_id, options=monitor_options, name=name)
 
 
 def oneshot_domain_exec(options):
@@ -338,7 +447,9 @@ def oneshot_domain_exec(options):
     monitor_options = options.get("monitor_options")
     name = options.get("name")
     task_id = options.get("task_id")
-    wrap_tasks.oneshot_domain_executors(base_domain=domain, scope_id=scope_id, options=monitor_options, name=name, task_id=task_id)
+    wrap_tasks.oneshot_domain_executors(
+        base_domain=domain, scope_id=scope_id,
+        options=monitor_options, name=name, task_id=task_id)
 
 
 def domain_task_sync(options):
@@ -394,29 +505,27 @@ def fofa_task(options):
 
 
 def ip_exec(options):
-    """
-    IP 监测任务
-    """
+    """IP 监测任务"""
     scope_id = options.get("scope_id")
     target = options.get("domain")
     scheduler_id = options.get("scheduler_id")
     monitor_options = options.get("monitor_options")
     name = options.get("name")
-    wrap_tasks.ip_executor(target=target, scope_id=scope_id,
-                           task_name=name, scheduler_id=scheduler_id,
-                           options=monitor_options)
+    wrap_tasks.ip_executor(
+        target=target, scope_id=scope_id, task_name=name,
+        scheduler_id=scheduler_id, options=monitor_options)
+
 
 def oneshot_ip_exec(options):
-    """
-    一次性 IP 监测任务
-    """
+    """一次性 IP 监测任务"""
     scope_id = options.get("scope_id")
-    target = options.get("domain") # Payload uses 'domain' for IP target as well
+    target = options.get("domain")
     monitor_options = options.get("monitor_options")
     name = options.get("name")
     task_id = options.get("task_id")
-    wrap_tasks.oneshot_ip_executors(target=target, scope_id=scope_id,
-                                    task_name=name, options=monitor_options, task_id=task_id)
+    wrap_tasks.oneshot_ip_executors(
+        target=target, scope_id=scope_id, task_name=name,
+        options=monitor_options, task_id=task_id)
 
 
 def github_task_task(options):
@@ -429,7 +538,8 @@ def github_task_monitor(options):
     task_id = options["task_id"]
     keyword = options["keyword"]
     scheduler_id = options["github_scheduler_id"]
-    wrap_tasks.github_task_monitor(task_id=task_id, keyword=keyword, scheduler_id=scheduler_id)
+    wrap_tasks.github_task_monitor(
+        task_id=task_id, keyword=keyword, scheduler_id=scheduler_id)
 
 
 def asset_site_update(options):
@@ -437,8 +547,8 @@ def asset_site_update(options):
     task_options = options["options"]
     scope_id = task_options["scope_id"]
     scheduler_id = task_options["scheduler_id"]
-    wrap_tasks.asset_site_update_task(task_id=task_id,
-                                      scope_id=scope_id, scheduler_id=scheduler_id)
+    wrap_tasks.asset_site_update_task(
+        task_id=task_id, scope_id=scope_id, scheduler_id=scheduler_id)
 
 
 def asset_wih_update_task(options):
@@ -446,13 +556,231 @@ def asset_wih_update_task(options):
     task_options = options["options"]
     scope_id = task_options["scope_id"]
     scheduler_id = task_options["scheduler_id"]
-    wrap_tasks.asset_wih_update_task(task_id=task_id,
-                                     scope_id=scope_id, scheduler_id=scheduler_id)
+    wrap_tasks.asset_wih_update_task(
+        task_id=task_id, scope_id=scope_id, scheduler_id=scheduler_id)
 
 
 def asset_site_add_task(options):
     task_id = options["task_id"]
     wrap_tasks.run_add_asset_site_task(task_id)
+
+
+# ═══════════════════════════════════════════════════════════
+# ★ 漏洞平台聚合：Celery 任务
+# ═══════════════════════════════════════════════════════════
+
+@celery.task(name='app.celerytask.vuln_platform_fetch_all',
+             queue='platform_fetch')
+def vuln_platform_fetch_all():
+    """抓取所有已启用平台"""
+    from app.services.vuln_platform import ProjectService
+
+    try:
+        service = ProjectService()
+        result = service.fetch_all_platforms()
+        logger.info("全平台抓取完成: {}".format(result))
+        return {"platforms": result}
+    except Exception as e:
+        logger.exception(e)
+        return {"error": str(e)}
+
+
+@celery.task(name='app.celerytask.vuln_platform_fetch_one',
+             queue='platform_fetch')
+def vuln_platform_fetch_one(platform_name):
+    """抓取单个平台"""
+    from app.services.vuln_platform import ProjectService
+
+    try:
+        service = ProjectService()
+        result = service.fetch_and_sync(platform_name)
+        logger.info("[{}] 抓取完成: {}".format(platform_name, result))
+        return result
+    except Exception as e:
+        logger.exception(e)
+        return {"error": str(e)}
+
+
+@celery.task(name='app.celerytask.vuln_platform_execute_scan',
+             queue='scan')
+def vuln_platform_execute_scan(scan_request):
+    """执行扫描任务（由 ScanOrchestrator 下发）"""
+    from app.services.vuln_platform import (
+        ProjectService, TargetService, VulnService,
+    )
+    from app.services.vuln_platform.scan_thread import (
+        nuclei_scan_thread,
+    )
+
+    project_fp = scan_request["project_fingerprint"]
+    source_platform = scan_request.get("source_platform")
+    scope = scan_request["scope"]
+    scan_config = scan_request["scan_config"]
+
+    logger.info("执行扫描: project={}, targets={}".format(
+        project_fp, len(scope)))
+
+    project_service = ProjectService()
+    target_service = TargetService()
+    vuln_service = VulnService()
+
+    try:
+        findings = nuclei_scan_thread(
+            targets=scope,
+            scan_config=scan_config,
+            project_fingerprint=project_fp,
+            source_platform=source_platform,
+            concurrency=scan_config.get("max_workers", 10))
+    except Exception as e:
+        logger.error("扫描失败: project={}, error={}".format(
+            project_fp, e))
+        raise
+
+    # 漏洞落库
+    new_count = 0
+    for f in findings:
+        is_new, _ = vuln_service.insert_or_update_finding(
+            f, project_fp, source_platform)
+        if is_new:
+            new_count += 1
+
+    # 更新项目状态
+    project_service.update_scan_state(
+        project_fp, status="completed",
+        vuln_count=len(findings))
+
+    # 标记目标已扫描
+    for t in scope:
+        pending = target_service.list_pending()
+        for p in pending:
+            if p.get("target") == t:
+                target_service.mark_scanned(p["fingerprint"])
+                break
+
+    logger.info("扫描完成: project={}, findings={}, new={}".format(
+        project_fp, len(findings), new_count))
+
+    return {"project": project_fp, "findings": len(findings),
+            "new": new_count}
+
+
+@celery.task(name='app.celerytask.vuln_platform_auto_submit',
+             queue='platform_fetch')
+def vuln_platform_auto_submit(project_fingerprint):
+    """扫描完成后自动提交项目漏洞"""
+    from app.services.vuln_platform import VulnSubmitter
+
+    try:
+        result = VulnSubmitter().submit_project_vulns(
+            project_fingerprint)
+        logger.info("项目 {} 自动提交结果: {}".format(
+            project_fingerprint, result))
+        return result
+    except Exception as e:
+        logger.exception(e)
+        return {"error": str(e)}
+
+
+@celery.task(name='app.celerytask.vuln_platform_check_scope',
+             queue='platform_fetch')
+def vuln_platform_check_scope():
+    """检查所有活跃项目的范围变化"""
+    from app.services.vuln_platform import (
+        ProjectService, ScanOrchestrator,
+    )
+
+    try:
+        project_service = ProjectService()
+        orchestrator = ScanOrchestrator()
+        projects = project_service.list_active()
+
+        changes = []
+        for p in projects:
+            r = orchestrator.dispatch_scan(p["fingerprint"])
+            if r.get("dispatched"):
+                changes.append({
+                    "project": p["fingerprint"],
+                    "target_count": r.get("target_count", 0),
+                })
+
+        logger.info("范围检查完成: {} 个项目有变化".format(
+            len(changes)))
+        return {"projects_with_changes": len(changes),
+                "details": changes}
+    except Exception as e:
+        logger.exception(e)
+        return {"error": str(e)}
+
+
+@celery.task(name='app.celerytask.vuln_platform_cookie_check',
+             queue='platform_fetch')
+def vuln_platform_cookie_check():
+    """检查所有需要登录的平台 Cookie 有效性"""
+    from app.adapters.vuln_platform import get_all_adapters
+
+    try:
+        adapters = get_all_adapters()
+        invalid = []
+        for name, adapter in adapters.items():
+            if not adapter.cookie_mgr:
+                continue
+            test_url = adapter.config.get("test_url", "")
+            if not adapter.cookie_mgr.is_cookie_valid(test_url):
+                invalid.append(name)
+                logger.warning("[{}] Cookie 已失效".format(name))
+
+        return {"invalid_cookies": invalid}
+    except Exception as e:
+        logger.exception(e)
+        return {"error": str(e)}
+
+
+@celery.task(name='app.celerytask.vuln_platform_weekly_rescan',
+             queue='platform_fetch')
+def vuln_platform_weekly_rescan():
+    """每周全量复扫"""
+    from app.services.vuln_platform import (
+        ProjectService, ScanOrchestrator,
+    )
+
+    try:
+        project_service = ProjectService()
+        orchestrator = ScanOrchestrator()
+        count = 0
+        for p in project_service.list_active():
+            r = orchestrator.full_scan(p["fingerprint"])
+            if r.get("dispatched"):
+                count += 1
+
+        logger.info("每周全量复扫下发: {} 个项目".format(count))
+        return {"dispatched": count}
+    except Exception as e:
+        logger.exception(e)
+        return {"error": str(e)}
+
+
+@celery.task(name='app.celerytask.vuln_platform_daily_rescan',
+             queue='platform_fetch')
+def vuln_platform_daily_rescan():
+    """每日增量复扫"""
+    from app.services.vuln_platform import (
+        ProjectService, ScanOrchestrator,
+    )
+
+    try:
+        project_service = ProjectService()
+        orchestrator = ScanOrchestrator()
+        count = 0
+        for p in project_service.list_active():
+            r = orchestrator.incremental_rescan(p["fingerprint"])
+            if r.get("dispatched"):
+                count += 1
+
+        logger.info("每日增量复扫下发: {} 个项目".format(count))
+        return {"dispatched": count}
+    except Exception as e:
+        logger.exception(e)
+        return {"error": str(e)}
 
 
 def github_threat_cve_task(options):

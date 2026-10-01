@@ -18,6 +18,7 @@
     "codemirror": "^6.0.2",
     "dayjs": "^1.11.23",
     "echarts": "^6.1.0",
+    "pinia": "^4.0.3",
     "sortablejs": "^1.15.7",
     "vue": "^3.5.32",
     "vue-codemirror": "^6.1.1",

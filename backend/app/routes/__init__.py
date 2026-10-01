@@ -366,7 +366,7 @@ class ARLResource(Resource):
 
         # 6. 【扫尾工作】：把查询条件 query 里的特殊对象也变成普通字符串
         # 为什么要搞这一步？因为 ARL 习惯把查询条件原封不动地返回给前端，方便调试或展示
-        special_keys = ["_id", "save_date", "update_date", "create_time"]
+        special_keys = ["_id", "save_date", "update_date", "create_time", "created_at", "updated_at"]
         for key in query:
             if key in special_keys:
                 query[key] = str(query[key])
@@ -797,5 +797,7 @@ from .assetCip import ns as asset_cip_ns
 from .assetNucleiResult import ns as asset_nuclei_result_ns
 from .assetStatFinger import ns as asset_stat_finger_ns
 from .mcp import ns as mcp_ns
+
+from .platform import ns as platform_ns
 
 

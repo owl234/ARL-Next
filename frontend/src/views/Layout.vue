@@ -124,7 +124,8 @@
       <a-layout-content class="arl-main-content" style="margin: 16px; display: flex; flex-direction: column; overflow-y: auto; height: 0;">
         <div :style="{ background: hasBgImage ? (isDarkMode ? 'rgba(15, 23, 42, 0.5)' : 'rgba(255, 255, 255, 0.4)') : (isDarkMode ? '#0f172a' : 'transparent'), flex: '1 0 auto', display: 'flex', flexDirection: 'column', borderRadius: '4px' }">
           <router-view v-slot="{ Component }">
-            <keep-alive include="Dashboard,TaskList,TaskDetail,AssetScope,GroupAssetsDetail,AssetSearch,AssetMonitor,PlanningTasks,GithubManage,PocList,Fingerprint,Policy,SystemSettings">
+            <!-- ★ 改动：include 中组件名与路由 name 对齐 -->
+            <keep-alive include="Dashboard,TaskList,TaskDetail,AssetScope,GroupAssetsDetail,AssetSearch,AssetMonitor,PlanningTasks,GithubManage,PocList,Fingerprint,Policy,SystemSettings,PlatformDashboard,PlatformList,PlatformSubmitRecords,PlatformScheduleConfig">
               <component :is="Component" />
             </keep-alive>
           </router-view>
@@ -135,6 +136,7 @@
       </a-layout-content>
     </a-layout>
   </a-layout>
+
   <a-modal
       v-model:visible="showMcpModal"
       title="AI 助手 MCP 客户端配置"
@@ -321,6 +323,11 @@ const defaultMenuItems = [
   { key: '/pocList', title: 'POC管理', icon: BugOutlined },
   { key: '/fingerprint', title: '指纹管理', icon: TagsOutlined },
   { key: '/policy', title: '策略配置', icon: SettingOutlined },
+  // ★ 漏洞平台聚合菜单
+  { key: '/platform/dashboard', title: '漏洞平台', icon: DeploymentUnitOutlined },
+  { key: '/platform/platforms', title: '平台管理', icon: AppstoreOutlined },
+  { key: '/platform/records', title: '提交记录', icon: BugOutlined },
+  { key: '/platform/schedules', title: '调度配置', icon: ClockCircleOutlined },
   { key: '/systemSettings', title: '系统设置', icon: SettingOutlined },
 ];
 
@@ -411,7 +418,7 @@ const initSidebarSortable = () => {
       const { oldIndex, newIndex, item, from } = evt;
       if (oldIndex === newIndex || oldIndex == null || newIndex == null) return;
 
-      // 核心加固：撤销 Sortable 的物理 DOM 变更，使真实 DOM 树与 Vue 虚拟 DOM 现有状态对齐，杜绝高亮项重复插入
+      // 核心加固：撤销 Sortable 的物理 DOM 变更，使真实 DOM 树与 Vue 虚拟 DOM 现有状态对齐
       if (from && item && item.parentNode === from) {
         from.removeChild(item);
         if (oldIndex >= from.children.length) {
@@ -487,18 +494,17 @@ const handleUploadBackground = async (file) => {
     message.warning('图片大小不能超过 25MB，请重新选择');
     return false;
   }
-  // 由于读取和提取可能较慢，可以给个 Loading 提示
   const hide = message.loading('正在提取主题色并设置高清背景...', 0);
   try {
     const base64 = await processImageToBase64(file);
     const color = await extractDominantColor(base64);
-    
+
     localStorage.setItem('themeColor', color);
     await dbHelper.set('bgImage', base64);
-    
+
     window.dispatchEvent(new CustomEvent('theme-changed', { detail: color }));
     window.dispatchEvent(new CustomEvent('bg-image-changed', { detail: base64 }));
-    
+
     message.success('自定义高清主题背景设置成功！');
   } catch (e) {
     message.error('提取颜色或设置失败：' + (e.message || '未知错误'));
@@ -521,16 +527,16 @@ onMounted(() => {
   nextTick(() => {
     initSidebarSortable();
   });
-  
+
   if (route.path.includes('/GitHubTasks/')) {
     selectedKeys.value = ['/GitHubTasks/GitHubTasksList'];
   }
-  
+
   const savedDarkMode = localStorage.getItem('darkMode');
   if (savedDarkMode === 'true') {
     isDarkMode.value = true;
   }
-  
+
   const urlParams = new URLSearchParams(window.location.search);
   const hashParams = new URLSearchParams(window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '');
   const shouldResetBg = urlParams.get('reset_bg') === '1' || hashParams.get('reset_bg') === '1';
@@ -544,11 +550,11 @@ onMounted(() => {
       }
     }).catch(() => {});
   }
-  
+
   window.addEventListener('bg-image-changed', handleBgImageEvent);
   document.addEventListener('click', restoreUI);
 
-  fetchBasicAuthStatus();
+  // fetchBasicAuthStatus();
 
   updateTime();
   timeInterval = setInterval(updateTime, 1000);
@@ -571,6 +577,9 @@ const getMenuKeyForPath = (path) => {
   if (path.startsWith('/group') || path.startsWith('/groupAssetsManagement')) return '/group';
   if (path.startsWith('/policy')) return '/policy';
   if (path.startsWith('/GitHub')) return '/GitHubTasks/GitHubTasksList';
+  // ★ 漏洞平台路径映射
+  if (path.startsWith('/platform/projects')) return '/platform/dashboard';
+  if (path.startsWith('/platform/')) return path;
   return path;
 };
 
@@ -657,6 +666,9 @@ const currentPageTitle = computed(() => {
   if (route.path.includes('GitHubTasksInfo')) return 'GitHub 任务详情';
   if (route.path.includes('GitHubMonitorInfo')) return 'GitHub 监控详情';
   if (route.path.includes('policyDetail')) return '策略配置详情';
+  // ★ 漏洞平台项目详情页标题
+  if (route.path.startsWith('/platform/projects/')) return '项目详情';
+
   const titleMap = {
     '/dashboard': '仪表盘',
     '/group': '资产分组',
@@ -668,23 +680,27 @@ const currentPageTitle = computed(() => {
     '/policy': '策略配置',
     '/pocList': 'POC管理',
     '/fingerprint': '指纹管理',
+    // ★ 漏洞平台标题映射
+    '/platform/dashboard': '项目看板',
+    '/platform/platforms': '平台管理',
+    '/platform/records': '提交记录',
+    '/platform/schedules': '调度配置',
     '/systemSettings': '系统设置',
   };
   return titleMap[route.path] || 'ARL-Next';
 });
-/* ---------- 新增：修改密码逻辑 ---------- */
+
+/* ---------- 修改密码逻辑 ---------- */
 const showChangePassModal = ref(false);
 const isSubmitting = ref(false);
 const passFormRef = ref();
 
-// 表单数据绑定
 const passForm = reactive({
   old_password: '',
   new_password: '',
   check_password: ''
 });
 
-// 自定义校验：确认密码必须和新密码一致
 const validateCheckPassword = async (_rule, value) => {
   if (value === '') {
     return Promise.reject('请再次输入确认密码');
@@ -695,31 +711,25 @@ const validateCheckPassword = async (_rule, value) => {
   }
 };
 
-// 表单校验规则
 const passRules = {
   old_password: [{ required: true, message: '旧密码不能为空', trigger: 'blur' }],
   new_password: [{ required: true, message: '新密码不能为空', trigger: 'blur' }],
   check_password: [{ required: true, validator: validateCheckPassword, trigger: 'blur' }]
 };
 
-// 提交修改密码
 const handleChangePass = async () => {
   try {
-    // 1. 触发前端表单验证
     await passFormRef.value.validate();
     isSubmitting.value = true;
 
-    // 2. 发送请求给后端（注意检查这里的 URL 是否需要加 /api 前缀，取决于你的 request.js baseURL 配置）
     const res = await request.post('/user/change_pass', passForm);
 
-    // 3. 处理后端返回结果
     if (res.code === 200) {
       message.success('密码修改成功，请重新登录');
       showChangePassModal.value = false;
       passFormRef.value.resetFields();
-      handleLogout(); // 密码修改成功后调用已有的退出逻辑
+      handleLogout();
     } else {
-      // 捕获后端的 301, 302, 303 等错误
       message.error(res.message || '修改失败');
     }
   } catch (error) {
@@ -729,12 +739,11 @@ const handleChangePass = async () => {
   }
 };
 
-// 取消弹窗时重置表单
 const handleCancelChangePass = () => {
   passFormRef.value?.resetFields();
 };
 
-/* ---------- 新增：MCP 接入逻辑 ---------- */
+/* ---------- MCP 接入逻辑 ---------- */
 const showMcpModal = ref(false);
 const mcpConfigJson = ref('');
 const isDownloadingScript = ref(false);
@@ -748,7 +757,6 @@ const handleShowMcpModal = () => {
       ]
     }
   };
-  // 去除最外层的 {} 使其更容易直接粘贴到已有的 mcpServers 对象内部
   const jsonStr = JSON.stringify(config, null, 2);
   mcpConfigJson.value = jsonStr.substring(2, jsonStr.length - 2).trim();
   showMcpModal.value = true;
@@ -771,7 +779,6 @@ const downloadMcpScript = async () => {
 
     const host = window.location.origin;
 
-    // 优先从后端动态注入导出接口获取
     try {
       const res = await fetch(`/api/mcp/export_server?host=${encodeURIComponent(host)}`, {
         method: 'GET',
@@ -786,7 +793,6 @@ const downloadMcpScript = async () => {
       console.warn('后端导出接口调用失败，尝试静态降级生成:', e);
     }
 
-    // 降级保护：若后端接口未就绪，直接拉取静态模版并在前端完成凭据注入
     if (!scriptText || scriptText.startsWith('{"code":')) {
       const staticRes = await fetch('/mcp/server.py');
       if (!staticRes.ok) {
@@ -829,7 +835,7 @@ const refreshMcpToken = async () => {
     if (res.code === 200 && res.data && res.data.token) {
       localStorage.setItem('token', res.data.token);
       message.success('Token 已作废并刷新成功！请重新下载客户端脚本。');
-      handleShowMcpModal(); // 重新生成配置展示
+      handleShowMcpModal();
     } else {
       message.error(res.message || '刷新 Token 失败');
     }
@@ -872,7 +878,6 @@ const fetchBasicAuthStatus = async () => {
     }
     isBasicAuthOnline.value = false;
   } catch (error) {
-    // 开发模式或未启动 updater 服务时优雅容错
     isBasicAuthOnline.value = false;
   } finally {
     clearTimeout(timeoutId);
@@ -881,12 +886,10 @@ const fetchBasicAuthStatus = async () => {
 
 const handleBasicAuthSwitchClick = () => {
   if (isBasicAuthLoading.value || !isBasicAuthOnline.value) return;
-  
+
   if (!isBasicAuthEnabled.value) {
-    // 当前为关闭状态，点击打开自定义配置弹窗
     showBasicAuthModal.value = true;
   } else {
-    // 当前为开启状态，点击弹出高危关闭警示
     Modal.confirm({
       title: '关闭 Nginx Basic Auth 前置安全防护',
       icon: createVNode(ExclamationCircleOutlined, { style: 'color: #ff4d4f;' }),
@@ -918,15 +921,13 @@ const executeToggleBasicAuth = async (checked, username = null, password = null)
   isBasicAuthLoading.value = true;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s 熔断保护
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
 
   try {
-    // 1. 获取一次性 Token
     const tokenRes = await request.post('/system_config/request_update_token');
     if (tokenRes.code === 200 && tokenRes.data && tokenRes.data.token) {
       const token = tokenRes.data.token;
-      
-      // 2. 调用 POST 接口传递 Token 及账号密码参数
+
       const payload = {
         token,
         enable: checked,

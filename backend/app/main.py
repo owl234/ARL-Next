@@ -72,6 +72,7 @@ api.add_namespace(routes.system_config_ns)
 api.add_namespace(routes.icp_ns)
 api.add_namespace(routes.brute_dict_ns)
 api.add_namespace(routes.mcp_ns)
+api.add_namespace(routes.platform_ns)
 
 from app.routes.github_threat import github_threat_bp
 arl_app.register_blueprint(github_threat_bp, url_prefix='/api/github_threat')

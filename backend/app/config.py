@@ -43,7 +43,18 @@ DYNAMIC_PROPERTIES = {
     "GITHUB_TOKEN", "DOMAIN_BRUTE_CONCURRENT", "ALT_DNS_CONCURRENT",
     "PROXY_URL", "QUERY_PLUGIN_CONFIG", "WEB_HOOK_URL", "WEB_HOOK_TOKEN",
     "AUTH", "API_KEY", "TYC_ID", "TYC_TOKEN", "PUSH_OPTIONS",
-    "TG_BOT_TOKEN", "TG_CHAT_ID", "SO_SEARCH_COOKIE", "BING_SEARCH_COOKIE"
+    "TG_BOT_TOKEN", "TG_CHAT_ID", "SO_SEARCH_COOKIE", "BING_SEARCH_COOKIE",
+    # ── 新增：漏洞平台聚合配置 ──────────────────────
+    "VULN_PLATFORM_ENABLED",
+    "VULN_PLATFORM_FETCH_CONCURRENT",
+    "VULN_PLATFORM_SCAN_CONCURRENT",
+    "VULN_PLATFORM_SUBMIT_CONCURRENT",
+    "HACKERONE_USERNAME",
+    "HACKERONE_TOKEN",
+    "PLATFORM_BUTIAN_COOKIE",
+    "PLATFORM_VULBOX_COOKIE",
+    "PLATFORM_CNVD_COOKIE",
+    "PLATFORM_EDUSRC_COOKIE",
 }
 
 DYNAMIC_KEYS_MAP = {
@@ -57,7 +68,18 @@ DYNAMIC_KEYS_MAP = {
     "TYC_TOKEN": "tyc_token",
     "PUSH_OPTIONS": "push_options",
     "SO_SEARCH_COOKIE": "so_search_cookie",
-    "BING_SEARCH_COOKIE": "bing_search_cookie"
+    "BING_SEARCH_COOKIE": "bing_search_cookie",
+    # ── 新增：漏洞平台映射 ──────────────────────────
+    "VULN_PLATFORM_ENABLED": "vuln_platform_enabled",
+    "VULN_PLATFORM_FETCH_CONCURRENT": "vuln_platform_fetch_concurrent",
+    "VULN_PLATFORM_SCAN_CONCURRENT": "vuln_platform_scan_concurrent",
+    "VULN_PLATFORM_SUBMIT_CONCURRENT": "vuln_platform_submit_concurrent",
+    "HACKERONE_USERNAME": "hackerone_username",
+    "HACKERONE_TOKEN": "hackerone_token",
+    "PLATFORM_BUTIAN_COOKIE": "platform_butian_cookie",
+    "PLATFORM_VULBOX_COOKIE": "platform_vulbox_cookie",
+    "PLATFORM_CNVD_COOKIE": "platform_cnvd_cookie",
+    "PLATFORM_EDUSRC_COOKIE": "platform_edusrc_cookie",
 }
 
 class ConfigMeta(type):
@@ -172,6 +194,21 @@ class Config(object, metaclass=ConfigMeta):
 
     _SO_SEARCH_COOKIE = ""
     _BING_SEARCH_COOKIE = ""
+    # ═════════════════════════════════════════════════
+    # 漏洞平台聚合配置（可被 system_config 集合动态覆盖）
+    # ═════════════════════════════════════════════════
+    _VULN_PLATFORM_ENABLED = True
+    _VULN_PLATFORM_FETCH_CONCURRENT = 4
+    _VULN_PLATFORM_SCAN_CONCURRENT = 10
+    _VULN_PLATFORM_SUBMIT_CONCURRENT = 5
+
+    _HACKERONE_USERNAME = ""
+    _HACKERONE_TOKEN = ""
+
+    _PLATFORM_BUTIAN_COOKIE = ""
+    _PLATFORM_VULBOX_COOKIE = ""
+    _PLATFORM_CNVD_COOKIE = ""
+    _PLATFORM_EDUSRC_COOKIE = ""
 
 
 try:

@@ -6,3 +6,4 @@ from .github import github_task_task, github_task_monitor
 from .asset_site import asset_site_update_task
 from app.tasks.asset_site import run_add_asset_site_task
 from .asset_wih import asset_wih_update_task
+from . import vuln_platform
