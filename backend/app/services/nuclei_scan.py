@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import os
 import shlex
@@ -181,6 +182,7 @@ class NucleiScan(object):
 
                 try:
                     data = json.loads(line)
+                    target = _result_target(data)
                     item = {
                         "template_url": data.get("template-url", ""),
                         "template_id": data.get("template-id", ""),
@@ -188,8 +190,8 @@ class NucleiScan(object):
                         "vuln_severity": data.get("info", {}).get("severity", ""),
                         "vuln_url": data.get("matched-at", ""),
                         "curl_command": data.get("curl-command", ""),
-                        "target": data.get("host") or data.get("matched-at", ""),
-                        "host": data.get("host") or data.get("matched-at", ""),
+                        "target": target,
+                        "host": target,
                         "extracted_results": data.get("extracted-results", [])
                     }
                     results.append(item)
@@ -249,6 +251,26 @@ class NucleiScan(object):
         self._delete_file()
 
         return results
+
+
+def _result_target(data):
+    # 新版 host 仅含主机名；url 保留协议、端口及原始目标路径。
+    if data.get("url"):
+        return data["url"]
+    host = data.get("host") or ""
+    port = data.get("port")
+    if host and (port or data.get("scheme")) and "://" not in host:
+        try:
+            if ipaddress.ip_address(host.strip("[]")).version == 6:
+                host = f"[{host.strip('[]')}]"
+        except ValueError:
+            pass
+        # 兼容旧版已含端口的 host，避免重复拼接。
+        if port and (":" not in host or host.endswith("]")):
+            host = f"{host}:{port}"
+    if host and data.get("scheme") and "://" not in host:
+        host = f"{data['scheme']}://{host}"
+    return host or data.get("matched-at", "")
 
 
 def nuclei_scan(targets: list, options: dict = None):

@@ -1,0 +1,3 @@
+# 固定离线 bulk API 测试依赖，避免 mongomock 与新版 PyMongo 的接口差异。
+pymongo==4.10.1
+mongomock==4.3.0
