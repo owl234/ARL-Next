@@ -2,16 +2,16 @@ rules:
   # 域名，内置规则
   - id: domain
     enabled: true
-  # IP， 内置规则
+  # IP，内置规则（IPv4 / IPv6）
   - id: ip
     enabled: false
-  # 路径，内置规则
+  # 路径，内置规则（引号中的 /、./、../ 路径）
   - id: path
     enabled: false
-  # URL主机部分为域名，内置规则
+  # HTTP(S) URL 主机部分为域名，内置规则
   - id: domain_url
     enabled: false
-  # URL主机部分为IP，内置规则
+  # HTTP(S) URL 主机部分为 IP，内置规则
   - id: ip_url
     enabled: false
   # 邮箱
