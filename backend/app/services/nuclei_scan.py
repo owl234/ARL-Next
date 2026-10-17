@@ -1,12 +1,32 @@
 import json
 import os
+import shlex
 import shutil
 import subprocess
+from functools import lru_cache
 
 from app.config import Config
 from app import utils
 
 logger = utils.get_logger()
+
+
+@lru_cache(maxsize=8)
+def _detect_json_flag(binary_identity):
+    """仅缓存成功检测；进程或可执行文件变化后使用新的缓存键。"""
+    binary_path = binary_identity[1]
+    for flag in ("-jsonl", "-json"):
+        result = subprocess.run([binary_path, "-duc", flag, "-version"],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+        if result.returncode == 0:
+            return flag
+
+    # 保留原有区别：无法运行的引擎跳过，能运行但不支持 JSON 的引擎报错。
+    result = subprocess.run([binary_path, "-version"],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+    if result.returncode != 0:
+        raise OSError("Nuclei version check failed")
+    raise RuntimeError("Nuclei does not support -jsonl or -json")
 
 
 class NucleiScan(object):
@@ -31,15 +51,16 @@ class NucleiScan(object):
         self.nuclei_json_flag = None
 
     def _check_json_flag(self):
-        json_flag = ["-json", "-jsonl"]
-        for x in json_flag:
-            command = [self.nuclei_bin_path, "-duc", x, "-version"]
-            pro = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if pro.returncode == 0:
-                self.nuclei_json_flag = x
-                return
-
-        assert self.nuclei_json_flag
+        binary_path = shutil.which(self.nuclei_bin_path)
+        if not binary_path:
+            raise FileNotFoundError("Nuclei executable not found")
+        binary_path = os.path.realpath(binary_path)
+        stat = os.stat(binary_path)
+        identity = (os.getpid(), binary_path, stat.st_dev, stat.st_ino,
+                    stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        self.nuclei_json_flag = _detect_json_flag(identity)
+        # 检测和实际扫描使用同一可执行文件，避免 PATH 顺序变化。
+        self.nuclei_bin_path = binary_path
 
     def _materialize_custom_templates(self):
         """从数据库物化已启用的自建 Nuclei 模板到临时扫描目录"""
@@ -128,12 +149,10 @@ class NucleiScan(object):
             logger.warning(e)
 
     def check_have_nuclei(self) -> bool:
-        command = [self.nuclei_bin_path, "-version"]
         try:
-            pro = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if pro.returncode == 0:
-                return True
-        except Exception as e:
+            self._check_json_flag()
+            return True
+        except (OSError, subprocess.SubprocessError) as e:
             logger.debug(f"{e}")
 
         return False
@@ -191,7 +210,7 @@ class NucleiScan(object):
             sev_arg = "-severity low,medium,high,critical"
 
         command = [
-            self.nuclei_bin_path, "-duc",
+            shlex.quote(self.nuclei_bin_path), "-duc",
             "-tags cve,http",
             sev_arg,
             f"-l {self.nuclei_target_path}",
