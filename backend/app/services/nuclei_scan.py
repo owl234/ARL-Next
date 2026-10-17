@@ -112,20 +112,21 @@ class NucleiScan(object):
         return None
 
     def _delete_file(self):
-        try:
-            if os.path.exists(self.nuclei_target_path):
-                os.unlink(self.nuclei_target_path)
-            # 删除结果临时文件
-            if os.path.exists(self.nuclei_result_path):
-                os.unlink(self.nuclei_result_path)
-            # 安全清理自建模板物化目录
-            if self.custom_templates_path and os.path.exists(self.custom_templates_path):
-                shutil.rmtree(self.custom_templates_path, ignore_errors=True)
-            # 安全清理排除清单文件
-            if self.nuclei_exclude_file and os.path.exists(self.nuclei_exclude_file):
-                os.unlink(self.nuclei_exclude_file)
-        except Exception as e:
-            logger.warning(e)
+        paths = [(self.nuclei_target_path, False), (self.nuclei_result_path, False),
+                 (self.custom_templates_path, True), (self.nuclei_exclude_file, False)]
+        for path, is_directory in paths:
+            if not path:
+                continue
+            try:
+                if is_directory:
+                    shutil.rmtree(path)
+                else:
+                    os.unlink(path)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                # 一个路径清理失败时继续处理其余路径，并保留原扫描异常。
+                logger.warning(f"Failed to remove Nuclei temporary path {path}: {e}")
 
     def check_have_nuclei(self) -> bool:
         command = [self.nuclei_bin_path, "-version"]
@@ -217,7 +218,9 @@ class NucleiScan(object):
             command.insert(2, f"-t {self.custom_templates_path}")
 
         logger.info(" ".join(command))
-        utils.exec_system(command, timeout=15 * 24 * 60 * 60)
+        completed = utils.exec_system(command, timeout=15 * 24 * 60 * 60)
+        if completed.returncode != 0:
+            raise subprocess.CalledProcessError(completed.returncode, command)
 
     def run(self):
         if not self.check_have_nuclei():
@@ -225,11 +228,11 @@ class NucleiScan(object):
             return []
 
         self._check_json_flag()
-        self.exec_nuclei()
-        results = self.dump_result()
-        self._delete_file()
-
-        return results
+        try:
+            self.exec_nuclei()
+            return self.dump_result()
+        finally:
+            self._delete_file()
 
 
 def nuclei_scan(targets: list, options: dict = None):
