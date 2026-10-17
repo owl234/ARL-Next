@@ -127,7 +127,7 @@
 
     <div v-show="activeTab !== 'syslog'" style="margin-bottom: 16px;">
       <a-button style="margin-right: 16px;" @click="resetSearch">清空筛选条件</a-button>
-      <a-button :disabled="!hasSelected" style="margin-right: 16px;" @click="handleBatchDelete">批量删除</a-button>
+      <a-button v-if="canDeleteAssets" :disabled="!hasSelected" style="margin-right: 16px;" @click="handleBatchDelete">批量删除</a-button>
       <a-button v-if="tabConfig[effectiveTab]?.exportName" type="primary" style="margin-right: 16px;" @click="handleExport">导出{{ tabConfig[effectiveTab].exportName }}</a-button>
       <a-button v-if="activeTab === 'site'" type="primary" @click="openRiskModal">风险任务下发</a-button>
     </div>
@@ -136,7 +136,7 @@
     <a-table
         :sticky="stickyConfig"
         v-show="activeTab !== 'syslog'"
-        :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange }"
+        :row-selection="canDeleteAssets ? { selectedRowKeys: selectedRowKeys, onChange: onSelectChange } : null"
         :loading="loading"
         :dataSource="dataSource"
         :columns="columns"
@@ -144,7 +144,7 @@
         :scroll="pagination.pageSize >= 100 ? { y: 'calc(100vh - 380px)', x: 'max-content' } : { x: 'max-content' }"
         :virtual="pagination.pageSize >= 100"
         size="middle"
-        :rowKey="(record) => record._id || record.id"
+        :rowKey="getAssetRowKey"
     >
       <template #bodyCell="{ column, record, index }">
 
@@ -1097,8 +1097,8 @@ const tabConfig = reactive({
     ]
   },
   url: {
-    url: '/asset_url/',
-    deleteUrl: '/asset_url/delete/',
+    url: '/url/',
+    deleteUrl: '/url/delete/',
     exportUrl: '/url/export/',
     exportName: 'URL信息',
     searchFields: [
@@ -1179,8 +1179,8 @@ const tabConfig = reactive({
     ]
   },
   cip: {
-    url: '/asset_cip/',
-    deleteUrl: '/asset_cip/delete/',
+    url: '/cip/',
+    deleteUrl: '/cip/delete/',
     exportUrl: '/cip/export/',
     exportName: 'C段',
     searchFields: [
@@ -1216,8 +1216,7 @@ const tabConfig = reactive({
     ]
   },
   stat_finger: {
-    url: '/asset_stat_finger/',
-    deleteUrl: '/asset_stat_finger/delete/',
+    url: '/stat_finger/',
     searchFields: [
       { 
         label: 'finger', 
@@ -1265,6 +1264,14 @@ const tabConfig = reactive({
     ]
   }
 });
+
+// 指纹统计及全局 C 段均为聚合视图，没有可用于删除的记录 ID。
+const canDeleteAssets = computed(() => !!tabConfig[effectiveTab.value]?.deleteUrl && !(
+  effectiveTab.value === 'cip' && !taskId.value
+));
+const getAssetRowKey = (record) => record._id || record.id || (
+  effectiveTab.value === 'stat_finger' ? record.name : undefined
+);
 
 const tabCache = createTabStateCache({
   getStorageKey: () => taskId.value ? `ARL_TASK_TAB_STATE_${taskId.value}` : 'ARL_TASK_TAB_STATE_GLOBAL',
@@ -1383,7 +1390,7 @@ const handleBatchDelete = () => {
   }
 
   const config = tabConfig[effectiveTab.value];
-  if (!config || !config.deleteUrl) {
+  if (!config || !canDeleteAssets.value) {
     message.warning('当前资产类型暂不支持批量删除');
     return;
   }

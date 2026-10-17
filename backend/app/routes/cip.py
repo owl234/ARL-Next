@@ -1,6 +1,9 @@
+from bson import ObjectId
 from flask_restx import fields, Namespace
 import re
 from app.utils import get_logger, auth, conn_db as conn
+from app import utils
+from app.modules import ErrorMsg
 from . import base_query_fields, ARLResource, get_arl_parser
 
 ns = Namespace('cip', description="C段 ip 统计信息")
@@ -167,3 +170,25 @@ class ARLCIPExport(CIPResource):
         response = self.send_export_file(args=args, _type="cip")
 
         return response
+
+
+delete_result_fields = ns.model('deleteCipResult', {
+    '_id': fields.List(fields.String, required=True, description="待删除的记录 ID")
+})
+
+
+@ns.route('/delete/')
+class DeleteARLCIP(ARLResource):
+    @auth
+    @ns.expect(delete_result_fields, validate=True)
+    def post(self):
+        """删除任务 C 段结果。"""
+        args = self.parse_args(delete_result_fields)
+        id_list = args.get('_id') or []
+        # 先校验整批，避免无效 ID 导致前面的记录已被删除。
+        if not id_list or any(not ObjectId.is_valid(value) for value in id_list):
+            return utils.build_ret(
+                {"code": 999, "message": "请提供有效的记录 ID 列表"}, {'_id': id_list}
+            )
+        result = utils.conn_db('cip').delete_many({'_id': {'$in': [ObjectId(value) for value in id_list]}})
+        return utils.build_ret(ErrorMsg.Success, {'_id': id_list, 'deleted_count': result.deleted_count})
