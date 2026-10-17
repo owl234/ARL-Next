@@ -9,7 +9,9 @@ Includes zero-dependency fallback parser when PyYAML is unavailable.
 import os
 import re
 import logging
+import ipaddress
 from typing import List, Dict, Tuple, Optional, Any
+from urllib.parse import urlsplit
 
 try:
     import yaml
@@ -54,6 +56,84 @@ BUILTIN_SECRET_KEY_PATTERN = re.compile(
     r'(?i)(?:secret_?key|app_?secret|access_?secret|api_?secret|secret_?token|client_?secret|app_?key|private_?key)'
     r'\s*[:=]\s*[\'\"]([a-zA-Z0-9_\-]{20,80})[\'\"]'
 )
+
+BUILTIN_IP_PATTERN = re.compile(
+    r'(?<![\w.:])(?:[0-9a-fA-F]{0,4}:){2,8}[0-9a-fA-F.]{0,15}(?![\w:]|\.[\w.])'
+    r'|(?<![\w.:])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.[\w.])'
+)
+BUILTIN_URL_PATTERN = re.compile(r'''\bhttps?://[^\s'"`<>\\]+''', re.IGNORECASE)
+BUILTIN_PATH_PATTERN = re.compile(r'''(['"`])((?:/(?!/)|\./|\.\./)[^\s'"`<>\\]*)\1''')
+HOST_LABEL_PATTERN = re.compile(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?')
+BUILTIN_EXTRA_RULES = {"ip", "path", "domain_url", "ip_url"}
+
+
+def _extract_builtin_matches(rule_id: str, text: str):
+    if rule_id == "ip":
+        for match in BUILTIN_IP_PATTERN.finditer(text):
+            value = match.group(0)
+            if value.endswith("."):
+                value = value[:-1]
+            try:
+                ipaddress.ip_address(value)
+            except ValueError:
+                continue
+            yield value
+        return
+
+    # 只对这几类内置规则还原 JSON/JavaScript 中的转义斜杠。
+    text = text.replace(r"\/", "/")
+    if rule_id == "path":
+        for match in BUILTIN_PATH_PATTERN.finditer(text):
+            yield match.group(2)
+        return
+
+    for match in BUILTIN_URL_PATTERN.finditer(text):
+        value = match.group(0)
+        if match.end() == len(text) or text[match.end()] not in "'\"`":
+            # 去除正文中的句末标点和多余闭括号，保留 URL 内成对的括号。
+            brackets = {")": "(", "]": "[", "}": "{"}
+            excess = {right: value.count(right) - value.count(left) for right, left in brackets.items()}
+            end = len(value)
+            while end:
+                char = value[end - 1]
+                if char in ".,;":
+                    end -= 1
+                elif excess.get(char, 0) > 0:
+                    excess[char] -= 1
+                    end -= 1
+                else:
+                    break
+            value = value[:end]
+        try:
+            parsed = urlsplit(value)
+            host = parsed.hostname
+            _ = parsed.port  # 同时校验非数字端口和端口范围。
+        except ValueError:
+            continue
+        if not host:
+            continue
+        authority = parsed.netloc.rsplit("@", 1)[-1]
+        if authority.startswith("["):
+            try:
+                ipaddress.IPv6Address(host)
+            except ValueError:
+                continue
+            suffix = authority.partition("]")[2]
+            if suffix and not suffix.startswith(":"):
+                continue
+
+        try:
+            ipaddress.ip_address(host)
+            url_type = "ip_url"
+        except ValueError:
+            # 不依赖固定 TLD 清单，也不把无效 IPv4 地址归为域名。
+            domain = host.rstrip(".")
+            if (len(domain) > 253 or re.fullmatch(r'[\d.]+', domain)
+                    or not all(HOST_LABEL_PATTERN.fullmatch(label) for label in domain.split("."))):
+                continue
+            url_type = "domain_url"
+        if url_type == rule_id:
+            yield value
 
 
 class ExcludeRuleMatcher:
@@ -287,6 +367,15 @@ class WihRuleEngine:
                             if not self.is_excluded(rule_id, m_clean, target_site, source_url, source_tag):
                                 seen_matches.add(key)
                                 results.append(key)
+
+            # 自定义正则优先，未配置 pattern 时才使用其余内置规则。
+            elif rule_id in BUILTIN_EXTRA_RULES and compiled_re is None:
+                for m_clean in _extract_builtin_matches(rule_id, text):
+                    key = (rule_id, m_clean)
+                    if key not in seen_matches:
+                        if not self.is_excluded(rule_id, m_clean, target_site, source_url, source_tag):
+                            seen_matches.add(key)
+                            results.append(key)
 
             # 3. Custom Regex Rule
             elif compiled_re:
