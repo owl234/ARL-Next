@@ -1,8 +1,10 @@
+import wihApi from './wihApi.zh-CN.js';
 import pages from './pages.zh-CN.js';
 import assets from './assets.zh-CN.js';
 import tasks from './tasks.zh-CN.js';
 
 export default {
+  wihApi,
   pages,
   assets,
   tasks,

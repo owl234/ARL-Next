@@ -1,8 +1,10 @@
+import wihApi from './wihApi.ru-RU.js';
 import pages from './pages.ru-RU.js';
 import assets from './assets.ru-RU.js';
 import tasks from './tasks.ru-RU.js';
 
 export default {
+  wihApi,
   pages,
   assets,
   tasks,

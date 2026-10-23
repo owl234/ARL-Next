@@ -391,6 +391,13 @@
           </div>
         </template>
 
+        <template v-else-if="column.key === 'content' && activeTab === 'wih'">
+          <div class="wih-api-content">
+            <span>{{ record.content }}</span>
+            <div class="wih-api-actions"><a-button v-if="isApiEndpointRecord(record)" type="link" size="small" @click="showWihApiDetails(record)">{{ assetText('wihApi.viewDetails') }}</a-button></div>
+          </div>
+        </template>
+
         <template v-else-if="column.key === 'wih_site'">
           <div style="display: flex; align-items: center; gap: 8px;">
             <a :href="record.site" target="_blank" style="word-break: break-all;">
@@ -411,6 +418,8 @@
 
       </template>
     </a-table>
+
+    <WihApiDetailsDrawer v-model:open="wihApiDetailsOpen" :record="wihApiDetailsRecord" :context-key="route.fullPath + ':' + activeTab" />
 
     <!-- 综合C段详情弹窗 (提取为组件) -->
     <CidrDetailModal v-model:open="cipDetailModalVisible" :record="currentCidrRecord" />
@@ -498,11 +507,21 @@ import { buildAssetFilterParams, formatAssetFilterOperator } from '../utils/asse
 import { message } from 'ant-design-vue';
 import { SearchOutlined, UndoOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons-vue';
 import CidrDetailModal from '../components/CidrDetailModal.vue';
+import WihApiDetailsDrawer from '../components/WihApiDetailsDrawer.vue';
+import { isApiEndpointRecord } from '../utils/wihApi';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import { createTabStateCache } from '../utils/useTabStateCache';
 import { formatGeo } from '../utils/formatGeo';
 
 const { t: assetText, locale: assetLocale } = useI18n({ useScope: 'global' });
+
+const wihApiDetailsOpen = ref(false);
+const wihApiDetailsRecord = ref(null);
+const showWihApiDetails = record => {
+  if (!isApiEndpointRecord(record)) return;
+  wihApiDetailsRecord.value = record;
+  wihApiDetailsOpen.value = true;
+};
 
 const formatAssetTag = tag => {
   const label = typeof tag === 'string' ? tag : (tag?.name || tag?.tag_name || tag);
@@ -1272,6 +1291,9 @@ onDeactivated(() => {
 </script>
 
 <style scoped>
+.wih-api-content { display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.wih-api-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
 .asset-site-count :deep(.ant-badge-count) { background-color: #1890ff; color: #fff; cursor: pointer; border-radius: 4px; padding: 0 6px; font-size: 12px; }
 
 .asset-filter-operator { width: 85px; box-shadow: none; }

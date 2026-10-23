@@ -515,6 +515,13 @@
           </div>
         </template>
 
+        <template v-else-if="column.key === 'content' && activeTab === 'wih'">
+          <div class="wih-api-content">
+            <span>{{ record.content }}</span>
+            <div class="wih-api-actions"><a-button v-if="isApiEndpointRecord(record)" type="link" size="small" @click="showWihApiDetails(record)">{{ assetText('wihApi.viewDetails') }}</a-button></div>
+          </div>
+        </template>
+
         <template v-else-if="column.key === 'wih_site'">
           <div style="display: flex; align-items: center; gap: 8px;">
             <a :href="record.site" target="_blank" style="word-break: break-all;">
@@ -679,6 +686,8 @@
         </template>
       </a-table>
     </a-modal>
+
+    <WihApiDetailsDrawer v-model:open="wihApiDetailsOpen" :record="wihApiDetailsRecord" :context-key="route.fullPath + ':' + activeTab" />
 
     <!-- 综合C段详情弹窗 (提取为组件) -->
     <CidrDetailModal v-model:open="cipDetailModalVisible" :record="currentCidrRecord" />
@@ -965,6 +974,8 @@ import { formatGeo } from '../utils/formatGeo';
 import { message, Modal } from 'ant-design-vue';
 import dayjs from 'dayjs';
 import CidrDetailModal from '../components/CidrDetailModal.vue';
+import WihApiDetailsDrawer from '../components/WihApiDetailsDrawer.vue';
+import { isApiEndpointRecord } from '../utils/wihApi';
 import ServiceDetailModal from '../components/ServiceDetailModal.vue';
 import EnterpriseOsintPanel from '../components/EnterpriseOsintPanel.vue';
 import ChainDrawer from '../components/ChainDrawer.vue';
@@ -998,6 +1009,14 @@ import { formatTaskStatus, formatTaskStatusColor } from '../constants/taskStatus
 import { createTabStateCache } from '../utils/useTabStateCache';
 
 const { t: assetText, locale: assetLocale } = useI18n({ useScope: 'global' });
+
+const wihApiDetailsOpen = ref(false);
+const wihApiDetailsRecord = ref(null);
+const showWihApiDetails = record => {
+  if (!isApiEndpointRecord(record)) return;
+  wihApiDetailsRecord.value = record;
+  wihApiDetailsOpen.value = true;
+};
 
 const route = useRoute();
 const router = useRouter();
@@ -2425,6 +2444,9 @@ onDeactivated(() => {
 </script>
 
 <style scoped>
+.wih-api-content { display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.wih-api-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
 .hero-left-section-wide { flex-wrap: wrap; row-gap: 6px; overflow: visible; }
 .filter-field-label.filter-field-label-wide { width: 112px; white-space: normal; overflow: visible; text-overflow: clip; }
 .asset-increment-badge :deep(.ant-badge-count) { background-color: #52c41a; font-size: 10px; }

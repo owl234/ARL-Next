@@ -7,6 +7,8 @@ import { parse, compileScript, babelParse } from 'vue/compiler-sfc';
 import { i18n } from '../src/i18n/index.js';
 import zh from '../src/i18n/tasks.zh-CN.js';
 import en from '../src/i18n/tasks.en-US.js';
+import allZh from '../src/i18n/zh-CN.js';
+import allEn from '../src/i18n/en-US.js';
 import { TASK_STATUS_LABEL, PLUGIN_NAME_MAP, formatTaskStatus, formatTaskStatusColor } from '../src/constants/taskStatus.js';
 import { buildAssetFilterParams, formatAssetFilterOperator } from '../src/utils/assetFilters.js';
 import { describeTaskFanout } from '../src/utils/targetParse.js';
@@ -61,10 +63,10 @@ test('任务组件的翻译引用及插值参数与语言包一致', () => {
     const check = node => {
       if (!node || typeof node !== 'object') return;
       if (node.type === 'CallExpression' && node.callee.name === 'taskText' && node.arguments[0].type === 'StringLiteral') {
-        const key = node.arguments[0].value?.replace(/^tasks\./, '');
-        assert.equal(typeof zh[key], 'string', `${file}: ${key}`);
-        assert.equal(typeof en[key], 'string', `${file}: ${key}`);
-        const expected = [...new Set([...en[key].matchAll(/\{(\w+)\}/g)].map(([, name]) => name))].sort();
+        const key = node.arguments[0].value;
+        const messages = [allZh, allEn].map(bundle => key.split('.').reduce((value, part) => value?.[part], bundle));
+        for (const message of messages) assert.equal(typeof message, 'string', `${file}: ${key}`);
+        const expected = [...new Set([...messages[1].matchAll(/\{(\w+)\}/g)].map(([, name]) => name))].sort();
         const actual = (node.arguments[1]?.properties || []).map(property => property.key.name).sort();
         assert.deepEqual(actual, expected, `${file}: ${key}`);
       }

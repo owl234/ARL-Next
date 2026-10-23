@@ -247,3 +247,15 @@ The site, URL, and file leak lists in Global Asset Search, Task Details, and Ass
 > - `999` is a generic parameter-validation code; read `message` and `data.error` for the specific cause.
 > - Clients should always keep a `default` branch in `switch/if` handling to avoid silently ignoring unmapped codes.
 > - Error codes are not yet fully unified between task and enterprise-task endpoints (for example, enterprise task deletion may return `400` when the task is active); always verify against `/api/doc` and actual responses.
+
+### WIH API request and response details
+
+WIH lists in task details, global asset search and asset-group details provide an API details action for `record_type=api_endpoint`. All three views share one drawer, using the `api_request` and `api_request.probe` metadata already returned by the list. Opening it does not request the endpoint, capture a screenshot or rerun a probe.
+
+- Request details preserve the original path, resolved URL, method, site, script source, client and line within the script.
+- Not collected, HTTP response received, request failed and skipped are separate states. Statuses including 401, 403, 404 and 5xx remain HTTP observations and do not establish endpoint validity, unauthenticated access or a vulnerability.
+- The last HTTP response URL and last attempted URL are shown separately, alongside redirect history, stop reasons, errors, collection time and duration. A failed later hop does not verify its destination.
+- Headers and body previews are displayed as plain text and can be copied without executing HTML or scripts. Incomplete reads, truncation, empty bodies, HEAD and skipped body types have separate notices. Copying a preview does not fetch the full body.
+- Legacy records retain their content and source without inferring methods or reachability. Changing task, asset group or tab, or leaving the view, closes the drawer to avoid mixing record contexts. Labels follow Chinese, English or Russian preferences; raw responses and sources remain unchanged.
+
+Existing list queries, filters, counts, exports, deletion permissions and scans are unchanged. No historical migration is required.

@@ -491,14 +491,19 @@
         </template>
 
         <template v-else-if="column.key === 'content' && activeTab === 'wih'">
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <span style="word-break: break-all;">{{ record.content }}</span>
-            <a-button type="link" size="small" class="task-icon-action" @click="copyText(record.content)">{{ taskText('tasks.copy') }}</a-button>
+          <div class="wih-api-content">
+            <span>{{ record.content }}</span>
+            <div class="wih-api-actions">
+              <a-button v-if="isApiEndpointRecord(record)" type="link" size="small" @click="showWihApiDetails(record)">{{ taskText('wihApi.viewDetails') }}</a-button>
+              <a-button type="link" size="small" class="task-icon-action" @click="copyText(record.content)">{{ taskText('tasks.copy') }}</a-button>
+            </div>
           </div>
         </template>
 
       </template>
     </a-table>
+
+    <WihApiDetailsDrawer v-model:open="wihApiDetailsOpen" :record="wihApiDetailsRecord" :context-key="route.fullPath + ':' + activeTab" />
 
     <!-- 综合C段详情弹窗 (提取为组件) -->
     <CidrDetailModal v-model:open="cipDetailModalVisible" :record="currentCidrRecord" />
@@ -636,6 +641,8 @@ import {
   CloseOutlined
 } from '@ant-design/icons-vue';
 import CidrDetailModal from '../components/CidrDetailModal.vue';
+import WihApiDetailsDrawer from '../components/WihApiDetailsDrawer.vue';
+import { isApiEndpointRecord } from '../utils/wihApi';
 import ServiceDetailModal from '../components/ServiceDetailModal.vue';
 import EnterpriseTaskDetailPanel from '../components/EnterpriseTaskDetailPanel.vue';
 import { useSticky } from '../utils/useSticky';
@@ -645,6 +652,14 @@ import { createTabStateCache } from '../utils/useTabStateCache';
 import { formatGeo } from '../utils/formatGeo';
 
 const { t: taskText, locale: taskLocale } = useI18n({ useScope: 'global' });
+
+const wihApiDetailsOpen = ref(false);
+const wihApiDetailsRecord = ref(null);
+const showWihApiDetails = record => {
+  if (!isApiEndpointRecord(record)) return;
+  wihApiDetailsRecord.value = record;
+  wihApiDetailsOpen.value = true;
+};
 
 // 更新差异弹窗状态
 const diffModalVisible = ref(false);
@@ -1828,6 +1843,9 @@ onDeactivated(() => {
 </script>
 
 <style scoped>
+.wih-api-content { display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.wih-api-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
 .task-option-heading { font-weight: 600; font-size: 13px; color: var(--arl-text-color); }
 .task-spaced-option { margin-right: 16px; }
 .task-clickable { cursor: pointer; }
