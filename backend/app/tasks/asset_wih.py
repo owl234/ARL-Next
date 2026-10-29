@@ -2,7 +2,7 @@ import time
 from app import utils
 from app.modules import TaskStatus
 from app.utils import get_logger
-from app.services.commonTask import CommonTask
+from app.services.commonTask import CommonTask, TaskHeartbeat
 from app.services import BaseUpdateTask, domain_site_update, sync_asset
 from app.services.asset_wih_monitor import asset_wih_monitor
 from app.helpers.asset_domain import find_domain_by_scope_id
@@ -23,19 +23,20 @@ class AssetWihUpdateTask(CommonTask):
         self._scope_sub_domains = None
 
     def run(self):
-        logger.info("run AssetWihUpdateTask, task_id:{} scope_id: {}".format(self.task_id, self.scope_id))
-        self.run_wih_monitor()
+        with TaskHeartbeat(self.task_id, interval=60):
+            logger.info("run AssetWihUpdateTask, task_id:{} scope_id: {}".format(self.task_id, self.scope_id))
+            self.run_wih_monitor()
 
-        self.wih_results_save()
+            self.wih_results_save()
 
-        if self.wih_results:
-            self.run_wih_domain_update()
-            self.notify_push()
+            if self.wih_results:
+                self.run_wih_domain_update()
+                self.notify_push()
 
-        # 插入统计信息
-        self.insert_stat()
+            # 插入统计信息
+            self.insert_stat()
 
-        logger.info("end AssetWihUpdateTask, task_id:{} results: {}".format(self.task_id, len(self.wih_results)))
+            logger.info("end AssetWihUpdateTask, task_id:{} results: {}".format(self.task_id, len(self.wih_results)))
 
     def notify_push(self):
         try:
