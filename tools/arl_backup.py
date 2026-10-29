@@ -185,7 +185,7 @@ def main():
         backups = list_all_backups()
         running_tasks = get_running_task_count()
         print("\n" + "=" * 75)
-        print(f"🗂️  ARL-Next 现存备份清单 (当前进行中任务: {running_tasks} 个)")
+        print(f"🗂️  ARL-Next 现存备份清单 (运行中及排队中的任务: {running_tasks} 个)")
         print("=" * 75)
         if not backups:
             print("暂无任何备份文件。您可以使用 'python3 tools/arl_backup.py backup' 创建首个备份。")

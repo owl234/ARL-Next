@@ -16,7 +16,8 @@ from app.services.backup_service import (
     read_archive_manifest,
     get_backup_dir,
     get_running_task_count,
-    progress_tracker
+    progress_tracker,
+    reserve_backup_operation,
 )
 
 ns = Namespace("backup", description="系统全量数据备份与恢复 API")
@@ -28,8 +29,37 @@ create_backup_model = ns.model('CreateBackup', {
 
 restore_model = ns.model('RestoreBackup', {
     'filename': fields.String(required=True, description='备份归档文件名'),
-    'force': fields.Boolean(default=False, description='若存在运行中任务，是否强制终止并继续恢复')
+    'force': fields.Boolean(default=False, description='是否终止运行中及排队中的任务并继续恢复')
 })
+
+
+def start_backup_job(func, **kwargs):
+    try:
+        operation_lock = reserve_backup_operation()
+    except RuntimeError:
+        return {'code': 409, 'message': '已有备份或恢复正在执行'}, 409
+
+    def run():
+        try:
+            func(**kwargs, _operation_lock=operation_lock)
+        except Exception:
+            pass  # The service records the operation's error for /status.
+        finally:
+            operation_lock.release()
+
+    try:
+        threading.Thread(target=run, daemon=True).start()
+    except BaseException:
+        operation_lock.release()
+        raise
+    return None
+
+
+def backup_request_data():
+    data = request.get_json(silent=True)
+    if data is None and not request.content_length:
+        return {}
+    return data if isinstance(data, dict) else None
 
 
 @ns.route('/create')
@@ -40,27 +70,18 @@ class CreateBackup(ARLResource):
         """
         异步触发一键全量备份
         """
-        state = progress_tracker.get_state()
-        if state["status"] in ["backing_up", "restoring"]:
-            return {
-                "code": 409,
-                "message": f"当前已有进行中的任务 ({state['action']})，请等待其完成后再发起。",
-                "data": state
-            }
-
-        data = request.json or {}
+        data = backup_request_data()
+        if data is None:
+            return {'code': 400, 'message': '请求体必须为 JSON 对象'}, 400
         include_screenshots = data.get('include_screenshots', True)
         note = data.get('note', '')
+        if type(include_screenshots) is not bool or not isinstance(note, str) or len(note) > 80:
+            return {'code': 400, 'message': 'include_screenshots 必须为布尔值，note 必须为不超过 80 字的字符串'}, 400
 
         # 启动后台异步线程执行备份，避免超大备份包耗时过长导致网关 HTTP 504 超时
-        def run_backup_async():
-            try:
-                create_backup_archive(include_screenshots=include_screenshots, note=note)
-            except Exception:
-                pass
-
-        thread = threading.Thread(target=run_backup_async, daemon=True)
-        thread.start()
+        conflict = start_backup_job(create_backup_archive, include_screenshots=include_screenshots, note=note)
+        if conflict:
+            return conflict
 
         return {
             "code": 200,
@@ -218,17 +239,13 @@ class RestoreBackup(ARLResource):
         """
         异步触发一键全量恢复
         """
-        state = progress_tracker.get_state()
-        if state["status"] in ["backing_up", "restoring"]:
-            return {
-                "code": 409,
-                "message": f"当前已有进行中的任务 ({state['action']})，请等待其完成后再发起。",
-                "data": state
-            }
-
-        data = request.json or {}
+        data = backup_request_data()
+        if data is None:
+            return {'code': 400, 'message': '请求体必须为 JSON 对象'}, 400
         filename = data.get('filename')
         force = data.get('force', False)
+        if type(force) is not bool:
+            return {'code': 400, 'message': 'force 必须为布尔值'}, 400
 
         if (not isinstance(filename, str) or filename != os.path.basename(filename)
                 or not filename.startswith('arl_backup_') or not filename.endswith('.tar.gz')):
@@ -246,7 +263,7 @@ class RestoreBackup(ARLResource):
         if running_tasks > 0 and not force:
             return {
                 "code": 409,
-                "message": f"系统当前有 {running_tasks} 个正在进行的扫描任务，执行覆盖恢复将中断这些任务。",
+                "message": f"系统当前有 {running_tasks} 个运行中或排队中的任务，执行覆盖恢复将终止这些任务。",
                 "data": {
                     "running_tasks": running_tasks,
                     "require_force": True
@@ -254,14 +271,9 @@ class RestoreBackup(ARLResource):
             }
 
         # 启动后台异步线程执行恢复
-        def run_restore_async():
-            try:
-                restore_backup_archive(archive_path=archive_path, force=force)
-            except Exception:
-                pass
-
-        thread = threading.Thread(target=run_restore_async, daemon=True)
-        thread.start()
+        conflict = start_backup_job(restore_backup_archive, archive_path=archive_path, force=force)
+        if conflict:
+            return conflict
 
         return {
             "code": 200,

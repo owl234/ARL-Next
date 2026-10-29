@@ -238,6 +238,7 @@ def create_index():
                     conn_db('mcp_key').create_index([("key_hash", 1)], unique=True, background=True)
                     conn_db('mcp_key').create_index([("status", 1)], background=True)
                     conn_db('mcp_key').create_index([("created_at", -1)], background=True)
+                    conn_db('mcp_rate_limit').create_index('expire_at', expireAfterSeconds=0, background=True)
                 except Exception as mcp_ex:
                     logging.getLogger().warning(f"Failed to create mcp indexes: {mcp_ex}")
 
@@ -1275,6 +1276,7 @@ def ensure_mcp_governance_schema():
             {"$setOnInsert": {
                 "tool_switches": {
                     "get_asset_profile": True,
+                    "get_enterprise_profile": True,
                     "search_assets": True,
                     "get_task_status": True,
                     "create_scan_task": False,

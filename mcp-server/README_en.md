@@ -171,7 +171,7 @@ Once connected, interact with your AI Agent using natural language:
 ### Q3: Task dispatch returns `Task dispatching is disabled on this MCP server`
 - **🔴 Symptom**: Calling `create_scan_task` or `stop_scan_task` is rejected.
 - **🔍 Root Cause**: Security safeguard. ARL-Next MCP defaults to read-only mode to prevent agents from unintentionally flooding the scan queue.
-- **⚡ Solution**: Server administrators can enable dispatching by setting `ARL_MCP_ENABLE_DISPATCH=true` in `docker-compose.prod.yml` under `arl-mcp`, then restarting with `docker compose -f docker-compose.prod.yml up -d arl-mcp`.
+- **⚡ Fix**: Enable the tool in the MCP Governance Center and grant the key `task:dispatch`. Discovery and execution use saved switches immediately; `ARL_MCP_ENABLE_DISPATCH` provides a default only when no corresponding switch is saved.
 
 ### Q4: Remote SSE connection frequently disconnects or returns `504 Gateway Timeout`
 - **🔴 Symptom**: Connection terminates unexpectedly after several minutes, or streaming requests time out.

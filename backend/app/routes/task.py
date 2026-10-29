@@ -334,8 +334,9 @@ def stop_task(task_id):
         control.revoke(celery_id, signal='SIGTERM', terminate=True)
     except Exception as e:
         logger.error(f"Failed to revoke celery task {celery_id} for task {task_id}: {e}")
+        return utils.build_ret(ErrorMsg.Error, {"task_id": task_id, "error": "任务终止指令发送失败，请重试"})
 
-    # 6. 打扫战场：不管工人死没死透，在数据库里强制把任务状态改成 "已停止 (STOP)"，并记录结束时间
+    # 6. 终止指令成功发送后，记录已停止状态和结束时间。
     # $set 是 MongoDB 专属语法，代表只更新这两个指定的字段，不影响其他字段
     update_data = {"$set": {"status": TaskStatus.STOP, "end_time": utils.curr_date()}}
     utils.conn_db('task').update_one({'_id': ObjectId(task_id)}, update_data)

@@ -321,6 +321,7 @@ import { extractDominantColor, processImageToBase64, dbHelper } from '@/utils/th
 import { message, Modal } from 'ant-design-vue';
 import SupportAuthorPopover from '@/components/SupportAuthorPopover.vue';
 import { copyText } from '@/utils/clipboard';
+import { createStdioServerConfig } from '@/utils/mcpCredentials';
 import Sortable from 'sortablejs';
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue';
 
@@ -834,12 +835,7 @@ const updateMcpConfigJson = () => {
     mcpConfigJson.value = jsonStr.substring(2, jsonStr.length - 2).trim();
   } else {
     const stdioConfig = {
-      "arl-next": {
-        "command": "python3",
-        "args": [
-          "~/Downloads/arl_mcp.py"
-        ]
-      }
+      "arl-next": createStdioServerConfig()
     };
     const jsonStr = JSON.stringify(stdioConfig, null, 2);
     mcpConfigJson.value = jsonStr.substring(2, jsonStr.length - 2).trim();

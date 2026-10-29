@@ -432,13 +432,13 @@ def build_enterprise_profile(target: str, category: str = "all", page: int = 1, 
         return {"code": 400, "status": "error", "message": f"Unsupported category '{category}'. Allowed: {sorted(list(allowed_categories))}"}
 
     try:
-        page = max(1, int(page or 1))
-    except (ValueError, TypeError):
+        page = min(2_147_483_647, max(1, int(page or 1)))
+    except (ValueError, TypeError, OverflowError):
         page = 1
 
     try:
         size = min(max(1, int(size or 20)), 100)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         size = 20
 
     if not target and not task_id:
@@ -446,11 +446,12 @@ def build_enterprise_profile(target: str, category: str = "all", page: int = 1, 
 
     # 1. 任务/标的解析与定位
     task_doc = None
-    if task_id and len(task_id) == 24:
-        try:
-            task_doc = utils.conn_db('icp_task').find_one({"_id": ObjectId(task_id)})
-        except Exception:
-            task_doc = None
+    if task_id:
+        if not ObjectId.is_valid(task_id):
+            return {'code': 400, 'status': 'error', 'message': 'Invalid enterprise task_id'}
+        task_doc = utils.conn_db('icp_task').find_one({'_id': ObjectId(task_id)})
+        if not task_doc:
+            return {'status': 'not_found', 'task_id': task_id, 'message': 'Enterprise task not found'}
 
     if not task_doc:
         # 1a. 检查 target 是否为域名/URL（如 qq.com，自动反查归属企业主体）
@@ -762,4 +763,3 @@ def build_enterprise_profile(target: str, category: str = "all", page: int = 1, 
         "tip": f"已返回第 {page} 页数据（共 {total} 条）。若需探测特定资产技术暴露面，可调用 get_asset_profile(target='...')"
     }
     return _clean_empty(detail_result)
-

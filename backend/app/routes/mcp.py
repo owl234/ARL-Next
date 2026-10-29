@@ -5,12 +5,20 @@ from flask_restx import Resource, Namespace
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
 import csv
+from functools import wraps
 import io
 import json
+import time
+import math
+import re
 from urllib.parse import urlsplit
 
 from app.utils import get_logger, auth
 from app import utils
+from app.mcp_security import (
+    MCPRequestError, authenticate_mcp_token, authorize_tool,
+    consume_mcp_quota, load_mcp_policy, record_mcp_audit, READ_TOOLS, WRITE_TOOLS,
+)
 
 ns = Namespace('mcp', description="MCP API 接口")
 logger = get_logger()
@@ -32,7 +40,7 @@ def _build_mcp_logs_query(tool_name='', status='', target='', key_id='', time_ra
         else:
             query["status"] = status
     if target:
-        query["target"] = {"$regex": target, "$options": "i"}
+        query["target"] = {"$regex": re.escape(target), "$options": "i"}
     if key_id:
         query["key_id"] = key_id
     if time_range:
@@ -99,7 +107,7 @@ class MCPTaskDetailExport(Resource):
                     flat_item['开放端口'] = " ".join([str(p.get('port_id', '')) for p in v if 'port_id' in p])
                 elif tab == 'ip' and k == 'geo_city' and isinstance(v, dict):
                     parts = [p for p in [v.get('country_name'), v.get('region_name'), v.get('city')] if p and p not in ('None', 'null', '0')]
-                    clean_p = []
+                    clean_p: list[str] = []
                     for item_p in parts:
                         if not clean_p or clean_p[-1] != item_p:
                             clean_p.append(item_p)
@@ -124,7 +132,7 @@ class MCPTaskDetailExport(Resource):
         if columns:
             headers = columns
         else:
-            headers_set = set()
+            headers_set: set[str] = set()
             for flat_item in flattened_items:
                 headers_set.update(flat_item.keys())
             headers = sorted(list(headers_set))
@@ -142,25 +150,59 @@ class MCPTaskDetailExport(Resource):
 from app.mcp_asset import build_asset_profile, build_enterprise_profile, _clean_empty
 
 
+def mcp_readonly(tool_name):
+    """Apply the same credential, policy, quota and audit checks to both profiles."""
+    def decorate(func):
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            token = request.headers.get('Token') or request.headers.get('Authorization', '')
+            user = authenticate_mcp_token(token)
+            if not user:
+                return {'code': 401, 'message': 'Invalid or expired MCP credential'}, 401
+            user['client_ip'] = request.headers.get('X-Real-IP') or request.remote_addr or ''
+            arguments = request.args.to_dict()
+            target = arguments.get('target', '').strip() or arguments.get('task_id', '').strip()
+            started = time.monotonic()
+            result, is_error = {}, True
+            audit_call = True
+            try:
+                policy = load_mcp_policy()
+                consume_mcp_quota(user, policy)
+                authorize_tool(user, tool_name, policy)
+                response = func(*args, **kwargs)
+                result = response[0] if isinstance(response, tuple) else response
+                is_error = result.get('status') in ('error', 'auth_error') or result.get('code', 200) != 200
+                return response
+            except MCPRequestError as error:
+                audit_call = error.audit
+                headers = {'Retry-After': str(error.retry_after)} if error.retry_after is not None else {}
+                result = {'code': error.status, 'status': 'denied', 'message': str(error)}
+                return result, error.status, headers
+            except Exception:
+                result = {'code': 500, 'message': 'MCP profile lookup failed'}
+                raise
+            finally:
+                if audit_call:
+                    record_mcp_audit(user, tool_name, target, arguments, result, is_error,
+                                     int((time.monotonic() - started) * 1000))
+        return wrapped
+    return decorate
+
+
 @ns.route('/asset_profile')
 class MCPAssetProfile(Resource):
-    @auth
+    @mcp_readonly('get_asset_profile')
     def get(self):
-        """
-        MCP 资产画像接口（站点/IP/子域名维度聚合，按需裁剪字段以收敛上下文开销）
-        """
         target = request.args.get('target', '').strip()
         task_id = request.args.get('task_id', '').strip()
         if not target:
-            return {"code": 400, "message": "Missing target parameter"}, 400
-
-        data = build_asset_profile(target, task_id)
-        return data
+            return {'code': 400, 'message': 'Missing target parameter'}, 400
+        return build_asset_profile(target, task_id)
 
 
 @ns.route('/enterprise_profile')
 class MCPEnterpriseProfile(Resource):
-    @auth
+    @mcp_readonly('get_enterprise_profile')
     def get(self):
         """
         MCP 企业生态资产画像接口（自适应识别企业、总览指标、核心样本与分维度下钻）
@@ -180,6 +222,10 @@ class MCPEnterpriseProfile(Resource):
 
 @ns.route('/export_server')
 class MCPExportServer(Resource):
+    @auth
+    def post(self):
+        return self.get()
+
     @auth
     def get(self):
         """
@@ -215,7 +261,11 @@ class MCPExportServer(Resource):
         # 2. 浏览器 Origin / Referer 请求头
         # 3. 反向代理头 X-Forwarded-Host / Host 与 X-Forwarded-Proto
         # 4. request.host_url
-        req_host = request.args.get("host", "").strip()
+        export_args = request.get_json(silent=True) if request.method == 'POST' else request.args
+        if ((request.method == 'POST' and not isinstance(export_args, dict))
+                or (request.method == 'GET' and 'raw_key' in request.args)):
+            return {'code': 400, 'message': 'Send dedicated MCP credentials in a POST JSON body'}, 400
+        req_host = str(export_args.get("host", "")).strip()
         if req_host:
             host = req_host.rstrip("/")
         else:
@@ -248,7 +298,11 @@ class MCPExportServer(Resource):
             return {'code': 400, 'message': 'Invalid server origin'}, 400
 
         # Serialize values as Python-compatible JSON string literals, never source.
-        raw_key = request.args.get("raw_key", "").strip()
+        raw_key = str(export_args.get("raw_key", "")).strip() if request.method == 'POST' else ''
+        if request.method == 'POST' and 'raw_key' in export_args:
+            identity = authenticate_mcp_token(raw_key)
+            if not identity or identity.get('type') != 'mcp_key' or 'asset:read' not in identity.get('scopes', []):
+                return {'code': 400, 'message': 'A complete, active MCP key with asset:read scope is required'}, 400
         effective_token = raw_key or user_token
         if effective_token:
             content = content.replace('DEFAULT_TOKEN = ""', 'DEFAULT_TOKEN = ' + json.dumps(effective_token))
@@ -344,12 +398,13 @@ class MCPKeys(Resource):
             page = 1
             size = 10
             keyword = ''
+        page, size = min(2_147_483_647, max(1, page)), min(100, max(1, size))
 
         query = {}
         if keyword:
             query["$or"] = [
-                {"name": {"$regex": keyword, "$options": "i"}},
-                {"key_prefix": {"$regex": keyword, "$options": "i"}}
+                {"name": {"$regex": re.escape(keyword), "$options": "i"}},
+                {"key_prefix": {"$regex": re.escape(keyword), "$options": "i"}}
             ]
 
         total = utils.conn_db('mcp_key').count_documents(query)
@@ -397,7 +452,9 @@ class MCPKeys(Resource):
         import secrets
         import hashlib
         from datetime import datetime, timedelta, timezone
-        data = request.json or {}
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return {'code': 400, 'message': 'Expected a JSON object'}, 400
         name = str(data.get("name", "")).strip()
         if not name:
             return {"code": 400, "message": "Key name is required"}, 400
@@ -405,13 +462,19 @@ class MCPKeys(Resource):
             return {"code": 400, "message": "Key name is too long (max 50 chars)"}, 400
 
         scopes = data.get("scopes", ["asset:read"])
-        if not isinstance(scopes, list) or not scopes:
-            scopes = ["asset:read"]
+        if (not isinstance(scopes, list) or not scopes
+                or any(scope not in ('asset:read', 'task:dispatch') for scope in scopes)):
+            return {'code': 400, 'message': 'Choose valid, nonempty MCP scopes'}, 400
 
         expire_days = data.get("expire_days", 0)
         expire_at = None
-        if isinstance(expire_days, (int, float)) and expire_days > 0:
-            expire_at = datetime.now(timezone.utc) + timedelta(days=expire_days)
+        now = datetime.now(timezone.utc)
+        max_days = (datetime.max.replace(tzinfo=timezone.utc) - now).days
+        if (type(expire_days) not in (int, float) or expire_days < 0 or expire_days > max_days
+                or (isinstance(expire_days, float) and not math.isfinite(expire_days))):
+            return {'code': 400, 'message': 'Invalid expire_days'}, 400
+        if expire_days > 0:
+            expire_at = now + timedelta(days=expire_days)
 
         # 生成安全随机密钥
         raw_token = secrets.token_urlsafe(24)
@@ -462,11 +525,13 @@ class MCPKeyStatus(Resource):
     @auth
     def post(self, key_id):
         """变更 API Key 状态（启用/停用/吊销）"""
-        if not key_id or len(key_id) != 24:
+        if not ObjectId.is_valid(key_id):
             return {"code": 400, "message": "Invalid key_id"}, 400
 
         from datetime import datetime, timezone
-        data = request.json or {}
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return {'code': 400, 'message': 'Expected a JSON object'}, 400
         new_status = data.get("status")
         if new_status not in ("active", "revoked"):
             return {"code": 400, "message": "Invalid status. Allowed: active, revoked"}, 400
@@ -486,7 +551,7 @@ class MCPKeyDelete(Resource):
     @auth
     def delete(self, key_id):
         """删除指定 API Key"""
-        if not key_id or len(key_id) != 24:
+        if not ObjectId.is_valid(key_id):
             return {"code": 400, "message": "Invalid key_id"}, 400
 
         res = utils.conn_db('mcp_key').delete_one({"_id": ObjectId(key_id)})
@@ -507,6 +572,7 @@ class MCPLogs(Resource):
         except ValueError:
             page = 1
             size = 10
+        page, size = min(2_147_483_647, max(1, page)), min(100, max(1, size))
 
         tool_name = request.args.get('tool_name', '').strip()
         status = request.args.get('status', '').strip()
@@ -628,19 +694,33 @@ class MCPConfig(Resource):
     def post(self):
         """保存 MCP 全局配置与工具开关"""
         from datetime import datetime
-        data = request.json or {}
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return {'code': 400, 'message': 'Expected a JSON object'}, 400
         tool_switches = data.get("tool_switches")
         max_search_limit = data.get("max_search_limit")
         rate_limit_per_min = data.get("rate_limit_per_min")
 
-        update_set = {"updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        if isinstance(tool_switches, dict):
-            update_set["tool_switches"] = tool_switches
-        if isinstance(max_search_limit, int) and 1 <= max_search_limit <= 200:
-            update_set["max_search_limit"] = max_search_limit
-        if isinstance(rate_limit_per_min, int) and 10 <= rate_limit_per_min <= 1000:
-            update_set["rate_limit_per_min"] = rate_limit_per_min
+        update_set: dict[str, object] = {"updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        if 'tool_switches' in data:
+            if (not isinstance(tool_switches, dict) or any(
+                    name not in READ_TOOLS | WRITE_TOOLS or type(value) is not bool
+                    for name, value in tool_switches.items())):
+                return {'code': 400, 'message': 'Tool switches must be known tools with boolean values'}, 400
+            update_set.update({f'tool_switches.{name}': value for name, value in tool_switches.items()})
+        for name, value, lower, upper in (('max_search_limit', max_search_limit, 1, 200),
+                                         ('rate_limit_per_min', rate_limit_per_min, 10, 1000)):
+            if name in data:
+                if type(value) is not int or not lower <= value <= upper:
+                    return {'code': 400, 'message': f'Invalid {name}'}, 400
+                update_set[name] = value
 
+        # Initialize once, then update only supplied fields. Replacing the
+        # switch object would erase previously disabled tools on partial saves.
+        utils.conn_db('mcp_config').update_one({'_id': 'global'}, {'$setOnInsert': {
+            'tool_switches': {name: name in READ_TOOLS for name in READ_TOOLS | WRITE_TOOLS},
+            'max_search_limit': 50, 'rate_limit_per_min': 120,
+        }}, upsert=True)
         utils.conn_db('mcp_config').update_one(
             {"_id": "global"},
             {"$set": update_set},

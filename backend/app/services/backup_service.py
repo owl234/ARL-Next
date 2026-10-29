@@ -10,6 +10,8 @@ import logging
 import threading
 import subprocess
 import tempfile
+from collections import deque
+from functools import wraps
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
@@ -17,6 +19,7 @@ from urllib.parse import urlparse
 from app.config import Config, basedir, clear_system_config_cache, bump_system_config_version
 from app.utils.conn import ConnMongo
 from .backup_archive import read_manifest, stage_restore, install_staged, regular_backup_member
+from .backup_workers import RestoreWorkers, BackupOperationLock
 
 logger = logging.getLogger('arlv2')
 
@@ -27,6 +30,13 @@ class BackupProgressTracker:
     跨 Gunicorn 多 Worker 进程持久化的进度管理器。
     将状态原子写入 /tmp/arl_backup_status.json，避免多进程内存隔离导致状态读取不一致。
     """
+    start_time: Optional[float]
+    end_time: Optional[float]
+    logs: List[str]
+    error: Optional[str]
+    result: Optional[Dict[str, Any]]
+    archive_name: Optional[str]
+
     def __init__(self):
         self._lock = threading.Lock()
         # 初始化时优先从磁盘读取现有状态，若有正在运行的任务则继承；终态则进入 idle
@@ -69,12 +79,12 @@ class BackupProgressTracker:
             self.action = None    # backup | restore
             self.stage = ""
             self.percent = 0
-            self.start_time: Optional[float] = None
-            self.end_time: Optional[float] = None
-            self.logs: List[str] = []
-            self.error: Optional[str] = None
-            self.result: Optional[Dict[str, Any]] = None
-            self.archive_name: Optional[str] = None
+            self.start_time = None
+            self.end_time = None
+            self.logs = []
+            self.error = None
+            self.result = None
+            self.archive_name = None
             if save_disk:
                 self._save_to_disk(self._build_dict())
 
@@ -118,6 +128,7 @@ class BackupProgressTracker:
             if log_msg:
                 timestamp = datetime.now().strftime('%H:%M:%S')
                 self.logs.append(f"[{timestamp}] {log_msg}")
+                self.logs = self.logs[-50:]
                 logger.info(f"[BackupService] {log_msg}")
             self._save_to_disk(self._build_dict())
 
@@ -166,6 +177,19 @@ class BackupProgressTracker:
 
 progress_tracker = BackupProgressTracker()
 _task_lock = threading.Lock()
+
+
+def reserve_backup_operation():
+    return BackupOperationLock(os.path.join(get_backup_dir(), '.operation.lock')).acquire()
+
+
+def exclusive_backup_operation(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        operation_lock = kwargs.pop('_operation_lock', None) or reserve_backup_operation()
+        with operation_lock:
+            return func(*args, **kwargs)
+    return wrapped
 
 
 def get_backup_dir() -> str:
@@ -291,11 +315,12 @@ def get_all_collection_counts() -> Dict[str, Any]:
 
 
 def get_running_task_count() -> int:
-    """获取当前系统中正在执行的扫描任务数量"""
+    """包括排队任务，避免旧队列在恢复期间或恢复后继续写入。"""
     from app.modules import TaskStatus
     from app.utils.conn import conn_db
-    non_running = [TaskStatus.DONE, TaskStatus.WAITING, TaskStatus.ERROR, TaskStatus.STOP]
-    return conn_db('task').count_documents({"status": {"$nin": non_running}})
+    non_running = [TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.STOP]
+    return sum(conn_db(name).count_documents({"status": {"$nin": non_running}})
+               for name in ('task', 'github_task'))
 
 
 def run_command_streaming(cmd: List[str], stage_prefix: str, pct_start: int, pct_end: int, log_tag: str = "Engine"):
@@ -303,41 +328,48 @@ def run_command_streaming(cmd: List[str], stage_prefix: str, pct_start: int, pct
     流式执行外部工具命令（如 mongodump / mongorestore），
     实时从 stderr/stdout 逐行读取输出，并平滑步进进度与控制台日志。
     """
-    logger.info(f"Running streaming command: {' '.join(cmd[:3])} ...")
+    logger.info('Running backup command: %s', log_tag)
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
         universal_newlines=True
     )
     
     lines_read = 0
-    all_err_lines = []
-    while True:
-        line = proc.stderr.readline()
-        if not line and proc.poll() is not None:
-            break
-        if line:
-            line_str = line.strip()
+    all_err_lines: deque[str] = deque(maxlen=10)
+    assert proc.stdout is not None
+    try:
+        for line in proc.stdout:
+            line_str = re.sub(r'mongodb(?:\+srv)?://\S+', '[redacted MongoDB URI]', line.strip())
             if not line_str:
                 continue
-            all_err_lines.append(line_str)
+            all_err_lines.append(line_str[:2000])
             lines_read += 1
-            clean_line = re.sub(r'^\d{4}-\d{2}-\d{2}T[\d:\.\+\-]+[\t\s]*', '', line_str)
+            clean_line = re.sub(r'^\d{4}-\d{2}-\d{2}T[\d:\.\+\-]+[\t\s]*', '', line_str)[:2000]
             is_milestone = any(k in clean_line.lower() for k in ["done", "writing", "restoring", "finished", "%"])
             if is_milestone or lines_read % 3 == 0:
-                # 拟真在 [pct_start, pct_end - 1] 区间步进
                 curr_pct = min(pct_end - 1, pct_start + (lines_read // 2))
                 progress_tracker.update(f"{stage_prefix}: {clean_line[:55]}", curr_pct, f"[{log_tag}] {clean_line}")
-
-    proc.wait()
+        proc.wait()
+    except BaseException:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        raise
+    finally:
+        proc.stdout.close()
     if proc.returncode != 0:
-        err_msg = "\n".join(all_err_lines[-10:]) if all_err_lines else "外部命令异常退出"
+        err_msg = "\n".join(all_err_lines) if all_err_lines else "外部命令异常退出"
         raise RuntimeError(f"{log_tag} 命令执行失败 (退出码 {proc.returncode}): {err_msg[:200]}")
 
 
+@exclusive_backup_operation
 def create_backup_archive(include_screenshots: bool = True, note: str = "") -> Dict[str, Any]:
     """
     执行全量一键备份的核心实现函数
@@ -534,7 +566,7 @@ def list_all_backups() -> List[Dict[str, Any]]:
     扫描备份目录，返回所有合法的备份归档清单及其元数据
     """
     backup_dir = get_backup_dir()
-    backups = []
+    backups: List[Dict[str, Any]] = []
     
     if not os.path.isdir(backup_dir):
         return backups
@@ -592,6 +624,7 @@ def delete_backup_file(filename: str) -> bool:
     return False
 
 
+@exclusive_backup_operation
 def restore_backup_archive(archive_path: str, force: bool = False) -> Dict[str, Any]:
     """
     执行数据恢复的核心实现函数（基于 --drop 完全覆盖模式）
@@ -611,7 +644,7 @@ def restore_backup_archive(archive_path: str, force: bool = False) -> Dict[str, 
         # 1. 前置预检：扫描运行中任务
         running_count = get_running_task_count()
         if running_count > 0 and not force:
-            raise RuntimeError(f"系统当前有 {running_count} 个正在进行的扫描任务！请等待完成后再恢复。")
+            raise RuntimeError(f"系统当前有 {running_count} 个运行中或排队中的任务！请等待完成后再恢复。")
 
         # 所有归档层级、哈希和目标目录均先校验；恶意包不得触发停任务或 --drop。
         progress_tracker.update("正在解包归档并校验完整性...", 15, "校验备份构件与恢复目录")
@@ -624,92 +657,77 @@ def restore_backup_archive(archive_path: str, force: bool = False) -> Dict[str, 
             'pocs': ('plugins', os.path.join(poc_dir, 'plugins')),
         })
 
-        if running_count > 0:
-            if not force:
-                raise RuntimeError(
-                    f"系统当前有 {running_count} 个正在进行的扫描任务！"
-                    f"执行覆盖恢复将中断这些任务，请在确认框中选择强制覆盖或等待任务完成。"
-                )
-            else:
-                progress_tracker.update(
-                    f"检测到 {running_count} 个运行中任务，正在强制收敛终止...", 10,
-                    f"强制将 {running_count} 个未完任务置为已停止"
-                )
-                from app.utils.conn import conn_db
-                from app.modules import TaskStatus
-                conn_db('task').update_many(
-                    {"status": {"$nin": [TaskStatus.DONE, TaskStatus.WAITING, TaskStatus.ERROR, TaskStatus.STOP]}},
-                    {"$set": {"status": TaskStatus.STOP, "end_time": datetime.now()}}
-                )
-
-        # 3. 执行 mongorestore 覆盖还原
-        progress_tracker.update("正在恢复 MongoDB 数据库（--drop 完全覆盖恢复）...", 35, "调用 mongorestore 覆盖还原")
-        restore_tool = find_tool("mongorestore")
-        mongo_archive_name = manifest.get("files", {}).get("mongo_dump", "mongo_dump.archive.gz")
-        mongo_archive_path = os.path.join(work_dir, mongo_archive_name)
+        # Pause consumers and confirm termination before replacing any data.
+        with RestoreWorkers(force=force) as workers:
+            # 3. 执行 mongorestore 覆盖还原
+            progress_tracker.update("正在恢复 MongoDB 数据库（--drop 完全覆盖恢复）...", 35, "调用 mongorestore 覆盖还原")
+            restore_tool = find_tool("mongorestore")
+            mongo_archive_name = manifest.get("files", {}).get("mongo_dump", "mongo_dump.archive.gz")
+            mongo_archive_path = os.path.join(work_dir, mongo_archive_name)
         
-        if not os.path.isfile(mongo_archive_path):
-            raise FileNotFoundError("未在解包目录中找到 MongoDB 归档文件！")
+            if not os.path.isfile(mongo_archive_path):
+                raise FileNotFoundError("未在解包目录中找到 MongoDB 归档文件！")
             
-        mongo_uri = Config.MONGO_URL
-        db_name = Config.MONGO_DB
+            mongo_uri = Config.MONGO_URL
+            db_name = Config.MONGO_DB
         
-        # 使用 --nsInclude="db_name.*" 与 --drop 确保对当前数据库内各个集合执行安全清空覆盖
-        restore_cmd = [
-            restore_tool,
-            f"--uri={mongo_uri}",
-            f"--nsInclude={db_name}.*",
-            "--drop",
-            f"--archive={mongo_archive_path}",
-            "--gzip"
-        ]
+            # 使用 --nsInclude="db_name.*" 与 --drop 确保对当前数据库内各个集合执行安全清空覆盖
+            restore_cmd = [
+                restore_tool,
+                f"--uri={mongo_uri}",
+                f"--nsInclude={db_name}.*",
+                "--drop",
+                f"--archive={mongo_archive_path}",
+                "--gzip"
+            ]
         
-        run_command_streaming(restore_cmd, "MongoDB 覆盖恢复", 35, 70, log_tag="mongorestore")
-        progress_tracker.update("MongoDB 数据覆盖还原成功", 70, "数据库集合已全部恢复")
+            workers.restore_started = True
+            run_command_streaming(restore_cmd, "MongoDB 覆盖恢复", 35, 70, log_tag="mongorestore")
+            progress_tracker.update("MongoDB 数据覆盖还原成功", 70, "数据库集合已全部恢复")
 
-        # 4. 还原静态资产与截图文件
-        progress_tracker.update("正在还原已校验的数据文件...", 80, "恢复截图、字典与插件")
-        for source, destination in staged:
-            install_staged(source, destination)
+            # 4. 还原静态资产与截图文件
+            progress_tracker.update("正在还原已校验的数据文件...", 80, "恢复截图、字典与插件")
+            for source, destination in staged:
+                install_staged(source, destination)
 
-        # 5. 执行索引重构与平滑兼容
-        progress_tracker.update("正在重新构建数据库核心索引与同步缓存...", 90, "执行 arlupdate 索引维护")
-        try:
-            from app.utils.arlupdate import create_index
-            create_index()
-        except Exception as ie:
-            logger.warning(f"索引重新构建告警: {ie}")
+            # 5. 执行索引重构与平滑兼容
+            progress_tracker.update("正在重新构建数据库核心索引与同步缓存...", 90, "执行 arlupdate 索引维护")
+            try:
+                from app.utils.arlupdate import create_index
+                create_index()
+            except Exception as ie:
+                logger.warning(f"索引重新构建告警: {ie}")
             
-        clear_system_config_cache()
-        bump_system_config_version()
+            clear_system_config_cache()
+            bump_system_config_version()
 
-        # 6. 比对校验恢复后的数据量
-        progress_tracker.update("正在执行恢复后数据量交叉比对...", 95, "比对各集合文档计数")
-        current_stats = get_all_collection_counts()
-        expected_collections = manifest.get("mongo_stats", {}).get("collections", {})
+            # 6. 比对校验恢复后的数据量
+            progress_tracker.update("正在执行恢复后数据量交叉比对...", 95, "比对各集合文档计数")
+            current_stats = get_all_collection_counts()
+            expected_collections = manifest.get("mongo_stats", {}).get("collections", {})
         
-        diff_report = {}
-        for cname, expected_cnt in expected_collections.items():
-            actual_cnt = current_stats.get("collections", {}).get(cname, 0)
-            if actual_cnt != expected_cnt:
-                diff_report[cname] = {
-                    "expected": expected_cnt,
-                    "actual": actual_cnt
-                }
+            diff_report = {}
+            for cname, expected_cnt in expected_collections.items():
+                actual_cnt = current_stats.get("collections", {}).get(cname, 0)
+                if actual_cnt != expected_cnt:
+                    diff_report[cname] = {
+                        "expected": expected_cnt,
+                        "actual": actual_cnt
+                    }
                 
-        if diff_report:
-            logger.warning(f"恢复完成但部分集合数量有微小差异: {diff_report}")
+            if diff_report:
+                logger.warning(f"恢复完成但部分集合数量有微小差异: {diff_report}")
             
-        final_summary = {
-            "restored_at": datetime.now().isoformat(),
-            "manifest_created_at": manifest.get("created_at"),
-            "arl_version": manifest.get("arl_version"),
-            "total_documents_restored": current_stats["total_documents"],
-            "total_collections_restored": current_stats["total_collections"],
-            "summary": current_stats["summary"],
-            "discrepancies": diff_report,
-            "verified": len(diff_report) == 0
-        }
+            final_summary = {
+                "restored_at": datetime.now().isoformat(),
+                "manifest_created_at": manifest.get("created_at"),
+                "arl_version": manifest.get("arl_version"),
+                "total_documents_restored": current_stats["total_documents"],
+                "total_collections_restored": current_stats["total_collections"],
+                "summary": current_stats["summary"],
+                "discrepancies": diff_report,
+                "verified": len(diff_report) == 0
+            }
         
         progress_tracker.finish(final_summary)
         return final_summary

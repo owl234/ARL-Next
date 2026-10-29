@@ -171,7 +171,7 @@ ARL-Next MCP 注册了 6 项核心标准化工具，默认开启只读情报查�
 ### Q3: 执行任务下发提示 `Task dispatching is disabled on this MCP server`
 - **🔴 症状**：调用 `create_scan_task` 或 `stop_scan_task` 时被拒绝。
 - **🔍 根因**：安全保护策略。ARL-Next 默认仅开放只读查询，防止 Agent 意外触发全量扫描挤占扫描队列。
-- **⚡ 解决**：服务端管理员在 `docker-compose.prod.yml` 的 `arl-mcp` 服务环境变量中加入 `ARL_MCP_ENABLE_DISPATCH=true`，然后执行 `docker compose -f docker-compose.prod.yml up -d arl-mcp` 重启容器生效。
+- **⚡ 解决**：管理员在 MCP 治理中心启用对应工具，并为 Key 授予 `task:dispatch`。工具发现与执行会立即使用已保存的开关；`ARL_MCP_ENABLE_DISPATCH` 仅在未保存对应开关时提供默认值。
 
 ### Q4: 远程 SSE 连接频繁断开或出现 `504 Gateway Timeout`
 - **🔴 症状**：建立连接后几分钟无响应自动中断，或流式推送超时。

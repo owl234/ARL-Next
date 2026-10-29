@@ -148,7 +148,7 @@ class TestBackupRestore(unittest.TestCase):
             with patch("app.services.backup_service.get_running_task_count", return_value=3):
                 with self.assertRaises(RuntimeError) as cm:
                     restore_backup_archive(archive_path, force=False)
-                self.assertIn("3 个正在进行的扫描任务", str(cm.exception))
+                self.assertIn("3 个运行中或排队中的任务", str(cm.exception))
         finally:
             if os.path.exists(archive_path):
                 os.remove(archive_path)

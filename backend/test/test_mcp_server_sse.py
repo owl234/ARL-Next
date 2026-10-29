@@ -28,6 +28,8 @@ class TestMCPServerSSE(unittest.IsolatedAsyncioTestCase):
         self.patcher_conn = patch("app.mcp_server.utils.conn_db")
         self.mock_conn = self.patcher_conn.start()
         self.mock_conn.return_value = Mock()
+        self.mock_conn.return_value.find_one.return_value = {}
+        self.mock_conn.return_value.find_one_and_update.return_value = {'count': 1}
         self.addCleanup(self.patcher_conn.stop)
 
     def test_supported_tools_default_readonly(self):

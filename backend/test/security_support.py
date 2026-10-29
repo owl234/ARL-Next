@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 import sys
 import types
-from unittest.mock import Mock
+from unittest.mock import Mock, MagicMock
 
 from flask import Flask
 from flask_restx import Api
@@ -55,12 +55,14 @@ def app_env(monkeypatch, tmp_path):
     utils.conn_db = conn.conn_db
     utils.gen_md5 = lambda value: hashlib.md5(value.encode()).hexdigest()
     utils.get_logger = lambda *a: logging.getLogger('security-test')
+    utils.curr_date = lambda: '2026-10-28 12:00:00'
     credentials = load_source(monkeypatch, 'app.utils.credentials', 'app/utils/credentials.py')
     user = load_source(monkeypatch, 'app.utils.user', 'app/utils/user.py')
     for name in ('auth', 'user_login', 'user_login_header', 'user_logout', 'user_refresh_token', 'change_pass'):
         setattr(utils, name, getattr(user, name))
     load_source(monkeypatch, 'app.utils.download_ticket', 'app/utils/download_ticket.py')
     load_source(monkeypatch, 'app.mcp_asset', 'app/mcp_asset.py')
+    load_source(monkeypatch, 'app.mcp_security', 'app/mcp_security.py')
     arlupdate = types.ModuleType('app.utils.arlupdate')
     arlupdate.create_index = Mock()
     monkeypatch.setitem(sys.modules, arlupdate.__name__, arlupdate)
@@ -95,6 +97,7 @@ def make_client(env, *namespaces):
 
 def load_backup(env):
     load_source(env.monkeypatch, 'app.services.backup_archive', 'app/services/backup_archive.py')
+    load_source(env.monkeypatch, 'app.services.backup_workers', 'app/services/backup_workers.py')
     module = load_source(env.monkeypatch, 'app.services.backup_service', 'app/services/backup_service.py')
     module.STATUS_FILE = str(env.tmp / 'backup-status.json')
     module.progress_tracker = module.BackupProgressTracker()
@@ -102,6 +105,7 @@ def load_backup(env):
     backup_dir.mkdir()
     module.get_backup_dir = lambda: str(backup_dir)
     module.get_running_task_count = lambda: 0
+    module.RestoreWorkers = MagicMock()
     module.find_tool = Mock(return_value='/not-executed/mongorestore')
     module.run_command_streaming = Mock()
     module.get_all_collection_counts = lambda: {'collections': {}, 'summary': {}, 'total_documents': 0, 'total_collections': 0}
