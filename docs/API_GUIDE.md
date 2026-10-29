@@ -291,6 +291,9 @@ rules:
 
 ARL-Next 集成了 Model Context Protocol (MCP 2024-11-05 规范)，支持 AI 协同分析与外部智能体对接。系统提供**远程原生 SSE** 与 **本地 Stdio 桥接** 双模支持。
 
+> [!NOTE]
+> 详细的渗透测试实战用例体系与全维可观测性验证方案参见 [MCP 渗透测试实战用例体系](./MCP_PENTEST_TEST_CASES.md)。配套自动化测试套件位于 [verify_mcp_pentest.py](file:///Users/sienchen/Documents/github_project/ARL-Next/tools/verify_mcp_pentest.py)。
+
 ### 端点清单
 
 | 访问路径 | 协议与动词 | 说明 | 鉴权通道 |

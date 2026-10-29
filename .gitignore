@@ -38,6 +38,7 @@ backend/.venv-docker/
 **/.tmp_venv/
 
 #系统临时生成文件
+artifacts/
 backend/app/tmp/
 backend/app/tmp_screenshot/
 data/

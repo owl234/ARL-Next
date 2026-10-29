@@ -398,6 +398,7 @@
               :data-source="logList"
               :loading="isLogsLoading"
               row-key="id"
+              :scroll="{ x: 1420 }"
               :pagination="{
                 current: logPagination.page,
                 pageSize: logPagination.size,
@@ -414,17 +415,59 @@
               size="middle"
             >
               <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'tool_name'">
-                  <a-typography-text strong>{{ record.tool_name }}</a-typography-text>
+                <template v-if="column.key === 'created_at'">
+                  <span class="mcp-time-cell">{{ record.created_at }}</span>
+                </template>
+
+                <template v-else-if="column.key === 'key_name'">
+                  <a-tooltip :title="record.key_name">
+                    <a-tag :color="record.key_name === '[Legacy Token]' ? 'default' : 'blue'" class="mcp-key-tag">
+                      <KeyOutlined style="margin-right: 4px;" />
+                      <span class="mcp-key-text">{{ record.key_name || '-' }}</span>
+                    </a-tag>
+                  </a-tooltip>
+                </template>
+
+                <template v-else-if="column.key === 'client_ip'">
+                  <span class="mcp-ip-cell">{{ record.client_ip || '-' }}</span>
+                </template>
+
+                <template v-else-if="column.key === 'tool_name'">
+                  <a-tooltip :title="getToolMeta(record.tool_name).desc">
+                    <a-tag :color="getToolMeta(record.tool_name).color" class="mcp-tool-tag">
+                      <component :is="getToolMeta(record.tool_name).icon" class="mcp-tool-icon" />
+                      <span class="mcp-tool-label">{{ record.tool_name }}</span>
+                    </a-tag>
+                  </a-tooltip>
                 </template>
 
                 <template v-else-if="column.key === 'target'">
-                  <span v-if="record.target" style="font-family: monospace;">{{ record.target }}</span>
-                  <span v-else style="color: var(--arl-text-secondary); font-size: 12px;">{{ record.params_summary }}</span>
+                  <div class="mcp-target-cell">
+                    <a-tooltip v-if="record.target" :title="record.target">
+                      <span class="mcp-target-text">{{ record.target }}</span>
+                    </a-tooltip>
+                    <a-tooltip v-else-if="record.params_summary" :title="record.params_summary">
+                      <span class="mcp-target-placeholder">{{ record.params_summary }}</span>
+                    </a-tooltip>
+                    <span v-else class="mcp-target-empty">-</span>
+
+                    <a-tooltip v-if="record.target" :title="pageText('pages.copy')">
+                      <a-button
+                        type="text"
+                        size="small"
+                        class="mcp-cell-copy-btn"
+                        @click.stop="copyTextDirect(record.target)"
+                      >
+                        <template #icon><CopyOutlined /></template>
+                      </a-button>
+                    </a-tooltip>
+                  </div>
                 </template>
 
                 <template v-else-if="column.key === 'duration_ms'">
-                  <span>{{ record.duration_ms }} ms</span>
+                  <span :class="['mcp-duration-badge', getDurationClass(record.duration_ms)]">
+                    {{ record.duration_ms != null ? record.duration_ms + ' ms' : '-' }}
+                  </span>
                 </template>
 
                 <template v-else-if="column.key === 'status'">
@@ -434,10 +477,16 @@
                 </template>
 
                 <template v-else-if="column.key === 'summary'">
-                  <a-tooltip v-if="record.error_message" :title="record.error_message">
-                    <span style="color: #ff4d4f;">{{ record.error_message }}</span>
+                  <a-tooltip v-if="record.error_message" :title="record.error_message" placement="topLeft">
+                    <span class="mcp-summary-error">
+                      <CloseCircleOutlined style="margin-right: 4px; flex-shrink: 0;" />
+                      <span class="mcp-summary-error-text">{{ record.error_message }}</span>
+                    </span>
                   </a-tooltip>
-                  <span v-else>{{ record.summary || '-' }}</span>
+                  <a-tooltip v-else-if="record.summary" :title="record.summary" placement="topLeft">
+                    <span class="mcp-summary-text">{{ record.summary }}</span>
+                  </a-tooltip>
+                  <span v-else class="mcp-summary-empty">-</span>
                 </template>
 
                 <template v-else-if="column.key === 'action'">
@@ -687,7 +736,12 @@ import {
   KeyOutlined,
   AlertOutlined,
   SearchOutlined,
-  ExportOutlined
+  ExportOutlined,
+  AimOutlined,
+  BankOutlined,
+  DashboardOutlined,
+  StopOutlined,
+  CloseCircleOutlined
 } from '@ant-design/icons-vue';
 import request from '@/utils/request';
 import { copyText } from '@/utils/clipboard';
@@ -772,17 +826,122 @@ const isLogsLoading = ref(false);
 const isExportingLogs = ref(false);
 const logPagination = reactive({ page: 1, size: 10, total: 0 });
 
-const logColumns = [
-  { title: pageText('pages.mcpLogTime'), dataIndex: 'created_at', key: 'created_at', width: 170 },
-  { title: pageText('pages.mcpLogKeyName'), dataIndex: 'key_name', key: 'key_name' },
-  { title: pageText('pages.mcpLogClientIp'), dataIndex: 'client_ip', key: 'client_ip', width: 130 },
-  { title: pageText('pages.mcpLogTool'), key: 'tool_name' },
-  { title: pageText('pages.mcpLogTarget'), key: 'target' },
-  { title: pageText('pages.mcpLogDuration'), key: 'duration_ms', width: 100 },
-  { title: pageText('pages.mcpLogStatus'), key: 'status', width: 100 },
-  { title: pageText('pages.mcpLogSummary'), key: 'summary' },
-  { title: pageText('pages.action'), key: 'action', width: 80, fixed: 'right' }
-];
+const logColumns = computed(() => [
+  {
+    title: pageText('pages.mcpLogTime'),
+    dataIndex: 'created_at',
+    key: 'created_at',
+    width: 175,
+    fixed: 'left'
+  },
+  {
+    title: pageText('pages.mcpLogKeyName'),
+    dataIndex: 'key_name',
+    key: 'key_name',
+    width: 150,
+    ellipsis: true
+  },
+  {
+    title: pageText('pages.mcpLogClientIp'),
+    dataIndex: 'client_ip',
+    key: 'client_ip',
+    width: 135
+  },
+  {
+    title: pageText('pages.mcpLogTool'),
+    dataIndex: 'tool_name',
+    key: 'tool_name',
+    width: 210
+  },
+  {
+    title: pageText('pages.mcpLogTarget'),
+    dataIndex: 'target',
+    key: 'target',
+    width: 240,
+    ellipsis: true
+  },
+  {
+    title: pageText('pages.mcpLogDuration'),
+    dataIndex: 'duration_ms',
+    key: 'duration_ms',
+    width: 110,
+    align: 'center'
+  },
+  {
+    title: pageText('pages.mcpLogStatus'),
+    dataIndex: 'status',
+    key: 'status',
+    width: 100,
+    align: 'center'
+  },
+  {
+    title: pageText('pages.mcpLogSummary'),
+    dataIndex: 'summary',
+    key: 'summary',
+    minWidth: 200,
+    ellipsis: true
+  },
+  {
+    title: pageText('pages.action'),
+    key: 'action',
+    width: 90,
+    fixed: 'right',
+    align: 'center'
+  }
+]);
+
+const getToolMeta = (toolName) => {
+  const metaMap = {
+    get_asset_profile: {
+      icon: AimOutlined,
+      color: 'cyan',
+      desc: pageText('pages.mcpToolDescProfile')
+    },
+    get_enterprise_profile: {
+      icon: BankOutlined,
+      color: 'purple',
+      desc: pageText('pages.mcpToolDescEnterprise')
+    },
+    search_assets: {
+      icon: SearchOutlined,
+      color: 'blue',
+      desc: pageText('pages.mcpToolDescSearch')
+    },
+    get_task_status: {
+      icon: DashboardOutlined,
+      color: 'geekblue',
+      desc: pageText('pages.mcpToolDescTask')
+    },
+    create_scan_task: {
+      icon: ThunderboltOutlined,
+      color: 'orange',
+      desc: pageText('pages.mcpToolDescCreate')
+    },
+    stop_scan_task: {
+      icon: StopOutlined,
+      color: 'red',
+      desc: pageText('pages.mcpToolDescStop')
+    }
+  };
+  return metaMap[toolName] || {
+    icon: ThunderboltOutlined,
+    color: 'default',
+    desc: toolName || ''
+  };
+};
+
+const getDurationClass = (ms) => {
+  if (ms == null) return '';
+  if (ms < 200) return 'duration-fast';
+  if (ms <= 1000) return 'duration-medium';
+  return 'duration-slow';
+};
+
+const copyTextDirect = async (text) => {
+  if (!text) return;
+  const ok = await copyText(text);
+  if (ok) message.success(pageText('pages.copySuccess'));
+};
 
 const openLogDetail = (record) => {
   selectedLog.value = record;
@@ -884,8 +1043,9 @@ const handleTabChange = (key) => {
 const fetchOverview = async () => {
   try {
     const res = await request.get('/mcp/overview');
-    if (res && res.data && res.data.code === 200) {
-      Object.assign(overviewData, res.data.data);
+    if (res && (res.code === 200 || res.data?.code === 200)) {
+      const data = res.code === 200 ? res.data : res.data.data;
+      if (data) Object.assign(overviewData, data);
     }
   } catch (e) {
     console.error('fetchOverview error', e);
@@ -902,8 +1062,8 @@ const fetchKeys = async () => {
         keyword: keySearchKeyword.value
       }
     });
-    if (res && res.data && res.data.code === 200) {
-      const data = res.data.data;
+    if (res && (res.code === 200 || res.data?.code === 200)) {
+      const data = (res.code === 200 ? res.data : res.data.data) || {};
       keyList.value = data.items || [];
       keyPagination.total = data.total || 0;
       activeKeyOptions.value = (data.items || []).filter(k => k.status === 'active');
@@ -936,17 +1096,18 @@ const handleCreateKeySubmit = async () => {
   isCreatingKey.value = true;
   try {
     const res = await request.post('/mcp/keys', newKeyForm);
-    if (res && res.data && res.data.code === 200) {
+    if (res && (res.code === 200 || res.data?.code === 200)) {
+      const data = (res.code === 200 ? res.data : res.data.data) || {};
       createKeyModalVisible.value = false;
-      createdKeyPlaintext.value = res.data.data.raw_key;
-      keySecrets[res.data.data.id] = res.data.data.raw_key;
+      createdKeyPlaintext.value = data.raw_key;
+      if (data.id) {
+        keySecrets[data.id] = data.raw_key;
+        selectedKeyId.value = data.id;
+      }
       keySuccessModalVisible.value = true;
       await fetchKeys();
-      if (res.data.data.id) {
-        selectedKeyId.value = res.data.data.id;
-      }
     } else {
-      message.error(res?.data?.message || pageText('pages.failed'));
+      message.error(res?.message || res?.data?.message || pageText('pages.failed'));
     }
   } catch (e) {
     message.error(pageText('pages.failed'));
@@ -959,11 +1120,11 @@ const toggleKeyStatus = async (record) => {
   const targetStatus = record.status === 'active' ? 'revoked' : 'active';
   try {
     const res = await request.post(`/mcp/keys/${record.id}/status`, { status: targetStatus });
-    if (res && res.data && res.data.code === 200) {
+    if (res && (res.code === 200 || res.data?.code === 200)) {
       message.success(pageText('pages.operationSuccess'));
       fetchKeys();
     } else {
-      message.error(res?.data?.message || pageText('pages.failed'));
+      message.error(res?.message || res?.data?.message || pageText('pages.failed'));
     }
   } catch (e) {
     message.error(pageText('pages.failed'));
@@ -973,11 +1134,11 @@ const toggleKeyStatus = async (record) => {
 const deleteKey = async (record) => {
   try {
     const res = await request.delete(`/mcp/keys/${record.id}`);
-    if (res && res.data && res.data.code === 200) {
+    if (res && (res.code === 200 || res.data?.code === 200)) {
       message.success(pageText('pages.deleteSuccess'));
       fetchKeys();
     } else {
-      message.error(res?.data?.message || pageText('pages.failed'));
+      message.error(res?.message || res?.data?.message || pageText('pages.failed'));
     }
   } catch (e) {
     message.error(pageText('pages.failed'));
@@ -1043,8 +1204,8 @@ const fetchLogs = async () => {
         target: logFilter.target
       }
     });
-    if (res && res.data && res.data.code === 200) {
-      const data = res.data.data;
+    if (res && (res.code === 200 || res.data?.code === 200)) {
+      const data = (res.code === 200 ? res.data : res.data.data) || {};
       logList.value = data.items || [];
       logPagination.total = data.total || 0;
     }
@@ -1130,8 +1291,8 @@ const policyDirtyCount = computed(() => {
 const fetchConfig = async () => {
   try {
     const res = await request.get('/mcp/config');
-    if (res && res.data && res.data.code === 200) {
-      const data = res.data.data;
+    if (res && (res.code === 200 || res.data?.code === 200)) {
+      const data = (res.code === 200 ? res.data : res.data.data) || {};
       if (data.tool_switches) Object.assign(toolSwitches, data.tool_switches);
       if (data.max_search_limit) policyForm.max_search_limit = data.max_search_limit;
       if (data.rate_limit_per_min) policyForm.rate_limit_per_min = data.rate_limit_per_min;
@@ -1154,11 +1315,11 @@ const savePolicyConfig = async () => {
       max_search_limit: policyForm.max_search_limit,
       rate_limit_per_min: policyForm.rate_limit_per_min
     });
-    if (res && res.data && res.data.code === 200) {
+    if (res && (res.code === 200 || res.data?.code === 200)) {
       message.success(pageText('pages.saveSuccess'));
       savedPolicySnapshot.value = currentPolicySnapshot.value;
     } else {
-      message.error(res?.data?.message || pageText('pages.failed'));
+      message.error(res?.message || res?.data?.message || pageText('pages.failed'));
     }
   } catch (e) {
     message.error(pageText('pages.failed'));
@@ -1234,6 +1395,7 @@ const handleKeySelectChange = () => {};
 onMounted(() => {
   fetchOverview();
   fetchKeys();
+  fetchLogs();
   fetchConfig();
 });
 </script>
@@ -1474,5 +1636,156 @@ onMounted(() => {
   font-size: 13px;
   color: var(--arl-text-color, #334155);
   line-height: 1.6;
+}
+
+/* 审计监控表格高级样式 */
+.mcp-time-cell {
+  white-space: nowrap;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--arl-text-color, #1e293b);
+}
+
+.mcp-key-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 140px;
+  margin: 0;
+}
+
+.mcp-key-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-ip-cell {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  color: var(--arl-text-secondary, #64748b);
+  white-space: nowrap;
+}
+
+.mcp-tool-tag {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin: 0;
+  max-width: 195px;
+}
+
+.mcp-tool-icon {
+  margin-right: 5px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.mcp-tool-label {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-target-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.mcp-target-text {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--arl-text-color, #1e293b);
+}
+
+.mcp-target-placeholder {
+  color: var(--arl-text-secondary, #94a3b8);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-cell-copy-btn {
+  opacity: 0.4;
+  padding: 0 4px;
+  height: 22px;
+  color: var(--arl-text-secondary, #64748b);
+  transition: opacity 0.2s, color 0.2s;
+  flex-shrink: 0;
+}
+
+.mcp-target-cell:hover .mcp-cell-copy-btn {
+  opacity: 1;
+  color: var(--arl-theme-color, #1890ff);
+}
+
+.mcp-duration-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.duration-fast {
+  background-color: #f6ffed;
+  color: #389e0d;
+  border: 1px solid #b7eb8f;
+}
+
+.duration-medium {
+  background-color: #e6f7ff;
+  color: #096dd9;
+  border: 1px solid #91d5ff;
+}
+
+.duration-slow {
+  background-color: #fff7e6;
+  color: #d46b08;
+  border: 1px solid #ffd591;
+}
+
+.mcp-summary-error {
+  display: inline-flex;
+  align-items: center;
+  color: #ff4d4f;
+  font-size: 12px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.mcp-summary-error-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-summary-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--arl-text-color, #334155);
+}
+
+.mcp-summary-empty,
+.mcp-target-empty {
+  color: var(--arl-text-secondary, #cbd5e1);
 }
 </style>

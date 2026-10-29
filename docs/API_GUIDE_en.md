@@ -289,6 +289,9 @@ Existing list queries, filters, counts, exports, deletion permissions and scans 
 
 ARL-Next integrates the Model Context Protocol (MCP 2024-11-05 specification) for AI agent collaboration. It supports both **Remote Native SSE** and **Local Stdio Bridge** integration modes.
 
+> [!NOTE]
+> For full-lifecycle penetration testing test case specifications and observability verification matrices, see [MCP Penetration Testing Test Cases](./MCP_PENTEST_TEST_CASES_en.md). The accompanying automated test suite is located at [verify_mcp_pentest.py](file:///Users/sienchen/Documents/github_project/ARL-Next/tools/verify_mcp_pentest.py).
+
 ### Endpoint Matrix
 
 | Path | Protocol & Method | Description | Authentication Channel |
