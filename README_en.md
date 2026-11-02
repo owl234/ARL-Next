@@ -231,6 +231,7 @@ docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
+docker cp arl-temp:/code/CHANGELOG_en.md ./ && \
 mkdir -p ./frontend && docker cp arl-temp:/code/frontend/default.conf.prod ./frontend/ && \
 docker rm -f arl-temp && \
 chmod +x start-prod.sh && bash start-prod.sh
@@ -271,6 +272,7 @@ docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
+docker cp arl-temp:/code/CHANGELOG_en.md ./ && \
 mkdir -p ./frontend && docker cp arl-temp:/code/frontend/default.conf.prod ./frontend/ && \
 docker rm -f arl-temp && \
 chmod +x start-prod.sh && bash start-prod.sh
@@ -346,7 +348,7 @@ Navigate to your ARL-Next installation directory and run the commands matching y
   ```bash
   cd ~/ARL-Next && \
   docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
-  docker run --rm -v $(pwd):/host crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest bash -c "cp /code/start-prod.sh /host/start-prod.sh && cp /code/docker-compose.prod.yml /host/docker-compose.prod.yml && mkdir -p /host/updater && cp -r /code/updater/. /host/updater/ 2>/dev/null || true; mkdir -p /host/frontend && cp /code/frontend/default.conf.prod /host/frontend/default.conf.prod 2>/dev/null || true; cp /code/version.txt /host/version.txt 2>/dev/null || true; cp /code/CHANGELOG.md /host/CHANGELOG.md 2>/dev/null || true" && \
+  docker run --rm -v $(pwd):/host crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest bash -c "cp /code/start-prod.sh /host/start-prod.sh && cp /code/docker-compose.prod.yml /host/docker-compose.prod.yml && mkdir -p /host/updater && cp -r /code/updater/. /host/updater/ 2>/dev/null || true; mkdir -p /host/frontend && cp /code/frontend/default.conf.prod /host/frontend/default.conf.prod 2>/dev/null || true; cp /code/version.txt /host/version.txt 2>/dev/null || true; cp /code/CHANGELOG.md /host/CHANGELOG.md 2>/dev/null || true; cp /code/CHANGELOG_en.md /host/CHANGELOG_en.md 2>/dev/null || true" && \
   sudo bash start-prod.sh
   ```
 
@@ -439,6 +441,24 @@ docker compose -f docker-compose.prod.yml logs -f arl-worker
 # Gracefully restart all services
 docker compose -f docker-compose.prod.yml restart
 ```
+</details>
+
+<details>
+<summary><b>Q6: Frontend container crashes or port 5173 is inaccessible on legacy kernels like CentOS 7 / Linux 3.x?</b></summary>
+<br/>
+
+**A:** On legacy kernels such as Linux 3.10, Docker's default Seccomp profile may intercept modern system calls (e.g., `SYS_pwritev2` or newer libc write routines), preventing Nginx from writing its PID file (triggering `pwrite() "/run/nginx.pid" failed (1: Operation not permitted)`) and causing a container restart loop.
+
+**Remediation Steps**:
+1. **Verify Compose Configuration**: The latest `docker-compose.prod.yml` includes `security_opt: [seccomp:unconfined]` under `arl-frontend` by default.
+2. **Quick Fix for Existing Deployments**: If your deployment was initialized with an earlier compose file lacking this setting, apply the patch and recreate the frontend container (idempotent, safe to run multiple times):
+   ```bash
+   # Add unconfined seccomp option under arl-frontend (if not already present)
+   grep -q "seccomp:unconfined" docker-compose.prod.yml || sed -i '/container_name: arl-frontend-prod/a \    security_opt:\n      - seccomp:unconfined' docker-compose.prod.yml
+   # Recreate frontend container
+   docker compose -f docker-compose.prod.yml up -d arl-frontend
+   ```
+3. **Re-run Deployment Verification**: Execute `bash start-prod.sh`. The built-in health assertion and connectivity probe will verify that the service is operational.
 </details>
 
 ---

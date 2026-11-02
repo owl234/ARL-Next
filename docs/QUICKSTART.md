@@ -37,6 +37,7 @@ docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
+docker cp arl-temp:/code/CHANGELOG_en.md ./ && \
 mkdir -p ./frontend && docker cp arl-temp:/code/frontend/default.conf.prod ./frontend/ && \
 docker rm -f arl-temp && \
 chmod +x start-prod.sh && bash start-prod.sh

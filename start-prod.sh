@@ -579,11 +579,12 @@ deploy_and_start_updater() {
     fi
 
     if [ -n "$occupied_pid" ] && [ "$occupied_pid" -gt 10 ] 2>/dev/null; then
-        local proc_cmd
-        proc_cmd=$(ps -p "$occupied_pid" -o cmd= 2>/dev/null || true)
-        # 防御性判断：确保 proc_cmd 非空、严格筛除 updater 且禁止操作 PID <= 10 的核心线程
-        if [ -n "$proc_cmd" ] && echo "$proc_cmd" | grep -qv "updater.py"; then
-            echo "⚠️ 警告：检测到 8888 端口被外部/遗留进程占用 (PID: $occupied_pid, 命令: $proc_cmd)，正在清理以解除冲突..."
+        local current_main_pid
+        current_main_pid=$(systemctl show -p MainPID --value arl-updater.service 2>/dev/null || echo "0")
+        if [ "$occupied_pid" != "$current_main_pid" ]; then
+            local proc_cmd
+            proc_cmd=$(ps -p "$occupied_pid" -o cmd= 2>/dev/null || true)
+            echo "⚠️ 警告：检测到 8888 端口被外部/遗留进程占用 (PID: $occupied_pid, 命令: $proc_cmd)，正在清理以解除端口冲突..."
             kill "$occupied_pid" 2>/dev/null || true
             sleep 1
             kill -9 "$occupied_pid" 2>/dev/null || true
@@ -745,25 +746,7 @@ if [ $WAIT_TIME -ge $MAX_WAIT ]; then
     echo "⚠️ 等待超时，服务可能仍在初始化或存在异常，请稍后重试。"
 fi
 
-# 检查是否有容器处于 exited 或 restarting 状态
-FAILED_SERVICES=$(docker compose -f docker-compose.prod.yml ps --status exited --status restarting --services)
-
-if [ -n "$FAILED_SERVICES" ]; then
-    echo "❌ 警告：部分服务启动失败或正在无限重启中！"
-    echo "异常服务列表："
-    echo "$FAILED_SERVICES"
-    echo "👉 建议稍后通过终端进入服务器执行 'docker compose -f docker-compose.prod.yml logs <服务名>' 查看具体报错。"
-else
-    echo "✅ 所有容器均已成功启动并稳定运行中！系统更新成功！"
-    
-
-
-    echo "🧹 正在清理构建过程中产生的废弃镜像缓存以释放磁盘空间..."
-    docker image prune -f &>/dev/null || true
-    echo "✅ 磁盘空间清理完成！"
-fi
-
-# 4.7 验证前端 5173 端口连通性，若内核转发异常则自动自愈
+## 4.7 验证前端 5173 端口连通性，若内核转发异常则自动自愈
 verify_and_heal_port_forwarding() {
     echo "🔍 正在对前端 5173 端口进行连通性探针测试..."
     local probe_ok=0
@@ -778,8 +761,31 @@ verify_and_heal_port_forwarding() {
         sleep 2
     done
 
-    # 若多次探测均失败（常见于防火墙操作清空了内核 iptables 转发链），触发自动自愈
+    # 若多次探测均失败，首先进行容器运行状态断言（排除自身崩溃死循环）
     if [ $probe_ok -eq 0 ]; then
+        local fe_status fe_restarting
+        fe_status=$(docker inspect --format '{{.State.Status}}' arl-frontend-prod 2>/dev/null || echo "unknown")
+        [ -z "$fe_status" ] && fe_status="unknown"
+        fe_restarting=$(docker inspect --format '{{.State.Restarting}}' arl-frontend-prod 2>/dev/null || echo "false")
+
+        if [ "$fe_status" != "running" ] || [ "$fe_restarting" = "true" ]; then
+            local kernel_ver
+            kernel_ver=$(uname -r 2>/dev/null || echo "unknown")
+            echo ""
+            echo "❌ 致命错误：前端网关容器 (arl-frontend-prod) 启动异常 (状态: ${fe_status}, 宿主机内核: ${kernel_ver})！"
+            echo "📋 容器最近 20 行运行日志如下："
+            echo "------------------------------------------------------------"
+            docker logs --tail=20 arl-frontend-prod 2>&1 || true
+            echo "------------------------------------------------------------"
+            echo "💡 诊断提示："
+            echo "   1. 若日志包含 'pwrite() ... failed (1: Operation not permitted)'："
+            echo "      说明宿主机内核 (当前: ${kernel_ver}，如 Linux 3.10) 的 Docker Seccomp 拦截了底层系统调用。"
+            echo "      请确认 docker-compose.prod.yml 中已为 arl-frontend 配置 'security_opt: [seccomp:unconfined]'。"
+            echo "   2. 检查 Nginx 配置文件语法是否合法: docker compose -f docker-compose.prod.yml run --rm arl-frontend nginx -t"
+            echo "❌ 部署已终止，请排除前端容器异常后重新执行 start-prod.sh。"
+            exit 1
+        fi
+
         echo "⚠️ 警告：检测到前端 5173 端口握手失败（常见于防火墙操作清空了内核转发链）！"
         echo "🛠️ 正在执行网络链自愈修复 (重启 Docker 恢复内核转发规则)..."
         if (run_cmd_with_timeout 30 systemctl restart docker &>/dev/null || run_cmd_with_timeout 30 service docker restart &>/dev/null) && wait_docker_daemon; then
@@ -787,16 +793,42 @@ verify_and_heal_port_forwarding() {
             if curl -k -s -m 5 -o /dev/null https://127.0.0.1:5173/ 2>/dev/null; then
                 echo "✅ 端口转发与 NAT 规则已自动修复，5173 端口连通已恢复。"
             else
-                echo "⚠️ 自愈复检存在轻微延迟，后台服务正在就绪中。"
+                echo "❌ 端口连通性自愈失败：前端 5173 端口仍无法建立 TLS 握手。"
+                echo "📋 前端网关最近 20 行运行日志如下："
+                echo "------------------------------------------------------------"
+                docker logs --tail=20 arl-frontend-prod 2>&1 || true
+                echo "------------------------------------------------------------"
+                echo "   请排查系统防火墙 (firewalld/iptables) 及端口监听情况 (netstat -tuln | grep 5173)。"
+                exit 1
             fi
         else
-            echo "⚠️ 自动重启 Docker 失败，若外部无法访问请手动执行 'systemctl restart docker'。"
+            echo "❌ 自动重启 Docker 失败，若外部无法访问请手动执行 'systemctl restart docker'。"
+            exit 1
         fi
     else
         echo "✅ 前端端口 (5173) 内核 NAT 转发与 TLS 握手链路健康！"
     fi
 }
 verify_and_heal_port_forwarding
+
+# 4.8 综合断言全部微服务容器健康状态
+FAILED_SERVICES=$(docker compose -f docker-compose.prod.yml ps --status exited --status restarting --services 2>/dev/null || true)
+
+if [ -n "$FAILED_SERVICES" ]; then
+    echo ""
+    echo "❌ 致命错误：部分微服务启动失败或处于异常重启状态！"
+    echo "异常服务列表："
+    echo "$FAILED_SERVICES"
+    echo "👉 建议通过终端进入服务器执行 'docker compose -f docker-compose.prod.yml logs <服务名>' 查看具体报错。"
+    echo "❌ 部署已终止，请排除微服务异常后重新执行 start-prod.sh。"
+    exit 1
+fi
+
+echo "✅ 所有微服务容器均已成功启动并稳定运行中！系统更新成功！"
+
+echo "🧹 正在清理构建过程中产生的废弃镜像缓存以释放磁盘空间..."
+docker image prune -f &>/dev/null || true
+echo "✅ 磁盘空间清理完成！"
 
 # 5. 获取本地与公网真实 IP 并展示
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')

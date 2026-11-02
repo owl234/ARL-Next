@@ -233,6 +233,7 @@ docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
+docker cp arl-temp:/code/CHANGELOG_en.md ./ && \
 mkdir -p ./frontend && docker cp arl-temp:/code/frontend/default.conf.prod ./frontend/ && \
 docker rm -f arl-temp && \
 chmod +x start-prod.sh && bash start-prod.sh
@@ -273,6 +274,7 @@ docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
+docker cp arl-temp:/code/CHANGELOG_en.md ./ && \
 mkdir -p ./frontend && docker cp arl-temp:/code/frontend/default.conf.prod ./frontend/ && \
 docker rm -f arl-temp && \
 chmod +x start-prod.sh && bash start-prod.sh
@@ -348,7 +350,7 @@ ARL-Next 提供两种升级路径：**Web 管理后台在线更新**（推荐，
   ```bash
   cd ~/ARL-Next && \
   docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
-  docker run --rm -v $(pwd):/host crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest bash -c "cp /code/start-prod.sh /host/start-prod.sh && cp /code/docker-compose.prod.yml /host/docker-compose.prod.yml && mkdir -p /host/updater && cp -r /code/updater/. /host/updater/ 2>/dev/null || true; mkdir -p /host/frontend && cp /code/frontend/default.conf.prod /host/frontend/default.conf.prod 2>/dev/null || true; cp /code/version.txt /host/version.txt 2>/dev/null || true; cp /code/CHANGELOG.md /host/CHANGELOG.md 2>/dev/null || true" && \
+  docker run --rm -v $(pwd):/host crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest bash -c "cp /code/start-prod.sh /host/start-prod.sh && cp /code/docker-compose.prod.yml /host/docker-compose.prod.yml && mkdir -p /host/updater && cp -r /code/updater/. /host/updater/ 2>/dev/null || true; mkdir -p /host/frontend && cp /code/frontend/default.conf.prod /host/frontend/default.conf.prod 2>/dev/null || true; cp /code/version.txt /host/version.txt 2>/dev/null || true; cp /code/CHANGELOG.md /host/CHANGELOG.md 2>/dev/null || true; cp /code/CHANGELOG_en.md /host/CHANGELOG_en.md 2>/dev/null || true" && \
   sudo bash start-prod.sh
   ```
 
@@ -441,6 +443,24 @@ docker compose -f docker-compose.prod.yml logs -f arl-worker
 # 平滑停止或重启核心容器服务
 docker compose -f docker-compose.prod.yml restart
 ```
+</details>
+
+<details>
+<summary><b>Q6: 在 CentOS 7 或 Linux 3.x 等老旧内核环境下部署，前端容器报错或端口无法访问？</b></summary>
+<br/>
+
+**A:** 在 Linux 3.10 等老旧内核上，Docker 默认 Seccomp 安全策略可能会拦截底层系统调用（如 `SYS_pwritev2` 等文件写调用），导致前端 Nginx 写入 PID 文件失败（报错 `pwrite() "/run/nginx.pid" failed (1: Operation not permitted)`）并反复崩溃重启。
+
+**处置与排查建议**：
+1. **确认编排配置**：最新版 `docker-compose.prod.yml` 已为 `arl-frontend` 默认配置 `security_opt: [seccomp:unconfined]` 兜底。
+2. **存量环境快速修复**：若使用的是早期未包含该配置的部署编排，可在部署目录下执行以下命令追加并重载容器（内置幂等判断，多次执行无副作用）：
+   ```bash
+   # 为 arl-frontend 补充解除 Seccomp 限制配置（若尚未配置）
+   grep -q "seccomp:unconfined" docker-compose.prod.yml || sed -i '/container_name: arl-frontend-prod/a \    security_opt:\n      - seccomp:unconfined' docker-compose.prod.yml
+   # 重建前端容器
+   docker compose -f docker-compose.prod.yml up -d arl-frontend
+   ```
+3. **重新执行部署校验**：执行 `bash start-prod.sh`，脚本内置的容器状态断言与端口连通性探针将自动验证服务健康就绪。
 </details>
 
 ---
