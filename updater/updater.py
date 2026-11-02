@@ -751,6 +751,7 @@ class PollingHandler(BaseHTTPRequestHandler):
             """
             cp /code/start-prod.sh /host/start-prod.sh 2>/dev/null || true
             mkdir -p /host/updater && cp /code/updater/updater.py /host/updater/updater.py 2>/dev/null || true
+            mkdir -p /host/tools && cp -r /code/tools/. /host/tools/ 2>/dev/null || true
             if [ -f /host/docker-compose.prod.yml ]; then
                 cp /host/docker-compose.prod.yml /host/docker-compose.prod.yml.bak_$(date +%Y%m%d%H%M%S) 2>/dev/null || true
             fi

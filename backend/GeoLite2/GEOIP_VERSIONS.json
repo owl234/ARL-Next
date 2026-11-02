@@ -1,9 +1,9 @@
 {
   "_comment": "ARL-Next GeoIP 数据库版本声明。三个库文件（约 88MB）不再随仓库分发，由部署时按 tools/fetch_geoip.py 获取并校验后装入 Docker 命名卷 arl_geoip。ip2region 走公网直链+sha256 强校验；GeoLite2 需 MaxMind 许可，无 MAXMIND_LICENSE_KEY 时跳过（服务降级运行）。",
   "ip2region_v4.xdb": {
-    "version": "2025.10",
-    "sha256": "27ecba8c9a6d5e3b280aedbe7ee15c65372b179fbd0dad3845d8c608f2fcace1",
-    "size": 11122642,
+    "version": "2026.10",
+    "sha256": "46249ad1b33bcaa4cc37475b93746cec2b00acffc3316cc4f56167ac821ea2ad",
+    "size": 11122714,
     "url": "https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
     "mirror": "https://ghproxy.cn/https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb"
   },

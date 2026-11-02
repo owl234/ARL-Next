@@ -7,6 +7,7 @@ ARL-Next 一键全量数据备份与恢复 CLI 运维工具
 
 import os
 import sys
+import shutil
 import argparse
 import subprocess
 import json
@@ -36,15 +37,56 @@ def get_web_container_name() -> str:
     return "arl-web-prod"
 
 
+def _resolve_container_script_path(web_container: str) -> str:
+    """解析容器内 arl_backup.py 路径，优先 /code/tools/arl_backup.py，兼容 /code/backend/tools/arl_backup.py 回退"""
+    primary = "/code/tools/arl_backup.py"
+    fallback = "/code/backend/tools/arl_backup.py"
+    for path in (primary, fallback):
+        check = subprocess.run(
+            ["docker", "exec", web_container, "test", "-f", path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        if check.returncode == 0:
+            return path
+    # 若旧版容器内尚无该脚本，自动同步当前脚本至容器 /code/tools/arl_backup.py
+    subprocess.run(["docker", "exec", web_container, "mkdir", "-p", "/code/tools"], check=True)
+    subprocess.run(["docker", "cp", os.path.abspath(__file__), f"{web_container}:{primary}"], check=True)
+    return primary
+
+
 def run_inside_container(cmd_args):
     """当在宿主机运行时，自动将命令透传到 arl-web 容器内执行"""
     web_container = get_web_container_name()
     print(f"🐳 检测到当前在宿主机环境，正在透传至容器 [{web_container}] 执行...")
     
-    # 检查是否有文件参数需要同步进容器
+    # 检查是否有文件参数需要同步进容器，以及是否指定了宿主机 --output 导出路径
     transformed_args = list(cmd_args)
+    host_output_path = ""
+    host_output_is_dir = False
+    container_output_tmp = f"/tmp/arl_backup_cli_out_{os.getpid()}.tar.gz"
+    uploaded_temp_files = []
+    skip_next = False
+
     for idx, arg in enumerate(transformed_args):
-        if os.path.isfile(arg):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--output" and idx + 1 < len(transformed_args):
+            raw_out = transformed_args[idx + 1]
+            if raw_out:
+                host_output_is_dir = raw_out.endswith(("/", "\\")) or os.path.isdir(raw_out)
+                host_output_path = os.path.abspath(raw_out)
+                transformed_args[idx + 1] = container_output_tmp
+            skip_next = True
+            continue
+        if arg.startswith("--output="):
+            raw_out = arg.split("=", 1)[1]
+            if raw_out:
+                host_output_is_dir = raw_out.endswith(("/", "\\")) or os.path.isdir(raw_out)
+                host_output_path = os.path.abspath(raw_out)
+                transformed_args[idx] = f"--output={container_output_tmp}"
+            continue
+        if not arg.startswith("-") and os.path.isfile(arg):
             filename = os.path.basename(arg)
             dest = f"/code/backend/data/backups/{filename}"
             # 检查容器内是否已存在同名且大小一致的文件
@@ -57,7 +99,11 @@ def run_inside_container(cmd_args):
                 print(f"📦 正在传输备份文件至容器: {arg} -> {web_container}:{dest} ...")
                 subprocess.run(["docker", "exec", web_container, "mkdir", "-p", "/code/backend/data/backups"], check=True)
                 subprocess.run(["docker", "cp", arg, f"{web_container}:{dest}"], check=True)
+                if transformed_args and transformed_args[0] == "info":
+                    uploaded_temp_files.append(dest)
             transformed_args[idx] = filename
+
+    container_script = _resolve_container_script_path(web_container)
 
     # 仅在具备真实 TTY 交互终端时才附加 -t，避免非交互脚本/SSH 批处理报错
     tty_flag = ["-t"] if sys.stdin.isatty() else []
@@ -66,10 +112,32 @@ def run_inside_container(cmd_args):
     ] + tty_flag + [
         web_container,
         "/code/backend/.venv-docker/bin/python",
-        "/code/backend/tools/arl_backup.py"
+        container_script
     ] + transformed_args
 
-    res = subprocess.run(container_full_cmd)
+    try:
+        res = subprocess.run(container_full_cmd)
+        if res.returncode == 0 and host_output_path:
+            try:
+                target_host_file = host_output_path
+                if host_output_is_dir or os.path.isdir(target_host_file):
+                    os.makedirs(target_host_file, exist_ok=True)
+                    target_host_file = os.path.join(target_host_file, f"arl_backup_{int(time.time())}.tar.gz")
+                else:
+                    os.makedirs(os.path.dirname(target_host_file) or ".", exist_ok=True)
+                subprocess.run(["docker", "cp", f"{web_container}:{container_output_tmp}", target_host_file], check=True)
+                print(f"📥 已将备份文件同步至宿主机: {target_host_file}")
+            finally:
+                subprocess.run(
+                    ["docker", "exec", web_container, "rm", "-f", container_output_tmp],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
+    finally:
+        for temp_dest in uploaded_temp_files:
+            subprocess.run(
+                ["docker", "exec", web_container, "rm", "-f", temp_dest],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
     sys.exit(res.returncode)
 
 
@@ -164,9 +232,16 @@ def main():
             
             # 若指定了 output 且不同于源路径，则移动/复制
             if args.output:
+                out_is_dir = args.output.endswith(("/", "\\")) or os.path.isdir(args.output)
                 out_path = os.path.abspath(args.output)
-                shutil.copyfile(archive_path, out_path)
-                archive_path = out_path
+                if out_is_dir or os.path.isdir(out_path):
+                    os.makedirs(out_path, exist_ok=True)
+                    out_path = os.path.join(out_path, res["archive_name"])
+                else:
+                    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                if os.path.abspath(archive_path) != os.path.abspath(out_path):
+                    shutil.move(archive_path, out_path)
+                    archive_path = out_path
 
             print("\n" + "=" * 60)
             print("🎉 恭喜！系统备份已成功生成！")
@@ -245,13 +320,15 @@ def main():
 
         # 校验任务
         running_count = get_running_task_count()
-        if running_count > 0 and not args.force:
+        force_restore = bool(args.force)
+        if running_count > 0 and not force_restore:
             print(f"\n⚠️  警告: 系统当前有 {running_count} 个正在执行的扫描任务！")
             print("覆盖恢复将会清空现有数据库并中断这些任务。")
             confirm = input("如确认继续，请输入 'yes'，或带 --force 参数运行: ").strip().lower()
             if confirm != "yes":
                 print("操作已取消。")
                 sys.exit(0)
+            force_restore = True
 
         print("\n" + "=" * 60)
         print("⚠️  ARL-Next 开始执行全量覆盖恢复 (--drop 模式)...")
@@ -260,7 +337,7 @@ def main():
         
         t0 = time.time()
         try:
-            res = restore_backup_archive(archive_path=target, force=True)
+            res = restore_backup_archive(archive_path=target, force=force_restore)
             elapsed = round(time.time() - t0, 2)
             print("\n" + "=" * 60)
             print("🎉 恭喜！数据覆盖恢复全部成功！")

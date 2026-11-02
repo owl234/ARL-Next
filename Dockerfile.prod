@@ -80,6 +80,10 @@ RUN python3 -m venv $VIRTUAL_ENV && \
 
 
 #########################################
+# 阶段二点五：提取 MongoDB 官方备份恢复工具（支持 amd64/arm64 多架构）
+FROM mongo:7.0 AS builder-mongo
+
+#########################################
 # 阶段三：Final（生产运行环境）
 FROM python:3.13-slim-bookworm
 
@@ -101,6 +105,9 @@ COPY --from=builder-c /usr/local/bin/massdns \
                     /usr/local/bin/nuclei \
                     /usr/local/bin/nmap \
                     /usr/local/bin/
+COPY --from=builder-mongo /usr/bin/mongodump \
+                        /usr/bin/mongorestore \
+                        /usr/local/bin/
 COPY --from=builder-c /usr/local/share/nmap /usr/share/nmap
 RUN mkdir -p /usr/local/share && ln -s /usr/share/nmap /usr/local/share/nmap
 COPY --from=builder-py /code/backend/.venv-docker /code/backend/.venv-docker
@@ -125,6 +132,7 @@ COPY ./CHANGELOG.md ./CHANGELOG_en.md /code/
 COPY ./updater /code/updater
 COPY ./frontend /code/frontend
 COPY ./mcp-server /code/mcp-server
+COPY ./tools /code/tools
 
 # 4. 拷贝待用脚本并赋予权限
 RUN cp /code/backend/wait-for-it.sh /usr/bin/wait-for-it.sh && \

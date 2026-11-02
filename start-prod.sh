@@ -666,22 +666,6 @@ for svc in "${SNAPSHOT_SVCS[@]}"; do
 done
 echo "✅ 稳定版本镜像快照备份完毕！"
 
-echo "🗺️ [1.5/3] 正在预填充 GeoIP 数据库命名卷 (arl_geoip)..."
-if command -v python3 &>/dev/null && [ -f "./tools/fetch_geoip.py" ]; then
-    GEOIP_TMP="$(mktemp -d)"
-    if MAXMIND_LICENSE_KEY="${MAXMIND_LICENSE_KEY:-}" python3 ./tools/fetch_geoip.py --dir "$GEOIP_TMP"; then
-        docker volume create arl_geoip >/dev/null 2>&1 || true
-        # 命名卷需经临时容器写入（volume 不支持宿主机直接 cp）
-        docker run --rm -v arl_geoip:/geoip -v "$GEOIP_TMP:/src:ro" alpine:3.20 sh -c "cp -f /src/* /geoip/ 2>/dev/null; ls -la /geoip/" || \
-            echo "⚠️ GeoIP 卷预填充失败（不阻断部署，服务以降级模式运行）"
-    else
-        echo "⚠️ ip2region 获取失败（不阻断部署，geo 解析将降级）"
-    fi
-    rm -rf "$GEOIP_TMP"
-else
-    echo "⚠️ 未检测到 python3 或 tools/fetch_geoip.py，跳过 GeoIP 预填充（服务降级运行）"
-fi
-
 echo "🐳 [2/3] 正在从阿里云镜像库极速拉取最新构建 (前端、Web、Worker、Puppeteer等)..."
 MAX_RETRIES=3
 RETRY_COUNT=0
@@ -726,8 +710,30 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     sleep 5
 done
 
+echo "🗺️ [2.5/3] 正在预填充 GeoIP 数据库命名卷 (arl-next-prod_arl_geoip)..."
+GEOIP_VOL="arl-next-prod_arl_geoip"
+docker volume create --label com.docker.compose.project=arl-next-prod --label com.docker.compose.volume=arl_geoip "$GEOIP_VOL" >/dev/null 2>&1 || true
+GEOIP_MOUNT_ARGS=()
+if [ -f "./tools/fetch_geoip.py" ]; then
+    GEOIP_MOUNT_ARGS=(-v "$(pwd)/tools/fetch_geoip.py:/code/tools/fetch_geoip.py:ro")
+fi
+if ! docker run --rm -v "${GEOIP_VOL}:/geoip" "${GEOIP_MOUNT_ARGS[@]}" -e MAXMIND_LICENSE_KEY="${MAXMIND_LICENSE_KEY:-}" crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest /code/backend/.venv-docker/bin/python /code/tools/fetch_geoip.py --dir /geoip; then
+    echo "⚠️ GeoIP 卷预填充失败（不阻断部署，服务以降级模式运行）"
+fi
+
 echo "🚀 [3/3] 正在启动生产多服务容器组并清理可能遗留的孤儿容器..."
 docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+# 兜底自愈：若存量 arl-web-prod 镜像尚未内置 mongodump/mongorestore，自动从同架构 arl-mongodb-prod 注入
+if ! docker exec arl-web-prod test -x /usr/local/bin/mongodump 2>/dev/null; then
+    MTOOLS_TMP="$(mktemp -d)"
+    if docker cp arl-mongodb-prod:/usr/bin/mongodump "$MTOOLS_TMP/mongodump" 2>/dev/null && \
+       docker cp arl-mongodb-prod:/usr/bin/mongorestore "$MTOOLS_TMP/mongorestore" 2>/dev/null; then
+        docker cp "$MTOOLS_TMP/mongodump" arl-web-prod:/usr/local/bin/mongodump 2>/dev/null || true
+        docker cp "$MTOOLS_TMP/mongorestore" arl-web-prod:/usr/local/bin/mongorestore 2>/dev/null || true
+    fi
+    rm -rf "$MTOOLS_TMP"
+fi
 
 echo "⏳ 正在等待后端 API 就绪 (动态健康探针检测)..."
 MAX_WAIT=90

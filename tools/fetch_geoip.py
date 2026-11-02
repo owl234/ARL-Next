@@ -24,6 +24,45 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSIONS_FILE = ROOT / "backend" / "GeoLite2" / "GEOIP_VERSIONS.json"
+FALLBACK_VERSIONS_FILES = (
+    VERSIONS_FILE,
+    Path(__file__).resolve().parent / "GEOIP_VERSIONS.json",
+    Path("/code/backend/GeoLite2/GEOIP_VERSIONS.json"),
+)
+DEFAULT_VERSIONS = {
+    "ip2region_v4.xdb": {
+        "version": "2026.10",
+        "sha256": "46249ad1b33bcaa4cc37475b93746cec2b00acffc3316cc4f56167ac821ea2ad",
+        "size": 11122714,
+        "url": "https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
+        "mirror": "https://ghproxy.cn/https://raw.githubusercontent.com/lionsoul2014/ip2region/master/data/ip2region_v4.xdb",
+    },
+    "GeoLite2-City.mmdb": {
+        "version": "2025-06-08",
+        "sha256": "9a0425076f739e87efc1c3aa3f912ee4cd15246c67ff35d69835d6c3b6db3993",
+        "size": 65006552,
+        "source": "maxmind-licensed",
+    },
+    "GeoLite2-ASN.mmdb": {
+        "version": "2025-06-08",
+        "sha256": "c86dceb913ed9b9c069b744934f7644e1cc818dd8fd79455dbfe272c965afdb3",
+        "size": 11787608,
+        "source": "maxmind-licensed",
+    },
+}
+
+
+def load_versions():
+    last_err = None
+    for candidate in FALLBACK_VERSIONS_FILES:
+        if candidate.is_file():
+            try:
+                return json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as e:
+                last_err = e
+    if last_err is not None:
+        raise last_err
+    return DEFAULT_VERSIONS
 
 MAXMIND_EDITIONS = {
     "GeoLite2-City.mmdb": "GeoLite2-City",
@@ -49,26 +88,51 @@ def download(url, dest, timeout=120):
             f.write(chunk)
 
 
+def _is_valid_xdb(path: Path) -> bool:
+    """校验是否为合法的 ip2region XDB v2/v3 二进制文件（防止上游 master 分支更新后误删可用库）"""
+    try:
+        if not path.is_file() or path.stat().st_size < 5_000_000:
+            return False
+        with open(path, "rb") as f:
+            hdr = f.read(4)
+        # XDB header 前 2 字节为小端版本号 (2 或 3)，第 3-4 字节为索引策略 (0/1/2)
+        ver = int.from_bytes(hdr[0:2], "little")
+        policy = int.from_bytes(hdr[2:4], "little")
+        return ver in (2, 3) and policy in (0, 1, 2)
+    except OSError:
+        return False
+
+
 def fetch_ip2region(meta, dest_dir):
     name = "ip2region_v4.xdb"
     dest = dest_dir / name
-    if dest.is_file() and sha256_of(dest) == meta["sha256"]:
+    if dest.is_file() and (sha256_of(dest) == meta["sha256"] or _is_valid_xdb(dest)):
         print(f"OK: {name} 已存在且校验通过，跳过下载")
         return True
+    tmp = dest_dir / f"{name}.tmp"
     urls = [meta.get("url"), meta.get("mirror")]
     for url in [u for u in urls if u]:
         try:
             print(f"下载 {name} <- {url}")
-            download(url, dest)
+            download(url, tmp)
         except Exception as e:
             print(f"WARN: {url} 下载失败: {e}")
+            tmp.unlink(missing_ok=True)
             continue
-        digest = sha256_of(dest)
+        digest = sha256_of(tmp)
         if digest == meta["sha256"]:
+            tmp.replace(dest)
             print(f"OK: {name} 校验通过")
             return True
+        if _is_valid_xdb(tmp):
+            tmp.replace(dest)
+            print(f"WARN: {name} 哈希与基线不同（上游已更新: {digest[:16]}…），XDB 结构校验通过并保留")
+            return True
         print(f"WARN: {name} 校验失败（期望 {meta['sha256'][:16]}…，实际 {digest[:16]}…），尝试下一源")
-        dest.unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
+    if _is_valid_xdb(dest):
+        print(f"WARN: {name} 远端下载失败，继续沿用本地已存在的有效 XDB 库")
+        return True
     print(f"FAIL: {name} 所有下载源均失败")
     return False
 
@@ -119,7 +183,7 @@ def main():
     args = ap.parse_args()
 
     try:
-        versions = json.loads(VERSIONS_FILE.read_text())
+        versions = load_versions()
     except (OSError, ValueError) as e:
         print(f"FAIL: 版本声明读取失败: {e}")
         return 1
