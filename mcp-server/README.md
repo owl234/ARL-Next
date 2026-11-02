@@ -16,6 +16,7 @@
   <a href="#claude-code"><b>💻 Claude Code CLI</b></a> •
   <a href="#antigravity-windsurf"><b>🚀 Antigravity / Windsurf</b></a> •
   <a href="#tools"><b>🧩 工具能力与实战</b></a> •
+  <a href="../docs/MCP_PENTEST_TEST_CASES.md"><b>🎯 渗透测试实战用例库</b></a> •
   <a href="#faq"><b>🚨 故障排查与自愈</b></a> •
   <a href="#architecture"><b>⚙️ 架构与进阶</b></a>
 </p>
@@ -25,7 +26,7 @@
 ## ⚡ 10 秒极速接入（按你的客户端选择）
 
 > [!TIP]
-> **💡 最省心的做法**：登录 ARL-Next Web 控制台，点击顶部导航栏右上角 **「MCP」**，弹窗已根据当前访问地址与账号权限预生成完整配置，支持一键复制或一键导出脚本。若手动配置，请直接对号入座复制下方卡片：
+> **💡 最省心的做法**：登录 ARL-Next Web 控制台，进入左侧菜单 **「MCP 中心」**（或点击顶部导航栏右上角 **「MCP」**），可按需签发最小权限的 MCP 专用密钥（支持 `asset:read` 只读情报与 `task:dispatch` 任务调度分级授权）、配置单工具开关与速率配额、查看调用审计日志，并一键复制或导出预生成配置。若手动配置，请直接对号入座复制下方卡片：
 
 ### <span id="cursor"></span>1. Cursor
 
@@ -137,7 +138,7 @@ ARL-Next MCP 注册了 6 项核心标准化工具，默认开启只读情报查�
 
 ### 2. 典型 Agent 交互指令示例
 
-在连接 MCP 后，直接在 AI 对话框中用自然语言对 Agent 下达指令：
+在连接 MCP 后，直接在 AI 对话框中用自然语言对 Agent 下达指令（更多完整渗透测试提示词与多步协同案例请参阅 [`docs/MCP_PENTEST_TEST_CASES.md`](../docs/MCP_PENTEST_TEST_CASES.md)）：
 
 - **场景一：单资产暴露面深度画像**
   > **💬 提问**：“帮我分析 `target.example.com` 的网络暴露面与已知风险。”<br>

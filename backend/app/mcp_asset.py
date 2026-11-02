@@ -563,7 +563,7 @@ def build_enterprise_profile(target: str, category: str = "all", page: int = 1, 
             "status": "not_found",
             "target": target,
             "message": f"未在 ARL 资产库中检索到与【{target}】匹配的企业测绘记录",
-            "suggestion": "可前往 ARL Web 控制台【资产分组 -> 企业生态资产 -> 新建企业测绘】，或确认名称/域名无误后重试"
+            "suggestion": "可前往 ARL Web 控制台【资产组 -> 新建资产组 -> 企业全景测绘建组】，或确认名称/域名无误后重试"
         }
 
     resolved_task_id = str(task_doc["_id"])

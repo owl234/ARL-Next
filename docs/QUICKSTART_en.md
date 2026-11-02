@@ -7,11 +7,11 @@
 
 ---
 
-## What changed in this release (v1.4.2)
+## What changed in this release (v1.4.3)
 
-- **Enterprise panorama recon → group**: "Asset Group → New Group" now offers "Enterprise panorama recon → group / Manual asset entry"; completed recon jobs are filed into groups automatically by the backend, no need to keep the page open.
-- **Tasks can link an asset group**: the new recon task form offers an optional "Related asset group"; results sync to that group on completion.
-- **Searchable system settings**: the "System Settings" page supports keyword search (e.g. `FOFA`, concurrency, Webhook); the concurrency page distinguishes Worker process counts from per-task blasting concurrency.
+- **Full-system data backup & restore**: "System Settings → Backup and restore" and the host CLI `python3 tools/arl_backup.py` support one-click full database & environment snapshot export/restore, guarded by a full-stack maintenance lock and automatic rollback on failure.
+- **Trilingual UI & MCP Governance Center**: switch between 简体中文 / English / Русский from the top navigation bar; the new sidebar "MCP Center" manages fine-grained scoped keys, tool-level permission switches, rate quotas, and invocation audit logs.
+- **WIH API endpoint probing & group workflow**: site details now extract static API endpoint candidates from JS assets and probe same-origin reachability; "New Asset Group" supports automated enterprise panorama recon filing and task-to-group linking.
 - Full changes: [`CHANGELOG_en.md`](../CHANGELOG_en.md).
 
 ---
@@ -35,6 +35,7 @@ docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyu
 docker cp arl-temp:/code/start-prod.sh ./ && \
 docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
+docker cp arl-temp:/code/tools ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
 docker cp arl-temp:/code/CHANGELOG_en.md ./ && \
@@ -92,7 +93,7 @@ Pick "🏢 Enterprise panorama recon → group" and paste a Tianyancha link (e.g
 
 > **New users: pick the "Fast recon" preset**: shortest run to close the loop first; try standard/deep when needed.
 
-Open "Task Management" → click "资产侦查任务" to switch views → "New recon task" (dialog title "New asset recon task"):
+Open "Task Management" → click "Asset Recon Tasks" to switch views → "New recon task" (dialog title "New asset recon task"):
 
 <p align="center"><img src="../img/quickstart-task-list.png" alt="Task management" width="850"></p>
 
@@ -100,7 +101,7 @@ Open "Task Management" → click "资产侦查任务" to switch views → "New r
 2. "Related asset group (optional)": pick the group when ready; results sync to it on completion, and every target must fall inside that group's scope.
 3. "Target": enter a domain (`example.com`), IP (`1.1.1.1`), or subnet (`192.168.1.0/24`); one target per line for multiples.
 4. Click the "Fast recon" preset directly.
-5. Click submit ("下发任务").
+5. Click submit ("Submit Task").
 
 <p align="center"><img src="../img/quickstart-task-new.png" alt="New asset recon task" width="380"></p>
 
@@ -121,7 +122,7 @@ Open "Task Management" → click "资产侦查任务" to switch views → "New r
 
 <p align="center"><img src="../img/quickstart-dashboard.png" alt="Dashboard" width="850"></p>
 
-- In "Task Management", filter by status: `running` (进行中), `waiting` (排队中), `done` (已完成), `stop` (已停止), `error` (异常失败); running phases render as "进行中 · \<phase\>" (e.g. port scan).
+- In "Task Management", filter by status: `running` (In progress), `waiting` (Queued), `done` (Completed), `stop` (Stopped), `error` (Failed); running phases render as "In progress · \<phase\>" (e.g. port scan).
 - Open the task detail for domains, sites, services, and vulnerability breakdowns; tasks linked to a group expose the group tag for jump-through.
 - Use the profile drawer in "Asset Search" or the group detail to drill into site, certificate, leak, and vulnerability dimensions.
 
@@ -137,7 +138,7 @@ Open "Task Management" → click "资产侦查任务" to switch views → "New r
 
 ## Upgrade notes
 
-- Prefer idle windows: triggering an update from "System Settings → System version & update" (button labeled "一键系统更新") restarts background Workers and interrupts running scan tasks.
+- Prefer idle windows: triggering an update from "System Settings → System version & update" (button labeled "One-Click System Update") restarts background Workers and interrupts running scan tasks.
 - Data compatibility: upgrades run incremental migrations and backfill missing fields without overwriting saved config; persistent volume names stay unchanged.
 
 ---

@@ -16,6 +16,7 @@
   <a href="#claude-code"><b>💻 Claude Code CLI</b></a> •
   <a href="#antigravity-windsurf"><b>🚀 Antigravity / Windsurf</b></a> •
   <a href="#tools"><b>🧩 Capabilities & Prompts</b></a> •
+  <a href="../docs/MCP_PENTEST_TEST_CASES_en.md"><b>🎯 Pentest Prompt Library</b></a> •
   <a href="#faq"><b>🚨 Troubleshooting</b></a> •
   <a href="#architecture"><b>⚙️ Architecture & Internals</b></a>
 </p>
@@ -25,7 +26,7 @@
 ## ⚡ 10-Second Quick Start (Choose by Your Client)
 
 > [!TIP]
-> **💡 Recommended Practice**: Log in to the ARL-Next Web Console and click **「MCP」** in the top navigation bar. The modal automatically generates a ready-to-use configuration populated with your host and API token. For manual configuration, copy the snippet matching your client below:
+> **💡 Recommended Practice**: Log in to the ARL-Next Web Console and open **「MCP Center」** in the left sidebar (or click **「MCP」** in the top navigation bar) to issue least-privilege scoped MCP keys (`asset:read` read-only intelligence vs. `task:dispatch` task scheduling), configure per-tool switches and rate quotas, inspect invocation audit logs, and copy or export ready-to-use client configurations with one click. For manual configuration, copy the snippet matching your client below:
 
 ### <span id="cursor"></span>1. Cursor
 
@@ -137,7 +138,7 @@ ARL-Next MCP registers 6 standardized tools with read-only reconnaissance enable
 
 ### 2. Typical Agent Prompts & Interactions
 
-Once connected, interact with your AI Agent using natural language:
+Once connected, interact with your AI Agent using natural language (see [`docs/MCP_PENTEST_TEST_CASES_en.md`](../docs/MCP_PENTEST_TEST_CASES_en.md) for the complete penetration testing prompt library and multi-step workflows):
 
 - **Scenario 1: Single Target Attack Surface Drill-Down**
   > **💬 Prompt**: "Analyze the network exposure and known vulnerabilities of `target.example.com`."<br>

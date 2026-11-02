@@ -213,7 +213,7 @@ class TestMCPEnterpriseProfile(unittest.TestCase):
         res = build_enterprise_profile(target="未知神秘企业xxxx")
         self.assertEqual(res.get("status"), "not_found")
         self.assertIn("未在 ARL 资产库中检索到", res["message"])
-        self.assertIn("新建企业测绘", res["suggestion"])
+        self.assertIn("企业全景测绘建组", res["suggestion"])
 
     def test_unsupported_category(self):
         """测试传入不支持的 category"""

@@ -35,6 +35,7 @@
     <a href="#core-features"><b>✨ 核心特性</b></a> •
     <a href="./docs/API_GUIDE.md"><b>🔌 API对接指南</b></a> •
     <a href="./mcp-server/README.md"><b>🤖 MCP配置指南</b></a> •
+    <a href="./docs/MCP_PENTEST_TEST_CASES.md"><b>🎯 MCP实战用例</b></a> •
     <a href="./CHANGELOG.md"><b>📜 更新日志</b></a> •
     <a href="https://github.com/owl234/ARL-Next/discussions"><b>💬 讨论交流</b></a> •
     <a href="./LICENSE"><b>📄 开源协议</b></a>
@@ -57,24 +58,25 @@
 | 评估维度 | ARL 原始架构与实现 | ARL-Next 重构方案 |
 | :--- | :--- | :--- |
 | **并发与调度架构** | 任务执行共用单 Celery 队列，复杂任务高并发时易发生队列阻塞与假死 | **拆分 OSINT 与截图为独立微服务**，引入轻重分离队列与批量落库，显著收敛队列阻塞与并发瓶颈 |
-| **自动化协议集成** | 无标准化外部调度接口，仅支持 Web 控制台人工交互 | **支持原生 MCP Server**，提供通过标准协议进行多维资产画像检索的能力 |
+| **自动化协议集成** | 无标准化外部调度接口，仅支持 Web 控制台人工交互 | **支持原生 MCP Server 与可视化治理中心**，提供多维资产画像检索、细粒度 Scope 专用密钥、工具级开关与调用审计 |
 | **企业资产拓扑** | 无关联企业与全类型数字资产下钻链路 | **资产组深度融合**：支持企业股权关联与多类型 ICP 检索（网站 / APP / 小程序 / 快应用），构建多级集团拓扑与暴露面画像 |
-| **容器构建与部署** | 依赖陈旧且缺乏镜像加速，构建拉取易受外部网络波动影响 | **多阶段容器构建与阿里云国内镜像源预编译**，提升构建速度与部署稳定性 |
+| **容器构建与部署** | 依赖陈旧且缺乏镜像加速，构建拉取易受外部网络波动影响 | **多阶段容器构建与阿里云国内镜像源预编译**，配套 Web / CLI 全量数据归档备份与迁移恢复能力 |
 | **底层技术栈基线** | Python 3.6 / Vue 2 / MongoDB 3.x / Nmap 7.70 | **Python 3.13 / Vue 3.5 / MongoDB 7.0 / Nmap 7.95 稳定版** 现代运行环境基线基准对齐 |
-| **敏感信息提取** | 基于外部 Go 二进制工具，跨平台存在依赖与编译维护成本 | **纯 Python 原生提取引擎**，敏感信息分析模块无需外部二进制依赖，支持流式提取 |
-| **Web 交互体验** | 大数据长列表无固定表头，分页状态未持久化，字典与策略配置分散于多级子菜单 | **表头与操作栏 Sticky 悬浮吸附**、分页状态本地持久化、三栏式字典管理器 |
+| **敏感信息提取** | 基于外部 Go 二进制工具，跨平台存在依赖与编译维护成本 | **纯 Python 原生提取引擎**，支持 JS/HTML 流式提取及 WIH 相对接口候选静态识别与同源可达性探测 |
+| **Web 交互体验** | 大数据长列表无固定表头，分页状态未持久化，仅支持单一中文界面 | **中 / 英 / 俄三语国际化切换**、表头与操作栏 Sticky 悬浮吸附、分页状态本地持久化、三栏式字典管理器 |
 | **威胁情报协同** | 缺乏持续情报同步机制，时间戳处理不统一易产生冗余告警 | **CVE 与 GitHub 代码泄露监听**、基于数据库原子更新锁去重、严格时区归一化 |
 
 ---
 
 ### <span id="core-features"></span>✨ 核心特性矩阵
 
-* 🤖 **AI Agent 原生集成 (MCP 2.0)**：遵循 Model Context Protocol (2024-11-05) 标准，提供 **远程原生 SSE 直连**（Cursor / Claude Desktop 粘贴即用）与 **本地 Stdio 桥接**（自签证书 / 内网专网开箱即通）双模支持；基于独立异步微服务容器解耦长连接，覆盖五维资产画像、条件检索、状态追踪及受控扫描调度。（👉 [MCP 配置手册](./mcp-server/README.md)）
+* 🤖 **AI Agent 原生集成与 MCP 治理中心 (MCP 2.0)**：遵循 Model Context Protocol (2024-11-05) 标准，提供 **远程原生 SSE 直连**（Cursor / Claude Desktop 粘贴即用）与 **本地 Stdio 桥接**（自签证书 / 内网专网开箱即通）双模支持；内置可视化 **MCP 治理中心**（支持签发细粒度 Scope 专用密钥、工具级启用开关、速率配额与调用审计日志），覆盖五维资产画像、企业生态画像、条件检索、状态追踪及受控扫描调度。（👉 [MCP 配置手册](./mcp-server/README.md) · [MCP 渗透测试实战用例库](./docs/MCP_PENTEST_TEST_CASES.md)）
 * ⚙️ **异步解耦并发调度**：微服务拆分与独立任务队列分流，结合批量数据落库优化，保障高吞吐扫描平稳运行。
 * 🌐 **多级资产组与深度融合**：企业资产查询深度融入资产组管理架构，支持集团多级架构管理、多类型 ICP（网站 / APP / 小程序 / 快应用）与生态资产自动化关联及网络暴露面统一测绘。
-* 🔍 **现代资产测绘基准**：基于 Nmap 7.95 稳定版；内置原生 Python 敏感凭据与信息流式提取引擎。
+* 🔍 **现代资产测绘与 WIH 接口探测**：基于 Nmap 7.95 稳定版；内置原生 Python 敏感信息流式提取引擎，支持从站点 HTML 与同源 JS 中静态识别相对 API 接口候选并执行同源 GET 可达性验证。
 * 🛡️ **漏洞与代码泄露监控**：持续同步权威 CVE 漏洞情报，监听 GitHub 关联代码与凭据泄露，支持基于原子更新的去重机制。
-* ⚡ **高可用运维与容错机制**：集成容器健康探活、就绪轮询与异常自动重启机制，支持管理后台在线平滑升级。
+* 💾 **全量数据备份与在线平滑运维**：支持通过 Web 控制台或 CLI 工具一键打包导出/覆盖恢复全库 MongoDB 集合、站点截图、自定义字典与 PoC 插件（内置 SHA256 完整性校验与 Worker 消费安全暂停）；集成容器健康探活、就绪轮询与后台在线热更新。
+* 🌍 **多语言国际化与现代交互体验**：内置简体中文、English、Русский 三语实时切换，结合全局设置项搜索、表头悬浮吸附与三栏式字典工作台。
 * 📦 **预构建镜像加速**：提供阿里云国内镜像源预编译构建制品，规避跨国网络波动导致的镜像拉取与依赖安装失败。
 
 ---
@@ -163,7 +165,7 @@ graph TD
         MQ -->|"威胁队列 arlgithub"| W_Git["🛡️ 威胁情报 Worker (CVE/代码泄露)"]
         
         Scheduler["⏰ 监控调度引擎 (Scheduler & Beat)"] -.->|"周期触发"| MQ
-        W_Heavy -->|"HTTP 截图渲染 (5005)"| Puppeteer["🧩 Puppeteer 微服务 (无头截图/异常自动重启)"]
+        W_Heavy -->|"HTTP 截图渲染 (3000)"| Puppeteer["🧩 Puppeteer 微服务 (无头截图/异常自动重启)"]
     end
 
     %% 5. 数据统一落库 (从上往下自然汇聚分流)
@@ -231,6 +233,7 @@ docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyu
 docker cp arl-temp:/code/start-prod.sh ./ && \
 docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
+docker cp arl-temp:/code/tools ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
 docker cp arl-temp:/code/CHANGELOG_en.md ./ && \
@@ -272,6 +275,7 @@ docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyu
 docker cp arl-temp:/code/start-prod.sh ./ && \
 docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
+docker cp arl-temp:/code/tools ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
 docker cp arl-temp:/code/CHANGELOG_en.md ./ && \
@@ -350,7 +354,7 @@ ARL-Next 提供两种升级路径：**Web 管理后台在线更新**（推荐，
   ```bash
   cd ~/ARL-Next && \
   docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
-  docker run --rm -v $(pwd):/host crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest bash -c "cp /code/start-prod.sh /host/start-prod.sh && cp /code/docker-compose.prod.yml /host/docker-compose.prod.yml && mkdir -p /host/updater && cp -r /code/updater/. /host/updater/ 2>/dev/null || true; mkdir -p /host/frontend && cp /code/frontend/default.conf.prod /host/frontend/default.conf.prod 2>/dev/null || true; cp /code/version.txt /host/version.txt 2>/dev/null || true; cp /code/CHANGELOG.md /host/CHANGELOG.md 2>/dev/null || true; cp /code/CHANGELOG_en.md /host/CHANGELOG_en.md 2>/dev/null || true" && \
+  docker run --rm -v $(pwd):/host crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest bash -c "cp /code/start-prod.sh /host/start-prod.sh && cp /code/docker-compose.prod.yml /host/docker-compose.prod.yml && mkdir -p /host/updater && cp -r /code/updater/. /host/updater/ 2>/dev/null || true; mkdir -p /host/tools && cp -r /code/tools/. /host/tools/ 2>/dev/null || true; mkdir -p /host/frontend && cp /code/frontend/default.conf.prod /host/frontend/default.conf.prod 2>/dev/null || true; cp /code/version.txt /host/version.txt 2>/dev/null || true; cp /code/CHANGELOG.md /host/CHANGELOG.md 2>/dev/null || true; cp /code/CHANGELOG_en.md /host/CHANGELOG_en.md 2>/dev/null || true" && \
   sudo bash start-prod.sh
   ```
 
@@ -366,6 +370,26 @@ ARL-Next 提供两种升级路径：**Web 管理后台在线更新**（推荐，
 > - **数据增量平滑迁移**：内置版本增量迁移逻辑，自动维护集合结构与联合唯一索引，降低升级冲突风险。
 > - **运行镜像备份标签**：升级前自动为当前运行的服务镜像（Web、Worker、Puppeteer、OSINT等）打上 `backup-stable` 标签，保障异常时可快速回滚。
 > - **镜像加速与就绪探针**：直连阿里云国内镜像仓库拉取构建制品，API 动态探活就绪后再行放行。
+
+---
+
+### 💾 系统数据备份与迁移恢复
+
+支持在跨机器迁移、重大升级前对全库 MongoDB 集合、站点资产截图、自定义字典与 PoC 插件进行一键打包归档与 `--drop` 全量覆盖恢复：
+
+- **Web 控制台可视化操作**：进入 **「系统设置」 ➔ 「数据备份与恢复」**，支持在线创建备份（可选排除截图以压缩体积）、下载归档包、上传外部归档包及二次确认（输入 `RESTORE`）覆盖恢复。
+- **终端 CLI 运维工具**（宿主机执行会自动透传至容器）：
+  ```bash
+  # 创建全量备份（或追加 --no-screenshots 创建轻量备份）
+  python3 tools/arl_backup.py backup --note "升级前全量快照"
+
+  # 列出所有现存备份包及查看备份包详情
+  python3 tools/arl_backup.py list
+  python3 tools/arl_backup.py info <archive_name.tar.gz>
+
+  # 覆盖恢复指定备份包
+  python3 tools/arl_backup.py restore <archive_name.tar.gz>
+  ```
 
 ---
 

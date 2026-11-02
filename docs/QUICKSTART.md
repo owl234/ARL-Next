@@ -7,11 +7,11 @@
 
 ---
 
-## 本次更新预览（v1.4.2）
+## 本次更新预览（v1.4.3）
 
-- **企业全景测绘建组**：「资产组 → 新建资产组」收敛为「企业全景测绘建组 / 手工录入资产」双模式，测绘完成后由后端自动建组纳管，无需保持页面打开。
-- **任务可关联资产组**：新建资产侦查任务支持可选「关联资产组」，扫描完成后自动同步至该组。
-- **系统设置可搜索**：「系统设置」顶部支持关键词搜索直达（如 `FOFA`、`并发`、`Webhook`），并发页明确区分 Worker 进程数与单任务内发包并发度。
+- **全量数据备份与迁移恢复**：「系统设置 → 数据备份与恢复」及宿主机 `python3 tools/arl_backup.py` 支持一键导出/恢复全库与环境快照，恢复期间内置全栈维护锁与自动回滚保护。
+- **三语国际化与 MCP 治理中心**：顶部导航栏支持简体中文 / English / Русский 即时切换；左侧新增「MCP 中心」统一管理细粒度 Scope 专用密钥、工具级权限开关、配额与调用审计。
+- **WIH 接口候选探测与建组增强**：站点详情页新增 JS 静态提取的 API 路径候选列表及同源可达性探测；「新建资产组」支持企业全景测绘自动纳管建组，任务支持关联资产组。
 - 完整变更见 [`CHANGELOG.md`](../CHANGELOG.md)。
 
 ---
@@ -35,6 +35,7 @@ docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyu
 docker cp arl-temp:/code/start-prod.sh ./ && \
 docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
+docker cp arl-temp:/code/tools ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
 docker cp arl-temp:/code/CHANGELOG_en.md ./ && \

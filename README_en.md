@@ -33,6 +33,7 @@
     <a href="#core-features"><b>✨ Core Features</b></a> •
     <a href="./docs/API_GUIDE_en.md"><b>🔌 API Guide</b></a> •
     <a href="./mcp-server/README_en.md"><b>🤖 MCP Guide</b></a> •
+    <a href="./docs/MCP_PENTEST_TEST_CASES_en.md"><b>🎯 MCP Use Cases</b></a> •
     <a href="./CHANGELOG_en.md"><b>📜 Changelog</b></a> •
     <a href="https://github.com/owl234/ARL-Next/discussions"><b>💬 Discussions</b></a> •
     <a href="./LICENSE"><b>📄 License</b></a>
@@ -55,24 +56,25 @@
 | Evaluation Dimension | Legacy ARL Architecture & Implementation | ARL-Next Re-engineered Architecture |
 | :--- | :--- | :--- |
 | **Concurrency & Task Scheduling** | All scan tasks shared a single Celery queue, causing frequent queue stalling and process hangs under high concurrency | **Decoupled OSINT and screenshot capture into dedicated microservices**; implemented dual-track light/heavy task queues and bulk database persistence to resolve concurrency bottlenecks |
-| **Automation Protocol Integration** | Lacked standardized external integration interfaces; restricted to manual Web UI interactions | **Supports native Python MCP Server**, providing standard protocol endpoints for multi-dimensional asset profiling |
+| **Automation Protocol Integration** | Lacked standardized external integration interfaces; restricted to manual Web UI interactions | **Supports native MCP Server & visual Governance Center**, providing multi-dimensional asset profiling, fine-grained scoped keys, tool-level switches, and call auditing |
 | **Enterprise Asset Topology** | Lacked organizational equity mapping and multi-tier digital asset drill-downs | **Integrated Asset Group Management**: correlates corporate equity with multi-category ICP registrations (websites, APPs, mini-programs, quick apps) to construct hierarchical group topologies |
-| **Containerization & Delivery** | Outdated dependencies lacking mirror acceleration; vulnerable to network disruption during installation | **Multi-stage Docker builds with pre-compiled artifacts on Alibaba Cloud ACR**, enhancing build reliability and rapid container deployment |
+| **Containerization & Delivery** | Outdated dependencies lacking mirror acceleration; vulnerable to network disruption during installation | **Multi-stage Docker builds with pre-compiled artifacts on Alibaba Cloud ACR**, paired with full-system data archive backup and migration restore via Web or CLI |
 | **Runtime Environment Baseline** | Python 3.6 / Vue 2 / MongoDB 3.x / Nmap 7.70 | **Python 3.13 / Vue 3.5 / MongoDB 7.0 / Nmap 7.95 Stable**; modernized runtime baseline |
-| **Sensitive Data Extraction** | Relied on external Go binaries with cross-platform build and runtime overhead | **Pure-Python streaming extraction engine**, sensitive data module requires no external binary dependencies, supporting stream extraction |
-| **Web UI / User Experience** | Long tables lacked sticky headers, pagination states were lost on refresh, and policy menus were fragmented | **Sticky table headers and floating action bars**, local pagination state persistence, and a modern 3-pane dictionary manager |
+| **Sensitive Data Extraction** | Relied on external Go binaries with cross-platform build and runtime overhead | **Pure-Python streaming extraction engine**, supporting JS/HTML stream extraction plus WIH static relative API candidate extraction and same-origin reachability probing |
+| **Web UI / User Experience** | Long tables lacked sticky headers, pagination states were lost on refresh, and UI was Chinese-only | **Chinese / English / Russian i18n switching**, sticky table headers and floating action bars, local pagination state persistence, and a 3-pane dictionary manager |
 | **Threat Intelligence Integration** | Lacked continuous intelligence feeds; unaligned timestamps led to redundant alerts | **Automated CVE synchronization & GitHub credential leak monitoring**, deduplicated via database atomic upsert locks with strict timezone normalization |
 
 ---
 
 ### <span id="core-features"></span>✨ Core Feature Matrix
 
-* 🤖 **Native AI Agent Integration (MCP 2.0)**: Compliant with the Model Context Protocol (2024-11-05) standard, providing dual-mode support for **Remote Native SSE Direct Connection** (copy-paste ready for Cursor / Claude Desktop) and **Local Stdio Bridge** (out-of-the-box for self-signed certificates / private networks); decoupled via an independent asynchronous microservice container to isolate long-lived connections, covering 5-dimensional asset profiling, conditional query, status tracking, and controlled scan task dispatch. (👉 [MCP Configuration Guide](./mcp-server/README_en.md))
+* 🤖 **Native AI Agent Integration & MCP Governance Center (MCP 2.0)**: Compliant with the Model Context Protocol (2024-11-05) standard, providing dual-mode support for **Remote Native SSE Direct Connection** (copy-paste ready for Cursor / Claude Desktop) and **Local Stdio Bridge** (out-of-the-box for self-signed certificates / private networks); includes a built-in visual **MCP Governance Center** (issuing fine-grained scoped keys, tool-level enable/disable switches, rate limits, and call audit logs), covering 5-dimensional asset profiling, enterprise ecosystem profiling, conditional query, status tracking, and controlled scan task dispatch. (👉 [MCP Configuration Guide](./mcp-server/README_en.md) · [MCP Pentest Prompt Cases](./docs/MCP_PENTEST_TEST_CASES_en.md))
 * ⚙️ **Asynchronous Decoupled Scheduling**: Microservice isolation with dedicated queues and bulk MongoDB operations ensures stable execution under high-throughput scanning workloads.
 * 🌐 **Hierarchical Asset Group Management**: Integrated corporate asset discovery supporting multi-tier organizational structures, multi-category ICP association (Web / APP / Mini-program / Quick App), and unified attack surface mapping.
-* 🔍 **Modern Reconnaissance Baseline**: Standardized on Nmap 7.95 Stable; native Python streaming engine for sensitive information and credential discovery.
+* 🔍 **Modern Reconnaissance Baseline & WIH API Probing**: Standardized on Nmap 7.95 Stable; native Python streaming engine for sensitive information discovery, supporting static extraction of relative API endpoint candidates from HTML/same-origin JS and same-origin GET reachability verification.
 * 🛡️ **Vulnerability & Leak Monitoring**: Continuous tracking of authoritative CVE feeds and automated GitHub credential leak monitoring with atomic lock deduplication.
-* ⚡ **High Availability & Fault Tolerance**: Container health probes, readiness polling, automated container watchdog auto-restart, and seamless web-based updates.
+* 💾 **Full-System Backup & Online Operations**: One-click export and `--drop` full restore of MongoDB collections, site screenshots, custom wordlists, and PoC plugins via the Web console or CLI tool (with SHA256 checksum verification and safe Worker consumer pausing); integrated container health probes and online hot updates.
+* 🌍 **Multilingual UI & Modern Experience**: Built-in real-time switching across Simplified Chinese, English, and Russian (`zh-CN` / `en-US` / `ru-RU`), paired with global settings search, sticky table headers, and a 3-pane wordlist workbench.
 * 📦 **Pre-built Container Images**: Pre-compiled multi-stage container images on Alibaba Cloud ACR minimize network latency and dependency installation failures.
 
 ---
@@ -161,7 +163,7 @@ graph TD
         MQ -->|"Threat Queue arlgithub"| W_Git["🛡️ Threat Intel Worker (CVE / Code Leaks)"]
         
         Scheduler["⏰ Scheduling Engine (Scheduler & Beat)"] -.->|"Periodic Triggers"| MQ
-        W_Heavy -->|"HTTP Screenshot Render (5005)"| Puppeteer["🧩 Puppeteer Microservice (Headless / Auto-restart)"]
+        W_Heavy -->|"HTTP Screenshot Render (3000)"| Puppeteer["🧩 Puppeteer Microservice (Headless / Auto-restart)"]
     end
 
     %% 5. Unified Data Persistence Layer
@@ -229,6 +231,7 @@ docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyu
 docker cp arl-temp:/code/start-prod.sh ./ && \
 docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
+docker cp arl-temp:/code/tools ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
 docker cp arl-temp:/code/CHANGELOG_en.md ./ && \
@@ -270,6 +273,7 @@ docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyu
 docker cp arl-temp:/code/start-prod.sh ./ && \
 docker cp arl-temp:/code/docker-compose.prod.yml ./ && \
 docker cp arl-temp:/code/updater ./ && \
+docker cp arl-temp:/code/tools ./ && \
 docker cp arl-temp:/code/version.txt ./ && \
 docker cp arl-temp:/code/CHANGELOG.md ./ && \
 docker cp arl-temp:/code/CHANGELOG_en.md ./ && \
@@ -348,7 +352,7 @@ Navigate to your ARL-Next installation directory and run the commands matching y
   ```bash
   cd ~/ARL-Next && \
   docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
-  docker run --rm -v $(pwd):/host crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest bash -c "cp /code/start-prod.sh /host/start-prod.sh && cp /code/docker-compose.prod.yml /host/docker-compose.prod.yml && mkdir -p /host/updater && cp -r /code/updater/. /host/updater/ 2>/dev/null || true; mkdir -p /host/frontend && cp /code/frontend/default.conf.prod /host/frontend/default.conf.prod 2>/dev/null || true; cp /code/version.txt /host/version.txt 2>/dev/null || true; cp /code/CHANGELOG.md /host/CHANGELOG.md 2>/dev/null || true; cp /code/CHANGELOG_en.md /host/CHANGELOG_en.md 2>/dev/null || true" && \
+  docker run --rm -v $(pwd):/host crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest bash -c "cp /code/start-prod.sh /host/start-prod.sh && cp /code/docker-compose.prod.yml /host/docker-compose.prod.yml && mkdir -p /host/updater && cp -r /code/updater/. /host/updater/ 2>/dev/null || true; mkdir -p /host/tools && cp -r /code/tools/. /host/tools/ 2>/dev/null || true; mkdir -p /host/frontend && cp /code/frontend/default.conf.prod /host/frontend/default.conf.prod 2>/dev/null || true; cp /code/version.txt /host/version.txt 2>/dev/null || true; cp /code/CHANGELOG.md /host/CHANGELOG.md 2>/dev/null || true; cp /code/CHANGELOG_en.md /host/CHANGELOG_en.md 2>/dev/null || true" && \
   sudo bash start-prod.sh
   ```
 
@@ -364,6 +368,26 @@ Navigate to your ARL-Next installation directory and run the commands matching y
 > - **Incremental Database Schema Evolution**: Automatically preserves collection structures and compound unique indexes, mitigating upgrade conflicts.
 > - **Image Backup Tags**: Tags existing running images with `backup-stable` prior to pulling new images, allowing quick rollback in case of runtime anomalies.
 > - **Readiness Probing**: Validates API responsiveness dynamically before releasing traffic.
+
+---
+
+### 💾 System Data Backup & Migration Restore
+
+Before cross-host migration or major upgrades, you can package and export all MongoDB collections, site screenshots, custom wordlists, and PoC plugins, or perform a `--drop` full overwrite restore:
+
+- **Web Console Visual Operations**: Go to **"System Settings" ➔ "Backup and restore"** to create backups online (optionally excluding screenshots to reduce archive size), download archives, upload external archives, and trigger a confirmed (`RESTORE`) overwrite restore.
+- **Terminal CLI Utility** (automatically forwarded to the container when run on the host):
+  ```bash
+  # Create a full backup (or append --no-screenshots for a compact archive)
+  python3 tools/arl_backup.py backup --note "Pre-upgrade snapshot"
+
+  # List existing backups and inspect archive metadata
+  python3 tools/arl_backup.py list
+  python3 tools/arl_backup.py info <archive_name.tar.gz>
+
+  # Overwrite and restore from a specified backup archive
+  python3 tools/arl_backup.py restore <archive_name.tar.gz>
+  ```
 
 ---
 
