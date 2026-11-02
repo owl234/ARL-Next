@@ -287,15 +287,15 @@
             <div class="ribbon-divider"></div>
 
             <!-- 扫描调度流水线 (Celery) -->
-            <div class="ribbon-item cursor-pointer ribbon-tasks-item" @click="router.push({ path: '/taskList', query: { tab: 'task' } })">
+            <div class="ribbon-item cursor-pointer ribbon-tasks-item" @click="handleTaskRibbonClick">
               <span class="ribbon-icon celery-color"><ThunderboltOutlined /></span>
               <span class="ribbon-name">{{ pageText('pages.scanScheduling') }}</span>
               <div class="ribbon-task-badges">
-                <span class="task-badge running">
+                <span class="task-badge running" @click.stop="handleRunningBadgeClick">
                   <span v-if="(sysInfo.tasks?.running || 0) > 0" class="pulse-beacon green inline-pulse"></span>
                   <span class="num">{{ sysInfo.tasks?.running || 0 }}</span> {{ pageText('pages.running') }}
                 </span>
-                <span class="task-badge waiting">
+                <span class="task-badge waiting" @click.stop="handleWaitingBadgeClick">
                   <span class="num">{{ sysInfo.tasks?.waiting || 0 }}</span> {{ pageText('pages.queued') }}
                 </span>
               </div>
@@ -718,11 +718,43 @@ const sysInfo = ref({
   swap_percent: 0,
   swap_total_gb: 0,
   disk_percent: 0,
-  tasks: { running: 0, waiting: 0 },
+  tasks: { running: 0, waiting: 0, task_waiting: 0, icp_waiting: 0, task_running: 0, icp_running: 0 },
   github_today: { leaks: 0, intel: 0 },
   github_today_breakdown: { cves: 0, hackers: 0, general: 0 },
   github_totals: { cves: 0, tools: 0, hackers: 0 }
 });
+
+const handleRunningBadgeClick = () => {
+  const icpRun = sysInfo.value?.tasks?.icp_running || 0;
+  const taskRun = sysInfo.value?.tasks?.task_running || 0;
+  if (icpRun > 0 && taskRun === 0) {
+    router.push({ path: '/taskList', query: { tab: 'enterprise', status: 'running' } });
+  } else {
+    router.push({ path: '/taskList', query: { tab: 'task', status: 'running' } });
+  }
+};
+
+const handleWaitingBadgeClick = () => {
+  const icpWait = sysInfo.value?.tasks?.icp_waiting || 0;
+  const taskWait = sysInfo.value?.tasks?.task_waiting || 0;
+  if (icpWait > 0 && taskWait === 0) {
+    router.push({ path: '/taskList', query: { tab: 'enterprise', status: 'waiting' } });
+  } else {
+    router.push({ path: '/taskList', query: { tab: 'task', status: 'waiting' } });
+  }
+};
+
+const handleTaskRibbonClick = () => {
+  const waiting = sysInfo.value?.tasks?.waiting || 0;
+  const running = sysInfo.value?.tasks?.running || 0;
+  if (waiting > 0 && running === 0) {
+    handleWaitingBadgeClick();
+  } else if (running > 0) {
+    handleRunningBadgeClick();
+  } else {
+    router.push({ path: '/taskList', query: { tab: 'task' } });
+  }
+};
 
 const widgetsData = ref({
   top_fingerprints: [],
@@ -1947,6 +1979,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+.task-badge:hover {
+  background: var(--arl-badge-hover-bg, rgba(0, 0, 0, 0.06));
+  filter: brightness(1.1);
 }
 .task-badge.running { color: #52c41a; }
 .task-badge.waiting { color: #fa8c16; }

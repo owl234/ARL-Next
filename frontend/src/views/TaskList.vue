@@ -343,8 +343,24 @@
                   <a-select-option value="task">{{ taskText('tasks.assetDiscoveryTasks') }}</a-select-option>
                   <a-select-option value="monitor">{{ taskText('tasks.assetMonitoringTask') }}</a-select-option>
                   <a-select-option value="risk_cruising">{{ taskText('tasks.riskScanningTask') }}</a-select-option>
-                  <a-select-option value="site_update">{{ taskText('tasks.websiteAssetUpdate') }}</a-select-option>
-                  <a-select-option value="wih">{{ taskText('tasks.wihMonitoringTask') }}</a-select-option>
+                  <a-select-option value="asset_site_update">{{ taskText('tasks.websiteAssetUpdate') }}</a-select-option>
+                  <a-select-option value="asset_wih_update">{{ taskText('tasks.wihMonitoringTask') }}</a-select-option>
+                </a-select>
+              </div>
+
+              <div class="filter-item">
+                <span class="filter-label">{{ taskText('tasks.syncStatus') || '资产同步状态' }}</span>
+                <a-select
+                  v-model:value="searchForm.sync_status"
+                  :placeholder="taskText('tasks.allStatuses') || '全部状态'"
+                  style="width: 130px;"
+                  allowClear
+                  @change="onSearch"
+                >
+                  <a-select-option value="waiting">{{ taskText('tasks.syncWaiting') || '等待同步' }}</a-select-option>
+                  <a-select-option value="running">{{ taskText('tasks.syncRunning') || '同步中' }}</a-select-option>
+                  <a-select-option value="default">{{ taskText('tasks.syncDone') || '已同步' }}</a-select-option>
+                  <a-select-option value="error">{{ taskText('tasks.syncFailedLabel') || '同步失败' }}</a-select-option>
                 </a-select>
               </div>
 
@@ -1757,13 +1773,15 @@ const isAdvancedFilterOpen = ref(false);
 const searchForm = reactive({
   name: '', target: '', task_id: '', type: undefined,
   status: '', site_count: '', site_operator: '=',
-  domain_count: '', domain_operator: '=', wih_count: '', wih_operator: '='
+  domain_count: '', domain_operator: '=', wih_count: '', wih_operator: '=',
+  sync_status: undefined
 });
 
 const activeAdvancedFilterCount = computed(() => {
   let count = 0;
   if (searchForm.task_id) count++;
   if (searchForm.type) count++;
+  if (searchForm.sync_status) count++;
   if (searchForm.site_count !== '' && searchForm.site_count !== null && searchForm.site_count !== undefined) count++;
   if (searchForm.domain_count !== '' && searchForm.domain_count !== null && searchForm.domain_count !== undefined) count++;
   if (searchForm.wih_count !== '' && searchForm.wih_count !== null && searchForm.wih_count !== undefined) count++;
@@ -1773,6 +1791,7 @@ const activeAdvancedFilterCount = computed(() => {
 const resetAdvancedFilters = () => {
   searchForm.task_id = '';
   searchForm.type = undefined;
+  searchForm.sync_status = undefined;
   searchForm.site_count = '';
   searchForm.site_operator = '=';
   searchForm.domain_count = '';
@@ -1801,6 +1820,7 @@ const fetchTasks = async (page = 1, size = 10, silent = false, includeStatistics
     if (searchForm.status) queryParams.status = searchForm.status;
     if (searchForm.task_id) queryParams._id = searchForm.task_id;
     if (searchForm.type) queryParams.task_tag = searchForm.type;
+    if (searchForm.sync_status) queryParams.sync_status = searchForm.sync_status;
 
     const appendCountParam = (count, operator, baseKey) => {
       if (count !== '' && count !== null && count !== undefined) {
@@ -1840,7 +1860,8 @@ const resetSearch = () => {
   Object.assign(searchForm, {
     name: '', target: '', task_id: '', type: undefined,
     status: '', site_count: '', site_operator: '=',
-    domain_count: '', domain_operator: '=', wih_count: '', wih_operator: '='
+    domain_count: '', domain_operator: '=', wih_count: '', wih_operator: '=',
+    sync_status: undefined
   });
   onSearch();
 };
@@ -2442,15 +2463,33 @@ const goToGlobalView = () => {
 };
 
 // ==========================================
-// 🚀 顶层 Tab 切换
+// 🚀 顶层 Tab 与状态联动
 // ==========================================
-watch(() => route.query.tab, (newTab) => {
-  // 核心加固：仅在当前路由处于任务管理页面时响应外部 query 联动，避免切至其他页面时将 activeMainTab 误重置为 enterprise
+watch(() => [route.query.tab, route.query.status], ([newTab, newStatus], [oldTab, oldStatus] = []) => {
+  // 核心加固：仅在当前路由处于任务管理页面时响应外部 query 联动，避免切至其他页面时误重置
   if (!route.path.startsWith('/taskList')) return;
-  if (newTab === 'task' && activeMainTab.value !== 'task') {
-    activeMainTab.value = 'task';
-  } else if (newTab === 'enterprise' && activeMainTab.value !== 'enterprise') {
-    activeMainTab.value = 'enterprise';
+
+  const targetTab = newTab === 'task' ? 'task' : (newTab === 'enterprise' ? 'enterprise' : activeMainTab.value);
+  const tabChanged = activeMainTab.value !== targetTab;
+  if (tabChanged) {
+    activeMainTab.value = targetTab;
+  }
+
+  const targetForm = targetTab === 'enterprise' ? reconSearchForm : searchForm;
+  const statusParam = (typeof newStatus === 'string') ? newStatus : '';
+  const statusQueryChanged = newStatus !== oldStatus;
+  const statusChanged = targetForm.status !== statusParam;
+
+  if (statusQueryChanged && statusChanged) {
+    targetForm.status = statusParam;
+  }
+
+  if (tabChanged || (statusQueryChanged && statusChanged)) {
+    if (targetTab === 'enterprise') {
+      fetchEnterpriseTasks(1, enterprisePagination.pageSize);
+    } else {
+      fetchTasks(1, pagination.pageSize);
+    }
   }
 });
 
@@ -2458,11 +2497,7 @@ const handleMainTabChange = (key) => {
   activeMainTab.value = key;
   const nextQuery = { ...route.query };
   delete nextQuery.view;
-  if (key === 'task') {
-    nextQuery.tab = 'task';
-  } else {
-    delete nextQuery.tab;
-  }
+  nextQuery.tab = key;
   router.replace({ query: nextQuery });
   if (key === 'enterprise') {
     fetchEnterpriseTasks(enterprisePagination.current, enterprisePagination.pageSize);
@@ -2480,6 +2515,15 @@ onMounted(async () => {
     const nextQuery = { ...route.query };
     delete nextQuery.view;
     router.replace({ query: nextQuery });
+  }
+
+  const queryStatus = route.query?.status;
+  if (typeof queryStatus === 'string' && queryStatus) {
+    if (activeMainTab.value === 'enterprise') {
+      reconSearchForm.status = queryStatus;
+    } else {
+      searchForm.status = queryStatus;
+    }
   }
 
   if (activeMainTab.value === 'enterprise') {
