@@ -43,7 +43,7 @@ from .domain import (
     is_valid_fuzz_domain, is_forbidden_domain,
     extract_dynamic_ip_from_domain, is_private_or_reserved_ip, is_dynamic_ip_edge_domain
 )
-from .ip import is_vaild_ip_target, not_in_black_ips, get_ip_asn, get_ip_city, get_ip_type
+from .ip import is_vaild_ip_target, not_in_black_ips, get_ip_asn, get_ip_city, get_ip_type, is_v4_ip, is_v6_ip
 from .arl import arl_domain, get_asset_domain_by_id
 from .time import curr_date, time2date, curr_date_obj, date2time
 from .url import rm_similar_url, get_hostname, normal_url, same_netloc, verify_cert, url_ext

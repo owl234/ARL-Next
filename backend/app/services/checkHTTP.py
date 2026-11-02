@@ -1,4 +1,6 @@
 import time
+import urllib.parse
+import ssl
 
 from app import utils
 from .baseThread import BaseThread
@@ -6,22 +8,49 @@ from .baseThread import BaseThread
 import requests.exceptions
 logger = utils.get_logger()
 
+GATEWAY_PORTS = {
+    80, 443, 8080, 8443, 8000, 8001, 8081, 8088, 8089, 8888, 8848,
+    9000, 9090, 7001, 10000, 10443, 9443, 4443, 4433, 4430, 8444,
+    4848, 8161, 8880, 9999, 10001, 5000, 5001, 7443, 8082, 8083,
+    8084, 8085, 9043, 9060, 9444, 2375, 2376, 6443
+}
+
+GATEWAY_PATHS = [
+    "/web/frame/login.html",
+    "/login.html",
+    "/admin/",
+    "/ui/",
+    "/manage/",
+    "/system/"
+]
+
 
 class CheckHTTP(BaseThread):
     def __init__(self, urls, concurrency=10):
         super().__init__(urls, concurrency=concurrency)
-        self.timeout = (5, 3)
+        self.timeout = (6, 6)
         self.checkout_map = {}
 
-    def check(self, url):
-        # 移除了流处理和手动 close，顺应底层的连接池机制
-        conn = utils.http_req(url, method="get", timeout=self.timeout, verify=False)
+    def check(self, url, resilient=False):
+        parsed = urllib.parse.urlsplit(url)
+        is_https = (parsed.scheme.lower() == "https") or url.startswith("https://")
+        try:
+            conn = utils.http_req(url, method="get", timeout=self.timeout, verify=False, resilient_ssl=resilient)
+        except (requests.exceptions.SSLError, requests.exceptions.ConnectionError, ssl.SSLError) as e:
+            if not resilient and is_https:
+                return self.check(url, resilient=True)
+            raise e
 
         if conn.status_code == 400:
-            # 特殊情况排除
-            etag = conn.headers.get("ETag")
-            date = conn.headers.get("Date")
-            if not etag or not date:
+            content_lower = (conn.content or b"").lower()
+            if b"the plain http request was sent to https port" in content_lower:
+                return None
+
+            has_server = bool(conn.headers.get("Server"))
+            content_type = conn.headers.get("Content-Type", "").lower()
+            has_html = "text/html" in content_type or any(tag in content_lower for tag in (b"<html", b"<head", b"<body", b"<!doctype html"))
+            has_legacy = bool(conn.headers.get("ETag") and conn.headers.get("Date"))
+            if not (has_server or has_html or has_legacy):
                 return None
 
         # *** 特殊情况过滤
@@ -44,17 +73,41 @@ class CheckHTTP(BaseThread):
         return item
 
     def work(self, url):
+        parsed = urllib.parse.urlsplit(url)
+        path = parsed.path or "/"
+        is_root = (path == "/" or path == "")
+        scheme = parsed.scheme.lower() if parsed.scheme else "http"
+        port = parsed.port or (443 if scheme == "https" else 80)
+        is_candidate_for_fallback = (scheme == "https") or (port in GATEWAY_PORTS)
+
+        out = None
         try:
             out = self.check(url)
-            if out is not None:
-                self.checkout_map[url] = out
-
         except requests.exceptions.RequestException:
-            pass
-
+            out = None
         except Exception as e:
+            out = None
             logger.warning("error on url {}".format(url))
             logger.warning(e)
+
+        # 检查是否需要回退探测网关路径
+        # 条件：针对根路径、属于高危/网关端口或 https 协议，且根路径失败(out is None)或返回错误(status >= 400)
+        is_error = (out is None) or (out.get("status", 0) >= 400)
+        if is_root and is_candidate_for_fallback and is_error:
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+            for gpath in GATEWAY_PATHS:
+                probe_url = base_url + gpath
+                try:
+                    fb_out = self.check(probe_url)
+                    if fb_out is not None and (fb_out.get("status", 0) < 400 or fb_out.get("status", 0) in (401, 403)):
+                        fb_out["url"] = url
+                        out = fb_out
+                        break
+                except Exception:
+                    continue
+
+        if out is not None:
+            self.checkout_map[url] = out
 
     def run(self):
         t1 = time.time()

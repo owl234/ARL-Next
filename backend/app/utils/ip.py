@@ -20,6 +20,22 @@ def is_vaild_ip_target(ip):
         return False
 
 
+def is_v4_ip(ip_str):
+    import ipaddress
+    try:
+        return isinstance(ipaddress.ip_address(str(ip_str).strip("[]")), ipaddress.IPv4Address)
+    except (ValueError, TypeError):
+        return False
+
+
+def is_v6_ip(ip_str):
+    import ipaddress
+    try:
+        return isinstance(ipaddress.ip_address(str(ip_str).strip("[]")), ipaddress.IPv6Address)
+    except (ValueError, TypeError):
+        return False
+
+
 def transfer_ip_scope(target):
     """
     将目标IP,IP段转换为合法的CIDR表示方法

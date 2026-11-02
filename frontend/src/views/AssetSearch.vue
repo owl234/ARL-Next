@@ -750,6 +750,7 @@ const tabConfig = reactive({
     get exportName() { return assetText('tasks.websites'); },
     searchFields: [
       { get label() { return assetText('tasks.websites'); }, key: 'site', operator: '=' },
+      { label: 'IP', key: 'ip', operator: '=' },
       { get label() { return assetText('tasks.title'); }, key: 'title', operator: '=' },
       { get label() { return assetText('tasks.webServer'); }, key: 'http_server', operator: '=' },
       { get label() { return assetText('tasks.statusCode'); }, key: 'status', type: 'httpStatus' },

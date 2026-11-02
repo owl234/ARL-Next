@@ -261,23 +261,63 @@ class FindSite(object):
     def _build(self):
         url_temp_list = []
         for info in self.ip_info_list:
-            for domain in info.domain:
-                for port_info in info.port_info_list:
-                    port_id = port_info.port_id
-                    if port_id == 80:
-                        url_temp = "http://{}".format(domain)
-                        url_temp_list.append(url_temp)
+            domains = getattr(info, 'domain', None)
+            if domains is None and isinstance(info, dict):
+                domains = info.get('domain', [])
+            elif domains is None:
+                domains = []
+
+            curr_ip = getattr(info, 'ip', None)
+            if curr_ip is None and isinstance(info, dict):
+                curr_ip = info.get('ip')
+
+            port_info_list = getattr(info, 'port_info_list', None)
+            if port_info_list is None and isinstance(info, dict):
+                port_info_list = info.get('port_info_list', info.get('port_info', []))
+            elif port_info_list is None:
+                port_info_list = []
+
+            for port_info in port_info_list:
+                port_id = getattr(port_info, 'port_id', None)
+                if port_id is None and isinstance(port_info, dict):
+                    port_id = port_info.get('port_id')
+                if port_id is None:
+                    continue
+
+                try:
+                    port_int = int(port_id)
+                except (ValueError, TypeError):
+                    port_int = None
+
+                is_80 = (port_int == 80) or (str(port_id) == "80")
+                is_443 = (port_int == 443) or (str(port_id) == "443")
+
+                for domain in domains:
+                    if not domain:
+                        continue
+                    clean_domain = str(domain).strip()
+                    if not clean_domain:
                         continue
 
-                    if port_id == 443:
-                        url_temp = "https://{}".format(domain)
-                        url_temp_list.append(url_temp)
-                        continue
+                    if is_80:
+                        url_temp_list.append("http://{}".format(clean_domain))
+                    elif is_443:
+                        url_temp_list.append("https://{}".format(clean_domain))
+                    else:
+                        url_temp_list.append("http://{}:{}".format(clean_domain, port_id))
+                        url_temp_list.append("https://{}:{}".format(clean_domain, port_id))
 
-                    url_temp1 = "http://{}:{}".format(domain, port_id)
-                    url_temp2 = "https://{}:{}".format(domain, port_id)
-                    url_temp_list.append(url_temp1)
-                    url_temp_list.append(url_temp2)
+                if curr_ip:
+                    raw_ip = str(curr_ip).strip("[] \t\r\n")
+                    if raw_ip:
+                        ip_host = f"[{raw_ip}]" if ":" in raw_ip else raw_ip
+                        if is_80:
+                            url_temp_list.append("http://{}".format(ip_host))
+                        elif is_443:
+                            url_temp_list.append("https://{}".format(ip_host))
+                        else:
+                            url_temp_list.append("http://{}:{}".format(ip_host, port_id))
+                            url_temp_list.append("https://{}:{}".format(ip_host, port_id))
 
         return url_temp_list
 

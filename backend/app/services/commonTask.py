@@ -2,7 +2,7 @@ import time
 import socket
 import re
 from collections import defaultdict
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 from bson import ObjectId
 from app import utils
 from app import services
@@ -200,6 +200,203 @@ class CommonTask(object):
         self.sync_asset()
 
 
+def sync_service_from_site(task_id, site_info_list):
+    """
+    [第一性原理：站点识别反哺系统服务与端口资产]
+    当 WebSiteFetch 获取存活站点并完成指纹识别后，反哺校准 db.service 和 db.ip：
+    1. 从其他服务分类（尤其是 unknown, tcpwrapped）中剔除该 (ip, port)
+    2. 将该 (ip, port) 归入 http / https 分类，并携带 product/fingerprint
+    3. 清理 service_info 已经为空的幽灵服务文档 (delete_many $size: 0)
+    4. 同步修正 db.ip 中对应端口的 service_name 与 product/version
+    """
+    if not task_id or not site_info_list:
+        return
+
+    task_id = str(task_id)
+
+    try:
+        for site_info in site_info_list:
+            try:
+                site_url = site_info.get("site", "")
+                if not site_url:
+                    continue
+
+                if "://" not in site_url:
+                    site_url = "http://" + site_url
+
+                parsed = urlsplit(site_url)
+                scheme = parsed.scheme.lower() if parsed.scheme else "http"
+                service_name = scheme  # "http" or "https"
+                port = parsed.port
+                if not port:
+                    port = 443 if scheme == "https" else 80
+                try:
+                    port = int(port)
+                except (ValueError, TypeError):
+                    continue
+
+                ip = site_info.get("ip")
+                if isinstance(ip, (list, tuple)):
+                    ip = ip[0] if ip else None
+
+                hostname = parsed.hostname
+                if not ip:
+                    if hostname:
+                        clean_host = hostname.strip("[]")
+                        if utils.is_v4_ip(clean_host) or utils.is_v6_ip(clean_host):
+                            ip = clean_host
+                        else:
+                            ips = utils.get_ip(clean_host)
+                            if ips:
+                                ip = ips[0]
+
+                if not ip:
+                    continue
+
+                ip = str(ip).strip("[]")
+
+                # 提取产品指纹与版本
+                finger_list = site_info.get("finger") or []
+                finger_names = []
+                finger_versions = []
+                for f in finger_list:
+                    if isinstance(f, dict):
+                        if f.get("name"):
+                            finger_names.append(f["name"])
+                        if f.get("version"):
+                            finger_versions.append(f["version"])
+
+                product_str = ", ".join(finger_names) if finger_names else (site_info.get("http_server") or "")
+                version_str = ", ".join(finger_versions) if finger_versions else ""
+
+                # 1. 从除当前 service_name 外的其他服务分类（如 unknown, tcpwrapped）中剔除该 (ip, port)
+                utils.conn_db('service').update_many(
+                    {
+                        "task_id": task_id,
+                        "service_name": {"$ne": service_name}
+                    },
+                    {
+                        "$pull": {
+                            "service_info": {
+                                "ip": ip,
+                                "port_id": {"$in": [port, str(port)]}
+                            }
+                        }
+                    }
+                )
+
+                # 2. 归入目标服务分类 (http 或 https)
+                new_service_entry = {
+                    "ip": ip,
+                    "port_id": port,
+                    "product": product_str,
+                    "version": version_str
+                }
+
+                # 先移除目标分类中可能存在的旧记录以避免重复
+                utils.conn_db('service').update_many(
+                    {
+                        "task_id": task_id,
+                        "service_name": service_name
+                    },
+                    {
+                        "$pull": {
+                            "service_info": {
+                                "ip": ip,
+                                "port_id": {"$in": [port, str(port)]}
+                            }
+                        }
+                    }
+                )
+
+                # 推入更新后的服务信息，若不存在分类文档则自动创建
+                utils.conn_db('service').update_one(
+                    {
+                        "task_id": task_id,
+                        "service_name": service_name
+                    },
+                    {
+                        "$push": {"service_info": new_service_entry},
+                        "$setOnInsert": {
+                            "task_id": task_id,
+                            "service_name": service_name
+                        }
+                    },
+                    upsert=True
+                )
+
+                # 3. 同步修正 db.ip 中对应端口的 service_name 与 product/version
+                set_fields = {"port_info.$.service_name": service_name}
+                if product_str:
+                    set_fields["port_info.$.product"] = product_str
+                if version_str:
+                    set_fields["port_info.$.version"] = version_str
+
+                res = utils.conn_db('ip').update_many(
+                    {
+                        "task_id": task_id,
+                        "ip": ip,
+                        "port_info.port_id": port
+                    },
+                    {
+                        "$set": set_fields
+                    }
+                )
+                if res.matched_count == 0:
+                    res_str = utils.conn_db('ip').update_many(
+                        {
+                            "task_id": task_id,
+                            "ip": ip,
+                            "port_info.port_id": str(port)
+                        },
+                        {
+                            "$set": set_fields
+                        }
+                    )
+                    if res_str.matched_count == 0:
+                        new_port_entry = {
+                            "port_id": port,
+                            "service_name": service_name,
+                            "version": version_str,
+                            "protocol": "tcp",
+                            "product": product_str
+                        }
+                        ip_doc = utils.conn_db('ip').find_one({"task_id": task_id, "ip": ip})
+                        if not ip_doc:
+                            new_ip_entry = {
+                                "task_id": task_id,
+                                "ip": ip,
+                                "domain": [hostname] if hostname and hostname != ip else [],
+                                "port_info": [new_port_entry],
+                                "os_info": {},
+                                "cdn_name": utils.get_cdn_name_by_ip(ip) if hasattr(utils, 'get_cdn_name_by_ip') else ""
+                            }
+                            utils.safe_insert_asset('ip', ['task_id', 'ip'], new_ip_entry)
+                        else:
+                            utils.conn_db('ip').update_many(
+                                {
+                                    "task_id": task_id,
+                                    "ip": ip,
+                                    "port_info.port_id": {"$nin": [port, str(port)]}
+                                },
+                                {
+                                    "$push": {"port_info": new_port_entry}
+                                }
+                            )
+            except Exception as item_err:
+                logger.warning("sync_service_from_site item error for site {}: {}".format(site_info.get("site"), item_err))
+    finally:
+        # 4. 清除由于 pull 导致 service_info 为空的幽灵文档（彻底消灭 unknown 假空行）
+        utils.conn_db('service').delete_many({
+            "task_id": task_id,
+            "$or": [
+                {"service_info": {"$size": 0}},
+                {"service_info": []},
+                {"service_info": None}
+            ]
+        })
+
+
 # *** 对用户提交的站点或者是发现的站点进行后续处理
 class WebSiteFetch(object):
     def __init__(self, task_id: str, sites: list, options: dict, scope_domain: list = None, domain_black_list: list = None):
@@ -279,6 +476,7 @@ class WebSiteFetch(object):
                     if analyze_name not in known_finger_set:
                         site_info["finger"].append(analyze_finger)
 
+        sites_to_sync = list(deduplicated_site_info_list)
         self.site_info_list = deduplicated_site_info_list
         from app.utils.monitor_diff import tag_monitor_diff
         
@@ -302,6 +500,12 @@ class WebSiteFetch(object):
                 ))
             if operations:
                 utils.conn_db('site').bulk_write(operations)
+
+        # 站点识别反哺系统服务与端口资产
+        try:
+            sync_service_from_site(self.task_id, sites_to_sync)
+        except Exception as e:
+            logger.warning("sync_service_from_site error for task {}: {}".format(self.task_id, e))
 
     def site_screenshot(self):
         # ***站点截图***

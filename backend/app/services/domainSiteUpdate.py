@@ -95,6 +95,13 @@ class DomainSiteUpdate(object):
             if operations:
                 utils.conn_db('site').bulk_write(operations)
 
+        # 站点识别反哺系统服务与端口资产
+        try:
+            from app.services.commonTask import sync_service_from_site
+            sync_service_from_site(self.task_id, site_info_list)
+        except Exception as e:
+            logger.warning("sync_service_from_site error in domainSiteUpdate for task {}: {}".format(self.task_id, e))
+
         # Update available_sites to exactly match the fetched sites
         # This ensures site_screenshot targets the exact URLs in the database
         self.available_sites = []

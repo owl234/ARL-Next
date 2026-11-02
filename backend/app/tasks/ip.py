@@ -122,20 +122,40 @@ class IPTask(CommonTask):
         url_temp_list = []
         for ip_info in self.ip_info_list:
             for port_info in ip_info["port_info"]:
-                curr_ip = ip_info["ip"]
-                port_id = port_info["port_id"]
-                if port_id == 80:
-                    url_temp = "http://{}".format(curr_ip)
+                curr_ip = ip_info.get("ip") if isinstance(ip_info, dict) else getattr(ip_info, "ip", None)
+                if not curr_ip:
+                    continue
+
+                raw_ip = str(curr_ip).strip("[] \t\r\n")
+                if not raw_ip:
+                    continue
+
+                port_id = port_info.get("port_id") if isinstance(port_info, dict) else getattr(port_info, "port_id", None)
+                if port_id is None:
+                    continue
+
+                try:
+                    port_int = int(port_id)
+                except (ValueError, TypeError):
+                    port_int = None
+
+                is_80 = (port_int == 80) or (str(port_id) == "80")
+                is_443 = (port_int == 443) or (str(port_id) == "443")
+
+                ip_host = f"[{raw_ip}]" if ":" in raw_ip else raw_ip
+
+                if is_80:
+                    url_temp = "http://{}".format(ip_host)
                     url_temp_list.append(url_temp)
                     continue
 
-                if port_id == 443:
-                    url_temp = "https://{}".format(curr_ip)
+                if is_443:
+                    url_temp = "https://{}".format(ip_host)
                     url_temp_list.append(url_temp)
                     continue
 
-                url_temp1 = "http://{}:{}".format(curr_ip, port_id)
-                url_temp2 = "https://{}:{}".format(curr_ip, port_id)
+                url_temp1 = "http://{}:{}".format(ip_host, port_id)
+                url_temp2 = "https://{}:{}".format(ip_host, port_id)
                 url_temp_list.append(url_temp1)
                 url_temp_list.append(url_temp2)
 

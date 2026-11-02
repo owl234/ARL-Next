@@ -1,6 +1,8 @@
 import time
-from pyquery import PyQuery as pq
+import requests
+import ssl
 import binascii
+from pyquery import PyQuery as pq
 from urllib.parse import urljoin, urlparse
 from urllib3.util.url import parse_url
 import mmh3
@@ -70,10 +72,56 @@ class FetchSite(BaseThread):
         if max_redirect <= 0:
             return
 
-        hostname = urlparse(site).hostname
+        parsed = urlparse(site)
+        hostname = parsed.hostname
+        is_https = (parsed.scheme.lower() == "https") or site.startswith("https://")
 
-        # 核心：发起 HTTP 请求
-        conn = utils.http_req(site, timeout=self.http_timeout, verify=False)
+        # 核心：发起 HTTP 请求 (支持对 SSL 握手异常目标的容错重试)
+        conn = None
+        try:
+            conn = utils.http_req(site, timeout=self.http_timeout, verify=False)
+        except (requests.exceptions.SSLError, requests.exceptions.ConnectionError):
+            if is_https:
+                try:
+                    conn = utils.http_req(site, timeout=self.http_timeout, verify=False, resilient_ssl=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # 若根路径请求失败或返回错误（status >= 400），且属于网关端口或 HTTPS 协议，触发网关回退探测
+        from .checkHTTP import GATEWAY_PORTS, GATEWAY_PATHS
+        path = parsed.path or "/"
+        is_root = (path == "/" or path == "")
+        port = parsed.port or (443 if is_https else 80)
+        is_candidate_for_fallback = is_https or (port in GATEWAY_PORTS)
+        is_error = (conn is None) or (conn.status_code >= 400)
+
+        effective_url = site
+        if is_root and is_candidate_for_fallback and is_error:
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+            for gpath in GATEWAY_PATHS:
+                probe_url = base_url + gpath
+                try:
+                    fb_conn = utils.http_req(probe_url, timeout=self.http_timeout, verify=False)
+                except (requests.exceptions.SSLError, requests.exceptions.ConnectionError):
+                    if is_https:
+                        try:
+                            fb_conn = utils.http_req(probe_url, timeout=self.http_timeout, verify=False, resilient_ssl=True)
+                        except Exception:
+                            fb_conn = None
+                    else:
+                        fb_conn = None
+                except Exception:
+                    fb_conn = None
+
+                if fb_conn is not None and (fb_conn.status_code < 400 or fb_conn.status_code in (401, 403)):
+                    conn = fb_conn
+                    effective_url = probe_url
+                    break
+
+        if conn is None:
+            return
         try:
             import simhash
             body_simhash = str(simhash.Simhash(conn.text).value)
@@ -91,7 +139,7 @@ class FetchSite(BaseThread):
             "body_length": len(conn.content),
             "simhash": body_simhash,
             "finger": [],
-            "favicon": fetch_favicon(site, html_content=conn.content)
+            "favicon": fetch_favicon(effective_url, html_content=conn.content)
         }
 
         self.fetch_fingerprint(item, content=conn.content)

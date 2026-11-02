@@ -1,5 +1,6 @@
 import urllib3
 import time
+import ssl
 import requests
 from app.config import Config
 from pymongo import MongoClient
@@ -24,8 +25,61 @@ proxies = {
 SET_PROXY = False
 
 
+def create_resilient_ssl_context():
+    """
+    [第一性原理：极端容错 SSL 上下文]
+    针对存在历史包袱的网关设备、过旧或非标嵌入式固件等场景：
+    1. 限制最高 TLS 1.2 (规避 TLS 1.3 握手故障或握手不完整)
+    2. 设置 SECLEVEL=0 (放宽密钥长度和旧式算法限制)
+    3. 启用 OP_IGNORE_UNEXPECTED_EOF (忽略连接过早关闭/不规范 EOF)
+    4. 启用 OP_LEGACY_SERVER_CONNECT (允许与旧版不安全服务器重新协商)
+    """
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    if hasattr(ssl, 'TLSVersion') and hasattr(ssl.TLSVersion, 'TLSv1_2'):
+        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    elif hasattr(ssl, 'OP_NO_TLSv1_3'):
+        ctx.options |= ssl.OP_NO_TLSv1_3
+
+    if hasattr(ssl, 'OP_IGNORE_UNEXPECTED_EOF'):
+        ctx.options |= ssl.OP_IGNORE_UNEXPECTED_EOF
+
+    legacy_connect = getattr(ssl, 'OP_LEGACY_SERVER_CONNECT', 0x4)
+    ctx.options |= legacy_connect
+
+    try:
+        ctx.set_ciphers('DEFAULT:@SECLEVEL=0')
+    except Exception:
+        try:
+            ctx.set_ciphers('ALL:@SECLEVEL=0')
+        except Exception:
+            pass
+
+    return ctx
+
+
+class ResilientSSLAdapter(requests.adapters.HTTPAdapter):
+    """
+    容错 SSL 适配器，使用定制的 SSL 上下文
+    """
+    def __init__(self, *args, **kwargs):
+        self.ssl_context = create_resilient_ssl_context()
+        super().__init__(*args, **kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs['ssl_context'] = self.ssl_context
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, *args, **kwargs):
+        kwargs['ssl_context'] = self.ssl_context
+        return super().proxy_manager_for(*args, **kwargs)
+
+
 _adapter = requests.adapters.HTTPAdapter(pool_connections=200, pool_maxsize=100)
 _scan_adapter = requests.adapters.HTTPAdapter(pool_connections=200, pool_maxsize=100)
+_resilient_ssl_adapter = ResilientSSLAdapter(pool_connections=200, pool_maxsize=100)
 
 class StatelessSession(requests.Session):
     def close(self):
@@ -58,6 +112,8 @@ def patch_content(response, timeout=None, max_size=10*1024*1024):
 
 
 def http_req(url, method='get', **kwargs):
+    resilient_ssl = kwargs.pop('resilient_ssl', False)
+
     # Third-party APIs and callbacks carry credentials and must verify TLS.
     # Reconnaissance callers explicitly opt out for self-signed target sites.
     kwargs.setdefault('verify', True)
@@ -82,9 +138,15 @@ def http_req(url, method='get', **kwargs):
         session.adapters.clear()
         # Keep insecure target connections out of credential-bearing API pools,
         # including on requests versions predating TLS-aware pool keys.
-        adapter = _scan_adapter if kwargs['verify'] is False else _adapter
-        session.mount('http://', adapter)
-        session.mount('https://', adapter)
+        if resilient_ssl:
+            kwargs['verify'] = False
+            session.mount('https://', _resilient_ssl_adapter)
+            session.mount('http://', _scan_adapter)
+        else:
+            adapter = _scan_adapter if kwargs['verify'] is False else _adapter
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+
         conn = getattr(session, method)(url, **kwargs)
 
         timeout = kwargs.get("timeout")
