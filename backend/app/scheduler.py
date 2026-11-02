@@ -7,7 +7,7 @@ from pymongo.errors import PyMongoError
 from app.utils import conn_db as conn, curr_date
 from app import utils
 import time
-from app.modules import CeleryAction, SchedulerStatus, AssetScopeType, TaskStatus, CeleryRoutingKey
+from app.modules import CeleryAction, SchedulerStatus, AssetScopeType, TaskStatus, CeleryRoutingKey, TaskTag
 from app.helpers import task_schedule, asset_site_monitor, asset_wih_monitor
 
 logger = utils.get_logger()
@@ -164,30 +164,59 @@ def submit_scheduler(domain, scheduler_id, scope_id, options=None, name="", scop
 
     monitor_options.update(options)
 
+    # 预建 WAITING 任务工单，保证排队可见与全生命周期追踪
+    merged_options = monitor_options.copy()
+    merged_options.update({
+        "scope_id": scope_id,
+        "scheduler_id": scheduler_id
+    })
+    task_record = {
+        "name": name,
+        "target": domain,
+        "start_time": "-",
+        "status": TaskStatus.WAITING,
+        "type": scope_type,
+        "task_tag": TaskTag.MONITOR,
+        "end_time": "-",
+        "service": [],
+        "options": merged_options,
+        "scope_id": str(scope_id),
+        "celery_id": ""
+    }
+    insert_res = conn('task').insert_one(task_record)
+    task_id = str(insert_res.inserted_id)
+
     task_data = {
         "domain": domain,
         "scope_id": scope_id,
         "scheduler_id": scheduler_id,
         "type": scope_type,
         "monitor_options": monitor_options,
-        "name": name
+        "name": name,
+        "task_id": task_id
     }
 
-    if scope_type == AssetScopeType.DOMAIN:
-        task_options = {
-            "celery_action": CeleryAction.DOMAIN_EXEC_TASK,
-            "data": task_data
-        }
-        celery_id = celerytask.arl_task.apply_async(kwargs={'options': task_options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
-        logger.info("submit domain job {} {} {}".format(celery_id, domain, scope_id))
+    try:
+        if scope_type == AssetScopeType.DOMAIN:
+            task_options = {
+                "celery_action": CeleryAction.DOMAIN_EXEC_TASK,
+                "data": task_data
+            }
+            celery_id = celerytask.arl_task.apply_async(kwargs={'options': task_options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
+            conn('task').update_one({"_id": ObjectId(task_id)}, {"$set": {"celery_id": str(celery_id)}})
+            logger.info("submit domain job {} {} {} task_id={}".format(celery_id, domain, scope_id, task_id))
 
-    if scope_type == AssetScopeType.IP:
-        task_options = {
-            "celery_action": CeleryAction.IP_EXEC_TASK,
-            "data": task_data
-        }
-        celery_id = celerytask.arl_task.apply_async(kwargs={'options': task_options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
-        logger.info("submit ip job {} {} {}".format(celery_id, domain, scope_id))
+        if scope_type == AssetScopeType.IP:
+            task_options = {
+                "celery_action": CeleryAction.IP_EXEC_TASK,
+                "data": task_data
+            }
+            celery_id = celerytask.arl_task.apply_async(kwargs={'options': task_options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
+            conn('task').update_one({"_id": ObjectId(task_id)}, {"$set": {"celery_id": str(celery_id)}})
+            logger.info("submit ip job {} {} {} task_id={}".format(celery_id, domain, scope_id, task_id))
+    except Exception:
+        conn('task').delete_one({"_id": ObjectId(task_id)})
+        raise
 
 
 def update_scheduler_run(scheduler_id):
@@ -295,20 +324,48 @@ def asset_monitor_scheduler():
             if "func" in strategy:
                 strategy["func"](scope_id=item["scope_id"], name=item.get("name", ""), scheduler_id=scheduler_id_str)
             else:
+                # 预建 WAITING 任务工单，保证排队可见与全生命周期追踪
+                merged_options = (item.get("monitor_options") or {}).copy()
+                merged_options.update({
+                    "scope_id": item["scope_id"],
+                    "scheduler_id": scheduler_id_str
+                })
+                task_record = {
+                    "name": item.get("name", ""),
+                    "target": item["domain"],
+                    "start_time": "-",
+                    "status": TaskStatus.WAITING,
+                    "type": scope_type,
+                    "task_tag": TaskTag.MONITOR,
+                    "end_time": "-",
+                    "service": [],
+                    "options": merged_options,
+                    "scope_id": scope_id_str,
+                    "celery_id": ""
+                }
+                insert_res = conn('task').insert_one(task_record)
+                task_id = str(insert_res.inserted_id)
+
                 task_data = {
                     "domain": item["domain"],
                     "scope_id": item["scope_id"],
                     "scheduler_id": scheduler_id_str,
                     "type": scope_type,
                     "monitor_options": item.get("monitor_options", {}),
-                    "name": item.get("name", "")
+                    "name": item.get("name", ""),
+                    "task_id": task_id
                 }
                 task_options = {
                     "celery_action": strategy["action"],
                     "data": task_data
                 }
-                celery_id = celerytask.arl_task.apply_async(kwargs={'options': task_options}, queue=strategy["queue"])
-                logger.info(f"submit {scope_type} job {celery_id} {item['domain']} {item['scope_id']}")
+                try:
+                    celery_id = celerytask.arl_task.apply_async(kwargs={'options': task_options}, queue=strategy["queue"])
+                    conn('task').update_one({"_id": ObjectId(task_id)}, {"$set": {"celery_id": str(celery_id)}})
+                    logger.info(f"submit {scope_type} job {celery_id} {item['domain']} {item['scope_id']} task_id={task_id}")
+                except Exception:
+                    conn('task').delete_one({"_id": ObjectId(task_id)})
+                    raise
 
             next_time = curr_time + item.get("interval", 3600)
             bulk_updates.append(UpdateOne(

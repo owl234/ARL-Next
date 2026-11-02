@@ -235,20 +235,24 @@ class DashboardSysInfo(ARLResource):
         else:
             mem_alert = "ok"
         
-        # 2. Background Tasks (task & github_task)
+        # 2. Background Tasks (task, icp_task & github_task) - MongoDB 单一事实源
         non_running_statuses = [TaskStatus.DONE, TaskStatus.WAITING, TaskStatus.ERROR, TaskStatus.STOP]
-        running_tasks = conn('task').count_documents({"status": {"$nin": non_running_statuses}})
-        waiting_tasks = conn('task').count_documents({"status": TaskStatus.WAITING})
-        
+        task_running = conn('task').count_documents({"status": {"$nin": non_running_statuses}})
+        task_waiting = conn('task').count_documents({"status": TaskStatus.WAITING})
+
         # Also check github tasks
-        running_tasks += conn('github_task').count_documents({"status": {"$nin": non_running_statuses}})
-        waiting_tasks += conn('github_task').count_documents({"status": TaskStatus.WAITING})
+        github_running = conn('github_task').count_documents({"status": {"$nin": non_running_statuses}})
+        github_waiting = conn('github_task').count_documents({"status": TaskStatus.WAITING})
 
         # Also check icp tasks
-        running_tasks += conn('icp_task').count_documents({"status": {"$nin": non_running_statuses}})
-        waiting_tasks += conn('icp_task').count_documents({"status": TaskStatus.WAITING})
-        
-        # 3. RabbitMQ Real Queue Depth
+        icp_running = conn('icp_task').count_documents({"status": {"$nin": non_running_statuses}})
+        icp_waiting = conn('icp_task').count_documents({"status": TaskStatus.WAITING})
+
+        running_tasks = task_running + github_running + icp_running
+        waiting_tasks = task_waiting + github_waiting + icp_waiting
+
+        # 3. RabbitMQ Real Queue Depth (作为底层 broker_backlog 指标独立上报，不计入业务排队口径)
+        broker_backlog = 0
         try:
             from app.celerytask import celery
             from app.modules import CeleryRoutingKey
@@ -256,7 +260,7 @@ class DashboardSysInfo(ARLResource):
                 for q in [CeleryRoutingKey.ASSET_TASK, CeleryRoutingKey.ASSET_TASK_HEAVY, CeleryRoutingKey.ASSET_TASK_LIGHT, CeleryRoutingKey.GITHUB_TASK]:
                     try:
                         _, message_count, _ = broker_conn.default_channel.queue_declare(queue=q, passive=True)
-                        waiting_tasks += (message_count or 0)
+                        broker_backlog += (message_count or 0)
                     except Exception:
                         pass
         except Exception as e:
@@ -294,7 +298,14 @@ class DashboardSysInfo(ARLResource):
             "disk_percent": disk_percent,
             "tasks": {
                 "running": running_tasks,
-                "waiting": waiting_tasks
+                "waiting": waiting_tasks,
+                "task_waiting": task_waiting,
+                "icp_waiting": icp_waiting,
+                "github_waiting": github_waiting,
+                "task_running": task_running,
+                "icp_running": icp_running,
+                "github_running": github_running,
+                "broker_backlog": broker_backlog
             },
             "github_today": {
                 "leaks": today_github_leaks,

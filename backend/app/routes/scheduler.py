@@ -3,7 +3,8 @@ from app.utils import auth, truncate_string
 from app.modules import ErrorMsg
 from . import base_query_fields, ARLResource, get_arl_parser
 from app import scheduler as app_scheduler, utils
-from app.modules import SchedulerStatus, AssetScopeType, TaskTag
+from app.modules import SchedulerStatus, AssetScopeType, TaskTag, TaskStatus
+from bson import ObjectId
 from app.helpers import (
     get_options_by_policy_id,
     have_same_site_update_monitor,
@@ -485,50 +486,102 @@ class OneTimeScanScheduler(ARLResource):
         # 下发 域名类型一次性扫描
         if domain_targets:
             from app.helpers.scope import update_scope_domain_status
+            scope_name = scope_data.get("name", "资产组") if isinstance(scope_data, dict) else "资产组"
             for x in domain_targets:
                 curr_name = name
                 if not name:
-                    curr_name = "一次性扫描-{}-{}".format(scope_data["name"], x)
+                    curr_name = "一次性扫描-{}-{}".format(scope_name, x)
                 curr_name = truncate_string(curr_name)
-                
+
+                # 预建 WAITING 工单，保证即刻可见与全生命周期追踪
+                merged_options = task_options.copy()
+                merged_options.update({"scope_id": str(scope_id)})
+                task_record = {
+                    "name": curr_name,
+                    "target": x,
+                    "start_time": "-",
+                    "status": TaskStatus.WAITING,
+                    "type": AssetScopeType.DOMAIN,
+                    "task_tag": TaskTag.MONITOR,
+                    "end_time": "-",
+                    "service": [],
+                    "options": merged_options,
+                    "scope_id": str(scope_id),
+                    "celery_id": ""
+                }
+                insert_res = utils.conn_db('task').insert_one(task_record)
+                task_id = str(insert_res.inserted_id)
+
                 task_data = {
                     "domain": x,
-                    "scope_id": scope_id,
+                    "scope_id": str(scope_id),
                     "type": AssetScopeType.DOMAIN,
                     "monitor_options": task_options,
-                    "name": curr_name
+                    "name": curr_name,
+                    "task_id": task_id
                 }
                 options = {
                     "celery_action": CeleryAction.ONESHOT_DOMAIN_EXEC_TASK,
                     "data": task_data
                 }
-                celery_id = celerytask.arl_task.apply_async(kwargs={'options': options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
-                update_scope_domain_status(scope_id, x, "scanning", str(celery_id))
-                ret_data.append({"domain": x, "celery_id": str(celery_id)})
+                try:
+                    celery_id = celerytask.arl_task.apply_async(kwargs={'options': options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
+                    utils.conn_db('task').update_one({"_id": ObjectId(task_id)}, {"$set": {"celery_id": str(celery_id)}})
+                    update_scope_domain_status(scope_id, x, "scanning", task_id)
+                    ret_data.append({"domain": x, "celery_id": str(celery_id), "task_id": task_id})
+                except Exception:
+                    utils.conn_db('task').delete_one({"_id": ObjectId(task_id)})
+                    raise
 
         # 下发 IP 类型一次性扫描
         if ip_targets:
             from app.helpers.scope import update_scope_domain_status
+            scope_name = scope_data.get("name", "资产组") if isinstance(scope_data, dict) else "资产组"
             curr_name = name
             ip_target = " ".join(ip_targets)
             if not name:
-                curr_name = "一次性扫描-{}-{}".format(scope_data["name"], ip_target)
+                curr_name = "一次性扫描-{}-{}".format(scope_name, ip_target)
             curr_name = truncate_string(curr_name)
+
+            # 预建 WAITING 工单，保证即刻可见与全生命周期追踪
+            merged_options = task_options.copy()
+            merged_options.update({"scope_id": str(scope_id)})
+            task_record = {
+                "name": curr_name,
+                "target": ip_target,
+                "start_time": "-",
+                "status": TaskStatus.WAITING,
+                "type": AssetScopeType.IP,
+                "task_tag": TaskTag.MONITOR,
+                "end_time": "-",
+                "service": [],
+                "options": merged_options,
+                "scope_id": str(scope_id),
+                "celery_id": ""
+            }
+            insert_res = utils.conn_db('task').insert_one(task_record)
+            task_id = str(insert_res.inserted_id)
 
             task_data = {
                 "domain": ip_target,
-                "scope_id": scope_id,
+                "scope_id": str(scope_id),
                 "type": AssetScopeType.IP,
                 "monitor_options": task_options,
-                "name": curr_name
+                "name": curr_name,
+                "task_id": task_id
             }
             options = {
                 "celery_action": CeleryAction.ONESHOT_IP_EXEC_TASK,
                 "data": task_data
             }
-            celery_id = celerytask.arl_task.apply_async(kwargs={'options': options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
-            for x in ip_targets:
-                update_scope_domain_status(scope_id, x, "scanning", str(celery_id))
-            ret_data.append({"domain": ip_target, "celery_id": str(celery_id)})
-            
+            try:
+                celery_id = celerytask.arl_task.apply_async(kwargs={'options': options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
+                utils.conn_db('task').update_one({"_id": ObjectId(task_id)}, {"$set": {"celery_id": str(celery_id)}})
+                for x in ip_targets:
+                    update_scope_domain_status(scope_id, x, "scanning", task_id)
+                ret_data.append({"domain": ip_target, "celery_id": str(celery_id), "task_id": task_id})
+            except Exception:
+                utils.conn_db('task').delete_one({"_id": ObjectId(task_id)})
+                raise
+
         return utils.build_ret(ErrorMsg.Success, ret_data)

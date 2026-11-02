@@ -370,8 +370,9 @@ def domain_exec(options):
     scheduler_id = options.get("scheduler_id")
     monitor_options = options.get("monitor_options")
     name = options.get("name")
+    task_id = options.get("task_id")
     wrap_tasks.domain_executors(base_domain=domain, scheduler_id=scheduler_id,
-                                scope_id=scope_id, options=monitor_options, name=name)
+                                scope_id=scope_id, options=monitor_options, name=name, task_id=task_id)
 
 
 def oneshot_domain_exec(options):
@@ -431,9 +432,10 @@ def ip_exec(options):
     scheduler_id = options.get("scheduler_id")
     monitor_options = options.get("monitor_options")
     name = options.get("name")
+    task_id = options.get("task_id")
     wrap_tasks.ip_executor(target=target, scope_id=scope_id,
                            task_name=name, scheduler_id=scheduler_id,
-                           options=monitor_options)
+                           options=monitor_options, task_id=task_id)
 
 def oneshot_ip_exec(options):
     """

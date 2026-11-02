@@ -16,17 +16,21 @@ from app.services.commonTask import TaskHeartbeat
 
 logger = utils.get_logger()
 
-def domain_executors(base_domain=None, scheduler_id=None, scope_id=None, options=None, name=""):
+def domain_executors(base_domain=None, scheduler_id=None, scope_id=None, options=None, name="", task_id=None):
     logger.info("start domain_executors {} {} {}".format(base_domain, scope_id, options))
     try:
         query = {"_id": ObjectId(scheduler_id)}
         item = utils.conn_db('scheduler').find_one(query)
         if not item:
             logger.info("stop  domain_executors {}  not found scheduler_id {}".format(base_domain, scheduler_id))
+            if task_id:
+                conn('task').delete_one({"_id": ObjectId(task_id)})
             return
 
         if item.get("status") == SchedulerStatus.STOP:
             logger.info("stop  domain_executors {}  scheduler_id {} is stop ".format(base_domain, scheduler_id))
+            if task_id:
+                conn('task').delete_one({"_id": ObjectId(task_id)})
             return
 
         # 关口 3：Worker 消费端前置校验（核验目标是否仍属于当前资产组 - Issue #48 Fail-Closed 加固）
@@ -35,9 +39,13 @@ def domain_executors(base_domain=None, scheduler_id=None, scope_id=None, options
                 scope_obj = utils.conn_db('asset_scope').find_one({"_id": ObjectId(str(scope_id))})
                 if not scope_obj or base_domain not in scope_obj.get("scope_array", []):
                     logger.warning("stop domain_executors: target {} is no longer in scope {}, dropping task.".format(base_domain, scope_id))
+                    if task_id:
+                        conn('task').delete_one({"_id": ObjectId(task_id)})
                     return
             except InvalidId as ex:
                 logger.error(f"stop domain_executors: invalid scope_id '{scope_id}': {ex}. Dropping task.")
+                if task_id:
+                    conn('task').delete_one({"_id": ObjectId(task_id)})
                 return
             except PyMongoError as ex:
                 logger.warning(f"retry domain_executors: MongoDB error checking scope {scope_id}: {ex}")
@@ -47,20 +55,26 @@ def domain_executors(base_domain=None, scheduler_id=None, scope_id=None, options
                         task_obj.retry(exc=ex, countdown=30, max_retries=3)
                     except MaxRetriesExceededError:
                         logger.error(f"stop domain_executors: max retries exceeded for scope {scope_id}. Dropping task (fail-closed).")
+                        if task_id:
+                            conn('task').delete_one({"_id": ObjectId(task_id)})
                         return
                 return
             except Exception as ex:
                 logger.error(f"stop domain_executors: unexpected error checking scope {scope_id}: {ex}. Dropping task (fail-closed).")
+                if task_id:
+                    conn('task').delete_one({"_id": ObjectId(task_id)})
                 return
 
-        wrap_domain_executors(base_domain=base_domain, scheduler_id=scheduler_id, scope_id=scope_id, options=options, name=name)
+        wrap_domain_executors(base_domain=base_domain, scheduler_id=scheduler_id, scope_id=scope_id, options=options, name=name, task_id=task_id)
     except Retry:
         raise
     except Exception as e:
         logger.exception(e)
+        if task_id:
+            conn('task').update_one({"_id": ObjectId(task_id)}, {"$set": {"status": TaskStatus.ERROR, "end_time": utils.curr_date()}})
 
 
-def wrap_domain_executors(base_domain=None, scheduler_id=None, scope_id=None, options=None, name=""):
+def wrap_domain_executors(base_domain=None, scheduler_id=None, scope_id=None, options=None, name="", task_id=None):
     import time
     import random
     
@@ -68,14 +82,20 @@ def wrap_domain_executors(base_domain=None, scheduler_id=None, scope_id=None, op
     time.sleep(random.uniform(0.1, 1.0))
     
     # 二次防重：防止多个 Celery Worker 同时消费到队列中积压的重复消息
-    running_tasks = conn('task').count_documents({
-        "options.scheduler_id": scheduler_id,
-        "status": {"$nin": [TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.STOP]}
-    })
-    
-    if running_tasks > 0:
-        logger.warning(f"Task overlap prevented in worker: scheduler {scheduler_id} is already running. Dropping duplicate message.")
-        return
+    if scheduler_id:
+        running_query = {
+            "options.scheduler_id": scheduler_id,
+            "status": {"$nin": [TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.STOP]}
+        }
+        if task_id:
+            running_query["_id"] = {"$ne": ObjectId(task_id)}
+        running_tasks = conn('task').count_documents(running_query)
+        
+        if running_tasks > 0:
+            logger.warning(f"Task overlap prevented in worker: scheduler {scheduler_id} is already running. Dropping duplicate message.")
+            if task_id:
+                conn('task').delete_one({"_id": ObjectId(task_id)})
+            return
 
     celery_id = "celery_id_placeholder"
 
@@ -119,9 +139,15 @@ def wrap_domain_executors(base_domain=None, scheduler_id=None, scope_id=None, op
         options = {}
     task_data["options"].update(options)
 
-    conn('task').insert_one(task_data)
-    task_id = str(task_data.pop("_id"))
-    
+    if task_id:
+        conn('task').update_one(
+            {"_id": ObjectId(task_id)},
+            {"$set": {"celery_id": celery_id, "target": base_domain, "options": task_data["options"], "status": TaskStatus.RUNNING}}
+        )
+    else:
+        conn('task').insert_one(task_data)
+        task_id = str(task_data.pop("_id"))
+
     arl_task_id_var.set(task_id)
         
     domain_executor = DomainExecutor(base_domain, task_id, task_data["options"])
@@ -191,7 +217,7 @@ def oneshot_domain_executors(base_domain=None, scope_id=None, options=None, name
         # 收养重启/预建的任务记录，避免重复落库，保证重启链路可追踪
         conn('task').update_one(
             {"_id": ObjectId(task_id)},
-            {"$set": {"celery_id": celery_id, "target": base_domain, "options": task_data["options"]}}
+            {"$set": {"celery_id": celery_id, "target": base_domain, "options": task_data["options"], "status": TaskStatus.RUNNING}}
         )
     else:
         conn('task').insert_one(task_data)
@@ -564,7 +590,7 @@ class IPExecutor(IPTask):
             # 收养重启/预建的任务记录，避免重复落库，保证重启链路可追踪
             conn('task').update_one(
                 {"_id": ObjectId(task_id)},
-                {"$set": {"celery_id": celery_id, "target": self.ip_target, "options": task_data["options"]}}
+                {"$set": {"celery_id": celery_id, "target": self.ip_target, "options": task_data["options"], "status": TaskStatus.RUNNING}}
             )
             self.task_id = task_id
         else:
@@ -641,7 +667,7 @@ class IPExecutor(IPTask):
                    push_flag=True, task_name=self.task_name)
 
 
-def ip_executor(target, scope_id, task_name, scheduler_id, options):
+def ip_executor(target, scope_id, task_name, scheduler_id, options, task_id=None):
     import time
     import random
     
@@ -649,24 +675,34 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options):
     time.sleep(random.uniform(0.1, 1.0))
     
     # 二次防重：防止队列积压导致的重复消费
-    running_tasks = conn('task').count_documents({
-        "options.scheduler_id": scheduler_id,
-        "status": {"$nin": [TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.STOP]}
-    })
-    
-    if running_tasks > 0:
-        logger.warning(f"Task overlap prevented in worker: IP scheduler {scheduler_id} is already running. Dropping duplicate message.")
-        return
+    if scheduler_id:
+        running_query = {
+            "options.scheduler_id": scheduler_id,
+            "status": {"$nin": [TaskStatus.DONE, TaskStatus.ERROR, TaskStatus.STOP]}
+        }
+        if task_id:
+            running_query["_id"] = {"$ne": ObjectId(task_id)}
+        running_tasks = conn('task').count_documents(running_query)
+        
+        if running_tasks > 0:
+            logger.warning(f"Task overlap prevented in worker: IP scheduler {scheduler_id} is already running. Dropping duplicate message.")
+            if task_id:
+                conn('task').delete_one({"_id": ObjectId(task_id)})
+            return
 
     try:
         query = {"_id": ObjectId(scheduler_id)}
         item = utils.conn_db('scheduler').find_one(query)
         if not item:
             logger.info("stop  ip_executors {}  not found scheduler_id {}".format(target, scheduler_id))
+            if task_id:
+                conn('task').delete_one({"_id": ObjectId(task_id)})
             return
 
         if item.get("status") == SchedulerStatus.STOP:
             logger.info("stop  ip_executors {}  scheduler_id {} is stop ".format(target, scheduler_id))
+            if task_id:
+                conn('task').delete_one({"_id": ObjectId(task_id)})
             return
 
         # 关口 3：Worker 消费端前置校验（核验 IP 目标是否仍属于当前资产组 - Issue #48 Fail-Closed 加固）
@@ -675,15 +711,21 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options):
                 scope_obj = utils.conn_db('asset_scope').find_one({"_id": ObjectId(str(scope_id))})
                 if not scope_obj:
                     logger.warning(f"stop ip_executors: scope {scope_id} not found, dropping task.")
+                    if task_id:
+                        conn('task').delete_one({"_id": ObjectId(task_id)})
                     return
                 valid_scopes = set(scope_obj.get("scope_array", []))
                 valid_targets = [t for t in target.split() if t in valid_scopes]
                 if not valid_targets:
                     logger.warning(f"stop ip_executors: target(s) '{target}' no longer in scope {scope_id}, dropping task.")
+                    if task_id:
+                        conn('task').delete_one({"_id": ObjectId(task_id)})
                     return
                 target = " ".join(valid_targets)
             except InvalidId as ex:
                 logger.error(f"stop ip_executors: invalid scope_id '{scope_id}': {ex}. Dropping task.")
+                if task_id:
+                    conn('task').delete_one({"_id": ObjectId(task_id)})
                 return
             except PyMongoError as ex:
                 logger.warning(f"retry ip_executors: MongoDB error checking scope {scope_id}: {ex}")
@@ -693,10 +735,14 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options):
                         task_obj.retry(exc=ex, countdown=30, max_retries=3)
                     except MaxRetriesExceededError:
                         logger.error(f"stop ip_executors: max retries exceeded for scope {scope_id}. Dropping task (fail-closed).")
+                        if task_id:
+                            conn('task').delete_one({"_id": ObjectId(task_id)})
                         return
                 return
             except Exception as ex:
                 logger.error(f"stop ip_executors: unexpected error checking scope {scope_id}: {ex}. Dropping task (fail-closed).")
+                if task_id:
+                    conn('task').delete_one({"_id": ObjectId(task_id)})
                 return
 
         update_scheduler_run(scheduler_id)
@@ -704,11 +750,13 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options):
         raise
     except Exception as e:
         logger.exception(e)
+        if task_id:
+            conn('task').update_one({"_id": ObjectId(task_id)}, {"$set": {"status": TaskStatus.ERROR, "end_time": utils.curr_date()}})
         return
 
     executor = IPExecutor(target, scope_id, task_name, scheduler_id, options)
     try:
-        executor.insert_task_data()
+        executor.insert_task_data(task_id=task_id)
         executor.run()
         executor.sync_asset_site_wih()
 

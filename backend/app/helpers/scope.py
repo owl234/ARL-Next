@@ -566,7 +566,7 @@ def trigger_scope_domain_scan(scope_id, domains, policy_id, task_type='oneshot',
     """
     复用监控/扫描任务体系，对资产组中的指定域名下发任务
     """
-    from app.modules import TaskTag, CeleryAction, CeleryRoutingKey, AssetScopeType
+    from app.modules import TaskTag, CeleryAction, CeleryRoutingKey, AssetScopeType, TaskStatus
     from app.helpers import get_options_by_policy_id
     from app import celerytask, scheduler as app_scheduler
 
@@ -601,20 +601,44 @@ def trigger_scope_domain_scan(scope_id, domains, policy_id, task_type='oneshot',
             update_scope_domain_status(scope_id, d, "scanning", scheduler_id)
             triggered_count += 1
         else:
-            # 一次性扫描任务
+            # 一次性扫描任务：预建 WAITING 工单，保证即刻可见与全生命周期追踪
+            merged_options = task_options.copy()
+            merged_options.update({"scope_id": str(scope_id)})
+            task_record = {
+                "name": curr_name,
+                "target": d,
+                "start_time": "-",
+                "status": TaskStatus.WAITING,
+                "type": AssetScopeType.DOMAIN,
+                "task_tag": TaskTag.MONITOR,
+                "end_time": "-",
+                "service": [],
+                "options": merged_options,
+                "scope_id": str(scope_id),
+                "celery_id": ""
+            }
+            insert_res = utils.conn_db('task').insert_one(task_record)
+            task_id = str(insert_res.inserted_id)
+
             task_data = {
                 "domain": d,
                 "scope_id": str(scope_id),
                 "type": AssetScopeType.DOMAIN,
                 "monitor_options": task_options,
-                "name": curr_name
+                "name": curr_name,
+                "task_id": task_id
             }
             options = {
                 "celery_action": CeleryAction.ONESHOT_DOMAIN_EXEC_TASK,
                 "data": task_data
             }
-            celery_id = celerytask.arl_task.apply_async(kwargs={'options': options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
-            update_scope_domain_status(scope_id, d, "scanning", str(celery_id))
+            try:
+                celery_id = celerytask.arl_task.apply_async(kwargs={'options': options}, queue=CeleryRoutingKey.ASSET_TASK_HEAVY)
+                utils.conn_db('task').update_one({"_id": bson.ObjectId(task_id)}, {"$set": {"celery_id": str(celery_id)}})
+                update_scope_domain_status(scope_id, d, "scanning", task_id)
+            except Exception:
+                utils.conn_db('task').delete_one({"_id": bson.ObjectId(task_id)})
+                raise
             triggered_count += 1
 
     return triggered_count

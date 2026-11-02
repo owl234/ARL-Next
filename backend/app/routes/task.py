@@ -30,6 +30,7 @@ base_search_task_fields = {
     'include_statistics': fields.Integer(description="设为 1 时附带全局任务状态统计"),
     '_id': fields.String(description="任务ID"),
     'task_tag': fields.String(description="监控任务和侦查任务tag"),
+    'sync_status': fields.String(description="资产组同步状态 (waiting/running/default/error)"),
 
     # 下面是一大堆开关选项，支持按“是否开启了某个功能”来搜索任务
     'options.domain_brute': fields.Boolean(description="是否开启域名爆破"),
@@ -122,7 +123,28 @@ class ARLTask(ARLResource): # 继承我们在阶段一拆解过的“大基类�
     parser = get_arl_parser(search_task_fields, location='args')
 
     def build_db_query(self, args):
-        status_val = args.get("status")
+        args_copy = dict(args)
+        tag_val = args_copy.pop("task_tag", None)
+        status_val = args_copy.pop("status", None)
+
+        # 兼容资产组同步状态别名 (syncing -> running, done/synced -> default)
+        sync_status_val = args_copy.get("sync_status")
+        if sync_status_val:
+            if sync_status_val == "syncing":
+                args_copy["sync_status"] = "running"
+            elif sync_status_val in ("done", "synced"):
+                args_copy["sync_status"] = "default"
+
+        q = super().build_db_query(args_copy)
+
+        # 向下兼容历史任务标签：使用 $in 既兼容历史标签又兼容现代标签
+        if tag_val in ("site_update", "asset_site_update"):
+            q["task_tag"] = {"$in": ["asset_site_update", "site_update"]}
+        elif tag_val in ("wih", "asset_wih_update"):
+            q["task_tag"] = {"$in": ["asset_wih_update", "wih"]}
+        elif tag_val:
+            q["task_tag"] = tag_val
+
         # 聚合态筛选：与统计口径保持一致（active = running + waiting，abnormal = error + stop），
         # 避免指标卡展示数量与点击筛选后的结果集数量不一致。
         aggregate_status = {
@@ -131,12 +153,11 @@ class ARLTask(ARLResource): # 继承我们在阶段一拆解过的“大基类�
             "running": {"$nin": ["done", "error", "stop", "waiting"]},
         }
         if status_val in aggregate_status:
-            args_copy = dict(args)
-            args_copy.pop("status", None)
-            q = super().build_db_query(args_copy)
             q["status"] = aggregate_status[status_val]
-            return q
-        return super().build_db_query(args)
+        elif status_val:
+            q["status"] = status_val
+
+        return q
 
     # ==========================================
     # GET 接口：负责分页查询和展示任务列表
