@@ -929,6 +929,7 @@ export default {
   "top2000Paths": "Топ-2000 путей",
   "top100CommonPorts": "Топ-100 распространённых портов",
   "top1000CommonPorts": "Топ-1000 распространённых портов",
+  "aliveProbePorts": "Порты проверки доступности",
   "rootDomainExclusionDictionary": "Словарь исключения корневых доменов",
   "maliciousUnwantedWebsiteBlocklist": "Список исключений вредоносных / нежелательных сайтов",
   "sensitiveWordFilterDictionary": "Словарь фильтрации нежелательных слов",

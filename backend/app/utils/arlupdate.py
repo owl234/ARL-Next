@@ -573,8 +573,9 @@ def heal_historical_invalid_sites():
 
 
 def ensure_builtin_dicts():
-    """确保核心内置字典文件存在（防止升级后因持久化数据卷隔离缺失新增的内置字典）"""
+    """确保核心内置字典文件存在与平滑增量演进（防止升级后因持久化数据卷隔离缺失新增的内置字典）"""
     import os
+    import re
     import logging
     from app.config import Config
     dict_dir = os.path.join(Config.basedir if hasattr(Config, 'basedir') else os.path.dirname(os.path.dirname(__file__)), 'dicts')
@@ -588,6 +589,81 @@ def ensure_builtin_dicts():
             logging.getLogger().info("Successfully auto-seeded missing domain_top300.txt into dicts volume.")
         except Exception as e:
             logging.getLogger().warning(f"Failed to auto-seed domain_top300.txt: {e}")
+
+    alive_path = os.path.join(dict_dir, 'port_alive.txt')
+    target_new_ports = [
+        '8000', '8001', '8888', '9000', '7001', '6443',
+        '2375', '6379', '5432', '9200', '27017', '1521'
+    ]
+    try:
+        from app.modules import DEFAULT_ALIVE_PORTS, sanitize_ports
+        default_tokens = [p for p in DEFAULT_ALIVE_PORTS.split(',') if p]
+
+        def _parse_port_range(token: str):
+            if '-' in token:
+                parts = token.split('-')
+                return int(parts[0]), int(parts[1])
+            elif token.isdigit():
+                val = int(token)
+                return val, val
+            return None, None
+
+        def _is_port_covered(port_val: int, tokens_list):
+            for t in tokens_list:
+                s, e = _parse_port_range(t)
+                if s is not None and e is not None and s <= port_val <= e:
+                    return True
+            return False
+
+        if not os.path.exists(alive_path):
+            with open(alive_path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(default_tokens) + '\n')
+            logging.getLogger().info("Successfully auto-seeded missing port_alive.txt into dicts volume.")
+        else:
+            with open(alive_path, 'r', encoding='utf-8', errors='ignore') as f:
+                raw_lines = f.readlines()
+
+            # 使用 sanitize_ports 进行标准清洗，解析出所有离散/范围 token
+            sanitized_str = sanitize_ports(raw_lines)
+            if not sanitized_str:
+                # 存量文件为空或全为非法/注释行，自动回退写入全量 47 基准端口
+                with open(alive_path, 'w', encoding='utf-8') as f:
+                    f.write('\n'.join(default_tokens) + '\n')
+                logging.getLogger().info("Re-seeded empty or invalid port_alive.txt with full baseline probe ports.")
+            else:
+                current_tokens = [tok for tok in sanitized_str.split(',') if tok]
+
+                # 1. 过滤 843（含单独 843 以及刚好为 843-843 的情况）
+                filtered_tokens = []
+                for tok in current_tokens:
+                    s, e = _parse_port_range(tok)
+                    if s == 843 and e == 843:
+                        continue
+                    filtered_tokens.append(tok)
+
+                # 2. 补齐缺失的 12 个新基准端口（若已在某个 range 内覆盖则不重复添加）
+                changed = len(filtered_tokens) != len(current_tokens)
+                for np in target_new_ports:
+                    np_int = int(np)
+                    if not _is_port_covered(np_int, filtered_tokens):
+                        filtered_tokens.append(np)
+                        changed = True
+
+                # 3. 排序：按 (start_port, end_port) 数值升序排序
+                def _sort_key(tok: str):
+                    s, e = _parse_port_range(tok)
+                    return (s if s is not None else 999999, e if e is not None else 999999)
+
+                filtered_tokens.sort(key=_sort_key)
+
+                # 4. 检查是否与原文件内容（逐行规范化对比）存在差异，有变化才写回
+                existing_clean_lines = [l.strip() for l in raw_lines if l.strip()]
+                if changed or existing_clean_lines != filtered_tokens:
+                    with open(alive_path, 'w', encoding='utf-8') as f:
+                        f.write('\n'.join(filtered_tokens) + '\n')
+                    logging.getLogger().info("Successfully updated port_alive.txt with modern baseline probe ports.")
+    except Exception as e:
+        logging.getLogger().warning(f"Failed to auto-seed/update port_alive.txt: {e}")
 
 
 def fingerprint_info_update():

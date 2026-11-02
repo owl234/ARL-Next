@@ -1883,6 +1883,7 @@ const ASSET_DICT_META = {
   'port_top1000.txt':    { get label() { return pageText('pages.top1000CommonPorts'); },         group: '🔌 端口扫描策略' },
   'port_custom.txt':     { get label() { return pageText('tasks.customPorts'); },             group: '🔌 端口扫描策略' },
   'port_all.txt':        { get label() { return pageText('tasks.allPorts165535'); },       group: '🔌 端口扫描策略' },
+  'port_alive.txt':      { get label() { return pageText('pages.aliveProbePorts'); },      group: '🔌 端口扫描策略' },
 
   'blackdomain.txt':     { get label() { return pageText('pages.rootDomainExclusionDictionary'); },     group: '🛡️ 全局黑名单拦截' },
   'black_asset_site.txt':{ get label() { return pageText('pages.maliciousUnwantedWebsiteBlocklist'); },  group: '🛡️ 全局黑名单拦截' },

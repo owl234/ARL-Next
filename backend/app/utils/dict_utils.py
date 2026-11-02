@@ -58,6 +58,7 @@ BUILTIN_ASSET_DICTS = {
     'port_top1000.txt',
     'port_custom.txt',
     'port_all.txt',
+    'port_alive.txt',
     'blackdomain.txt',
     'black_asset_site.txt',
     'blackhexie.txt',

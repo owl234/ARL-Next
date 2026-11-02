@@ -929,6 +929,7 @@ export default {
   "top2000Paths": "Top 2000 路径字典",
   "top100CommonPorts": "常用 100 端口",
   "top1000CommonPorts": "常用 1000 端口",
+  "aliveProbePorts": "存活探测常用端口",
   "rootDomainExclusionDictionary": "根域名爆破拦截字典",
   "maliciousUnwantedWebsiteBlocklist": "恶意/干扰站点拦截字典",
   "sensitiveWordFilterDictionary": "敏感词汇过滤字典",

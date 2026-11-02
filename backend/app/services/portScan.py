@@ -1,6 +1,7 @@
 from app import utils
 from app.utils import nmap, is_valid_exclude_ports
 from app.config import Config
+from app.modules import get_alive_ports
 
 logger = utils.get_logger()
 
@@ -15,13 +16,19 @@ class PortScan:
     """
     def __init__(self, targets, ports=None, service_detect=False, os_detect=False,
                  port_parallelism=None, port_min_rate=None, custom_host_timeout=None,
-                 exclude_ports=None,
+                 exclude_ports=None, alive_port=None,
                  ):
         self.targets = " ".join(targets)
         self.ports = ports
         self.max_host_group = 32 # Nmap 每次并行扫描的 IP 组大小
         # 存活探测端口集：如果不用 ICMP (ping)，就靠探测这些高频端口来判断主机是否存活
-        self.alive_port = "22,80,443,843,3389,8007-8011,8443,9090,8080-8091,8093,8099,5000-5004,2222,3306,1433,21,25"
+        if alive_port:
+            if isinstance(alive_port, list):
+                self.alive_port = ",".join(str(p) for p in alive_port)
+            else:
+                self.alive_port = str(alive_port).strip()
+        else:
+            self.alive_port = get_alive_ports()
         # -sT: TCP 连接扫描 (不需要 root 权限，且更准)
         # -n: 不做反向 DNS 解析 (极大提升速度)
         # --open: 只输出 open 状态的端口
@@ -158,7 +165,8 @@ class PortScan:
 
 
 def port_scan(targets, ports=None, service_detect=False, os_detect=False,
-              port_parallelism=32, port_min_rate=64, custom_host_timeout=None, exclude_ports=None):
+              port_parallelism=32, port_min_rate=64, custom_host_timeout=None, exclude_ports=None,
+              alive_port=None):
     """
     [高级封装层]
     供外部 Celery Task 调用的入口函数。
@@ -172,5 +180,6 @@ def port_scan(targets, ports=None, service_detect=False, os_detect=False,
                   port_parallelism=port_parallelism, port_min_rate=port_min_rate,
                   custom_host_timeout=custom_host_timeout,
                   exclude_ports=exclude_ports,
+                  alive_port=alive_port,
                   )
     return ps.run()

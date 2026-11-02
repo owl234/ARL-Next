@@ -929,6 +929,7 @@ export default {
   "top2000Paths": "Top 2,000 paths",
   "top100CommonPorts": "Top 100 common ports",
   "top1000CommonPorts": "Top 1,000 common ports",
+  "aliveProbePorts": "Host Discovery Ports (Ping)",
   "rootDomainExclusionDictionary": "Root domain exclusion dictionary",
   "maliciousUnwantedWebsiteBlocklist": "Malicious / unwanted website blocklist",
   "sensitiveWordFilterDictionary": "Sensitive word filter dictionary",

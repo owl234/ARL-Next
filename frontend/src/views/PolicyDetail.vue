@@ -569,7 +569,7 @@ onMounted(async () => {
       domainDicts.value = dictRes.data.filter(item => item.category && item.category.includes(pageText('pages.subdomainDiscovery')) && !item.category.includes(pageText('pages.smart')));
       altDnsDicts.value = dictRes.data.filter(item => item.category && item.category.includes(pageText('pages.subdomainMutationDiscovery')));
       fileLeakDicts.value = dictRes.data.filter(item => item.category && (item.category.includes(pageText('pages.directoryAndFileDisclosure')) || item.category.includes(pageText('pages.directoryAndFileDisclosures'))));
-      portDicts.value = dictRes.data.filter(item => item.category && item.category.includes(pageText('pages.portScanPolicy')) && item.name !== 'port_custom.txt');
+      portDicts.value = dictRes.data.filter(item => item.category && item.category.includes(pageText('pages.portScanPolicy')) && item.name !== 'port_custom.txt' && item.name !== 'port_alive.txt');
 
       if (!isEdit) {
         if (domainDicts.value.length > 0) policyForm.domain_config.domain_brute_type = domainDicts.value[0].name;

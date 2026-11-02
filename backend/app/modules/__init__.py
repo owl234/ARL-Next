@@ -15,6 +15,7 @@ class ScanPortType:
     TOP1000 = "top1000"
     ALL = "all"
     CUSTOM = "custom"
+    ALIVE = "alive"
 
 
 def sanitize_ports(port_lines):
@@ -30,14 +31,18 @@ def sanitize_ports(port_lines):
         if not line:
             continue
         line_str = str(line).strip()
-        if not line_str or line_str.startswith("#") or line_str.startswith("//"):
+        if not line_str:
+            continue
+        # 剥离行内注释 (# 或 // 及后续内容)
+        line_str = re.split(r'#|//', line_str, maxsplit=1)[0].strip()
+        if not line_str:
             continue
         
         # 允许一行中包含逗号或空格分隔的多个端口
         tokens = re.split(r'[,，\s]+', line_str)
         for tok in tokens:
             tok = tok.strip()
-            if not tok or tok.startswith("#"):
+            if not tok:
                 continue
             
             # 支持单个端口 (如 80, 443)
@@ -65,6 +70,56 @@ def sanitize_ports(port_lines):
     return ",".join(valid_tokens)
 
 
+DEFAULT_ALIVE_PORTS = (
+    "21,22,25,80,443,1433,1521,2222,2375,3306,3389,"
+    "5000-5004,5432,6379,6443,7001,8000,8001,8007-8011,"
+    "8080-8091,8093,8099,8443,8888,9000,9090,9200,27017"
+)
+
+
+def get_alive_ports(max_ports: int = 60) -> str:
+    """
+    [动态读取存活探测端口配置]
+    读取 app/dicts/port_alive.txt，调用 sanitize_ports() 进行清洗规范化。
+    若文件不存在或内容清洗后为空，平滑回退到 DEFAULT_ALIVE_PORTS。
+    若逗号分割后的端口数超过 max_ports，进行安全截断截取前 max_ports 个并记录 warning 日志。
+    """
+    from app.utils import get_logger
+    logger = get_logger()
+
+    from app.config import Config
+    basedir = getattr(Config, 'basedir', None) or os.path.dirname(os.path.dirname(__file__))
+    dicts_dir = os.path.join(basedir, 'dicts')
+    path = os.path.join(dicts_dir, 'port_alive.txt')
+
+    ports_str = ""
+    if os.path.exists(path):
+        try:
+            raw_lines = []
+            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    raw_lines.append(line)
+            ports_str = sanitize_ports(raw_lines)
+            if not ports_str:
+                logger.warning(f"Port dictionary '{path}' has no valid ports after sanitization, falling back to DEFAULT_ALIVE_PORTS.")
+        except Exception as e:
+            logger.error(f"Error reading alive port dict '{path}': {e}")
+            ports_str = ""
+    else:
+        logger.warning(f"Alive port dictionary file not found at '{path}', falling back to DEFAULT_ALIVE_PORTS.")
+
+    if not ports_str:
+        ports_str = DEFAULT_ALIVE_PORTS
+
+    tokens = [p for p in ports_str.split(',') if p]
+    if max_ports and len(tokens) > max_ports:
+        logger.warning(f"Alive probe ports count ({len(tokens)}) exceeds limit of {max_ports}, truncating to first {max_ports} ports.")
+        tokens = tokens[:max_ports]
+        return ",".join(tokens)
+
+    return ports_str
+
+
 def get_scan_ports(port_type):
     """
     [动态读取端口配置]
@@ -73,9 +128,10 @@ def get_scan_ports(port_type):
     如果没有找到对应字典或字典内容为空，平滑回退到兜底配置。
     """
     from app.utils import get_safe_dict_path, get_logger
+    from app.config import Config
     logger = get_logger()
     
-    basedir = os.path.dirname(os.path.dirname(__file__))
+    basedir = getattr(Config, 'basedir', None) or os.path.dirname(os.path.dirname(__file__))
     dicts_dir = os.path.join(basedir, 'dicts')
     
     alias_map = {
@@ -91,6 +147,9 @@ def get_scan_ports(port_type):
         "custom": "port_custom.txt",
         "port_custom": "port_custom.txt",
         "port_custom.txt": "port_custom.txt",
+        "alive": "port_alive.txt",
+        "port_alive": "port_alive.txt",
+        "port_alive.txt": "port_alive.txt",
         "test": "port_top100.txt",
     }
     
@@ -121,7 +180,9 @@ def get_scan_ports(port_type):
         ScanPortType.ALL: "1-65535",
         "port_all.txt": "1-65535",
         ScanPortType.CUSTOM: "80,443",
-        "port_custom.txt": "80,443"
+        "port_custom.txt": "80,443",
+        ScanPortType.ALIVE: DEFAULT_ALIVE_PORTS,
+        "port_alive.txt": DEFAULT_ALIVE_PORTS,
     }
 
     if not path or not os.path.exists(path):

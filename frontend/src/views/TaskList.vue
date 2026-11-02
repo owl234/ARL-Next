@@ -2496,7 +2496,7 @@ onMounted(async () => {
       domainDicts.value = dictRes.data.filter(item => item.category && item.category.includes('子域名爆破') && !item.category.includes('智能'));
       altDnsDicts.value = dictRes.data.filter(item => item.category && item.category.includes('智能子域爆破'));
       fileLeakDicts.value = dictRes.data.filter(item => item.category && (item.category.includes('目录文件泄露') || item.category.includes('目录与文件泄露')));
-      portDicts.value = dictRes.data.filter(item => item.category && item.category.includes('端口扫描策略'));
+      portDicts.value = dictRes.data.filter(item => item.category && item.category.includes('端口扫描策略') && item.name !== 'port_alive.txt');
 
       if (domainDicts.value.length > 0) formState.domain_brute_type = domainDicts.value[0].name;
       if (altDnsDicts.value.length > 0) formState.alt_dns_dict = altDnsDicts.value[0].name;
