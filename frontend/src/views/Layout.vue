@@ -129,7 +129,7 @@
       <a-layout-content class="arl-main-content" style="margin: 16px; display: flex; flex-direction: column; overflow-y: auto; height: 0;">
         <div :style="{ background: hasBgImage ? (isDarkMode ? 'rgba(15, 23, 42, 0.5)' : 'rgba(255, 255, 255, 0.4)') : (isDarkMode ? '#0f172a' : 'transparent'), flex: '1 0 auto', display: 'flex', flexDirection: 'column', borderRadius: '4px' }">
           <router-view v-slot="{ Component }">
-            <keep-alive include="Dashboard,TaskList,TaskDetail,AssetScope,GroupAssetsDetail,AssetSearch,PlanningTasks,GithubManage,PocList,Fingerprint,Policy,SystemSettings">
+            <keep-alive include="Dashboard,TaskList,TaskDetail,AssetScope,GroupAssetsDetail,AssetSearch,PlanningTasks,GithubManage,PocList,Fingerprint,Policy,SystemSettings,McpCenter">
               <component :is="Component" />
             </keep-alive>
           </router-view>

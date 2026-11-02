@@ -610,7 +610,7 @@
                 </a-button>
               </div>
             </div>
-            <a-empty v-else :description="assetText('tasks.noDataAvailable')" />
+            <a-empty v-else :description="assetText('tasks.noData')" />
           </template>
         </a-table>
 

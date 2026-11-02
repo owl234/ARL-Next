@@ -167,7 +167,7 @@ test('菜单按保存的路由顺序排列，切换语言后只更新标签', ()
   assert.deepEqual(plain(labels.value.slice(0, 2)), ['策略配置', '仪表盘']);
   setLocale('en-US');
   assert.deepEqual(plain(labels.value.slice(0, 2)), ['Policies', 'Dashboard']);
-  assert.equal(items.length, 10);
+  assert.equal(items.length, 11);
   assert.equal(nav.store.getItem('arl_sidebar_menu_order_fixture'), '["/policy","/dashboard"]');
 });
 

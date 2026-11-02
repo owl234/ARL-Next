@@ -750,6 +750,8 @@ import { resolveMcpCredential, createStdioServerConfig } from '@/utils/mcpCreden
 const { t } = useI18n({ useScope: 'global' });
 const pageText = t;
 
+defineOptions({ name: 'McpCenter' });
+
 // 1. 全局状态
 const activeTab = ref('client_setup');
 const isRefreshing = ref(false);
@@ -777,7 +779,7 @@ const keyList = ref([]);
 const isKeysLoading = ref(false);
 const keyPagination = reactive({ page: 1, size: 10, total: 0 });
 
-const keyColumns = [
+const keyColumns = computed(() => [
   { title: pageText('pages.mcpColName'), dataIndex: 'name', key: 'name' },
   { title: pageText('pages.mcpColKeyPrefix'), dataIndex: 'key_prefix', key: 'key_prefix' },
   { title: pageText('pages.mcpColScopes'), key: 'scopes' },
@@ -786,7 +788,7 @@ const keyColumns = [
   { title: pageText('pages.mcpColLastActive'), key: 'last_active' },
   { title: pageText('pages.mcpColCreatedAt'), dataIndex: 'created_at', key: 'created_at' },
   { title: pageText('pages.action'), key: 'action', width: 140 }
-];
+]);
 
 // 新建 Key 表单
 const createKeyModalVisible = ref(false);
@@ -979,14 +981,14 @@ const policyForm = reactive({
   rate_limit_per_min: 120
 });
 
-const toolSwitchConfigs = [
+const toolSwitchConfigs = computed(() => [
   { key: 'get_asset_profile', desc: pageText('pages.mcpToolDescProfile'), isDangerous: false },
   { key: 'get_enterprise_profile', desc: pageText('pages.mcpToolDescEnterprise'), isDangerous: false },
   { key: 'search_assets', desc: pageText('pages.mcpToolDescSearch'), isDangerous: false },
   { key: 'get_task_status', desc: pageText('pages.mcpToolDescTask'), isDangerous: false },
   { key: 'create_scan_task', desc: pageText('pages.mcpToolDescCreate'), isDangerous: true },
   { key: 'stop_scan_task', desc: pageText('pages.mcpToolDescStop'), isDangerous: true }
-];
+]);
 
 // 6. 计算配置片段
 const currentTokenValue = computed(() => {
@@ -1023,7 +1025,7 @@ const configSnippet = computed(() => {
 const refreshAllData = async () => {
   isRefreshing.value = true;
   try {
-    await Promise.all([fetchOverview(), fetchKeys(), fetchLogs(), fetchConfig()]);
+    await Promise.all([fetchOverview(), fetchKeys(), fetchActiveKeyOptions(), fetchLogs(), fetchConfig()]);
     message.success(pageText('pages.refreshSuccess'));
   } catch (e) {
     console.error('Failed to refresh data', e);
@@ -1052,21 +1054,39 @@ const fetchOverview = async () => {
   }
 };
 
+const fetchActiveKeyOptions = async () => {
+  try {
+    const res = await request.get('/mcp/keys', {
+      params: {
+        page: 1,
+        size: 100,
+        keyword: ''
+      }
+    });
+    if (res && (res.code === 200 || res.data?.code === 200)) {
+      const data = (res.code === 200 ? res.data : res.data.data) || {};
+      activeKeyOptions.value = (data.items || []).filter(k => k.status === 'active');
+    }
+  } catch (e) {
+    console.error('fetchActiveKeyOptions error', e);
+  }
+};
+
 const fetchKeys = async () => {
   isKeysLoading.value = true;
   try {
+    const keyword = keySearchKeyword.value.trim();
     const res = await request.get('/mcp/keys', {
       params: {
         page: keyPagination.page,
         size: keyPagination.size,
-        keyword: keySearchKeyword.value
+        keyword
       }
     });
     if (res && (res.code === 200 || res.data?.code === 200)) {
       const data = (res.code === 200 ? res.data : res.data.data) || {};
       keyList.value = data.items || [];
       keyPagination.total = data.total || 0;
-      activeKeyOptions.value = (data.items || []).filter(k => k.status === 'active');
     }
   } catch (e) {
     console.error('fetchKeys error', e);
@@ -1105,7 +1125,7 @@ const handleCreateKeySubmit = async () => {
         selectedKeyId.value = data.id;
       }
       keySuccessModalVisible.value = true;
-      await fetchKeys();
+      await Promise.all([fetchKeys(), fetchActiveKeyOptions()]);
     } else {
       message.error(res?.message || res?.data?.message || pageText('pages.failed'));
     }
@@ -1122,7 +1142,7 @@ const toggleKeyStatus = async (record) => {
     const res = await request.post(`/mcp/keys/${record.id}/status`, { status: targetStatus });
     if (res && (res.code === 200 || res.data?.code === 200)) {
       message.success(pageText('pages.operationSuccess'));
-      fetchKeys();
+      await Promise.all([fetchKeys(), fetchActiveKeyOptions()]);
     } else {
       message.error(res?.message || res?.data?.message || pageText('pages.failed'));
     }
@@ -1136,7 +1156,10 @@ const deleteKey = async (record) => {
     const res = await request.delete(`/mcp/keys/${record.id}`);
     if (res && (res.code === 200 || res.data?.code === 200)) {
       message.success(pageText('pages.deleteSuccess'));
-      fetchKeys();
+      if (selectedKeyId.value === record.id) {
+        selectedKeyId.value = 'current_session';
+      }
+      await Promise.all([fetchKeys(), fetchActiveKeyOptions()]);
     } else {
       message.error(res?.message || res?.data?.message || pageText('pages.failed'));
     }
@@ -1245,6 +1268,17 @@ const exportLogsCsv = async () => {
     const res = await fetch(`/api/mcp/logs/export?${query.toString()}`, {
       headers: { Token: token }
     });
+    if (!res.ok) {
+      let errMsg = '';
+      try {
+        const errData = await res.json();
+        errMsg = errData?.message || '';
+      } catch {
+        // 忽略非 JSON 错误体解析异常
+      }
+      message.error(errMsg || pageText('pages.exportFailed'));
+      return;
+    }
     const blob = await res.blob();
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -1395,6 +1429,7 @@ const handleKeySelectChange = () => {};
 onMounted(() => {
   fetchOverview();
   fetchKeys();
+  fetchActiveKeyOptions();
   fetchLogs();
   fetchConfig();
 });

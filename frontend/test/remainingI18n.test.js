@@ -16,7 +16,8 @@ const stops = [];
 afterEach(() => { stops.splice(0).forEach(stop => stop()); i18n.global.locale.value = 'zh-CN'; });
 const files = ['views/Dashboard.vue', 'views/GithubManage.vue', 'views/PocList.vue', 'components/NucleiManage.vue',
   'views/Fingerprint.vue', 'views/Policy.vue', 'views/PolicyDetail.vue', 'views/SystemSettings.vue',
-  'views/Layout.vue', 'components/SupportAuthorPopover.vue'];
+  'components/settings/BackupRestorePanel.vue', 'components/settings/SystemUpdatePanel.vue',
+  'views/McpCenter.vue', 'views/Layout.vue', 'components/SupportAuthorPopover.vue'];
 const sources = new Map();
 function component(file, initial = {}) {
   if (!sources.has(file)) {
@@ -49,7 +50,7 @@ test('备份和恢复切换语言后保持请求参数、强制恢复选项和�
   for (const locale of ['zh-CN', 'en-US']) {
     i18n.global.locale.value = locale;
     const calls = [], tracking = [];
-    const page = component('views/SystemSettings.vue', {
+    const page = component('components/settings/BackupRestorePanel.vue', {
       request: { async post(url, payload) { calls.push({ url, payload: plain(payload) }); return { code: 200 }; } },
       createBackupForm: reactive({ includeScreenshots: false, note: ' fixture note ' }),
       backupLoading: ref(false), createBackupModalVisible: ref(true),
@@ -77,7 +78,7 @@ test('备份进度恢复保留已有进度，忽略空闲状态和更低百分�
     { status: 'success', percent: 100, action: 'backup' },
   ];
   let stopped = 0, refreshed = 0;
-  const page = component('views/SystemSettings.vue', {
+  const page = component('components/settings/BackupRestorePanel.vue', {
     request: { async get(url) { assert.equal(url, '/api/backup/status'); return { code: 200, data: replies.shift() }; } },
     progressAction: ref('backup'), progressPercent: ref(42), progressStage: ref('fixture backend stage'),
     progressElapsed: ref(17), progressLogs: ref(['fixture backend log']), progressFinished: ref(false),
@@ -165,15 +166,17 @@ test('已创建的管理表格、选项和设置索引切换语言后更新标�
     ['views/PocList.vue', 'columns'], ['components/NucleiManage.vue', 'customColumns'],
     ['components/NucleiManage.vue', 'communityColumns'], ['components/NucleiManage.vue', 'blacklistColumns'],
     ['views/Fingerprint.vue', 'columns'], ['views/Policy.vue', 'columns'],
-    ['views/SystemSettings.vue', 'backupColumns'],
+    ['components/settings/BackupRestorePanel.vue', 'backupColumns'],
+    ['views/McpCenter.vue', 'keyColumns'], ['views/McpCenter.vue', 'logColumns'], ['views/McpCenter.vue', 'toolSwitchConfigs'],
     ['views/PolicyDetail.vue', 'nucleiSeverityOptions'], ['views/SystemSettings.vue', 'SETTINGS_INDEX'],
   ];
   for (const [file, name] of cases) {
     i18n.global.locale.value = 'zh-CN';
     const rows = component(file).read(name);
-    const labels = computed(() => rows.map(row => row.title || row.label));
+    const list = () => rows.value || rows;
+    const labels = computed(() => list().map(row => row.title || row.label || row.desc));
     const chinese = labels.value;
-    const identity = () => plain(rows.map(({ key, dataIndex, value, tab, anchor, keywords }) => ({ key, dataIndex, value, tab, anchor, keywords })));
+    const identity = () => plain(list().map(({ key, dataIndex, value, tab, anchor, keywords }) => ({ key, dataIndex, value, tab, anchor, keywords })));
     const original = identity();
     i18n.global.locale.value = 'en-US';
     assert.notDeepEqual(labels.value, chinese, file);
@@ -411,11 +414,11 @@ test('字典条目删除在两种语言下均等待确认并保留原始文件�
 test('更新日志保留原始阶段识别和字节偏移，语言切换不重复追加离线提示', async () => {
   const timers = new Map(), requests = []; let sequence = 0;
   const responses = [
-    { ok: true }, { ok: false, status: 502 }, { ok: false, status: 502 },
+    { ok: true, json: async () => ({ log_token: 'fixture-log-token' }) }, { ok: false, status: 502 }, { ok: false, status: 502 },
     { ok: true, headers: { get: () => 'application/json' }, json: async () => ({ chunk: '正在拉取核心镜像\n', offset: 77 }) },
     { ok: true, headers: { get: () => 'application/json' }, json: async () => ({ chunk: '后端服务已完全就绪\n', offset: 140, done: true }) },
   ];
-  const page = component('views/SystemSettings.vue', {
+  const page = component('components/settings/SystemUpdatePanel.vue', {
     ...Object.fromEntries(['updateModalVisible', 'updateButtonLoading', 'updateHasError', 'updateFinished'].map(name => [name, ref(false)])),
     updateLogs: ref(''), updateProgress: ref(0), updateOfflineNotices: ref(''), logByteOffset: ref(0), activeLayers: ref({}),
     updateElapsedSeconds: ref(0), updateTimer: ref(null), updatePollInterval: ref(null), scrollToBottom() {},
@@ -439,14 +442,14 @@ test('更新日志保留原始阶段识别和字节偏移，语言切换不重�
   assert.equal(page.context.updateProgress.value, 100);
   assert.equal(timers.size, 0);
   assert.match(requests.at(-1), /offset=77$/);
-  assert.equal(requests[1], '/update_stream/trigger?token=fixture-update-token');
+  assert.equal(requests[1], '/update_stream/trigger');
   assert.doesNotMatch(page.context.currentStageTitle.value, /\p{Script=Han}/u);
 });
 
 test('版本占位文案切换语言，真实版本和支持信息的身份字段保持原样', () => {
   const format = component('components/NucleiManage.vue').read('formatTemplateVersion');
   assert.equal(format('未安装'), '未安装');
-  const systemVersion = component('views/SystemSettings.vue').read('formatSystemVersion');
+  const systemVersion = component('components/settings/SystemUpdatePanel.vue').read('formatSystemVersion');
   assert.equal(systemVersion('未知版本'), '未知版本');
   const author = { name: SUPPORT_CONFIG.official.name, wechatId: SUPPORT_CONFIG.wechat.wechatId, tab: SUPPORT_CONFIG.defaultTab };
   const chinese = SUPPORT_CONFIG.entry.text;
