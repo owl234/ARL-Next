@@ -6,6 +6,30 @@ This document records all major version evolution, new features, performance opt
 
 ---
 
+## [v1.4.4] - 2026-11-03
+
+### 🚀 New Features
+- **Native asynchronous MCP (Model Context Protocol) governance center**: introduced standard Model Context Protocol backend endpoints supporting native SSE direct streaming (`/mcp/sse`) and Stdio bridge dual modes; registered two core intelligence tools: `get_asset_profile` (two-stage adaptive drill-down by asset category with token budget controls) and `get_enterprise_profile` (enterprise ecosystem mapping); delivered a dedicated "MCP Center" frontend console featuring API key lifecycle management, sub-millisecond execution audit logging, token consumption dashboards, and whitelist access control; accompanied by automated pentest suites (`tools/verify_mcp_pentest.py`) and security validation test cases.
+- **Group scope lifecycle governance with asset group dissolve and transfer**: overhauled group entity lifecycle, enabling safe group deletion along with options to either dissolve underlying asset groups (reverting to standalone scope) or transfer them to another designated parent group; upgraded UI hierarchy views and added secondary confirmation guardrails for irreversible operations.
+- **Externalized alive probe port dictionary**: decoupled scanner alive host probing baselines from hardcoded routines into `backend/app/dicts/port_alive.txt`; purged conflicting high-false-positive ports (such as 843) while appending modern web, API, and microservice baseline ports; integrated automatic file seeding, deduplication, and normalization in the update pipeline.
+
+### 🛠️ Performance & Refactoring
+- **Hardware gateway probe resilience and bidirectional service enrichment**: enhanced `fetchSite` and `checkHTTP` probes to handle hardware gateways and reverse proxies returning 401/403 authorization challenges, empty payloads, or high latency; implemented bidirectional metadata feedback from web probing back into underlying service records to prevent missing assets under restrictive network filtering.
+- **Asset search compact layout and dashboard single source of truth**: refactored the asset search interface into a compact grid layout with a smooth collapsible multi-dimensional filter bar for improved screen density; overhauled dashboard metric aggregation pipelines to decouple queue pending states from active execution counters, enforcing a single source of truth across task lifecycles.
+- **System settings view modularization and bundle optimization**: decomposed the monolithic `SystemSettings.vue` into focused modular components (`BackupRestorePanel`, `CdnRulePanel`, `SystemUpdatePanel`), decoupling oversized routes and optimizing frontend bundle chunking for faster production loading.
+
+### 🐛 Bug Fixes & Hardening
+- **WIH recon heartbeat persistence and detail inspection drawer**: implemented periodic heartbeat updates during long-running WIH API discovery runs to prevent scheduler timeouts; added an inspection drawer displaying raw HTTP request paths and response payloads with sensitive data masking and full trilingual localization.
+- **Task list filter enum synchronization and navigation fixes**: fixed route query synchronization when filtering tasks across multiple compound states; rectified option reset glitches during navigation from asset groups or enterprise recon, keeping filter states strictly bound to pagination.
+- **Legacy Linux kernel container runtime compatibility**: refined frontend Nginx container startup probes and configuration profiles for hosts running older kernels (< 4.19), addressing container hang conditions and self-healing startup failures.
+
+### 🛡️ Security & Configuration
+- **Backup archive staging sandbox and directory traversal prevention**: re-engineered the backup restore engine with `backup_archive.py` and `backup_workers.py` to enforce strict archive path and filename verification, isolating decompression within a temporary staging sandbox to eliminate path traversal risks; added global mutual exclusion locks during restore executions.
+- **Session token expiration lifecycle and sensitive asset authentication**: introduced bounded `token_expire_at` grace periods and MongoDB TTL index auto-cleanup for user session tokens; enforced authentication headers and signed download tickets (`download_ticket`) for asset screenshot previews and updater binaries; fortified IP blacklist parsing against syntax errors.
+- **Production image toolchain enrichment and GeoIP population refinement**: bundled essential `tools/` CLI suites and `mongodump` binaries inside `Dockerfile.prod`; refined GeoIP volume pre-population to guarantee smooth container initialization in offline or air-gapped environments.
+
+---
+
 ## [v1.4.3] - 2026-10-23
 
 ### 🚀 New Features
