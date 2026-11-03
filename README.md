@@ -243,7 +243,40 @@ chmod +x start-prod.sh && bash start-prod.sh
 ```
 
 > [!TIP]
-> 若宿主机尚未安装 Docker，请先执行下方「方式二」的第一步补齐基础工具，再回来执行本命令。
+> - **单行执行提示**：部分云厂商控制台（如网页 Web SSH、VNC、堡垒机）在多行粘贴时可能因吞换行或网络延迟导致指令乱序报错（如 `No such container: arl-temp`）。若遇到此类报错，请点击展开下方「单行逐步执行版」，逐行复制执行。
+> - 若宿主机尚未安装 Docker，请先执行下方「方式二」的第一步补齐基础工具，再回来执行本命令。
+
+<details>
+<summary><b>🛠️ 若多行粘贴报错，点击展开【单行逐步执行版】</b></summary>
+<br/>
+
+在终端中逐行执行以下命令（每行独立执行，无反斜杠连缀）：
+
+```bash
+# 1. 创建并进入工作目录
+mkdir -p ~/ARL-Next && cd ~/ARL-Next
+
+# 2. 拉取最新生产镜像
+docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest
+
+# 3. 创建临时容器提取编排与配置脚本
+docker rm -f arl-temp 2>/dev/null || true
+docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest
+docker cp arl-temp:/code/start-prod.sh ./
+docker cp arl-temp:/code/docker-compose.prod.yml ./
+docker cp arl-temp:/code/updater ./
+docker cp arl-temp:/code/tools ./
+docker cp arl-temp:/code/version.txt ./
+docker cp arl-temp:/code/CHANGELOG.md ./
+docker cp arl-temp:/code/CHANGELOG_en.md ./
+mkdir -p ./frontend && docker cp arl-temp:/code/frontend/default.conf.prod ./frontend/
+docker rm -f arl-temp
+
+# 4. 赋予执行权限并启动服务
+chmod +x start-prod.sh && bash start-prod.sh
+```
+
+</details>
 
 <details>
 <summary><b>方式二：完整命令部署（按系统类型手动执行）</b></summary>

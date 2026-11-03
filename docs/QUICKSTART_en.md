@@ -44,6 +44,39 @@ docker rm -f arl-temp && \
 chmod +x start-prod.sh && bash start-prod.sh
 ```
 
+> [!TIP]
+> - **Single-line Execution Tip**: Some cloud web terminals (such as Web SSH or VNC) may drop newlines when pasting multiple lines at once, causing errors such as `No such container: arl-temp`. If you encounter this, expand the "Step-by-Step Single-Line Commands" below and paste each line individually.
+
+<details>
+<summary><b>🛠️ If multi-line paste errors occur, click to expand [Step-by-Step Single-Line Commands]</b></summary>
+<br/>
+
+```bash
+# 1. Create and enter directory
+mkdir -p ~/ARL-Next && cd ~/ARL-Next
+
+# 2. Pull the latest production image
+docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest
+
+# 3. Extract orchestration scripts
+docker rm -f arl-temp 2>/dev/null || true
+docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest
+docker cp arl-temp:/code/start-prod.sh ./
+docker cp arl-temp:/code/docker-compose.prod.yml ./
+docker cp arl-temp:/code/updater ./
+docker cp arl-temp:/code/tools ./
+docker cp arl-temp:/code/version.txt ./
+docker cp arl-temp:/code/CHANGELOG.md ./
+docker cp arl-temp:/code/CHANGELOG_en.md ./
+mkdir -p ./frontend && docker cp arl-temp:/code/frontend/default.conf.prod ./frontend/
+docker rm -f arl-temp
+
+# 4. Start the stack
+chmod +x start-prod.sh && bash start-prod.sh
+```
+
+</details>
+
 Then open `https://<your-server-ip>:5173` (accept the self-signed certificate warning on first visit).
 
 | Layer | Default user | Default password | Notes |

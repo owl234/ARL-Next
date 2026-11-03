@@ -44,6 +44,39 @@ docker rm -f arl-temp && \
 chmod +x start-prod.sh && bash start-prod.sh
 ```
 
+> [!TIP]
+> - **单行执行提示**：部分云厂商网页终端（如 Web SSH、VNC）多行粘贴时可能因吞换行导致报错（如 `No such container: arl-temp`）。若遇到此类问题，可点击展开下方「单行逐步执行版」，逐行复制执行。
+
+<details>
+<summary><b>🛠️ 若多行粘贴报错，点击展开【单行逐步执行版】</b></summary>
+<br/>
+
+```bash
+# 1. 创建并进入目录
+mkdir -p ~/ARL-Next && cd ~/ARL-Next
+
+# 2. 拉取最新生产镜像
+docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest
+
+# 3. 提取编排文件
+docker rm -f arl-temp 2>/dev/null || true
+docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest
+docker cp arl-temp:/code/start-prod.sh ./
+docker cp arl-temp:/code/docker-compose.prod.yml ./
+docker cp arl-temp:/code/updater ./
+docker cp arl-temp:/code/tools ./
+docker cp arl-temp:/code/version.txt ./
+docker cp arl-temp:/code/CHANGELOG.md ./
+docker cp arl-temp:/code/CHANGELOG_en.md ./
+mkdir -p ./frontend && docker cp arl-temp:/code/frontend/default.conf.prod ./frontend/
+docker rm -f arl-temp
+
+# 4. 启动服务
+chmod +x start-prod.sh && bash start-prod.sh
+```
+
+</details>
+
 部署完成后访问 `https://<你的服务器IP>:5173`（首次自签名证书按浏览器提示继续前往）。
 
 | 验证层级 | 默认账号 | 默认密码 | 说明 |

@@ -241,7 +241,40 @@ chmod +x start-prod.sh && bash start-prod.sh
 ```
 
 > [!TIP]
-> If Docker is not yet installed on the host, run step 1 of "Method 2" below first, then return to this command.
+> - **Single-line Execution Tip**: Some cloud web consoles (such as Web SSH, VNC, or bastion hosts) may drop newlines or reorder pasted lines due to terminal buffer latency, causing errors such as `No such container: arl-temp`. If you encounter this, expand the "Step-by-Step Single-Line Commands" below and paste each line individually.
+> - If Docker is not yet installed on the host, run step 1 of "Method 2" below first, then return to this command.
+
+<details>
+<summary><b>🛠️ If multi-line paste errors occur, click to expand [Step-by-Step Single-Line Commands]</b></summary>
+<br/>
+
+Run the following commands line by line in your terminal (each line runs independently without backslash continuation):
+
+```bash
+# 1. Create and enter directory
+mkdir -p ~/ARL-Next && cd ~/ARL-Next
+
+# 2. Pull the latest production image
+docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest
+
+# 3. Create temporary container to extract orchestration scripts
+docker rm -f arl-temp 2>/dev/null || true
+docker create --name arl-temp crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest
+docker cp arl-temp:/code/start-prod.sh ./
+docker cp arl-temp:/code/docker-compose.prod.yml ./
+docker cp arl-temp:/code/updater ./
+docker cp arl-temp:/code/tools ./
+docker cp arl-temp:/code/version.txt ./
+docker cp arl-temp:/code/CHANGELOG.md ./
+docker cp arl-temp:/code/CHANGELOG_en.md ./
+mkdir -p ./frontend && docker cp arl-temp:/code/frontend/default.conf.prod ./frontend/
+docker rm -f arl-temp
+
+# 4. Grant execution permissions and start the stack
+chmod +x start-prod.sh && bash start-prod.sh
+```
+
+</details>
 
 <details>
 <summary><b>Method 2: Full Manual Commands (by OS type)</b></summary>
