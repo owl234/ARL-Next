@@ -312,22 +312,50 @@
                 <span class="count-tag">{{ pageText('pages.selected') }} {{ selectedPocCount }} / {{ pocList.length }}</span>
               </div>
               <div class="sub-section-actions">
-                <a-checkbox :checked="isAllPocSelected" @change="toggleAllPoc">{{ pageText('pages.selectAllPocs') }}</a-checkbox>
+                <a-checkbox
+                  :indeterminate="isPocIndeterminate"
+                  :checked="isAllPocSelected"
+                  @change="toggleAllPoc"
+                >
+                  {{ pageText('pages.selectAllPocs') }}
+                </a-checkbox>
                 <a-input v-model:value="pocSearch" :placeholder="pageText('pages.searchPocPlugins')" class="search-input" allowClear>
                   <template #suffix><search-outlined class="search-icon" /></template>
                 </a-input>
               </div>
             </div>
-            <a-row :gutter="[12, 12]" class="plugin-checkbox-grid">
-              <a-col :span="12" v-for="(item, index) in filteredPocList" :key="item.plugin_name">
-                <div class="plugin-item-checkbox" :class="{ 'is-checked': item.enable }">
-                  <a-checkbox v-model:checked="item.enable">
-                    <span class="index-num">{{ index + 1 }}.</span>
-                    <span class="plugin-name-text">{{ item.vul_name || item.plugin_name }}</span>
-                  </a-checkbox>
-                </div>
-              </a-col>
-            </a-row>
+
+            <!-- 分页分片渲染：只挂载当前页的 DOM 节点，海量插件零卡顿 -->
+            <template v-if="filteredPocList.length > 0">
+              <a-row :gutter="[12, 12]" class="plugin-checkbox-grid">
+                <a-col :span="12" v-for="(item, index) in paginatedPocList" :key="item.plugin_name">
+                  <div class="plugin-item-checkbox" :class="{ 'is-checked': selectedPocNames.has(item.plugin_name) }">
+                    <a-checkbox
+                      :checked="selectedPocNames.has(item.plugin_name)"
+                      @change="(e) => togglePocItem(item.plugin_name, e.target.checked)"
+                    >
+                      <span class="index-num">{{ (pocPagination.current - 1) * pocPagination.pageSize + index + 1 }}.</span>
+                      <span class="plugin-name-text">{{ item.vul_name || item.plugin_name }}</span>
+                    </a-checkbox>
+                  </div>
+                </a-col>
+              </a-row>
+
+              <div v-if="filteredPocList.length > pocPagination.pageSize" class="plugin-pagination-row">
+                <a-pagination
+                  v-model:current="pocPagination.current"
+                  v-model:pageSize="pocPagination.pageSize"
+                  :total="filteredPocList.length"
+                  :pageSizeOptions="['40', '60', '100', '200']"
+                  show-size-changer
+                  show-quick-jumper
+                  size="small"
+                />
+              </div>
+            </template>
+            <div v-else class="plugin-empty-box">
+              <a-empty :description="pageText('tasks.noData')" :image="simpleImage" />
+            </div>
           </div>
 
           <a-divider style="margin: 20px 0;" />
@@ -340,22 +368,50 @@
                 <span class="count-tag">{{ pageText('pages.selected') }} {{ selectedBruteCount }} / {{ bruteList.length }}</span>
               </div>
               <div class="sub-section-actions">
-                <a-checkbox :checked="isAllBruteSelected" @change="toggleAllBrute">{{ pageText('pages.selectAllCredentialChecks') }}</a-checkbox>
+                <a-checkbox
+                  :indeterminate="isBruteIndeterminate"
+                  :checked="isAllBruteSelected"
+                  @change="toggleAllBrute"
+                >
+                  {{ pageText('pages.selectAllCredentialChecks') }}
+                </a-checkbox>
                 <a-input v-model:value="bruteSearch" :placeholder="pageText('pages.searchCredentialCheckPlugins')" class="search-input" allowClear>
                   <template #suffix><search-outlined class="search-icon" /></template>
                 </a-input>
               </div>
             </div>
-            <a-row :gutter="[12, 12]" class="plugin-checkbox-grid">
-              <a-col :span="12" v-for="(item, index) in filteredBruteList" :key="item.plugin_name">
-                <div class="plugin-item-checkbox" :class="{ 'is-checked': item.enable }">
-                  <a-checkbox v-model:checked="item.enable">
-                    <span class="index-num">{{ index + 1 }}.</span>
-                    <span class="plugin-name-text">{{ item.vul_name || item.plugin_name }}</span>
-                  </a-checkbox>
-                </div>
-              </a-col>
-            </a-row>
+
+            <!-- 分页分片渲染：只挂载当前页的 DOM 节点，海量插件零卡顿 -->
+            <template v-if="filteredBruteList.length > 0">
+              <a-row :gutter="[12, 12]" class="plugin-checkbox-grid">
+                <a-col :span="12" v-for="(item, index) in paginatedBruteList" :key="item.plugin_name">
+                  <div class="plugin-item-checkbox" :class="{ 'is-checked': selectedBruteNames.has(item.plugin_name) }">
+                    <a-checkbox
+                      :checked="selectedBruteNames.has(item.plugin_name)"
+                      @change="(e) => toggleBruteItem(item.plugin_name, e.target.checked)"
+                    >
+                      <span class="index-num">{{ (brutePagination.current - 1) * brutePagination.pageSize + index + 1 }}.</span>
+                      <span class="plugin-name-text">{{ item.vul_name || item.plugin_name }}</span>
+                    </a-checkbox>
+                  </div>
+                </a-col>
+              </a-row>
+
+              <div v-if="filteredBruteList.length > brutePagination.pageSize" class="plugin-pagination-row">
+                <a-pagination
+                  v-model:current="brutePagination.current"
+                  v-model:pageSize="brutePagination.pageSize"
+                  :total="filteredBruteList.length"
+                  :pageSizeOptions="['40', '60', '100', '200']"
+                  show-size-changer
+                  show-quick-jumper
+                  size="small"
+                />
+              </div>
+            </template>
+            <div v-else class="plugin-empty-box">
+              <a-empty :description="pageText('tasks.noData')" :image="simpleImage" />
+            </div>
           </div>
         </a-collapse-panel>
 
@@ -372,11 +428,13 @@
 
 <script setup>
 import { useI18n } from 'vue-i18n';
-import { ref, reactive, onMounted, computed } from 'vue';
+import { ref, reactive, shallowRef, watch, onMounted, computed } from 'vue';
 import request from '../utils/request';
-import { message } from 'ant-design-vue';
+import { message, Empty } from 'ant-design-vue';
 import { SearchOutlined } from '@ant-design/icons-vue';
 import { useRouter, useRoute } from 'vue-router';
+
+const simpleImage = Empty.PRESENTED_IMAGE_SIMPLE;
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 
@@ -444,8 +502,10 @@ const nucleiSeverityOptions = [
 
 const policyForm = reactive(initPolicyForm());
 
-const pocList = ref([]);
-const bruteList = ref([]);
+const pocList = shallowRef([]);
+const bruteList = shallowRef([]);
+const selectedPocNames = ref(new Set());
+const selectedBruteNames = ref(new Set());
 const domainDicts = ref([]);
 const altDnsDicts = ref([]);
 const fileLeakDicts = ref([]);
@@ -523,6 +583,32 @@ const toggleAllSite = (e) => {
 };
 
 // ================= 面板 4：漏洞插件过滤与全选联动 =================
+const pocPagination = reactive({
+  current: 1,
+  pageSize: 60
+});
+
+const brutePagination = reactive({
+  current: 1,
+  pageSize: 60
+});
+
+watch(pocSearch, () => {
+  pocPagination.current = 1;
+}, { flush: 'sync' });
+
+watch(() => pocPagination.pageSize, () => {
+  pocPagination.current = 1;
+}, { flush: 'sync' });
+
+watch(bruteSearch, () => {
+  brutePagination.current = 1;
+}, { flush: 'sync' });
+
+watch(() => brutePagination.pageSize, () => {
+  brutePagination.current = 1;
+}, { flush: 'sync' });
+
 const filteredPocList = computed(() => {
   const kw = (pocSearch.value || '').toLowerCase().trim();
   if (!kw) return pocList.value;
@@ -541,27 +627,146 @@ const filteredBruteList = computed(() => {
   );
 });
 
-const selectedPocCount = computed(() => pocList.value.filter(p => p.enable).length);
-const selectedBruteCount = computed(() => bruteList.value.filter(p => p.enable).length);
+const paginatedPocList = computed(() => {
+  const total = filteredPocList.value.length;
+  if (!total) return [];
+  const maxPage = Math.max(1, Math.ceil(total / pocPagination.pageSize));
+  const page = Math.min(Math.max(1, pocPagination.current), maxPage);
+  const start = (page - 1) * pocPagination.pageSize;
+  return filteredPocList.value.slice(start, start + pocPagination.pageSize);
+});
 
-const isAllPocSelected = computed(() => filteredPocList.value.length > 0 && filteredPocList.value.every(p => p.enable));
-const isAllBruteSelected = computed(() => filteredBruteList.value.length > 0 && filteredBruteList.value.every(p => p.enable));
+const paginatedBruteList = computed(() => {
+  const total = filteredBruteList.value.length;
+  if (!total) return [];
+  const maxPage = Math.max(1, Math.ceil(total / brutePagination.pageSize));
+  const page = Math.min(Math.max(1, brutePagination.current), maxPage);
+  const start = (page - 1) * brutePagination.pageSize;
+  return filteredBruteList.value.slice(start, start + brutePagination.pageSize);
+});
+
+const selectedPocCount = computed(() => {
+  const sel = selectedPocNames.value;
+  if (!sel.size) return 0;
+  let count = 0;
+  const list = pocList.value;
+  for (let i = 0; i < list.length; i++) {
+    if (sel.has(list[i].plugin_name)) count++;
+  }
+  return count;
+});
+
+const selectedBruteCount = computed(() => {
+  const sel = selectedBruteNames.value;
+  if (!sel.size) return 0;
+  let count = 0;
+  const list = bruteList.value;
+  for (let i = 0; i < list.length; i++) {
+    if (sel.has(list[i].plugin_name)) count++;
+  }
+  return count;
+});
+
+const pocSelectedFilteredCount = computed(() => {
+  const list = filteredPocList.value;
+  const sel = selectedPocNames.value;
+  if (!list.length || !sel.size) return 0;
+  let count = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (sel.has(list[i].plugin_name)) count++;
+  }
+  return count;
+});
+
+const isAllPocSelected = computed(() => {
+  const list = filteredPocList.value;
+  return list.length > 0 && pocSelectedFilteredCount.value === list.length;
+});
+
+const isPocIndeterminate = computed(() => {
+  const count = pocSelectedFilteredCount.value;
+  return count > 0 && count < filteredPocList.value.length;
+});
+
+const bruteSelectedFilteredCount = computed(() => {
+  const list = filteredBruteList.value;
+  const sel = selectedBruteNames.value;
+  if (!list.length || !sel.size) return 0;
+  let count = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (sel.has(list[i].plugin_name)) count++;
+  }
+  return count;
+});
+
+const isAllBruteSelected = computed(() => {
+  const list = filteredBruteList.value;
+  return list.length > 0 && bruteSelectedFilteredCount.value === list.length;
+});
+
+const isBruteIndeterminate = computed(() => {
+  const count = bruteSelectedFilteredCount.value;
+  return count > 0 && count < filteredBruteList.value.length;
+});
+
+const togglePocItem = (pluginName, checked) => {
+  const next = new Set(selectedPocNames.value);
+  if (checked) {
+    next.add(pluginName);
+  } else {
+    next.delete(pluginName);
+  }
+  selectedPocNames.value = next;
+};
+
+const toggleBruteItem = (pluginName, checked) => {
+  const next = new Set(selectedBruteNames.value);
+  if (checked) {
+    next.add(pluginName);
+  } else {
+    next.delete(pluginName);
+  }
+  selectedBruteNames.value = next;
+};
 
 const toggleAllPoc = (e) => {
-  const checked = e.target.checked;
-  filteredPocList.value.forEach(p => p.enable = checked);
+  const checked = e?.target ? e.target.checked : !!e;
+  const next = new Set(selectedPocNames.value);
+  const targetList = filteredPocList.value;
+  if (checked) {
+    for (let i = 0; i < targetList.length; i++) {
+      next.add(targetList[i].plugin_name);
+    }
+  } else {
+    for (let i = 0; i < targetList.length; i++) {
+      next.delete(targetList[i].plugin_name);
+    }
+  }
+  selectedPocNames.value = next;
 };
+
 const toggleAllBrute = (e) => {
-  const checked = e.target.checked;
-  filteredBruteList.value.forEach(p => p.enable = checked);
+  const checked = e?.target ? e.target.checked : !!e;
+  const next = new Set(selectedBruteNames.value);
+  const targetList = filteredBruteList.value;
+  if (checked) {
+    for (let i = 0; i < targetList.length; i++) {
+      next.add(targetList[i].plugin_name);
+    }
+  } else {
+    for (let i = 0; i < targetList.length; i++) {
+      next.delete(targetList[i].plugin_name);
+    }
+  }
+  selectedBruteNames.value = next;
 };
 
 // ================= 生命周期：数据加载与编辑回填 =================
 onMounted(async () => {
   try {
     const [pocRes, bruteRes, dictRes] = await Promise.all([
-      request.get('/poc/', { params: { plugin_type: 'poc', size: 10000 } }),
-      request.get('/poc/', { params: { plugin_type: 'brute', size: 10000 } }),
+      request.get('/poc/', { params: { plugin_type: 'poc', size: 100000 } }),
+      request.get('/poc/', { params: { plugin_type: 'brute', size: 100000 } }),
       request.get('/dictionary/list')
     ]);
 
@@ -582,17 +787,27 @@ onMounted(async () => {
     if (pocRes.code === 200) {
       const uniquePoc = new Map();
       (pocRes.items || []).forEach(p => {
-        if (!uniquePoc.has(p.plugin_name)) uniquePoc.set(p.plugin_name, { ...p, enable: false });
+        if (!uniquePoc.has(p.plugin_name)) {
+          uniquePoc.set(p.plugin_name, Object.freeze({
+            plugin_name: p.plugin_name,
+            vul_name: p.vul_name || p.plugin_name
+          }));
+        }
       });
-      pocList.value = Array.from(uniquePoc.values());
+      pocList.value = Object.freeze(Array.from(uniquePoc.values()));
     }
 
     if (bruteRes.code === 200) {
       const uniqueBrute = new Map();
       (bruteRes.items || []).forEach(p => {
-        if (!uniqueBrute.has(p.plugin_name)) uniqueBrute.set(p.plugin_name, { ...p, enable: false });
+        if (!uniqueBrute.has(p.plugin_name)) {
+          uniqueBrute.set(p.plugin_name, Object.freeze({
+            plugin_name: p.plugin_name,
+            vul_name: p.vul_name || p.plugin_name
+          }));
+        }
       });
-      bruteList.value = Array.from(uniqueBrute.values());
+      bruteList.value = Object.freeze(Array.from(uniqueBrute.values()));
     }
 
     if (pocRes.code === 200 && bruteRes.code === 200) {
@@ -648,15 +863,21 @@ onMounted(async () => {
           showAdvancedPortConfig.value = true;
         }
 
-        // PoC 插件勾选回填
-        const pocMap = {};
-        data.policy?.poc_config?.forEach(p => pocMap[p.plugin_name] = p.enable);
-        pocList.value.forEach(p => { if (pocMap[p.plugin_name] !== undefined) p.enable = pocMap[p.plugin_name]; });
+        // PoC 插件勾选回填：仅回填当前存在的有效插件，避免历史已废弃插件导致保存报错
+        const validPocSet = new Set(pocList.value.map(p => p.plugin_name));
+        const loadedPocSet = new Set();
+        data.policy?.poc_config?.forEach(p => {
+          if (p.enable && validPocSet.has(p.plugin_name)) loadedPocSet.add(p.plugin_name);
+        });
+        selectedPocNames.value = loadedPocSet;
 
-        // 弱口令插件勾选回填
-        const bruteMap = {};
-        data.policy?.brute_config?.forEach(p => bruteMap[p.plugin_name] = p.enable);
-        bruteList.value.forEach(p => { if (bruteMap[p.plugin_name] !== undefined) p.enable = bruteMap[p.plugin_name]; });
+        // 弱口令插件勾选回填：仅回填当前存在的有效插件
+        const validBruteSet = new Set(bruteList.value.map(p => p.plugin_name));
+        const loadedBruteSet = new Set();
+        data.policy?.brute_config?.forEach(p => {
+          if (p.enable && validBruteSet.has(p.plugin_name)) loadedBruteSet.add(p.plugin_name);
+        });
+        selectedBruteNames.value = loadedBruteSet;
       } else {
         message.error(pageText('pages.policyNotFoundOrAlreadyDeleted'));
         router.push('/policy');
@@ -701,8 +922,29 @@ const submitPolicy = async () => {
 
   submitLoading.value = true;
   try {
-    const poc_config = pocList.value.filter(p => p.enable).map(p => ({ plugin_name: p.plugin_name, vul_name: p.vul_name, enable: p.enable }));
-    const brute_config = bruteList.value.filter(p => p.enable).map(p => ({ plugin_name: p.plugin_name, vul_name: p.vul_name, enable: p.enable }));
+    const pocNameMap = new Map(pocList.value.map(p => [p.plugin_name, p.vul_name]));
+    const poc_config = [];
+    for (const name of selectedPocNames.value) {
+      if (pocNameMap.has(name)) {
+        poc_config.push({
+          plugin_name: name,
+          vul_name: pocNameMap.get(name) || name,
+          enable: true
+        });
+      }
+    }
+
+    const bruteNameMap = new Map(bruteList.value.map(p => [p.plugin_name, p.vul_name]));
+    const brute_config = [];
+    for (const name of selectedBruteNames.value) {
+      if (bruteNameMap.has(name)) {
+        brute_config.push({
+          plugin_name: name,
+          vul_name: bruteNameMap.get(name) || name,
+          enable: true
+        });
+      }
+    }
 
     const policyData = {
       name: policyForm.name.trim(),
@@ -958,11 +1200,33 @@ const submitPolicy = async () => {
   padding-right: 6px;
 }
 
+.plugin-pagination-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--arl-border-color);
+}
+
+.plugin-empty-box {
+  padding: 32px 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
 .plugin-item-checkbox {
   padding: 6px 10px;
   border-radius: 6px;
   transition: all 0.2s ease;
   border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.plugin-item-checkbox :deep(.ant-checkbox-wrapper) {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
 }
 
 .plugin-item-checkbox:hover {

@@ -411,26 +411,58 @@ class EditPolicy(ARLResource):
 
 
 def _update_plugin_config(config):
+    if not isinstance(config, (list, tuple)):
+        return []
+
     plugin_name_set = set()
-    ret = []
+    unique_items = []
     for item in config:
-        plugin_name = str(item.get("plugin_name", ""))
-        enable = item.get("enable", False)
+        if not isinstance(item, dict):
+            continue
+        plugin_name = item.get("plugin_name")
+        enable = item.get("enable")
         if plugin_name is None or enable is None:
+            continue
+        plugin_name = str(plugin_name).strip()
+        if not plugin_name:
             continue
         if plugin_name in plugin_name_set:
             continue
 
-        plugin_info = plugin_name_in_arl(plugin_name)
+        plugin_name_set.add(plugin_name)
+        unique_items.append({"plugin_name": plugin_name, "enable": bool(enable)})
+
+    if not unique_items:
+        return []
+
+    # 批量聚合校验：使用 $in 消除 N+1 数据库风暴，仅投影必要字段，规避海量插件保存时 Gunicorn 超时
+    plugin_names = [item["plugin_name"] for item in unique_items]
+    poc_map = {}
+    chunk_size = 5000
+    for i in range(0, len(plugin_names), chunk_size):
+        chunk = plugin_names[i:i + chunk_size]
+        cursor = utils.conn_db('poc').find(
+            {"plugin_name": {"$in": chunk}},
+            {"plugin_name": 1, "vul_name": 1}
+        )
+        if cursor:
+            for doc in cursor:
+                name = doc.get("plugin_name")
+                if name and name not in poc_map:
+                    poc_map[name] = doc
+
+    ret = []
+    for item in unique_items:
+        plugin_name = item["plugin_name"]
+        plugin_info = poc_map.get(plugin_name)
         if not plugin_info:
             return "没有找到 {} 插件".format(plugin_name)
 
         config_item = {
             "plugin_name": plugin_name,
-            "vul_name": plugin_info["vul_name"],
-            "enable": bool(enable)
+            "vul_name": plugin_info.get("vul_name") or "",
+            "enable": item["enable"]
         }
-        plugin_name_set.add(plugin_name)
         ret.append(config_item)
 
     return ret
