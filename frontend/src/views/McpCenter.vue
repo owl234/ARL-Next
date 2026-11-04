@@ -97,7 +97,7 @@
                         {{ showCertGuide ? pageText('pages.mcpHideCertGuide') : pageText('pages.mcpShowCertGuide') }}
                       </a-button>
                     </div>
-                    <div v-if="showCertGuide" style="margin-top: 10px; padding: 10px 12px; background: rgba(0, 0, 0, 0.03); border: 1px solid var(--arl-border-color, rgba(0, 0, 0, 0.06)); border-radius: 6px; font-size: 12px; line-height: 1.6;">
+                    <div v-if="showCertGuide" class="cert-guide-box">
                       <div style="margin-bottom: 6px;">{{ pageText('pages.mcpCertGuideStep1') }}</div>
                       <div>{{ pageText('pages.mcpCertGuideStep2') }}</div>
                     </div>
@@ -1441,11 +1441,18 @@ onMounted(() => {
 }
 
 .mcp-hero-card {
-  background: var(--arl-card-bg, #ffffff);
+  background: var(--arl-bg-white, #ffffff);
   border-radius: 8px;
   padding: 20px 24px;
   margin-bottom: 16px;
   border: 1px solid var(--arl-border-color, #e2e8f0);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.25s ease;
+}
+
+body.dark-mode .mcp-hero-card {
+  box-shadow: none;
+  border-color: var(--arl-border-color, #333333);
 }
 
 .mcp-hero-header {
@@ -1513,7 +1520,19 @@ onMounted(() => {
   margin-bottom: 18px;
   padding: 12px 16px;
   background: var(--arl-bg-light, #f8fafc);
+  border: 1px solid var(--arl-border-color, #e2e8f0);
   border-radius: 6px;
+}
+
+.cert-guide-box {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--arl-bg-light, #f8fafc);
+  border: 1px solid var(--arl-border-color, #e2e8f0);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--arl-text-color);
 }
 
 .setup-field-group {
@@ -1644,10 +1663,18 @@ onMounted(() => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
-.metric-active {
+.metric-active,
+.metric-active:hover {
   border-color: var(--arl-theme-color, #1890ff) !important;
-  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2) !important;
-  background: rgba(24, 144, 255, 0.02);
+  box-shadow: 0 0 0 2px rgba(var(--arl-theme-color-rgb, 24, 144, 255), 0.2) !important;
+  background: rgba(var(--arl-theme-color-rgb, 24, 144, 255), 0.04);
+}
+
+body.dark-mode .metric-active,
+body.dark-mode .metric-active:hover {
+  border-color: var(--arl-theme-color, #1890ff) !important;
+  box-shadow: 0 0 0 2px rgba(var(--arl-theme-color-rgb, 24, 144, 255), 0.35) !important;
+  background: rgba(var(--arl-theme-color-rgb, 24, 144, 255), 0.12);
 }
 
 .detail-code-block {
@@ -1792,6 +1819,24 @@ onMounted(() => {
   background-color: #fff7e6;
   color: #d46b08;
   border: 1px solid #ffd591;
+}
+
+body.dark-mode .duration-fast {
+  background-color: rgba(82, 196, 26, 0.15);
+  color: #73d13d;
+  border-color: rgba(82, 196, 26, 0.35);
+}
+
+body.dark-mode .duration-medium {
+  background-color: rgba(24, 144, 255, 0.15);
+  color: #40a9ff;
+  border-color: rgba(24, 144, 255, 0.35);
+}
+
+body.dark-mode .duration-slow {
+  background-color: rgba(250, 140, 22, 0.15);
+  color: #ffa940;
+  border-color: rgba(250, 140, 22, 0.35);
 }
 
 .mcp-summary-error {

@@ -59,6 +59,7 @@ const updateGlobalCssVariables = () => {
   root.style.setProperty('--arl-bg-light', isDark ? (hasBg ? 'rgba(17, 17, 17, 0.3)' : '#111111') : (hasBg ? 'rgba(241, 245, 249, 0.3)' : '#f1f5f9'));
   root.style.setProperty('--arl-bg-white', isDark ? (hasBg ? 'rgba(17, 17, 17, 0.3)' : '#111111') : (hasBg ? 'rgba(255, 255, 255, 0.3)' : '#ffffff'));
   root.style.setProperty('--arl-bg-card', isDark ? (hasBg ? 'rgba(20, 20, 20, 0.65)' : '#141414') : (hasBg ? 'rgba(255, 255, 255, 0.75)' : '#ffffff'));
+  root.style.setProperty('--arl-card-bg', isDark ? (hasBg ? 'rgba(20, 20, 20, 0.65)' : '#141414') : (hasBg ? 'rgba(255, 255, 255, 0.75)' : '#ffffff'));
   root.style.setProperty('--arl-bg-container', isDark ? (hasBg ? 'rgba(20, 20, 20, 0.65)' : '#141414') : (hasBg ? 'rgba(255, 255, 255, 0.75)' : '#ffffff'));
   root.style.setProperty('--arl-bg-subcard', isDark ? (hasBg ? 'rgba(26, 26, 26, 0.65)' : '#1a1a1a') : (hasBg ? 'rgba(248, 249, 250, 0.85)' : '#f8f9fa'));
   root.style.setProperty('--arl-bg-layout', isDark ? (hasBg ? 'rgba(0, 0, 0, 0.3)' : '#000000') : (hasBg ? 'rgba(241, 245, 249, 0.3)' : '#f1f5f9'));
