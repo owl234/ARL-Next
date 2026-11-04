@@ -632,21 +632,47 @@
     <a-modal
       v-model:open="addModalVisible"
       :title="assetText('tasks.createAnAssetGroup')"
-      :width="creationMode === 'wizard' && wizardStep === 2 ? '780px' : '640px'"
+      :width="'720px'"
       wrapClassName="arl-theme-modal"
       rootClassName="arl-theme-modal"
-      :footer="creationMode === 'wizard' && wizardStep === 1 ? null : (creationMode === 'wizard' ? null : undefined)"
+      :footer="creationMode === 'wizard' ? null : undefined"
       @ok="handleAddSubmit"
       :confirmLoading="addLoading"
       :okText="assetText('tasks.confirm')"
       :cancelText="assetText('assets.cancel')"
       destroyOnClose
     >
-      <div style="margin-bottom: 20px; text-align: center;">
-        <a-radio-group v-model:value="creationMode" button-style="solid" size="middle">
-          <a-radio-button value="wizard">{{ assetText('assets.discoverEnterpriseAndCreateAssetGroup') }}</a-radio-button>
-          <a-radio-button value="manual">{{ assetText('assets.enterAssetsManually') }}</a-radio-button>
-        </a-radio-group>
+      <div class="creation-mode-selector">
+        <div
+          class="mode-card"
+          :class="{ 'mode-card-active': creationMode === 'wizard' }"
+          @click="creationMode = 'wizard'"
+        >
+          <div class="mode-card-header">
+            <div class="mode-card-title-wrap">
+              <span class="mode-card-title">{{ assetText('assets.discoverEnterpriseAndCreateAssetGroup') }}</span>
+            </div>
+            <a-tag color="orange" class="mode-card-tag">{{ assetText('assets.recommended') }}</a-tag>
+          </div>
+          <div class="mode-card-desc">
+            {{ assetText('assets.discoverEnterpriseModeDesc') }}
+          </div>
+        </div>
+
+        <div
+          class="mode-card"
+          :class="{ 'mode-card-active': creationMode === 'manual' }"
+          @click="creationMode = 'manual'"
+        >
+          <div class="mode-card-header">
+            <div class="mode-card-title-wrap">
+              <span class="mode-card-title">{{ assetText('assets.enterAssetsManually') }}</span>
+            </div>
+          </div>
+          <div class="mode-card-desc">
+            {{ assetText('assets.enterAssetsManuallyModeDesc') }}
+          </div>
+        </div>
       </div>
 
       <!-- 手工录入模式 -->
@@ -659,10 +685,11 @@
         :wrapper-col="{ style: { width: assetLocale !== 'zh-CN' ? 'calc(100% - 160px)' : 'calc(100% - 110px)' } }"
         style="margin-top: 10px;"
       >
-        <a-form-item :label="assetText('tasks.parentOrganization')" name="group_id">
-          <template #tooltip>
-            {{ assetText('assets.parentOrganizationHelpTooltip') }}
-          </template>
+        <a-form-item
+          :label="assetText('tasks.parentOrganization')"
+          name="group_id"
+          :tooltip="assetText('assets.parentOrganizationHelpTooltip')"
+        >
           <div style="display: flex; gap: 8px; align-items: center;">
             <a-select v-model:value="addForm.group_id" :placeholder="assetText('tasks.selectAParentOrganizationOptional')" allowClear show-search option-filter-prop="label" style="flex: 1;" :getPopupContainer="(trigger) => trigger.parentNode">
               <a-select-option v-for="g in groupList" :key="g._id" :value="g._id">{{ g.name }}</a-select-option>
@@ -703,8 +730,8 @@
             <a-form :label-wrap="true"
               ref="wizardFormRef"
               :model="wizardForm"
-              :label-col="{ style: { width: '120px' } }"
-              :wrapper-col="{ style: { width: 'calc(100% - 120px)' } }"
+              :label-col="{ style: { width: assetLocale !== 'zh-CN' ? '160px' : '110px' } }"
+              :wrapper-col="{ style: { width: assetLocale !== 'zh-CN' ? 'calc(100% - 160px)' : 'calc(100% - 110px)' } }"
               style="margin-top: 8px;"
             >
               <!-- 引擎引导提示 -->
@@ -760,10 +787,10 @@
               </a-form-item>
 
               <!-- 所属集团 (选填) -->
-              <a-form-item :label="assetText('tasks.parentOrganization')">
-                <template #tooltip>
-                  {{ assetText('assets.parentOrganizationHelpTooltip') }}
-                </template>
+              <a-form-item
+                :label="assetText('tasks.parentOrganization')"
+                :tooltip="assetText('assets.parentOrganizationHelpTooltip')"
+              >
                 <div style="display: flex; gap: 8px; align-items: center;">
                   <a-select
                     v-model:value="wizardForm.group_id"
@@ -808,8 +835,8 @@
 
                 <div v-if="wizardAutoScan" style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--arl-border-color);">
                   <a-row :gutter="12">
-                    <a-col :span="12">
-                      <a-form-item :label="assetText('tasks.scanPolicy')" :label-col="{ style: { width: assetLocale !== 'zh-CN' ? '160px' : '80px' } }" :wrapper-col="{ style: { width: assetLocale !== 'zh-CN' ? 'calc(100% - 160px)' : 'calc(100% - 80px)' } }" class="asset-flush-bottom" required>
+                    <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
+                      <a-form-item :label="assetText('tasks.scanPolicy')" :label-col="{ style: { width: assetLocale !== 'zh-CN' ? '160px' : '80px' } }" :wrapper-col="{ style: { width: assetLocale !== 'zh-CN' ? 'calc(100% - 160px)' : 'calc(100% - 80px)' } }" :class="assetLocale !== 'zh-CN' ? 'asset-form-spacing' : 'asset-flush-bottom'" required>
                         <a-select
                           v-model:value="wizardPolicyId"
                           :placeholder="assetText('tasks.selectAScanPolicy')"
@@ -818,7 +845,7 @@
                         />
                       </a-form-item>
                     </a-col>
-                    <a-col :span="12">
+                    <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
                       <a-form-item :label="assetText('tasks.taskTypeLabel')" :label-col="{ style: { width: assetLocale !== 'zh-CN' ? '160px' : '80px' } }" :wrapper-col="{ style: { width: assetLocale !== 'zh-CN' ? 'calc(100% - 160px)' : 'calc(100% - 80px)' } }" class="asset-flush-bottom">
                         <a-radio-group v-model:value="wizardTaskType" size="small">
                           <a-radio-button value="oneshot">{{ assetText('assets.oneTimeScan') }}</a-radio-button>
@@ -836,7 +863,7 @@
                   <span class="asset-section-caption">{{ assetText('tasks.advancedDiscoverySettings') }}</span>
                 </div>
                 <a-row :gutter="16">
-                  <a-col :span="12">
+                  <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
                     <a-form-item
                       :label="assetText('tasks.investmentDepthLabel')"
                       :label-col="{ style: { width: assetLocale !== 'zh-CN' ? '160px' : '90px' } }"
@@ -849,15 +876,12 @@
                         :min="1"
                         :max="20"
                         size="small"
-                        style="width: 110px;"
+                        style="width: 100%;"
                         :addon-after="assetText('tasks.levels')"
                       />
-                      <div v-if="wizardForm.depth > 1" class="depth-cost-hint">
-                        {{ assetText('tasks.investmentDepthHint', { depth: wizardForm.depth }) }}
-                      </div>
                     </a-form-item>
                   </a-col>
-                  <a-col :span="12">
+                  <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
                     <a-form-item
                       :label="assetText('tasks.minimumOwnershipLabel')"
                       :label-col="{ style: { width: assetLocale !== 'zh-CN' ? '160px' : '90px' } }"
@@ -870,25 +894,40 @@
                         :min="1"
                         :max="100"
                         size="small"
-                        style="width: 110px;"
+                        style="width: 100%;"
                         addon-after="%"
                       />
                     </a-form-item>
                   </a-col>
                 </a-row>
 
-                <a-form-item
-                  :label="assetText('tasks.icpCrossCheck')"
-                  :label-col="{ style: { width: assetLocale !== 'zh-CN' ? '160px' : '90px' } }"
-                  :wrapper-col="{ style: { width: assetLocale !== 'zh-CN' ? 'calc(100% - 160px)' : 'calc(100% - 90px)' } }"
-                  style="margin-bottom: 0;"
-                  :tooltip="assetText('tasks.crossCheckAgainstOfficialMiitIcpRecordsAnd')"
-                >
-                  <a-switch v-model:checked="wizardForm.enable_icp" size="small" />
-                  <span style="font-size: 12px; margin-left: 8px; color: var(--arl-text-color); opacity: 0.7;">
-                    {{ wizardForm.enable_icp ? assetText('tasks.enabledRecommended') : assetText('assets.disabled') }}
-                  </span>
-                </a-form-item>
+                <div class="arl-settings-row">
+                  <div class="settings-row-left">
+                    <div class="settings-row-title-wrap">
+                      <span class="settings-row-title">{{ assetText('tasks.icpCrossCheck') }}</span>
+                      <a-tooltip :title="assetText('tasks.crossCheckAgainstOfficialMiitIcpRecordsAnd')">
+                        <question-circle-outlined class="settings-row-help" />
+                      </a-tooltip>
+                    </div>
+                    <div class="settings-row-subtitle">
+                      {{ assetText('tasks.crossCheckAgainstOfficialMiitIcpRecordsAnd') }}
+                    </div>
+                  </div>
+                  <div class="settings-row-right">
+                    <a-switch v-model:checked="wizardForm.enable_icp" size="small" />
+                    <span class="settings-row-status">
+                      {{ wizardForm.enable_icp ? assetText('tasks.enabledRecommended') : assetText('assets.disabled') }}
+                    </span>
+                  </div>
+                </div>
+
+                <a-alert
+                  v-if="wizardForm.depth > 1"
+                  type="warning"
+                  show-icon
+                  style="margin-top: 10px; font-size: 12px; border-radius: 4px;"
+                  :message="assetText('tasks.investmentDepthHint', { depth: wizardForm.depth })"
+                />
               </div>
 
               <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
@@ -935,22 +974,28 @@
             </div>
           </div>
 
-          <div style="background: var(--arl-bg-light); padding: 12px; border-radius: 6px; border: 1px solid var(--arl-border-color); margin-bottom: 20px;">
+          <a-form layout="vertical" style="background: var(--arl-bg-light); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--arl-border-color); margin-bottom: 20px;">
             <a-form-item :label="assetText('assets.automaticDiscovery')" class="asset-form-spacing">
               <a-checkbox v-model:checked="wizardAutoScan">{{ assetText('assets.runActiveDiscoveryOnTheSelectedDomainsNow') }}</a-checkbox>
             </a-form-item>
             <template v-if="wizardAutoScan">
-              <a-form-item :label="assetText('tasks.taskTypeLabel')" class="asset-form-spacing">
-                <a-radio-group v-model:value="wizardTaskType">
-                  <a-radio value="oneshot">{{ assetText('assets.oneTimeScan') }}</a-radio>
-                  <a-radio value="periodic">{{ assetText('assets.recurringMonitoring') }}</a-radio>
-                </a-radio-group>
-              </a-form-item>
-              <a-form-item :label="assetText('tasks.scanPolicy')" class="asset-flush-bottom" required>
-                <a-select v-model:value="wizardPolicyId" :placeholder="assetText('tasks.selectAScanPolicy')" :options="policyList.map(p => ({ value: p._id, label: p.name }))" />
-              </a-form-item>
+              <a-row :gutter="16">
+                <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
+                  <a-form-item :label="assetText('tasks.taskTypeLabel')" :class="assetLocale !== 'zh-CN' ? 'asset-form-spacing' : 'asset-flush-bottom'">
+                    <a-radio-group v-model:value="wizardTaskType">
+                      <a-radio-button value="oneshot">{{ assetText('assets.oneTimeScan') }}</a-radio-button>
+                      <a-radio-button value="periodic">{{ assetText('assets.recurringMonitoring') }}</a-radio-button>
+                    </a-radio-group>
+                  </a-form-item>
+                </a-col>
+                <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
+                  <a-form-item :label="assetText('tasks.scanPolicy')" class="asset-flush-bottom" required>
+                    <a-select v-model:value="wizardPolicyId" :placeholder="assetText('tasks.selectAScanPolicy')" :options="policyList.map(p => ({ value: p._id, label: p.name }))" />
+                  </a-form-item>
+                </a-col>
+              </a-row>
             </template>
-          </div>
+          </a-form>
 
           <div style="display: flex; justify-content: space-between; align-items: center;">
             <a-button @click="wizardStep = 1">{{ assetText('assets.goBack') }}</a-button>
@@ -986,10 +1031,11 @@
         :wrapper-col="{ span: assetLocale !== 'zh-CN' ? 17 : 19 }"
         style="margin-top: 20px;"
       >
-        <a-form-item :label="assetText('tasks.parentOrganization')" name="group_id">
-          <template #tooltip>
-            {{ assetText('assets.parentOrganizationHelpTooltip') }}
-          </template>
+        <a-form-item
+          :label="assetText('tasks.parentOrganization')"
+          name="group_id"
+          :tooltip="assetText('assets.parentOrganizationHelpTooltip')"
+        >
           <div style="display: flex; gap: 8px; align-items: center;">
             <a-select v-model:value="editGroupForm.group_id" :placeholder="assetText('tasks.selectAParentOrganizationOptional')" allowClear show-search option-filter-prop="label" style="flex: 1;" :getPopupContainer="(trigger) => trigger.parentNode">
               <a-select-option v-for="g in groupList" :key="g._id" :value="g._id">{{ g.name }}</a-select-option>
@@ -1546,7 +1592,20 @@ import {
   InfoCircleOutlined,
   RightCircleOutlined,
   ScheduleOutlined,
-  CloseOutlined
+  CloseOutlined,
+  CloudDownloadOutlined,
+  CheckCircleOutlined,
+  SafetyCertificateOutlined,
+  RocketOutlined,
+  AppstoreOutlined,
+  InboxOutlined,
+  HolderOutlined,
+  MoreOutlined,
+  LeftOutlined,
+  RightOutlined,
+  CopyOutlined,
+  FileTextOutlined,
+  TagsOutlined
 } from '@ant-design/icons-vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
@@ -4235,4 +4294,152 @@ onUnmounted(() => {
 .asset-risk-form { margin-top: 20px; }
 .asset-full-width { width: 100%; }
 .asset-modal-spacing { margin-top: 16px; }
+
+/* 新建资产组特征卡片选择器 */
+.creation-mode-selector {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.mode-card {
+  position: relative;
+  background: var(--arl-bg-light, #fafafa);
+  border: 1.5px solid var(--arl-border-color, #d9d9d9);
+  border-radius: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  user-select: none;
+}
+
+.mode-card:hover {
+  border-color: var(--arl-theme-color, #1890ff);
+  background: var(--arl-bg-white, #ffffff);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+.mode-card-active {
+  border-color: var(--arl-theme-color, #1890ff) !important;
+  background: var(--arl-bg-white, #ffffff) !important;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.12), 0 3px 10px rgba(0, 0, 0, 0.08) !important;
+}
+
+.mode-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.mode-card-title-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mode-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--arl-text-color, #262626);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.mode-card-tag {
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-weight: 500;
+  margin-right: 0;
+  flex-shrink: 0;
+}
+
+.mode-card-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--arl-text-color, #595959);
+  opacity: 0.72;
+  margin-top: 2px;
+}
+
+/* 通栏设置项行 (ICP 双轨查重) */
+.arl-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--arl-bg-white, #ffffff);
+  border: 1px solid var(--arl-border-color, #e8e8e8);
+  border-radius: 6px;
+  margin-top: 10px;
+  transition: border-color 0.2s;
+}
+
+.arl-settings-row:hover {
+  border-color: var(--arl-theme-color, #1890ff);
+}
+
+.settings-row-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-right: 16px;
+  flex: 1;
+}
+
+.settings-row-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--arl-text-color, #262626);
+}
+
+.settings-row-help {
+  color: #bfbfbf;
+  cursor: pointer;
+  font-size: 13px;
+  transition: color 0.2s;
+}
+
+.settings-row-help:hover {
+  color: var(--arl-theme-color, #1890ff);
+}
+
+.settings-row-subtitle {
+  font-size: 12px;
+  color: var(--arl-text-color, #8c8c8c);
+  opacity: 0.75;
+  line-height: 1.4;
+}
+
+.settings-row-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.settings-row-status {
+  font-size: 12px;
+  color: var(--arl-text-color, #595959);
+  opacity: 0.75;
+  min-width: 72px;
+  white-space: nowrap;
+}
 </style>

@@ -108,12 +108,9 @@
                   :min="1"
                   :max="20"
                   size="small"
-                  style="width: 100px;"
+                  style="width: 100%;"
                   :addon-after="taskText('tasks.levels')"
                 />
-                <div v-if="formState.depth > 1" class="depth-cost-hint">
-                  {{ taskText('tasks.investmentDepthHint', { depth: formState.depth }) }}
-                </div>
               </a-form-item>
             </a-col>
             <a-col :span="taskLocale !== 'zh-CN' ? 24 : 12">
@@ -129,31 +126,46 @@
                   :min="1"
                   :max="100"
                   size="small"
-                  style="width: 100px;"
+                  style="width: 100%;"
                   addon-after="%"
                 />
               </a-form-item>
             </a-col>
           </a-row>
 
-          <a-form-item
-            :label="taskText('tasks.icpCrossCheck')"
-            :label-col="{ style: { width: taskLocale !== 'zh-CN' ? '140px' : '85px' } }"
-            :wrapper-col="{ style: { width: taskLocale !== 'zh-CN' ? 'calc(100% - 140px)' : 'calc(100% - 85px)' } }"
-            style="margin-bottom: 8px;"
-            :tooltip="taskText('tasks.crossCheckAgainstOfficialMiitIcpRecordsAnd')"
-          >
-            <a-switch v-model:checked="formState.enable_icp" size="small" />
-            <span style="font-size: 12px; margin-left: 8px; color: var(--arl-text-color); opacity: 0.7;">
-              {{ formState.enable_icp ? taskText('tasks.enabledRecommended') : taskText('tasks.disabled') }}
-            </span>
-          </a-form-item>
+          <div class="arl-settings-row">
+            <div class="settings-row-left">
+              <div class="settings-row-title-wrap">
+                <span class="settings-row-title">{{ taskText('tasks.icpCrossCheck') }}</span>
+                <a-tooltip :title="taskText('tasks.crossCheckAgainstOfficialMiitIcpRecordsAnd')">
+                  <question-circle-outlined class="settings-row-help" />
+                </a-tooltip>
+              </div>
+              <div class="settings-row-subtitle">
+                {{ taskText('tasks.crossCheckAgainstOfficialMiitIcpRecordsAnd') }}
+              </div>
+            </div>
+            <div class="settings-row-right">
+              <a-switch v-model:checked="formState.enable_icp" size="small" />
+              <span class="settings-row-status">
+                {{ formState.enable_icp ? taskText('tasks.enabledRecommended') : taskText('tasks.disabled') }}
+              </span>
+            </div>
+          </div>
+
+          <a-alert
+            v-if="formState.depth > 1"
+            type="warning"
+            show-icon
+            style="margin-top: 10px; margin-bottom: 4px; font-size: 12px; border-radius: 4px;"
+            :message="taskText('tasks.investmentDepthHint', { depth: formState.depth })"
+          />
 
           <a-form-item
             :label="taskText('tasks.assetCategories')"
             :label-col="{ style: { width: taskLocale !== 'zh-CN' ? '140px' : '80px' } }"
             :wrapper-col="{ style: { width: taskLocale !== 'zh-CN' ? 'calc(100% - 140px)' : 'calc(100% - 80px)' } }"
-            style="margin-bottom: 0;"
+            style="margin-top: 12px; margin-bottom: 0;"
           >
             <a-checkbox-group v-model:value="formState.query_type" style="display: flex; flex-wrap: wrap; gap: 6px;">
               <a-checkbox value="invest">{{ taskText('tasks.investments') }}</a-checkbox>
@@ -178,7 +190,10 @@ import { useRouter } from 'vue-router';
 import { Modal, message } from 'ant-design-vue';
 import {
   LinkOutlined,
-  BankOutlined
+  BankOutlined,
+  CheckCircleOutlined,
+  SafetyCertificateOutlined,
+  QuestionCircleOutlined
 } from '@ant-design/icons-vue';
 import request from '../utils/request';
 
@@ -415,4 +430,75 @@ const handleSubmit = async () => {
 
 .task-settings-link { margin-left: 4px; }
 .task-section-caption { font-weight: 500; font-size: 13px; }
+
+/* 通栏设置项行 (ICP 双轨查重) */
+.arl-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--arl-bg-white, #ffffff);
+  border: 1px solid var(--arl-border-color, #e8e8e8);
+  border-radius: 6px;
+  margin-top: 10px;
+  transition: border-color 0.2s;
+}
+
+.arl-settings-row:hover {
+  border-color: var(--arl-theme-color, #1890ff);
+}
+
+.settings-row-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-right: 16px;
+  flex: 1;
+}
+
+.settings-row-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--arl-text-color, #262626);
+}
+
+.settings-row-help {
+  color: #bfbfbf;
+  cursor: pointer;
+  font-size: 13px;
+  transition: color 0.2s;
+}
+
+.settings-row-help:hover {
+  color: var(--arl-theme-color, #1890ff);
+}
+
+.settings-row-subtitle {
+  font-size: 12px;
+  color: var(--arl-text-color, #8c8c8c);
+  opacity: 0.75;
+  line-height: 1.4;
+}
+
+.settings-row-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.settings-row-status {
+  font-size: 12px;
+  color: var(--arl-text-color, #595959);
+  opacity: 0.75;
+  min-width: 72px;
+  white-space: nowrap;
+}
 </style>
