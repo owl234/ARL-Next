@@ -10,7 +10,7 @@
     >
       <template #message>
         <strong>{{ pageText('pages.unsavedSettingsCount', { count: unsavedCount }) }}</strong>
-        <a @click="activeKey = firstDirtyTabKey">{{ pageText('pages.goToUnsavedSettings') }}</a>
+        <a @click="goToFirstDirty">{{ pageText('pages.goToUnsavedSettings') }}</a>
         {{ pageText('pages.saveEachChangeBeforeLeavingThisPage') }}
       </template>
     </a-alert>
@@ -546,9 +546,9 @@
       </a-tab-pane>
         </a-tabs>
       </a-tab-pane>
-      <a-tab-pane key="performance" :tab="tabTitle(pageText('pages.scanningAndConcurrency'), isPerformanceDirty || isSecurityDirty)">
+      <a-tab-pane key="performance" :tab="tabTitle(pageText('pages.scanningAndConcurrency'), isPerformanceDirty || isSecurityDirty || Object.keys(pendingByGroup.system_general || {}).length > 0)">
         <a-tabs v-model:activeKey="scanSubTab" type="card" class="dict-sub-tabs" style="margin-bottom: 16px;">
-          <a-tab-pane key="performance" :tab="pageText('pages.taskQueueConcurrency')">
+          <a-tab-pane key="performance" :tab="tabTitle(pageText('pages.taskQueueConcurrency'), isPerformanceDirty)">
             <div style="max-width: 1000px; padding-bottom: 40px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <span style="color: var(--arl-text-color); opacity: 0.45;">
@@ -754,7 +754,7 @@
               </a-spin>
             </div>
           </a-tab-pane>
-          <a-tab-pane key="security" :tab="pageText('pages.securityPolicyIpDomainScanExclusions')">
+          <a-tab-pane key="security" :tab="tabTitle(pageText('pages.securityPolicyIpDomainScanExclusions'), isSecurityDirty)">
             <div style="max-width: 1000px; padding-bottom: 40px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <span style="color: var(--arl-text-color); opacity: 0.45;">
@@ -782,7 +782,7 @@
               </a-spin>
             </div>
           </a-tab-pane>
-          <a-tab-pane key="system_general" :tab="pageText('pages.advancedScanningAndEnvironment')">
+          <a-tab-pane key="system_general" :tab="tabTitle(pageText('pages.advancedScanningAndEnvironment'), Object.keys(pendingByGroup.system_general || {}).length > 0)">
             <div style="max-width: 1000px; padding-bottom: 40px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <span style="color: var(--arl-text-color); opacity: 0.45;">
@@ -1471,6 +1471,10 @@ const GENERAL_FIELD_GROUPS = {
                    'auth', 'api_key'],
 };
 
+// 首轮配置基准同步完成标记：在挂载并首轮同步基准前，所有脏状态判定恒为 false / {}，
+// 杜绝首屏因接口异步返回耗时差（如 Celery inspect 阻塞 1s）造成的虚假未保存提示与路由拦截。
+const isConfigInitialized = ref(false);
+
 // 打开页面时保存的基线快照，用于 diff 出真正变更的字段
 const generalBaseline = ref({});
 
@@ -1517,7 +1521,12 @@ const pendingByGroup = computed(() => {
 
 // 安全策略与性能配置走独立接口，各自维护基线
 const securityBaseline = ref({ blackIpsText: '', forbiddenDomainsText: '' });
-const performanceBaseline = ref({});
+const performanceBaseline = ref({
+  celery_heavy_concurrency: 1,
+  celery_light_concurrency: 1,
+  osint_concurrency: 1,
+  github_concurrency: 1,
+});
 
 const isSecurityDirty = computed(() =>
   securityForm.value.blackIpsText !== securityBaseline.value.blackIpsText
@@ -1530,14 +1539,18 @@ const isPerformanceDirty = computed(() => (
   || performanceForm.value.github_concurrency !== performanceBaseline.value.github_concurrency));
 
 // 全局是否存在未保存改动（含安全策略与性能配置两个独立接口）
-const hasUnsavedChanges = computed(() => (
-  Object.keys(changedFields.value).length > 0
-  || isSecurityDirty.value
-  || isPerformanceDirty.value
-));
+const hasUnsavedChanges = computed(() => {
+  if (typeof isConfigInitialized !== 'undefined' && !isConfigInitialized.value) return false;
+  return (
+    Object.keys(changedFields.value).length > 0
+    || isSecurityDirty.value
+    || isPerformanceDirty.value
+  );
+});
 
 // 未保存改动总数，用于页头常驻提示
 const unsavedCount = computed(() => {
+  if (typeof isConfigInitialized !== 'undefined' && !isConfigInitialized.value) return 0;
   const detail = Object.keys(changedFields.value).length;
   return detail
     + (isSecurityDirty.value ? 1 : 0)
@@ -1676,14 +1689,42 @@ const goToQueueConcurrency = () => {
 
 // 定位第一个存在未保存改动的 Tab，供提示条一键跳转
 const firstDirtyTabKey = computed(() => {
-  if (isSecurityDirty.value) return 'security';
-  if (isPerformanceDirty.value) return 'performance';
-  const order = ['api_config', 'message_push', 'system_general'];
+  if (isSecurityDirty.value || isPerformanceDirty.value || Object.keys(pendingByGroup.value.system_general || {}).length > 0) {
+    return 'performance';
+  }
+  const order = ['api_config', 'message_push'];
   for (const group of order) {
     if (Object.keys(pendingByGroup.value[group] || {}).length > 0) return group;
   }
   return 'api_config';
 });
+
+const goToFirstDirty = () => {
+  if (isPerformanceDirty.value) {
+    activeKey.value = 'performance';
+    scanSubTab.value = 'performance';
+    return;
+  }
+  if (isSecurityDirty.value) {
+    activeKey.value = 'performance';
+    scanSubTab.value = 'security';
+    return;
+  }
+  if (Object.keys(pendingByGroup.value.system_general || {}).length > 0) {
+    activeKey.value = 'performance';
+    scanSubTab.value = 'system_general';
+    return;
+  }
+  if (Object.keys(pendingByGroup.value.api_config || {}).length > 0) {
+    activeKey.value = 'api_config';
+    return;
+  }
+  if (Object.keys(pendingByGroup.value.message_push || {}).length > 0) {
+    activeKey.value = 'message_push';
+    return;
+  }
+  activeKey.value = 'api_config';
+};
 
 // 关闭/刷新浏览器窗口时兜底拦截（系统级，无法自定义文案）
 const handleBeforeUnload = (e) => {
@@ -1784,11 +1825,19 @@ const fetchCapacityProbe = async () => {
   }
 };
 
+const RECOMMENDED_FIELD_MAP = {
+  heavy: 'celery_heavy_concurrency',
+  light: 'celery_light_concurrency',
+  osint: 'osint_concurrency',
+  github: 'github_concurrency',
+};
+
 // 从「生效值」一键回填，降低"该填什么"的决策成本
 const applyRecommended = (formRef, key) => {
   const rec = capacityInfo.value[`${key}_recommended`];
   if (rec) {
-    formRef.value[key] = rec;
+    const targetKey = RECOMMENDED_FIELD_MAP[key] || key;
+    formRef.value[targetKey] = rec;
     message.success(pageText('pages.appliedRecommendedValueValue', { value: rec }));
   }
 };
@@ -1832,6 +1881,7 @@ const generalForm = ref({
   query_plugin_config: {},
   push_options: ['task_complete', 'github_leak', 'github_cve', 'github_tools', 'github_hackers', 'asset_site']
 });
+captureBaseline();
 
 const fetchGeneralConfig = async () => {
   generalLoading.value = true;
@@ -1853,10 +1903,16 @@ const fetchGeneralConfig = async () => {
       captureBaseline();
     } else {
       message.error(res.message || pageText('pages.failedToLoadGeneralSystemConfiguration'));
+      if (!isConfigInitialized.value) {
+        captureBaseline();
+      }
     }
   } catch (error) {
     message.error(pageText('pages.generalSystemConfigurationRequestFailed'));
     console.error(error);
+    if (!isConfigInitialized.value) {
+      captureBaseline();
+    }
   } finally {
     generalLoading.value = false;
   }
@@ -2429,10 +2485,16 @@ const fetchSecurityPolicy = async () => {
       securityBaseline.value = cloneDeep(securityForm.value);
     } else {
       message.error(res.message || pageText('pages.failedToLoadSecurityPolicy'));
+      if (!isConfigInitialized.value) {
+        securityBaseline.value = cloneDeep(securityForm.value);
+      }
     }
   } catch (error) {
     message.error(pageText('pages.securityPolicyRequestFailed'));
     console.error(error);
+    if (!isConfigInitialized.value) {
+      securityBaseline.value = cloneDeep(securityForm.value);
+    }
   } finally {
     securityLoading.value = false;
   }
@@ -2451,6 +2513,7 @@ const saveSecurityPolicy = async () => {
     
     if (res.code === 200) {
       message.success(pageText('pages.securityPolicyUpdated'));
+      securityBaseline.value = cloneDeep(securityForm.value);
       fetchSecurityPolicy(); // 重新拉取确认
     } else {
       message.error(res.message || pageText('pages.failedToSaveLabel2'));
@@ -2464,8 +2527,13 @@ const saveSecurityPolicy = async () => {
 };
 
 // ======================= 性能配置管理逻辑 =======================
-const performanceForm = ref({ celery_heavy_concurrency: 1, celery_light_concurrency: 1, osint_concurrency: 1 });
-const runtimePerformance = ref({ runtime_heavy_concurrency: null, runtime_light_concurrency: null });
+const performanceForm = ref({
+  celery_heavy_concurrency: 1,
+  celery_light_concurrency: 1,
+  osint_concurrency: 1,
+  github_concurrency: 1,
+});
+const runtimePerformance = ref({ runtime_heavy_concurrency: null, runtime_light_concurrency: null, runtime_github_concurrency: null });
 const performanceLoading = ref(false);
 const performanceSaveLoading = ref(false);
 
@@ -2484,10 +2552,16 @@ const fetchPerformanceConfig = async () => {
       performanceBaseline.value = cloneDeep(performanceForm.value);
     } else {
       message.error(res.message || pageText('pages.failedToLoadPerformanceSettings'));
+      if (!isConfigInitialized.value) {
+        performanceBaseline.value = cloneDeep(performanceForm.value);
+      }
     }
   } catch (error) {
     message.error(pageText('pages.performanceSettingsRequestFailed'));
     console.error(error);
+    if (!isConfigInitialized.value) {
+      performanceBaseline.value = cloneDeep(performanceForm.value);
+    }
   } finally {
     performanceLoading.value = false;
   }
@@ -2505,6 +2579,7 @@ const savePerformanceConfig = async () => {
     
     if (res.code === 200) {
       message.success(res.message || pageText('pages.performanceSettingsUpdated'), 5);
+      performanceBaseline.value = cloneDeep(performanceForm.value);
       fetchPerformanceConfig();
     } else {
       message.error(res.message || pageText('pages.failedToSaveLabel2'));
@@ -2548,7 +2623,7 @@ const probeActiveBackupTask = async () => {
   }
 };
 
-onMounted(() => {
+onMounted(async () => {
   probeActiveBackupTask();
 
   if (route.query.tab) {
@@ -2576,9 +2651,15 @@ onMounted(() => {
   fetchCapacityProbe();
   fetchDictList();
   fetchBruteDictList();
-  fetchSecurityPolicy();
-  fetchPerformanceConfig();
-  fetchGeneralConfig();
+  try {
+    await Promise.allSettled([
+      fetchSecurityPolicy(),
+      fetchPerformanceConfig(),
+      fetchGeneralConfig(),
+    ]);
+  } finally {
+    isConfigInitialized.value = true;
+  }
 });
 
 onDeactivated(() => {
