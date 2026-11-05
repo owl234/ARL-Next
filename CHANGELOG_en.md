@@ -6,6 +6,23 @@ This document records all major version evolution, new features, performance opt
 
 ---
 
+## [v1.4.5] - 2026-11-05
+
+### 🚀 New Features
+- **Asset scope feature card selector and Tianyancha recon UX enhancements**: overhauled the scope selection workflow in `AssetScope.vue` with an interactive card-based mode selector (supporting smooth switching between domains, IPs, and asset groups with high-contrast active states, capability tags, and descriptions); enhanced the `TycTaskModal.vue` Tianyancha recon dialog with optimized ICP deduplication layout and summary metrics; fully updated trilingual dictionaries across Chinese, English, and Russian (`assets.zh-CN.js`, `assets.en-US.js`, `assets.ru-RU.js`).
+
+### 🛠️ Performance & Refactoring
+- **Policy configuration batch PoC validation and chunked paginated rendering**: addressed UI latency under thousands of PoC plugins by introducing the `/api/policy/plugin/verify-batch` backend endpoint with concurrent chunked execution, timeout guards, and robust status mapping; re-engineered `PolicyDetail.vue` with paginated chunked rendering and decoupled `Set`-based lookups, eliminating deep reactivity overhead and ensuring microsecond-level batch selection responsiveness without main thread blocking; delivered automated backend and frontend test suites (`test_policy_plugin_batch.py` and `policyDetailPocPerformance.test.js`).
+
+### 🐛 Bug Fixes & Hardening
+- **System settings initial dirty-state debouncing and recommended concurrency mapping**: resolved premature "unsaved changes" banner flickering in `SystemSettings.vue` caused by asynchronous data arrival and mismatched reactive baselines; fixed field mapping in `applyRecommended` for performance concurrency sliders; introduced uninitialized state gating and precise dirty-tab navigation, accompanied by the `systemSettingsDirtyState.test.js` test suite.
+- **MCP Center dark mode adaptation and platform theme alignment**: corrected styling discrepancies in `McpCenter.vue` under dark mode, revamping CSS variables for top status bars, metric cards, instruction panels, and audit log drawers to strictly comply with platform dark theme tokens.
+
+### 🛡️ Security & Configuration
+- **Deployment workflow step-by-step guidance and collapsible code blocks**: refined production installation guides across `README.md`, `README_en.md`, `docs/QUICKSTART.md`, and `docs/QUICKSTART_en.md` with explicit single-line execution prompts and collapsible snippet sections, mitigating operational errors during container setup and cold starts.
+
+---
+
 ## [v1.4.4] - 2026-11-03
 
 ### 🚀 New Features
