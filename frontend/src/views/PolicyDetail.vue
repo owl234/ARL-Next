@@ -922,27 +922,53 @@ const submitPolicy = async () => {
 
   submitLoading.value = true;
   try {
-    const pocNameMap = new Map(pocList.value.map(p => [p.plugin_name, p.vul_name]));
+    const pocNameMap = new Map((pocList?.value || []).map(p => [p.plugin_name, p.vul_name]));
     const poc_config = [];
-    for (const name of selectedPocNames.value) {
-      if (pocNameMap.has(name)) {
-        poc_config.push({
-          plugin_name: name,
-          vul_name: pocNameMap.get(name) || name,
-          enable: true
-        });
+    const pocSet = (typeof selectedPocNames !== 'undefined' && selectedPocNames?.value) ? selectedPocNames.value : null;
+    if (pocSet && pocSet.size > 0) {
+      for (const name of pocSet) {
+        if (pocNameMap.has(name)) {
+          poc_config.push({
+            plugin_name: name,
+            vul_name: pocNameMap.get(name) || name,
+            enable: true
+          });
+        }
+      }
+    } else if (Array.isArray(pocList?.value)) {
+      for (const p of pocList.value) {
+        if (p?.enable && p.plugin_name) {
+          poc_config.push({
+            plugin_name: p.plugin_name,
+            vul_name: p.vul_name || p.plugin_name,
+            enable: true
+          });
+        }
       }
     }
 
-    const bruteNameMap = new Map(bruteList.value.map(p => [p.plugin_name, p.vul_name]));
+    const bruteNameMap = new Map((bruteList?.value || []).map(p => [p.plugin_name, p.vul_name]));
     const brute_config = [];
-    for (const name of selectedBruteNames.value) {
-      if (bruteNameMap.has(name)) {
-        brute_config.push({
-          plugin_name: name,
-          vul_name: bruteNameMap.get(name) || name,
-          enable: true
-        });
+    const bruteSet = (typeof selectedBruteNames !== 'undefined' && selectedBruteNames?.value) ? selectedBruteNames.value : null;
+    if (bruteSet && bruteSet.size > 0) {
+      for (const name of bruteSet) {
+        if (bruteNameMap.has(name)) {
+          brute_config.push({
+            plugin_name: name,
+            vul_name: bruteNameMap.get(name) || name,
+            enable: true
+          });
+        }
+      }
+    } else if (Array.isArray(bruteList?.value)) {
+      for (const p of bruteList.value) {
+        if (p?.enable && p.plugin_name) {
+          brute_config.push({
+            plugin_name: p.plugin_name,
+            vul_name: p.vul_name || p.plugin_name,
+            enable: true
+          });
+        }
       }
     }
 

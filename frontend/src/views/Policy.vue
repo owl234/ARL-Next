@@ -157,7 +157,7 @@
 import { useI18n } from 'vue-i18n';
 defineOptions({ name: 'Policy' });
 
-import { ref, reactive, onMounted, onDeactivated, watch } from 'vue';
+import { ref, reactive, onMounted, onActivated, onDeactivated, watch } from 'vue';
 import { useSticky } from '../utils/useSticky';
 const actionBarRef = ref(null);
 const { stickyConfig } = useSticky(actionBarRef);
@@ -303,7 +303,17 @@ const getBruteConfigText = (p) => {
   return pageText('pages.enabledCountNamesSuffix', { count: active.length, names: active.slice(0, 3).map(x => x.vul_name || x.plugin_name).join('、'), suffix: active.length > 3 ? pageText('pages.etc') : '' });
 };
 
+let firstActivation = true;
 onMounted(() => fetchData());
+
+onActivated(async () => {
+  // KeepAlive 首次激活时 onMounted 已启动加载，消除并发双重触发
+  if (firstActivation) {
+    firstActivation = false;
+    return;
+  }
+  await fetchData();
+});
 
 // ================= 任务下发逻辑 =================
 const dispatchModalVisible = ref(false);
