@@ -507,5 +507,12 @@ export default {
   "riskScanCount": "Создать сканирование рисков ({count})",
   "ipCount": "IP: {count}",
   "domainCount": "Доменов: {count}",
-  "websiteCount": "Сайтов: {count}"
+  "websiteCount": "Сайтов: {count}",
+  "chainHitSummary": "Совпадений: {hit}/{totalCategories} кат. · {totalRecords} записей",
+  "showEmptyCategories": "Пустые разделы",
+  "showEmptyCategoriesTooltip": "Скрыто пустых категорий: {count}. Включите, чтобы просмотреть все 13.",
+  "allCategoriesVisibleTooltip": "Показаны все 13 категорий. Выключите, чтобы скрыть пустые.",
+  "viewAllCategories": "Показать все 13 категорий",
+  "webServerLabel": "Веб-сервер:",
+  "ipLabel": "IP:"
 };

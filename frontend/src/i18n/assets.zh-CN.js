@@ -507,5 +507,12 @@ export default {
   "riskScanCount": "下发风险巡航 ({count})",
   "ipCount": "{count} 个 IP",
   "domainCount": "{count} 个域名",
-  "websiteCount": "{count} 个网站"
+  "websiteCount": "{count} 个网站",
+  "chainHitSummary": "已命中 {hit}/{totalCategories} 维 · 共 {totalRecords} 条关联记录",
+  "showEmptyCategories": "显示空维度",
+  "showEmptyCategoriesTooltip": "当前隐藏 {count} 个无记录维度，开启可查看全部 13 维",
+  "allCategoriesVisibleTooltip": "正在展示全部 13 个维度，关闭可聚焦命中维度",
+  "viewAllCategories": "查看全部 13 个维度",
+  "webServerLabel": "Web 服务：",
+  "ipLabel": "IP："
 };

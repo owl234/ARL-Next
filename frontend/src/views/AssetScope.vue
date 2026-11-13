@@ -14,7 +14,7 @@
         width: isSidebarCollapsed ? '0px' : '240px',
         overflow: 'hidden',
         opacity: isSidebarCollapsed ? 0 : 1,
-        transition: 'width 0.25s, opacity 0.25s, left 0.2s, top 0.2s',
+        transition: isSidebarTransitionSuppressed ? 'none' : 'width 0.25s, opacity 0.25s, left 0.2s, top 0.2s',
         background: 'var(--arl-bg-sticky)',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
@@ -147,7 +147,7 @@
         cursor: 'pointer',
         zIndex: 16,
         boxShadow: '2px 0 8px rgba(0,0,0,0.06)',
-        transition: 'left 0.2s ease, background 0.2s'
+        transition: isSidebarTransitionSuppressed ? 'none' : 'left 0.2s ease, background 0.2s'
       }"
       class="sidebar-collapse-handle"
       :title="assetText('assets.collapseOrganizationGroups')"
@@ -173,7 +173,7 @@
         justifyContent: 'center',
         gap: '8px',
         cursor: 'pointer',
-        transition: 'all 0.2s ease',
+        transition: isSidebarTransitionSuppressed ? 'none' : 'all 0.2s ease',
         zIndex: 15
       }"
       class="sidebar-expand-handle"
@@ -187,7 +187,7 @@
     <div
       :style="{
         marginLeft: isSidebarCollapsed ? '34px' : '248px',
-        transition: 'margin-left 0.25s ease',
+        transition: isSidebarTransitionSuppressed ? 'none' : 'margin-left 0.25s ease',
         padding: '16px 20px',
         minWidth: 0,
         position: 'relative'
@@ -1558,17 +1558,55 @@ import { useSticky } from '../utils/useSticky';
 const sidebarAnchorRef = ref(null);
 const sidebarLeft = ref(null);
 const sidebarTop = ref(80);
+const isSidebarTransitionSuppressed = ref(true);
 let sidebarRafId = null;
+let sidebarTransitionRaf1 = null;
+let sidebarTransitionRaf2 = null;
+
+const cancelSidebarTransitionFrames = () => {
+  if (typeof window === 'undefined' || typeof window.cancelAnimationFrame !== 'function') return;
+  if (sidebarTransitionRaf1 !== null) {
+    window.cancelAnimationFrame(sidebarTransitionRaf1);
+    sidebarTransitionRaf1 = null;
+  }
+  if (sidebarTransitionRaf2 !== null) {
+    window.cancelAnimationFrame(sidebarTransitionRaf2);
+    sidebarTransitionRaf2 = null;
+  }
+};
+
+const suppressSidebarTransitionBriefly = () => {
+  isSidebarTransitionSuppressed.value = true;
+  cancelSidebarTransitionFrames();
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    isSidebarTransitionSuppressed.value = false;
+    return;
+  }
+  sidebarTransitionRaf1 = window.requestAnimationFrame(() => {
+    sidebarTransitionRaf1 = null;
+    sidebarTransitionRaf2 = window.requestAnimationFrame(() => {
+      sidebarTransitionRaf2 = null;
+      isSidebarTransitionSuppressed.value = false;
+    });
+  });
+};
 
 const updateSidebarLeft = () => {
-  if (sidebarAnchorRef.value) {
-    const rect = sidebarAnchorRef.value.getBoundingClientRect();
-    if (rect.left >= 0) {
-      sidebarLeft.value = rect.left;
-    }
-    if (rect.top > 0) {
-      sidebarTop.value = rect.top;
-    }
+  const anchorEl = sidebarAnchorRef.value;
+  // 跳过 KeepAlive 离屏缓存等脱离文档或隐藏状态下的测量，防止 getBoundingClientRect() 返回 0 污染 left
+  if (!anchorEl || !anchorEl.isConnected || anchorEl.offsetParent === null) {
+    return;
+  }
+  const rect = anchorEl.getBoundingClientRect();
+  if (rect.left > 0) {
+    sidebarLeft.value = rect.left;
+  }
+  const contentEl = anchorEl.closest('.ant-layout-content');
+  const contentTop = contentEl ? contentEl.getBoundingClientRect().top : 0;
+  if (contentTop > 0) {
+    sidebarTop.value = contentTop + 16;
+  } else if (rect.top > 0) {
+    sidebarTop.value = rect.top;
   }
 };
 
@@ -2227,22 +2265,51 @@ const submitBatchMove = async () => {
 };
 
 // initialize
+let siderElRef = null;
 let siderObserver = null;
 let contentResizeObserver = null;
+let siderSyncTimers = [];
+let areSidebarObserversBound = false;
 
-onMounted(() => {
-  if (route.path === '/group') {
-    fetchGroups();
-  }
+const handleSiderChange = () => {
   scheduleSidebarMetricsSync();
+  siderSyncTimers.forEach(clearTimeout);
+  siderSyncTimers = [
+    setTimeout(updateSidebarLeft, 250),
+    setTimeout(updateSidebarLeft, 550)
+  ];
+};
+
+const unbindSidebarObservers = () => {
+  areSidebarObserversBound = false;
+  window.removeEventListener('resize', scheduleSidebarMetricsSync);
+  if (sidebarRafId !== null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+    window.cancelAnimationFrame(sidebarRafId);
+    sidebarRafId = null;
+  }
+  siderSyncTimers.forEach(clearTimeout);
+  siderSyncTimers = [];
+  if (siderElRef) {
+    siderElRef.removeEventListener('transitionend', updateSidebarLeft);
+    siderElRef = null;
+  }
+  if (siderObserver) {
+    siderObserver.disconnect();
+    siderObserver = null;
+  }
+  if (contentResizeObserver) {
+    contentResizeObserver.disconnect();
+    contentResizeObserver = null;
+  }
+};
+
+const bindSidebarObservers = () => {
+  if (areSidebarObserversBound) return;
+  areSidebarObserversBound = true;
   window.addEventListener('resize', scheduleSidebarMetricsSync);
   const siderEl = document.querySelector('.ant-layout-sider');
   if (siderEl) {
-    const handleSiderChange = () => {
-      scheduleSidebarMetricsSync();
-      setTimeout(updateSidebarLeft, 250);
-      setTimeout(updateSidebarLeft, 550);
-    };
+    siderElRef = siderEl;
     siderObserver = new MutationObserver(handleSiderChange);
     siderObserver.observe(siderEl, { attributes: true, attributeFilter: ['style', 'class'] });
     siderEl.addEventListener('transitionend', updateSidebarLeft);
@@ -2254,6 +2321,15 @@ onMounted(() => {
     });
     contentResizeObserver.observe(contentEl);
   }
+};
+
+onMounted(() => {
+  if (route.path === '/group') {
+    fetchGroups();
+  }
+  suppressSidebarTransitionBriefly();
+  bindSidebarObservers();
+  scheduleSidebarMetricsSync();
   loadPendingReconTasks();
   if (pendingReconTasks.value.some(t => t.status === 'running')) {
     pollRunningReconTasks();
@@ -2266,7 +2342,9 @@ onActivated(() => {
     fetchGroups();
     fetchData(true);
   }
-  updateSidebarLeft();
+  suppressSidebarTransitionBriefly();
+  bindSidebarObservers();
+  scheduleSidebarMetricsSync();
   loadPendingReconTasks();
   if (pendingReconTasks.value.some(t => t.status === 'running')) {
     pollRunningReconTasks();
@@ -3571,6 +3649,9 @@ const handleImportFromTask = async (task) => {
 
 
 onDeactivated(() => {
+  isSidebarTransitionSuppressed.value = true;
+  cancelSidebarTransitionFrames();
+  unbindSidebarObservers();
   stopPoll();
   stopReconPoller();
   // 离开页面时安全收起弹窗，避免浮层遮挡其他视图
@@ -3587,23 +3668,8 @@ onDeactivated(() => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener('resize', scheduleSidebarMetricsSync);
-  if (sidebarRafId !== null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
-    window.cancelAnimationFrame(sidebarRafId);
-    sidebarRafId = null;
-  }
-  const siderEl = document.querySelector('.ant-layout-sider');
-  if (siderEl) {
-    siderEl.removeEventListener('transitionend', updateSidebarLeft);
-  }
-  if (siderObserver) {
-    siderObserver.disconnect();
-    siderObserver = null;
-  }
-  if (contentResizeObserver) {
-    contentResizeObserver.disconnect();
-    contentResizeObserver = null;
-  }
+  cancelSidebarTransitionFrames();
+  unbindSidebarObservers();
   if (sortableInstance) {
     sortableInstance.destroy();
     sortableInstance = null;

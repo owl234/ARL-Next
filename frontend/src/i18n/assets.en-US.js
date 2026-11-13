@@ -507,5 +507,12 @@ export default {
   "riskScanCount": "Create risk scan ({count})",
   "ipCount": "IPs: {count}",
   "domainCount": "Domains: {count}",
-  "websiteCount": "Websites: {count}"
+  "websiteCount": "Websites: {count}",
+  "chainHitSummary": "Matched {hit}/{totalCategories} categories · {totalRecords} records",
+  "showEmptyCategories": "Show empty",
+  "showEmptyCategoriesTooltip": "{count} empty categories are hidden. Toggle to inspect all 13.",
+  "allCategoriesVisibleTooltip": "Showing all 13 categories. Toggle off to focus on matched findings.",
+  "viewAllCategories": "View all 13 categories",
+  "webServerLabel": "Web server:",
+  "ipLabel": "IP:"
 };

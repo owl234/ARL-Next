@@ -318,7 +318,7 @@
         <template v-else-if="column.key === 'site'">
           <div class="site-header">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-              <div style="display: flex; align-items: center; gap: 6px; overflow: hidden;">
+              <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; overflow: hidden;">
                 <img v-if="record.favicon && record.favicon.data" :src="`data:image/png;base64,${record.favicon.data}`" class="site-img" />
                 <a :href="record.site || record.url" target="_blank" style="font-weight: 500; word-break: break-all;">
                   {{ record.site || record.url }}
@@ -329,9 +329,9 @@
                   </a-button>
                 </a-tooltip>
               </div>
-              <a-button type="link" size="small" class="chain-action-btn" style="padding: 0; height: auto; font-size: 12px; flex-shrink: 0;" @click="openChainDrawer(record.hostname || record.site)">
-                <compass-outlined />{{ assetText('assets.profile') }}
-              </a-button>
+              <button type="button" class="chain-action-btn" @click.stop="openChainDrawer(record.hostname || record.site)">
+                <compass-outlined /><span>{{ assetText('assets.profile') }}</span>
+              </button>
             </div>
             <div class="mt5" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
               <!-- 1. 置顶渲染「待测试」标签 -->
@@ -454,7 +454,7 @@
 
         <template v-else-if="column.key === 'ip'">
           <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
               <span style="font-weight: 500; font-family: monospace;">{{ record.ip }}</span>
               <a-tooltip :title="assetText('assets.copyIp')">
                 <a-button type="text" size="small" class="cell-copy-btn" @click.stop="handleCopyText(record.ip)">
@@ -462,9 +462,9 @@
                 </a-button>
               </a-tooltip>
             </div>
-            <a-button type="link" size="small" class="chain-action-btn" style="padding: 0; height: auto; font-size: 12px; flex-shrink: 0;" @click="openChainDrawer(record.ip)">
-              <compass-outlined />{{ assetText('assets.profile') }}
-            </a-button>
+            <button type="button" class="chain-action-btn" @click.stop="openChainDrawer(record.ip)">
+              <compass-outlined /><span>{{ assetText('assets.profile') }}</span>
+            </button>
           </div>
         </template>
 
@@ -486,17 +486,17 @@
                 </a-tooltip>
               </div>
             </div>
-            <div v-else style="display: flex; align-items: center; gap: 6px;">
-              <span style="font-weight: 500;">{{ record.domain }}</span>
+            <div v-else style="display: flex; align-items: center; gap: 6px; min-width: 0;">
+              <span style="font-weight: 500; word-break: break-all;">{{ record.domain }}</span>
               <a-tooltip :title="assetText('assets.copyDomain')">
                 <a-button type="text" size="small" class="cell-copy-btn" @click.stop="handleCopyText(record.domain)">
                   <copy-outlined style="font-size: 11px; opacity: 0.65;" />
                 </a-button>
               </a-tooltip>
             </div>
-            <a-button v-if="!Array.isArray(record.domain)" type="link" size="small" class="chain-action-btn" style="padding: 0; height: auto; font-size: 12px; flex-shrink: 0;" @click="openChainDrawer(record.domain)">
-              <compass-outlined />{{ assetText('assets.profile') }}
-            </a-button>
+            <button v-if="!Array.isArray(record.domain)" type="button" class="chain-action-btn" @click.stop="openChainDrawer(record.domain)">
+              <compass-outlined /><span>{{ assetText('assets.profile') }}</span>
+            </button>
           </div>
         </template>
 
@@ -2978,21 +2978,35 @@ div:hover > .cell-copy-btn {
 }
 
 .chain-action-btn {
-  opacity: 0;
-  transition: opacity 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--arl-border-color);
+  background: var(--arl-bg-subtle);
+  color: var(--arl-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
   cursor: pointer;
-  margin-left: 6px;
-  border-radius: 4px;
-  padding: 0 4px;
-  font-size: 11px;
+  transition: color 0.2s, background-color 0.2s, border-color 0.2s;
 }
-:hover > .chain-action-btn,
-:hover > span > .chain-action-btn,
 div:hover > .chain-action-btn {
-  opacity: 0.85;
+  border-color: color-mix(in srgb, var(--arl-theme-color) 24%, var(--arl-border-color));
+  color: var(--arl-text-color);
 }
-.chain-action-btn:hover {
-  opacity: 1 !important;
+.chain-action-btn:hover,
+.chain-action-btn:focus-visible {
+  background: var(--arl-theme-soft-bg);
+  border-color: var(--arl-theme-soft-border);
+  color: var(--arl-theme-color);
+  outline: none;
+}
+.chain-action-btn:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--arl-theme-color) 20%, transparent);
 }
 
 /* ================= 辅助工具类 ================= */

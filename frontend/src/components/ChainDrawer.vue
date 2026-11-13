@@ -6,78 +6,137 @@
     :width="drawerWidth"
     placement="right"
     destroyOnClose
-    class="chain-drawer-root"
+    rootClassName="chain-drawer-root"
+    :bodyStyle="drawerBodyStyle"
     @close="handleClose"
   >
-    <div ref="scrollContainerRef" class="chain-drawer-scroll-wrapper" @scroll="handleScroll">
-      <!-- 头部自定义导航与控制栏 (随页面一体自然滚动) -->
+    <!-- 顶部双吸顶控制区：主头部 + 单行维度锚点导航条 -->
+    <div class="chain-drawer-sticky-top">
       <div class="chain-drawer-header">
-      <div class="drawer-header-left">
-        <div class="drawer-header-badge">
-          <compass-outlined class="drawer-compass-icon" />
+        <div class="drawer-header-left">
+          <div class="drawer-header-badge">
+            <compass-outlined class="drawer-compass-icon" />
+          </div>
+          <div class="drawer-header-titles">
+            <div class="drawer-title-text">
+              <span class="drawer-title-main">{{ assetText('assets.assetRelationshipProfile') }}</span>
+              <a-tag color="blue" class="drawer-target-tag" :title="target">{{ target }}</a-tag>
+            </div>
+            <div class="drawer-subtitle-text">
+              <template v-if="loading">
+                {{ assetText('assets.loadingAssetRelationshipsAcrossCategories') }}
+              </template>
+              <template v-else-if="chainData">
+                {{ assetText('assets.chainHitSummary', { hit: hitCategoryCount, totalCategories: metricChips.length, totalRecords }) }}
+              </template>
+              <template v-else>
+                {{ assetText('assets.explore13AssetAndSecurityCategoriesClickA') }}
+              </template>
+            </div>
+          </div>
         </div>
-        <div>
-          <div class="drawer-title-text">
-            <span>{{ assetText('assets.assetRelationshipProfile') }}</span>
-            <a-tag color="blue" class="drawer-target-tag">{{ target }}</a-tag>
-          </div>
-          <div class="drawer-subtitle-text">
-            {{ assetText('assets.explore13AssetAndSecurityCategoriesClickA') }}
-          </div>
+        <div class="drawer-header-right">
+          <a-tooltip
+            v-if="!loading && chainData"
+            :title="showEmptySections
+              ? assetText('assets.allCategoriesVisibleTooltip')
+              : assetText('assets.showEmptyCategoriesTooltip', { count: emptyCategoryCount })"
+          >
+            <div class="chain-empty-toggle" :class="{ 'is-active': showEmptySections }">
+              <a-switch v-model:checked="showEmptySections" size="small" />
+              <span class="chain-empty-toggle-label" @click="showEmptySections = !showEmptySections">
+                {{ assetText('assets.showEmptyCategories') }}
+              </span>
+              <span
+                v-if="!showEmptySections && emptyCategoryCount > 0"
+                class="chain-empty-count"
+                @click="showEmptySections = !showEmptySections"
+              >
+                {{ emptyCategoryCount }}
+              </span>
+            </div>
+          </a-tooltip>
+          <a-tooltip :title="assetText('assets.copyTarget')">
+            <a-button size="small" :disabled="!target" @click="handleCopyTarget">
+              <template #icon><copy-outlined /></template>
+            </a-button>
+          </a-tooltip>
+          <a-tooltip :title="assetText('assets.exportProfileJson')">
+            <a-button size="small" :disabled="!chainData" @click="downloadChainJson">
+              <template #icon><download-outlined /></template>
+              {{ assetText('assets.exportProfile') }}
+            </a-button>
+          </a-tooltip>
+          <a-button type="text" size="small" class="drawer-close-btn" @click="handleClose">
+            <template #icon><close-outlined /></template>
+          </a-button>
         </div>
       </div>
-      <div class="drawer-header-right">
-        <a-tooltip :title="assetText('assets.copyTarget')">
-          <a-button size="small" @click="handleCopyTarget">
-            <template #icon><copy-outlined /></template>
-          </a-button>
-        </a-tooltip>
-        <a-tooltip :title="assetText('assets.exportProfileJson')">
-          <a-button size="small" :disabled="!chainData" @click="downloadChainJson">
-            <template #icon><download-outlined /></template>
-            {{ assetText('assets.exportProfile') }}
-          </a-button>
-        </a-tooltip>
-        <a-button type="text" size="small" @click="handleClose">
-          <template #icon><close-outlined /></template>
-        </a-button>
+
+      <!-- 紧凑维度锚点条 (默认仅展示命中维度；支持横向滚动与正文滚动联动高亮) -->
+      <div v-if="!loading && chainData && visibleNavChips.length > 0" class="chain-nav-bar">
+        <div ref="navRailRef" class="chain-metric-row">
+          <button
+            v-for="chip in visibleNavChips"
+            :key="chip.id"
+            :ref="(el) => setChipRef(chip.id, el)"
+            type="button"
+            class="chain-metric-chip"
+            :class="{
+              'is-zero': chip.count === 0,
+              'is-active': activeSectionId === chip.id
+            }"
+            :title="assetText('assets.jumpToSection', { section: chip.label })"
+            @click="scrollToSection(chip.id)"
+          >
+            <component :is="chip.icon" :style="{ color: chip.color }" class="metric-icon" />
+            <span class="metric-label">{{ chip.label }}</span>
+            <b :class="{ 'zero-num': chip.count === 0 }">{{ chip.count }}</b>
+          </button>
+        </div>
       </div>
     </div>
 
-    <!-- 抽屉主体内容区 -->
-    <div class="chain-drawer-body">
-      <a-spin :spinning="loading" :tip="assetText('assets.loadingAssetRelationshipsAcrossCategories')">
-        <!-- 仅当未发起查询或请求失败无数据对象时展示空白提示 -->
-        <div v-if="!loading && !chainData" class="drawer-empty-box">
-          <a-empty :description="assetText('assets.noRelatedAssetRecordsFoundForThisTarget')">
-            <template #image>
-              <compass-outlined style="font-size: 56px; color: var(--arl-theme-color); opacity: 0.6;" />
-            </template>
-            <div style="margin-top: 12px; color: var(--arl-text-secondary); font-size: 13px;">
-              {{ assetText('assets.theTargetMayNotHaveCompletedDetailedDiscovery') }}
-            </div>
-          </a-empty>
+    <!-- 独立滚动正文容器 -->
+    <div ref="scrollContainerRef" class="chain-drawer-scroll-wrapper" @scroll="handleScroll">
+      <div class="chain-drawer-body">
+        <!-- 1. 首次加载或切换目标时的骨架屏，保持布局稳定 -->
+        <div v-if="loading" class="chain-skeleton-wrap">
+          <div class="chain-skeleton-pills">
+            <span v-for="i in 6" :key="i" class="chain-skeleton-pill" />
+          </div>
+          <a-card v-for="n in 3" :key="n" :bordered="false" class="drawer-chain-card">
+            <a-skeleton active :title="{ width: '32%' }" :paragraph="{ rows: n === 1 ? 4 : 3 }" />
+          </a-card>
         </div>
 
-        <div v-else-if="chainData" class="chain-sections-container">
-          <!-- 13 维统计指标与锚点导航胶囊行 (常驻展示，支持点击平滑滚动) -->
-          <div class="chain-metric-row">
-            <div
-              v-for="chip in metricChips"
-              :key="chip.id"
-              class="chain-metric-chip"
-              :class="{ 'is-zero': chip.count === 0 }"
-              @click="scrollToSection(chip.id)"
-              :title="assetText('assets.jumpToSection', { section: chip.label })"
-            >
-              <component :is="chip.icon" :style="{ color: chip.color }" class="metric-icon" />
-              <span class="metric-label">{{ chip.label }}</span>
-              <b :class="{ 'zero-num': chip.count === 0 }">{{ chip.count }}</b>
+        <!-- 2. 请求失败或无数据对象时展示统一空状态 -->
+        <div v-else-if="!chainData" class="drawer-empty-box">
+          <ArlEmpty :description="assetText('assets.noRelatedAssetRecordsFoundForThisTarget')">
+            <div class="drawer-empty-subtip">
+              {{ assetText('assets.theTargetMayNotHaveCompletedDetailedDiscovery') }}
             </div>
-          </div>
+          </ArlEmpty>
+        </div>
 
+        <!-- 3. 全部 13 维均无记录且未开启显示空维度时，提供一键展开入口 -->
+        <div v-else-if="totalRecords === 0 && !showEmptySections" class="drawer-empty-box">
+          <ArlEmpty :description="assetText('assets.noRelatedAssetRecordsFoundForThisTarget')">
+            <div class="drawer-empty-subtip">
+              {{ assetText('assets.theTargetMayNotHaveCompletedDetailedDiscovery') }}
+            </div>
+            <div class="drawer-empty-action">
+              <a-button size="small" @click="showEmptySections = true">
+                {{ assetText('assets.viewAllCategories') }}
+              </a-button>
+            </div>
+          </ArlEmpty>
+        </div>
+
+        <!-- 4. 维度详情卡片列表（默认仅渲染有数据的维度） -->
+        <div v-else class="chain-sections-container">
           <!-- 1. 站点基础信息与截图 -->
-          <a-card id="chain-sec-site" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.site?.length)" id="chain-sec-site" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <global-outlined style="color: #1890ff;" />
@@ -91,20 +150,20 @@
                 <div class="drawer-site-meta">
                   <div class="site-title-row">
                     <img v-if="siteItem.favicon && siteItem.favicon.data" :src="`data:image/png;base64,${siteItem.favicon.data}`" class="drawer-favicon" />
-                    <a :href="siteItem.site" target="_blank" class="site-link">{{ siteItem.site }}</a>
+                    <a :href="siteItem.site" target="_blank" rel="noopener noreferrer" class="site-link">{{ siteItem.site }}</a>
                     <a-tag :color="siteItem.status === 200 ? 'success' : (siteItem.status >= 400 ? 'error' : 'default')">
                       HTTP {{ siteItem.status || '-' }}
                     </a-tag>
                   </div>
                   <div class="site-kv-grid">
                     <div class="kv-item"><span class="kv-label">{{ assetText('assets.title') }}</span><span class="kv-value">{{ siteItem.title || '-' }}</span></div>
-                    <div class="kv-item"><span class="kv-label">{{ assetText('tasks.webServer') }}:</span><span class="kv-value">{{ siteItem.http_server || '-' }}</span></div>
-                    <div class="kv-item"><span class="kv-label">IP：</span><span class="kv-value font-mono">{{ siteItem.ip || '-' }}</span></div>
+                    <div class="kv-item"><span class="kv-label">{{ assetText('assets.webServerLabel') }}</span><span class="kv-value">{{ siteItem.http_server || '-' }}</span></div>
+                    <div class="kv-item"><span class="kv-label">{{ assetText('assets.ipLabel') }}</span><span class="kv-value font-mono">{{ siteItem.ip || '-' }}</span></div>
                     <div class="kv-item"><span class="kv-label">{{ assetText('assets.updated') }}</span><span class="kv-value">{{ siteItem.update_date || siteItem.save_date || '-' }}</span></div>
                   </div>
                   <div v-if="siteItem.finger && siteItem.finger.length" class="site-finger-row">
                     <span class="kv-label">{{ assetText('assets.fingerprints') }}</span>
-                    <a-tag v-for="f in siteItem.finger" :key="f.name" color="blue" size="small">{{ f.name }}</a-tag>
+                    <a-tag v-for="(f, fIdx) in siteItem.finger" :key="f.name || f || fIdx" color="blue">{{ f.name || f }}</a-tag>
                   </div>
                 </div>
                 <div v-if="siteItem.screenshot" class="drawer-site-shot">
@@ -115,7 +174,7 @@
           </a-card>
 
           <!-- 2. 子域名与解析记录 -->
-          <a-card id="chain-sec-domain" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.domain_records?.length)" id="chain-sec-domain" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <link-outlined style="color: #52c41a;" />
@@ -128,7 +187,8 @@
               v-else
               :dataSource="chainData.domain_records"
               :columns="domainCols"
-              :pagination="false"
+              :pagination="tablePagination"
+              :scroll="{ x: 'max-content' }"
               size="small"
               :rowKey="(r, i) => i"
             >
@@ -137,7 +197,7 @@
                   <span class="font-mono font-bold">{{ record.domain }}</span>
                 </template>
                 <template v-else-if="column.key === 'ips'">
-                  <div v-if="Array.isArray(record.ips)">
+                  <div v-if="Array.isArray(record.ips)" class="cell-tag-wrap">
                     <span v-for="(ip, idx) in record.ips" :key="idx" class="font-mono font-tag">{{ ip }}</span>
                   </div>
                   <span v-else class="font-mono">{{ record.ips || '-' }}</span>
@@ -147,7 +207,7 @@
           </a-card>
 
           <!-- 3. IP 与网络归属 -->
-          <a-card id="chain-sec-ip" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.ip?.length)" id="chain-sec-ip" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <cloud-server-outlined style="color: #722ed1;" />
@@ -160,7 +220,8 @@
               v-else
               :dataSource="chainData.ip"
               :columns="ipCols"
-              :pagination="false"
+              :pagination="tablePagination"
+              :scroll="{ x: 'max-content' }"
               size="small"
               :rowKey="(r, i) => i"
             >
@@ -177,7 +238,7 @@
                   </a-tag>
                 </template>
                 <template v-else-if="column.key === 'port_info'">
-                  <span>{{ record.port_info && record.port_info.length ? record.port_info.map(p => p.port_id).join(', ') : '-' }}</span>
+                  <span class="font-mono">{{ record.port_info && record.port_info.length ? record.port_info.map(p => p.port_id).join(', ') : '-' }}</span>
                 </template>
                 <template v-else-if="column.key === 'geo'">
                   <span>{{ formatGeo(record.geo_city) }}</span>
@@ -190,7 +251,7 @@
           </a-card>
 
           <!-- 4. SSL 证书 -->
-          <a-card id="chain-sec-cert" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.cert?.length)" id="chain-sec-cert" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <safety-certificate-outlined style="color: #13c2c2;" />
@@ -199,21 +260,24 @@
               </div>
             </template>
             <ArlEmpty v-if="!chainData.cert || chainData.cert.length === 0" compact :description="assetText('assets.noRelatedSslCertificatesFound')" />
-            <div v-else>
+            <div v-else class="drawer-cert-list">
               <div v-for="(certItem, idx) in chainData.cert" :key="idx" class="drawer-cert-item">
                 <div class="cert-host-tag">{{ certItem.ip || certItem.host }}{{ certItem.port ? ':' + certItem.port : '' }}</div>
                 <div v-if="certItem.cert" class="cert-fields">
-                  <div><b>{{ assetText('assets.subject') }}</b>{{ certItem.cert.subject_dn || '-' }}</div>
-                  <div><b>{{ assetText('assets.issuer') }}</b>{{ certItem.cert.issuer_dn || '-' }}</div>
-                  <div v-if="certItem.cert.extensions?.subjectAltName"><b>{{ assetText('assets.subjectAlternativeNamesSan') }}</b>{{ certItem.cert.extensions.subjectAltName }}</div>
-                  <div><b>{{ assetText('assets.validity') }}</b>{{ certItem.cert.validity?.start || '-' }} {{ assetText('tasks.to') }} {{ certItem.cert.validity?.end || '-' }}</div>
+                  <div class="cert-field-row"><b>{{ assetText('assets.subject') }}</b><span>{{ certItem.cert.subject_dn || '-' }}</span></div>
+                  <div class="cert-field-row"><b>{{ assetText('assets.issuer') }}</b><span>{{ certItem.cert.issuer_dn || '-' }}</span></div>
+                  <div v-if="certItem.cert.extensions?.subjectAltName" class="cert-field-row">
+                    <b>{{ assetText('assets.subjectAlternativeNamesSan') }}</b>
+                    <span class="cert-san-value font-mono">{{ certItem.cert.extensions.subjectAltName }}</span>
+                  </div>
+                  <div class="cert-field-row"><b>{{ assetText('assets.validity') }}</b><span>{{ certItem.cert.validity?.start || '-' }} {{ assetText('tasks.to') }} {{ certItem.cert.validity?.end || '-' }}</span></div>
                 </div>
               </div>
             </div>
           </a-card>
 
           <!-- 5. 系统服务 -->
-          <a-card id="chain-sec-service" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.service?.length)" id="chain-sec-service" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <api-outlined style="color: #fa8c16;" />
@@ -234,7 +298,7 @@
           </a-card>
 
           <!-- 6. 文件泄露 -->
-          <a-card id="chain-sec-fileleak" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.fileleak?.length)" id="chain-sec-fileleak" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <file-search-outlined style="color: #faad14;" />
@@ -247,20 +311,21 @@
               v-else
               :dataSource="chainData.fileleak"
               :columns="fileleakCols"
-              :pagination="false"
+              :pagination="tablePagination"
+              :scroll="{ x: 'max-content' }"
               size="small"
               :rowKey="(r, i) => r.url || i"
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'url'">
-                  <a :href="record.url" target="_blank" style="font-family: monospace; word-break: break-all;">{{ record.url }}</a>
+                  <a :href="record.url" target="_blank" rel="noopener noreferrer" class="drawer-break-link font-mono">{{ record.url }}</a>
                 </template>
               </template>
             </a-table>
           </a-card>
 
           <!-- 7. URL 信息 -->
-          <a-card id="chain-sec-url" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.url?.length)" id="chain-sec-url" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <deployment-unit-outlined style="color: #2f54eb;" />
@@ -273,20 +338,21 @@
               v-else
               :dataSource="chainData.url"
               :columns="urlCols"
-              :pagination="false"
+              :pagination="tablePagination"
+              :scroll="{ x: 'max-content' }"
               size="small"
               :rowKey="(r, i) => r.url || i"
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'url'">
-                  <a :href="record.url" target="_blank" style="font-family: monospace; word-break: break-all;">{{ record.url }}</a>
+                  <a :href="record.url" target="_blank" rel="noopener noreferrer" class="drawer-break-link font-mono">{{ record.url }}</a>
                 </template>
               </template>
             </a-table>
           </a-card>
 
           <!-- 8. C 段网段 -->
-          <a-card id="chain-sec-cip" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.cip?.length)" id="chain-sec-cip" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <cluster-outlined style="color: #eb2f96;" />
@@ -299,7 +365,8 @@
               v-else
               :dataSource="chainData.cip"
               :columns="cipCols"
-              :pagination="false"
+              :pagination="tablePagination"
+              :scroll="{ x: 'max-content' }"
               size="small"
               :rowKey="(r, i) => r.cidr_ip || i"
             >
@@ -314,14 +381,14 @@
                   <a-tag color="blue" class="font-mono">{{ assetText('assets.domainCount', { count: record.domain_count ?? (record.domain_list?.length || 0) }) }}</a-tag>
                 </template>
                 <template v-else-if="column.key === 'update_date'">
-                  <span style="font-size: 12px; color: var(--arl-text-secondary);">{{ record.update_date || record.save_date || '-' }}</span>
+                  <span class="drawer-muted-time">{{ record.update_date || record.save_date || '-' }}</span>
                 </template>
               </template>
             </a-table>
           </a-card>
 
           <!-- 9. 指纹统计 -->
-          <a-card id="chain-sec-stat-finger" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(statFingerList.length)" id="chain-sec-stat-finger" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <tag-outlined style="color: #1d39c4;" />
@@ -334,7 +401,8 @@
               v-else
               :dataSource="statFingerList"
               :columns="fingerCols"
-              :pagination="false"
+              :pagination="tablePagination"
+              :scroll="{ x: 'max-content' }"
               size="small"
               :rowKey="(r, i) => r.finger_name || i"
             >
@@ -350,7 +418,7 @@
           </a-card>
 
           <!-- 10. WIH 敏感信息 -->
-          <a-card id="chain-sec-wih" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.wih?.length)" id="chain-sec-wih" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <radar-chart-outlined style="color: #fa8c16;" />
@@ -363,18 +431,19 @@
               v-else
               :dataSource="chainData.wih"
               :columns="wihCols"
-              :pagination="false"
+              :pagination="tablePagination"
+              :scroll="{ x: 'max-content' }"
               size="small"
               :rowKey="(r, i) => r._id || i"
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'content'">
-                  <span style="font-family: monospace; word-break: break-all; color: #fa8c16; font-weight: 500;">
+                  <span class="wih-content-text font-mono">
                     {{ record.content }}
                   </span>
                 </template>
                 <template v-else-if="column.key === 'source'">
-                  <a v-if="record.source || record.site" :href="record.source || record.site" target="_blank" style="font-family: monospace; word-break: break-all;">
+                  <a v-if="record.source || record.site" :href="record.source || record.site" target="_blank" rel="noopener noreferrer" class="drawer-break-link font-mono">
                     {{ record.source || record.site }}
                   </a>
                   <span v-else>-</span>
@@ -384,7 +453,7 @@
           </a-card>
 
           <!-- 11. 应用风险漏洞 -->
-          <a-card id="chain-sec-vuln" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.vuln?.length)" id="chain-sec-vuln" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <bug-outlined style="color: #f5222d;" />
@@ -405,7 +474,7 @@
           </a-card>
 
           <!-- 12. 服务 (Python NPOC) -->
-          <a-card id="chain-sec-npoc" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.npoc_service?.length)" id="chain-sec-npoc" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <code-outlined style="color: #722ed1;" />
@@ -418,7 +487,8 @@
               v-else
               :dataSource="chainData.npoc_service"
               :columns="npocCols"
-              :pagination="false"
+              :pagination="tablePagination"
+              :scroll="{ x: 'max-content' }"
               size="small"
               :rowKey="(r, i) => r._id || i"
             >
@@ -427,14 +497,14 @@
                   <a-tag color="purple">{{ record.scheme || '-' }}</a-tag>
                 </template>
                 <template v-else-if="column.key === 'target'">
-                  <span class="font-mono">{{ record.target || '-' }}</span>
+                  <span class="font-mono drawer-break-link">{{ record.target || '-' }}</span>
                 </template>
               </template>
             </a-table>
           </a-card>
 
           <!-- 13. Nuclei 扫描发现 -->
-          <a-card id="chain-sec-nuclei" :bordered="false" class="drawer-chain-card">
+          <a-card v-if="shouldShowSection(chainData.nuclei_result?.length)" id="chain-sec-nuclei" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <fire-outlined style="color: #fa541c;" />
@@ -444,11 +514,16 @@
             </template>
             <ArlEmpty v-if="!chainData.nuclei_result || chainData.nuclei_result.length === 0" compact :description="assetText('assets.noNucleiVulnerabilitySignaturesMatched')" />
             <div v-else class="drawer-vuln-list">
-              <div v-for="(n, idx) in chainData.nuclei_result" :key="'n-'+idx" class="vuln-item-card">
+              <div
+                v-for="(n, idx) in chainData.nuclei_result"
+                :key="'n-'+idx"
+                class="vuln-item-card"
+                :style="{ borderLeftColor: getSeverityColor(n.vuln_severity || n.vul_severity) }"
+              >
                 <div class="vuln-header">
                   <a-tag color="volcano">Nuclei</a-tag>
                   <span class="vuln-name">{{ n.vuln_name || n.template_id }}</span>
-                  <a-tag size="small" :color="getSeverityColor(n.vuln_severity || n.vul_severity)">
+                  <a-tag :color="getSeverityColor(n.vuln_severity || n.vul_severity)">
                     {{ (n.vuln_severity || n.vul_severity || 'HIGH').toUpperCase() }}
                   </a-tag>
                 </div>
@@ -456,32 +531,31 @@
               </div>
             </div>
           </a-card>
-
         </div>
-      </a-spin>
-    </div>
+      </div>
     </div>
 
-    <!-- 右下角悬浮回到顶端按钮 (大号圆形科技质感悬浮球) -->
+    <!-- 右下角悬浮回到顶端按钮 -->
     <transition name="fade">
-      <div
-        v-if="showBackTop"
-        class="chain-back-top-btn"
-        @click="scrollToTop"
-      >
-        <a-tooltip :title="assetText('assets.backToTop')" placement="left">
-          <div class="back-top-circle">
+      <a-tooltip v-if="showBackTop" :title="assetText('assets.backToTop')" placement="left">
+        <button
+          type="button"
+          class="chain-back-top-btn"
+          :aria-label="assetText('assets.backToTop')"
+          @click="scrollToTop"
+        >
+          <span class="back-top-circle">
             <vertical-align-top-outlined class="back-top-icon" />
-          </div>
-        </a-tooltip>
-      </div>
+          </span>
+        </button>
+      </a-tooltip>
     </transition>
   </a-drawer>
 </template>
 
 <script setup>
 import { useI18n } from 'vue-i18n';
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { message } from 'ant-design-vue';
 import dayjs from 'dayjs';
 import {
@@ -531,11 +605,105 @@ const emit = defineEmits(['update:open', 'close']);
 const loading = ref(false);
 const chainData = ref(null);
 const scrollContainerRef = ref(null);
+const navRailRef = ref(null);
 const showBackTop = ref(false);
+const showEmptySections = ref(false);
+const activeSectionId = ref('');
+const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1280);
+
+const chipRefs = new Map();
+let programmaticScrollTimer = null;
+let isProgrammaticScroll = false;
+let fetchSeq = 0;
+
+const drawerBodyStyle = {
+  padding: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  height: '100%',
+  overflow: 'hidden',
+  background: 'var(--arl-bg-layout)',
+  position: 'relative'
+};
+
+const tablePagination = {
+  defaultPageSize: 10,
+  hideOnSinglePage: true,
+  showSizeChanger: false,
+  size: 'small'
+};
+
+const handleWindowResize = () => {
+  viewportWidth.value = window.innerWidth;
+};
+
+onMounted(() => {
+  window.addEventListener('resize', handleWindowResize, { passive: true });
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleWindowResize);
+  if (programmaticScrollTimer) {
+    clearTimeout(programmaticScrollTimer);
+    programmaticScrollTimer = null;
+  }
+  chipRefs.clear();
+});
+
+const drawerWidth = computed(() => {
+  return viewportWidth.value > 1400 ? '900px' : (viewportWidth.value > 992 ? '800px' : '94vw');
+});
+
+const setChipRef = (id, el) => {
+  if (el) {
+    chipRefs.set(id, el);
+  } else {
+    chipRefs.delete(id);
+  }
+};
+
+const syncActiveChipIntoView = (secId) => {
+  const chipEl = chipRefs.get(secId);
+  if (chipEl && typeof chipEl.scrollIntoView === 'function') {
+    chipEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }
+};
+
+const updateActiveSectionFromScroll = () => {
+  const container = scrollContainerRef.value;
+  const chips = visibleNavChips.value;
+  if (!container || chips.length === 0) return;
+
+  const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 12;
+  if (atBottom) {
+    const lastId = chips[chips.length - 1].id;
+    if (activeSectionId.value !== lastId) {
+      activeSectionId.value = lastId;
+      syncActiveChipIntoView(lastId);
+    }
+    return;
+  }
+
+  const thresholdTop = container.getBoundingClientRect().top + 28;
+  let currentId = chips[0].id;
+  for (const chip of chips) {
+    const el = document.getElementById(chip.id);
+    if (el && el.getBoundingClientRect().top <= thresholdTop) {
+      currentId = chip.id;
+    }
+  }
+  if (activeSectionId.value !== currentId) {
+    activeSectionId.value = currentId;
+    syncActiveChipIntoView(currentId);
+  }
+};
 
 const handleScroll = (e) => {
   const scrollTop = e?.target?.scrollTop ?? 0;
   showBackTop.value = scrollTop > 200;
+  if (!isProgrammaticScroll) {
+    updateActiveSectionFromScroll();
+  }
 };
 
 const scrollToTop = () => {
@@ -546,10 +714,6 @@ const scrollToTop = () => {
     });
   }
 };
-
-const drawerWidth = computed(() => {
-  return window.innerWidth > 1400 ? '900px' : (window.innerWidth > 992 ? '800px' : '92vw');
-});
 
 const domainCols = [
   { get title() { return assetText('tasks.subdomains'); }, dataIndex: 'domain', key: 'domain' },
@@ -623,7 +787,7 @@ const statFingerList = computed(() => {
     .sort((a, b) => b.cnt - a.cnt);
 });
 
-// 13 维统计指标与锚点导航胶囊列表
+// 13 维统计指标与锚点导航列表
 const metricChips = computed(() => {
   if (!chainData.value) return [];
   const d = chainData.value;
@@ -644,12 +808,51 @@ const metricChips = computed(() => {
   ];
 });
 
-// 平滑滚动定位到指定资产卡片
+const visibleNavChips = computed(() => {
+  return showEmptySections.value
+    ? metricChips.value
+    : metricChips.value.filter((chip) => chip.count > 0);
+});
+
+const hitCategoryCount = computed(() => metricChips.value.filter((c) => c.count > 0).length);
+const emptyCategoryCount = computed(() => metricChips.value.length - hitCategoryCount.value);
+const totalRecords = computed(() => metricChips.value.reduce((sum, c) => sum + c.count, 0));
+
+const shouldShowSection = (count) => showEmptySections.value || (count || 0) > 0;
+
+watch(visibleNavChips, (chips) => {
+  nextTick(() => {
+    if (!chips.length) {
+      activeSectionId.value = '';
+      return;
+    }
+    if (!chips.some((chip) => chip.id === activeSectionId.value)) {
+      activeSectionId.value = chips[0].id;
+    }
+  });
+});
+
+// 平滑滚动定位到独立滚动容器内的目标资产卡片
 const scrollToSection = (secId) => {
+  const container = scrollContainerRef.value;
   const el = document.getElementById(secId);
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (!container || !el) return;
+
+  activeSectionId.value = secId;
+  syncActiveChipIntoView(secId);
+
+  isProgrammaticScroll = true;
+  if (programmaticScrollTimer) {
+    clearTimeout(programmaticScrollTimer);
   }
+  programmaticScrollTimer = setTimeout(() => {
+    isProgrammaticScroll = false;
+    programmaticScrollTimer = null;
+  }, 480);
+
+  const delta = el.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  const targetTop = Math.max(0, container.scrollTop + delta - 16);
+  container.scrollTo({ top: targetTop, behavior: 'smooth' });
 };
 
 const getBadgeStyle = (cnt, activeColor) => {
@@ -670,6 +873,7 @@ const getSeverityColor = (sev) => {
 
 const fetchChainData = async () => {
   if (!props.target || !props.scopeId) return;
+  const currentSeq = ++fetchSeq;
   loading.value = true;
   chainData.value = null;
   try {
@@ -679,37 +883,60 @@ const fetchChainData = async () => {
         domain: props.target.trim()
       }
     });
+    if (currentSeq !== fetchSeq) return;
     if (res.code === 200) {
       chainData.value = res.data || {};
     } else {
       message.error(res.message || assetText('assets.failedToLoadAssetProfile'));
     }
   } catch (e) {
-    message.error(assetText('tasks.networkRequestFailed'));
+    if (currentSeq === fetchSeq) {
+      message.error(assetText('tasks.networkRequestFailed'));
+    }
   } finally {
-    loading.value = false;
+    if (currentSeq === fetchSeq) {
+      loading.value = false;
+    }
   }
 };
 
-watch(() => props.open, (isOpen) => {
-  if (isOpen) {
-    showBackTop.value = false;
-    nextTick(() => {
-      if (scrollContainerRef.value) {
-        scrollContainerRef.value.scrollTop = 0;
+watch(
+  () => [props.open, props.target],
+  ([isOpen, newTarget], prev) => {
+    const prevOpen = prev?.[0];
+    const prevTarget = prev?.[1];
+    if (!isOpen) {
+      showEmptySections.value = false;
+      activeSectionId.value = '';
+      showBackTop.value = false;
+      if (programmaticScrollTimer) {
+        clearTimeout(programmaticScrollTimer);
+        programmaticScrollTimer = null;
+        isProgrammaticScroll = false;
       }
-    });
-    if (props.target) {
-      fetchChainData();
+      fetchSeq += 1;
+      return;
     }
-  }
-});
 
-watch(() => props.target, (newTarget) => {
-  if (props.open && newTarget) {
-    fetchChainData();
-  }
-});
+    if (!prevOpen || newTarget !== prevTarget) {
+      showBackTop.value = false;
+      activeSectionId.value = '';
+      nextTick(() => {
+        if (scrollContainerRef.value) {
+          scrollContainerRef.value.scrollTop = 0;
+        }
+      });
+      if (newTarget) {
+        fetchChainData();
+      } else {
+        fetchSeq += 1;
+        chainData.value = null;
+        loading.value = false;
+      }
+    }
+  },
+  { immediate: true }
+);
 
 const handleClose = () => {
   emit('update:open', false);
@@ -731,8 +958,8 @@ const downloadChainJson = () => {
     const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
     const blobUrl = URL.createObjectURL(blob);
     const downloadAnchor = document.createElement('a');
-    const targetLabel = props.target || 'target';
-    const filename = `arl_chain_${targetLabel}_${dayjs().format('YYYYMMDD_HHmmss')}.json`;
+    const safeTarget = String(props.target || 'target').replace(/[/:\\?*"<>|]+/g, '_');
+    const filename = `arl_chain_${safeTarget}_${dayjs().format('YYYYMMDD_HHmmss')}.json`;
     downloadAnchor.href = blobUrl;
     downloadAnchor.download = filename;
     document.body.appendChild(downloadAnchor);
@@ -752,28 +979,32 @@ const downloadChainJson = () => {
   background: var(--arl-bg-layout);
   height: 100%;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
   position: relative;
 }
 
-.chain-drawer-scroll-wrapper {
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
+.chain-drawer-sticky-top {
+  flex-shrink: 0;
+  background: var(--arl-bg-card);
+  border-bottom: 1px solid var(--arl-border-color);
+  z-index: 10;
 }
 
 .chain-drawer-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 20px;
-  background: var(--arl-bg-white);
-  border-bottom: 1px solid var(--arl-border-color);
+  gap: 12px;
+  padding: 14px 20px;
 }
 
 .drawer-header-left {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  flex: 1;
 }
 
 .drawer-header-badge {
@@ -781,128 +1012,298 @@ const downloadChainJson = () => {
   height: 36px;
   border-radius: 8px;
   background: var(--arl-theme-soft-bg);
+  border: 1px solid var(--arl-theme-soft-border);
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .drawer-compass-icon {
-  font-size: 20px;
+  font-size: 19px;
   color: var(--arl-theme-color);
 }
 
+.drawer-header-titles {
+  min-width: 0;
+  flex: 1;
+}
+
 .drawer-title-text {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--arl-text-color);
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.drawer-title-main {
+  flex-shrink: 0;
 }
 
 .drawer-target-tag {
-  font-family: monospace;
-  font-size: 13px;
+  font-family: var(--arl-font-mono);
+  font-size: 12px;
   border-radius: 4px;
+  margin-inline-end: 0;
+  max-width: min(360px, 100%);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
 
 .drawer-subtitle-text {
   font-size: 12px;
   color: var(--arl-text-secondary);
   margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .drawer-header-right {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
-.chain-drawer-body {
-  padding: 20px;
+.drawer-close-btn {
+  color: var(--arl-text-secondary);
 }
 
-.drawer-empty-box {
-  background: var(--arl-bg-white);
-  border-radius: 8px;
-  padding: 80px 24px;
-  text-align: center;
-  border: 1px dashed var(--arl-border-color);
+.chain-empty-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--arl-border-color);
+  background: var(--arl-bg-subtle);
+  font-size: 12px;
+  color: var(--arl-text-secondary);
+  user-select: none;
+  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
 
-.chain-sections-container {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.chain-empty-toggle.is-active {
+  border-color: var(--arl-theme-soft-border);
+  background: var(--arl-theme-soft-bg);
+  color: var(--arl-theme-color);
+}
+
+.chain-empty-toggle-label {
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chain-empty-count {
+  cursor: pointer;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--arl-bg-hover);
+  color: var(--arl-text-secondary);
+  font-family: var(--arl-font-mono);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.chain-nav-bar {
+  border-top: 1px solid var(--arl-border-color);
+  padding: 8px 20px;
+  background: var(--arl-bg-subcard);
 }
 
 .chain-metric-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 4px;
-  padding: 4px 0 8px 0;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+
+.chain-metric-row::-webkit-scrollbar {
+  height: 4px;
+}
+
+.chain-metric-row::-webkit-scrollbar-thumb {
+  background: var(--arl-border-color);
+  border-radius: 999px;
 }
 
 .chain-metric-chip {
-  background: var(--arl-bg-white);
+  appearance: none;
+  font-family: inherit;
+  background: var(--arl-bg-card);
   border: 1px solid var(--arl-border-color);
-  padding: 5px 10px;
-  border-radius: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
   font-size: 12px;
-  display: flex;
+  line-height: 18px;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   color: var(--arl-text-color);
   cursor: pointer;
   user-select: none;
-  transition: all 0.2s ease;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: all 0.18s ease;
 }
 
 .chain-metric-chip:hover {
   border-color: var(--arl-theme-color);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  color: var(--arl-theme-color);
+}
+
+.chain-metric-chip:focus-visible {
+  outline: 2px solid var(--arl-theme-color);
+  outline-offset: 1px;
+}
+
+.chain-metric-chip.is-active {
+  border-color: var(--arl-theme-color);
+  background: var(--arl-theme-soft-bg);
+  color: var(--arl-theme-color);
+  font-weight: 500;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--arl-theme-color) 16%, transparent);
 }
 
 .chain-metric-chip.is-zero {
-  opacity: 0.6;
-  background: rgba(0, 0, 0, 0.02);
+  opacity: 0.62;
+  background: var(--arl-bg-subtle);
 }
 
-.chain-metric-chip.is-zero:hover {
+.chain-metric-chip.is-zero:hover,
+.chain-metric-chip.is-zero.is-active {
   opacity: 1;
 }
 
 .chain-metric-chip b {
-  color: var(--arl-primary-color);
-  font-family: monospace;
+  color: var(--arl-theme-color);
+  font-family: var(--arl-font-mono);
 }
 
 .chain-metric-chip b.zero-num {
   color: var(--arl-text-secondary);
 }
 
-.drawer-chain-card {
-  border-radius: 8px;
-  background: var(--arl-bg-white);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  scroll-margin-top: 16px;
+.chain-drawer-scroll-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
-/* 回到顶端悬浮按钮 (48px 科技质感圆形悬浮球) */
+.chain-drawer-body {
+  padding: 16px 20px 32px;
+}
+
+.chain-skeleton-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.chain-skeleton-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chain-skeleton-pill {
+  display: inline-block;
+  width: 92px;
+  height: 28px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--arl-bg-subtle) 25%, var(--arl-bg-hover) 50%, var(--arl-bg-subtle) 75%);
+  background-size: 200% 100%;
+  animation: chain-shimmer 1.4s ease infinite;
+}
+
+@keyframes chain-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.drawer-empty-box {
+  background: var(--arl-bg-card);
+  border-radius: 8px;
+  padding: 64px 24px;
+  text-align: center;
+  border: 1px dashed var(--arl-border-color);
+}
+
+.drawer-empty-subtip {
+  margin-top: 8px;
+  color: var(--arl-text-secondary);
+  font-size: 13px;
+}
+
+.drawer-empty-action {
+  margin-top: 16px;
+}
+
+.chain-sections-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.drawer-chain-card {
+  border-radius: 8px;
+  background: var(--arl-bg-card);
+  border: 1px solid var(--arl-border-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.drawer-chain-card :deep(.ant-card-head) {
+  min-height: 44px;
+  padding: 0 16px;
+  border-bottom-color: var(--arl-border-color);
+}
+
+.drawer-chain-card :deep(.ant-card-body) {
+  padding: 14px 16px;
+}
+
+/* 回到顶端悬浮按钮 */
 .chain-back-top-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
   position: absolute;
-  right: 28px;
-  bottom: 32px;
-  z-index: 100;
+  right: 24px;
+  bottom: 24px;
+  z-index: 20;
   cursor: pointer;
   user-select: none;
 }
 
+.chain-back-top-btn:focus-visible {
+  outline: none;
+}
+
+.chain-back-top-btn:focus-visible .back-top-circle {
+  box-shadow: 0 0 0 3px var(--arl-theme-soft-bg), 0 6px 18px color-mix(in srgb, var(--arl-theme-color) 38%, transparent);
+}
+
 .back-top-circle {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   background: linear-gradient(135deg, color-mix(in srgb, var(--arl-theme-color) 78%, #ffffff) 0%, var(--arl-theme-color) 55%, color-mix(in srgb, var(--arl-theme-color) 80%, #000000) 100%);
   color: #ffffff;
@@ -911,20 +1312,19 @@ const downloadChainJson = () => {
   justify-content: center;
   box-shadow: 0 6px 18px color-mix(in srgb, var(--arl-theme-color) 38%, transparent), 0 2px 6px rgba(0, 0, 0, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.3);
-  transition: all 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   backdrop-filter: blur(4px);
 }
 
 .back-top-icon {
-  font-size: 22px;
+  font-size: 20px;
   line-height: 1;
-  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .chain-back-top-btn:hover .back-top-circle {
-  transform: translateY(-4px) scale(1.08);
+  transform: translateY(-3px) scale(1.06);
   box-shadow: 0 10px 24px color-mix(in srgb, var(--arl-theme-color) 50%, transparent), 0 4px 10px rgba(0, 0, 0, 0.15);
-  background: linear-gradient(135deg, color-mix(in srgb, var(--arl-theme-color) 65%, #ffffff) 0%, var(--arl-theme-color) 50%, color-mix(in srgb, var(--arl-theme-color) 75%, #000000) 100%);
 }
 
 .chain-back-top-btn:hover .back-top-icon {
@@ -933,18 +1333,17 @@ const downloadChainJson = () => {
 
 .chain-back-top-btn:active .back-top-circle {
   transform: translateY(-1px) scale(0.96);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--arl-theme-color) 30%, transparent);
 }
 
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.22s cubic-bezier(0.4, 0, 0.2, 1), transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
-  transform: translateY(16px) scale(0.8);
+  transform: translateY(12px) scale(0.85);
 }
 
 .drawer-card-title {
@@ -953,6 +1352,7 @@ const downloadChainJson = () => {
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
+  color: var(--arl-text-color);
 }
 
 .drawer-site-list {
@@ -964,20 +1364,23 @@ const downloadChainJson = () => {
 .drawer-site-item {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 16px;
   padding: 12px;
   border-radius: 6px;
-  background: var(--arl-bg-light);
+  background: var(--arl-bg-subcard);
   border: 1px solid var(--arl-border-color);
 }
 
 .drawer-site-meta {
   flex: 1;
+  min-width: 0;
 }
 
 .site-title-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -985,6 +1388,7 @@ const downloadChainJson = () => {
 .drawer-favicon {
   width: 16px;
   height: 16px;
+  flex-shrink: 0;
 }
 
 .site-link {
@@ -996,23 +1400,27 @@ const downloadChainJson = () => {
 
 .site-kv-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
   font-size: 12px;
 }
 
 .kv-item {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 4px;
+  min-width: 0;
 }
 
 .kv-label {
   color: var(--arl-text-secondary);
+  flex-shrink: 0;
 }
 
 .kv-value {
   color: var(--arl-text-color);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .site-finger-row {
@@ -1021,6 +1429,10 @@ const downloadChainJson = () => {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+}
+
+.drawer-site-shot {
+  flex-shrink: 0;
 }
 
 .drawer-site-shot :deep(img) {
@@ -1032,54 +1444,100 @@ const downloadChainJson = () => {
 }
 
 .font-mono {
-  font-family: monospace;
+  font-family: var(--arl-font-mono);
 }
 
 .font-bold {
   font-weight: 600;
 }
 
+.cell-tag-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 .font-tag {
   display: inline-block;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--arl-bg-hover);
+  color: var(--arl-text-color);
   padding: 2px 6px;
   border-radius: 4px;
-  margin-right: 4px;
-  margin-bottom: 2px;
+  font-size: 12px;
+}
+
+.drawer-break-link {
+  word-break: break-all;
+}
+
+.drawer-muted-time {
+  font-size: 12px;
+  color: var(--arl-text-secondary);
+}
+
+.wih-content-text {
+  word-break: break-all;
+  color: #fa8c16;
+  font-weight: 500;
+}
+
+.drawer-cert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .drawer-cert-item {
-  padding: 10px;
-  background: var(--arl-bg-light);
+  padding: 10px 12px;
+  background: var(--arl-bg-subcard);
   border-radius: 6px;
   border: 1px solid var(--arl-border-color);
-  margin-bottom: 8px;
 }
 
 .cert-host-tag {
   font-weight: 600;
-  font-family: monospace;
+  font-family: var(--arl-font-mono);
   color: var(--arl-theme-color);
   margin-bottom: 6px;
 }
 
 .cert-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   font-size: 12px;
   line-height: 1.6;
   color: var(--arl-text-color);
 }
 
+.cert-field-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+.cert-san-value {
+  display: block;
+  max-height: 96px;
+  overflow-y: auto;
+  word-break: break-all;
+  color: var(--arl-text-secondary);
+}
+
 .drawer-services-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 8px;
 }
 
 .service-pill {
-  padding: 8px;
-  background: var(--arl-bg-light);
+  padding: 8px 10px;
+  background: var(--arl-bg-subcard);
   border-radius: 6px;
   border: 1px solid var(--arl-border-color);
+  min-width: 0;
 }
 
 .service-name-tag {
@@ -1093,11 +1551,15 @@ const downloadChainJson = () => {
   font-size: 11px;
   display: flex;
   justify-content: space-between;
-  gap: 4px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .service-product {
   color: var(--arl-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drawer-vuln-list {
@@ -1107,8 +1569,9 @@ const downloadChainJson = () => {
 }
 
 .vuln-item-card {
-  padding: 8px 12px;
-  background: var(--arl-bg-light);
+  padding: 10px 12px;
+  background: var(--arl-bg-subcard);
+  border: 1px solid var(--arl-border-color);
   border-radius: 6px;
   border-left: 3px solid #f5222d;
 }
@@ -1116,6 +1579,7 @@ const downloadChainJson = () => {
 .vuln-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 4px;
 }
@@ -1124,10 +1588,47 @@ const downloadChainJson = () => {
   font-weight: 600;
   font-size: 13px;
   color: var(--arl-text-color);
+  overflow-wrap: anywhere;
 }
 
 .vuln-target {
   font-size: 12px;
   color: var(--arl-text-secondary);
+  word-break: break-all;
+}
+
+@media (max-width: 720px) {
+  .chain-drawer-header {
+    flex-wrap: wrap;
+    padding: 12px 16px;
+  }
+
+  .drawer-header-right {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .chain-nav-bar {
+    padding: 8px 16px;
+  }
+
+  .chain-drawer-body {
+    padding: 12px 16px 28px;
+  }
+
+  .drawer-site-item {
+    flex-direction: column;
+  }
+
+  .site-kv-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .drawer-site-shot :deep(img) {
+    width: 100%;
+    max-width: 240px;
+    height: auto;
+  }
 }
 </style>
