@@ -137,6 +137,7 @@ def create_index():
         "wih": [("task_id", 1), ("site", 1), ("fnv_hash", 1)],
         "asset_wih": [("scope_id", 1), ("site", 1), ("fnv_hash", 1)],
         "poc": [("plugin_name", 1)],
+        "fingerprint": [("name", 1)],
         "fingerprint_deleted": [("name", 1)],
         "asset_group": [("name", 1)],
         "nuclei_template": [("template_id", 1)],
@@ -675,7 +676,12 @@ def fingerprint_info_update():
     import json
     import logging
     from app.config import Config
-    from app.services.fingerprint_cache import finger_db_cache
+    from app.services.fingerprint_cache import (
+        finger_db_cache,
+        is_fingerprint_initialized,
+        mark_fingerprint_initialized,
+        bump_fingerprint_cache_version,
+    )
     from pymongo import UpdateOne
     from app.utils import curr_date_obj
 
@@ -697,15 +703,26 @@ def fingerprint_info_update():
     except Exception:
         pass
 
-    # 1. 若表完全为空，直接触发底层 auto_seed 初始全量灌入
-    if db.count_documents({}) == 0:
+    has_fingerprints = db.find_one({}, {"_id": 1}) is not None
+    has_deleted = conn_db('fingerprint_deleted').find_one({}, {"_id": 1}) is not None
+
+    # 1. 若表完全为空：仅首次初始化且无删除记录时执行全量灌入；用户主动删空后不再复活
+    if not has_fingerprints:
+        if is_fingerprint_initialized() or has_deleted:
+            mark_fingerprint_initialized()
+            logger.info("Fingerprint collection is empty by user deletion; skipping auto-seed.")
+            return
         finger_db_cache._auto_seed_if_empty()
+        bump_fingerprint_cache_version()
         return
+
+    # 存量非空库升级时补齐初始化标记，确保后续被删空也不再重灌
+    mark_fingerprint_initialized()
 
     # 2. 存量环境执行增量自动补齐与核心系统指纹加固
     try:
         # 清理已废弃/合并的存量冗余规则（如 etcd-io 归并至 etcd）
-        db.delete_one({"name": "etcd-io"})
+        del_res = db.delete_one({"name": "etcd-io"})
 
         # 用户在 UI 主动删除的内置指纹黑名单：删除后不因增量同步自动复活
         # （由 /fingerprint/delete/ 写入，重新添加/全量重灌时清除）
@@ -754,6 +771,9 @@ def fingerprint_info_update():
         if operations:
             db.bulk_write(operations, ordered=False)
             logger.info(f"Smoothly synced {len(operations)} fingerprint rules (new: {len(missing_rules)}) to MongoDB.")
+
+        if operations or getattr(del_res, "deleted_count", 0) > 0:
+            bump_fingerprint_cache_version()
             finger_db_cache.update_cache(force=True)
     except Exception as e:
         logger.error(f"Failed to smoothly sync fingerprints: {e}")

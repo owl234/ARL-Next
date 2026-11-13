@@ -68,9 +68,9 @@
             :ok-text="pageText('assets.confirm')"
             :cancel-text="pageText('tasks.cancel')"
             @confirm="handleBatchDelete"
-            :disabled="!hasSelected"
+            :disabled="!hasSelected || deleteLoading"
           >
-            <a-button danger size="small" :disabled="!hasSelected">
+            <a-button danger size="small" :disabled="!hasSelected || deleteLoading" :loading="deleteLoading">
               <template #icon><delete-outlined /></template>
               {{ pageText('tasks.deleteSelected') }}
             </a-button>
@@ -82,7 +82,7 @@
     <!-- 表格：统一小尺寸 -->
     <a-table
       :sticky="stickyConfig"
-      :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange, preserveSelectedRowKeys: true }"
+      :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange }"
       :loading="loading"
       :dataSource="dataSource"
       :columns="columns"
@@ -180,6 +180,7 @@ watch(globalPageSize, (newSize) => {
 
 // 表格多选逻辑
 const selectedRowKeys = ref([]);
+const deleteLoading = ref(false);
 const hasSelected = computed(() => selectedRowKeys.value.length > 0);
 const onSelectChange = (keys) => { selectedRowKeys.value = keys; };
 
@@ -197,11 +198,11 @@ const fetchData = async () => {
     const params = {
       page: pagination.current,
       size: pagination.pageSize,
-      order_name: 'update_date' // 默认排序
+      order: '-update_date,-_id' // 稳定分页排序，避免同秒 update_date 翻页抖动
     };
 
     if (searchForm.name) params.name = searchForm.name;
-    if (searchForm.rule) params.rule = searchForm.rule; // 新增：根据规则搜索
+    if (searchForm.rule) params.human_rule = searchForm.rule; // 对齐后端 human_rule 规则模糊查询
 
     const res = await request.get('/fingerprint/', { params });
     if (res.code === 200) {
@@ -271,8 +272,9 @@ const submitAdd = async () => {
 };
 // ================= 批量删除逻辑 =================
 const handleBatchDelete = async () => {
-  if (selectedRowKeys.value.length === 0) return;
+  if (selectedRowKeys.value.length === 0 || deleteLoading.value) return;
 
+  deleteLoading.value = true;
   try {
     // 🚨 核心对齐：指纹管理的删除参数名叫 _id，且必须是数组
     const payload = {
@@ -291,12 +293,14 @@ const handleBatchDelete = async () => {
 
       // 清空选中项并刷新列表
       selectedRowKeys.value = [];
-      fetchData();
+      await fetchData();
     } else {
       message.error(pageText('tasks.deletionFailed') + res.message);
     }
   } catch (error) {
     message.error(pageText('pages.requestFailedSelectedRecordsWereNotDeleted'));
+  } finally {
+    deleteLoading.value = false;
   }
 };
 // ================= 指纹导出逻辑 =================

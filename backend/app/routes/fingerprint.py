@@ -18,6 +18,8 @@ logger = get_logger()
 
 base_search_fields = {
     'name': fields.String(required=False, description="名称"),
+    'human_rule': fields.String(required=False, description="规则"),
+    'rule': fields.String(required=False, description="规则（兼容别名）"),
     "update_date__dgt": fields.String(description="更新时间大于"),
     "update_date__dlt": fields.String(description="更新时间小于")
 }
@@ -31,9 +33,44 @@ add_fingerprint_fields = ns.model('addFingerSite', {
 })
 
 
+def _record_deleted_fingerprint_names(names: list):
+    """
+    将待删除指纹名称写入 fingerprint_deleted 黑名单。
+    采用 Fail-Closed 策略：写入失败且回查未落库时抛出异常，阻断后续删库以避免重启复活。
+    """
+    if not names:
+        return
+    from pymongo import UpdateOne
+    from pymongo.errors import BulkWriteError, DuplicateKeyError
+
+    ops = [
+        UpdateOne({"name": name}, {"$setOnInsert": {"name": name}}, upsert=True)
+        for name in names
+    ]
+    needs_verify = False
+    try:
+        write_res = utils.conn_db('fingerprint_deleted').bulk_write(ops, ordered=False)
+        if write_res is not None and getattr(write_res, 'acknowledged', True) is False:
+            needs_verify = True
+    except (BulkWriteError, DuplicateKeyError):
+        needs_verify = True
+
+    if needs_verify:
+        recorded = set(
+            utils.conn_db('fingerprint_deleted').distinct('name', {'name': {'$in': names}})
+        )
+        missing = [name for name in names if name not in recorded]
+        if missing:
+            raise RuntimeError(f"fingerprint_deleted 写入未完整确认，缺失 {len(missing)} 条黑名单记录")
+
+
 @ns.route('/')
 class ARLFingerprint(ARLResource):
     parser = get_arl_parser(base_search_fields, location='args')
+    query_field_map = {
+        **ARLResource.query_field_map,
+        "rule": "human_rule",
+    }
 
     @auth
     @ns.expect(parser)
@@ -79,6 +116,13 @@ class ARLFingerprint(ARLResource):
         # 用户主动重新添加同名指纹 = 恢复该内置指纹，清除删除标记以便后续自动加固
         utils.conn_db('fingerprint_deleted').delete_one({"name": name})
 
+        try:
+            from app.services.fingerprint_cache import finger_db_cache, mark_fingerprint_initialized
+            mark_fingerprint_initialized()
+            finger_db_cache.invalidate_cache(bump_version=True)
+        except Exception as e:
+            logger.warning(f"Failed to invalidate fingerprint cache after add: {e}")
+
         finger_id = str(data.pop('_id'))
 
         data.pop('update_date')
@@ -105,38 +149,37 @@ class DeleteARLFinger(ARLResource):
         # 批量记录指纹名称到 fingerprint_deleted 黑名单，
         # 避免内置指纹在下次启动的增量同步中被自动复活，并原子化批量删除
         valid_oids = []
-        for _id in id_list:
+        for _id in (id_list or []):
             try:
                 valid_oids.append(ObjectId(_id))
             except Exception:
                 continue
 
         if valid_oids:
-            # 1. 批量查询待删除指纹名称
+            # 1. 批量查询待删除指纹名称并去重
             docs = list(utils.conn_db('fingerprint').find({'_id': {'$in': valid_oids}}, {"name": 1}))
-            names = [d["name"] for d in docs if d.get("name")]
+            names = list(dict.fromkeys(d["name"] for d in docs if d.get("name")))
 
-            # 2. 批量记录删除标记，规避 N 次网络往返
-            if names:
-                from pymongo import UpdateOne
-                ops = [
-                    UpdateOne({"name": name}, {"$setOnInsert": {"name": name}}, upsert=True)
-                    for name in names
-                ]
-                try:
-                    utils.conn_db('fingerprint_deleted').bulk_write(ops, ordered=False)
-                except Exception as e:
-                    logger.warning(f"Failed to record deleted fingerprints in bulk: {e}")
+            # 2. Fail-Closed：先确保初始化标记与删除黑名单持久化落库，再删除主表记录
+            try:
+                from app.services.fingerprint_cache import (
+                    finger_db_cache,
+                    mark_fingerprint_initialized,
+                )
+                mark_fingerprint_initialized(raise_on_error=True)
+                _record_deleted_fingerprint_names(names)
+            except Exception as e:
+                logger.error(f"Failed to persist fingerprint deletion guard, aborting delete: {e}")
+                return utils.build_ret(ErrorMsg.Error, {'msg': f"记录删除标记失败，已中止删除以避免指纹复活: {e}"})
 
             # 3. 批量删除指纹记录
             utils.conn_db('fingerprint').delete_many({'_id': {'$in': valid_oids}})
 
-            # 4. 强制刷新指纹内存缓存，使删除在当前进程即时生效
+            # 4. 失效当前进程缓存并递增跨进程版本号，使删除在所有 Worker 即时生效
             try:
-                from app.services.fingerprint_cache import finger_db_cache
-                finger_db_cache.update_cache(force=True)
+                finger_db_cache.invalidate_cache(bump_version=True)
             except Exception as e:
-                logger.warning(f"Failed to update fingerprint cache after deletion: {e}")
+                logger.warning(f"Failed to invalidate fingerprint cache after deletion: {e}")
 
         return utils.build_ret(ErrorMsg.Success, {'_id': id_list})
 
@@ -300,6 +343,12 @@ class UploadARLFinger(ARLResource):
                 utils.conn_db('fingerprint_deleted').delete_many(
                     {"name": {"$in": [d["name"] for d in new_docs]}}
                 )
+                try:
+                    from app.services.fingerprint_cache import finger_db_cache, mark_fingerprint_initialized
+                    mark_fingerprint_initialized()
+                    finger_db_cache.invalidate_cache(bump_version=True)
+                except Exception as e:
+                    logger.warning(f"Failed to invalidate fingerprint cache after upload: {e}")
 
             return utils.build_ret(ErrorMsg.Success, {'error_cnt': error_cnt,
                                                       'repeat_cnt': repeat_cnt,'success_cnt': success_cnt})
@@ -348,8 +397,14 @@ class SyncFromJSON(ARLResource):
             if docs:
                 db.insert_many(docs)
             
-            # 3. 强制重载内存中的缓存单例，使最新指纹立即在后端生效
-            from app.services.fingerprint_cache import finger_db_cache
+            # 3. 强制重载内存中的缓存单例，使最新指纹立即在后端生效并通知其他 Worker 刷新
+            from app.services.fingerprint_cache import (
+                finger_db_cache,
+                mark_fingerprint_initialized,
+                bump_fingerprint_cache_version,
+            )
+            mark_fingerprint_initialized()
+            bump_fingerprint_cache_version()
             finger_db_cache.update_cache(force=True)
             
             return utils.build_ret(ErrorMsg.Success, {'msg': f"成功同步并生效了 {len(docs)} 条规则到数据库"})
