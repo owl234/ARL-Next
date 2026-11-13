@@ -10,7 +10,7 @@ backend/test/integration/conftest.py
 环境变量：
   ARL_API_BASE  API 基址（含 /api 前缀），默认 http://127.0.0.1:5000/api
   ARL_USERNAME  登录账号，默认 admin
-  ARL_PASSWORD  登录密码，默认 arlpass（与 README 公开的初始凭据一致）
+  ARL_PASSWORD  登录密码，默认 arlpass（新部署已改为首次启动随机生成，请从 /tmp/arl_initial_admin_password 或 ARL_ADMIN_PASSWORD 获取后传入）
 """
 import os
 

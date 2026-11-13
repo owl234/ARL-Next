@@ -13,6 +13,7 @@ export default {
   login: {
     username: 'Username',
     password: 'Password',
+    passwordPlaceholder: 'Enter your password',
     usernameRequired: 'Please enter your username.',
     passwordRequired: 'Please enter your password.',
     signIn: 'Sign in',

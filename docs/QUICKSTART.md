@@ -87,7 +87,7 @@ chmod +x start-prod.sh && bash start-prod.sh
 docker exec arl-web-prod cat /tmp/arl_initial_admin_password
 ```
 
-可在首次启动前设置 `ARL_ADMIN_PASSWORD`（至少 12 个字符）；设置后不会生成上述密码文件。初始密码不写入启动日志。修改密码并确认登录成功后可删除该文件，登录会话有效期为 24 小时。
+可在首次启动前设置 `ARL_ADMIN_PASSWORD`（至少 12 个字符）；设置后不会生成上述密码文件（注意 `sudo` 默认会清空环境变量，请使用 `sudo ARL_ADMIN_PASSWORD=... bash start-prod.sh`、`sudo -E bash start-prod.sh` 或写入部署目录 `.env`）。初始密码不写入启动日志。修改密码并确认登录成功后可删除该文件（`docker exec arl-web-prod rm -f /tmp/arl_initial_admin_password`）；若容器重建前未读取该文件，请按 `README.md` 常见问题 Q2 执行 `--reset` 重置。登录会话有效期为 24 小时。
 
 > 说明：Nginx Basic Auth 前置网关默认关闭，如需开启请在顶部导航栏安全开关处操作。
 

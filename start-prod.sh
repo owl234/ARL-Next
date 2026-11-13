@@ -332,6 +332,57 @@ echo "🚀 开始执行 ARL-Next 生产一键部署与调优..."
 
 # 执行依赖检测与安装
 check_and_install_python3
+
+# 2.5 前置校验预设管理员密码 (兼容环境变量与当前目录 .env)，避免少于 12 字符导致容器启动崩溃超时
+PRESET_ADMIN_PASSWORD=0
+check_arl_admin_password() {
+    local check_result
+    if ! check_result=$(python3 -c "
+import os, re, sys
+
+pwd = os.environ.get('ARL_ADMIN_PASSWORD')
+source = '环境变量'
+if pwd is None and os.path.isfile('.env'):
+    try:
+        with open('.env', 'r', encoding='utf-8') as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if line.startswith('export '):
+                    line = line[7:].lstrip()
+                if '=' not in line:
+                    continue
+                k, v = line.split('=', 1)
+                if k.strip() != 'ARL_ADMIN_PASSWORD':
+                    continue
+                v = v.strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in ('\"', \"'\"):
+                    v = v[1:-1]
+                else:
+                    v = re.split(r'\s+#', v, maxsplit=1)[0].rstrip()
+                pwd = v
+                source = '.env 文件'
+    except OSError as exc:
+        print(f'⚠️ 警告：读取 .env 失败: {exc}', file=sys.stderr)
+
+if pwd:
+    if not (12 <= len(pwd) <= 1024):
+        print(f'❌ 错误：检测到 {source} 中的 ARL_ADMIN_PASSWORD 长度为 {len(pwd)} 个字符，不满足 12–1024 个字符要求。', file=sys.stderr)
+        print('👉 请设置至少 12 个字符的密码，或取消该配置以由系统在首次启动时生成随机初始密码。', file=sys.stderr)
+        sys.exit(2)
+    print('PRESET')
+else:
+    print('AUTO')
+"); then
+        exit 1
+    fi
+    if [ "$check_result" = "PRESET" ]; then
+        PRESET_ADMIN_PASSWORD=1
+    fi
+}
+check_arl_admin_password
+
 check_and_install_docker
 
 # 4.5 统一探测 Docker 守护进程是否就绪；缺失 timeout 命令的极简环境直接探测（接受极小概率挂起风险）
@@ -650,7 +701,7 @@ if [ ! -f "./frontend/.htpasswd" ]; then
     echo "⚠️ 提示：未检测到 ./frontend/.htpasswd 文件，正在预置防扫描基础凭证..."
     mkdir -p ./frontend
     echo 'admin:$apr1$i/Qqu0mp$6rhjb2tWaFFEqpeDcr4Su/' > ./frontend/.htpasswd
-    echo "✅ 已预置默认 Basic Auth 凭证: 账号 admin / 密码 arl_next (网关默认关闭，可在 Web 顶部导航栏按需开启)"
+    echo "✅ 已预置 Nginx Basic Auth 网关凭证: 账号 admin / 密码 arl_next (网关默认关闭，可在 Web 顶部导航栏按需开启；注意：此非平台系统登录密码)"
 fi
 
 echo "🐳 [1/3] 正在为当前运行版本创建稳定备份快照..."
@@ -858,6 +909,29 @@ echo "👉 请通过浏览器访问以下地址之一登录系统："
 echo "   - 本地/局域网访问: https://$LOCAL_IP:5173"
 if [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "$LOCAL_IP" ]; then
     echo "   - 公网访问:        https://$PUBLIC_IP:5173"
+fi
+
+echo ""
+if docker exec arl-web-prod test -f /tmp/arl_initial_admin_password 2>/dev/null; then
+    echo "🔑 平台系统登录初始凭据："
+    echo "   - 默认账号: admin"
+    echo "   - 读取初始密码: docker exec arl-web-prod cat /tmp/arl_initial_admin_password"
+    echo "   - 安全提示: 该文件权限为 0600，密码不会写入启动日志；首次登录后请修改密码并执行"
+    echo "     docker exec arl-web-prod rm -f /tmp/arl_initial_admin_password"
+    echo "   - 说明: Basic Auth (admin / arl_next) 仅用于默认关闭的 Nginx 前置网关，并非系统登录密码。"
+elif [ "$PRESET_ADMIN_PASSWORD" = "1" ]; then
+    echo "🔑 平台系统登录凭据提示："
+    echo "   - 默认账号: admin"
+    echo "   - 初始密码: 若为首次初始化，已使用配置的 ARL_ADMIN_PASSWORD（不生成 /tmp/arl_initial_admin_password）；"
+    echo "     若库中已存在 admin 账号，则保留既有密码不变。"
+    echo "   - 如忘记密码，可执行以下命令重置后从 /tmp/arl_initial_admin_password 读取新密码："
+    echo "     docker exec -it arl-web-prod /code/backend/.venv-docker/bin/python3 /code/backend/inject_user.py --reset"
+else
+    echo "🔑 平台系统登录凭据提示："
+    echo "   - 账号: admin（本次未生成新的随机密码文件，已保留既有管理员密码）"
+    echo "   - 若为首次安装后容器已重建且尚未记录密码，或已忘记密码，可执行以下命令重置："
+    echo "     docker exec -it arl-web-prod /code/backend/.venv-docker/bin/python3 /code/backend/inject_user.py --reset"
+    echo "     随后读取新密码: docker exec arl-web-prod cat /tmp/arl_initial_admin_password"
 fi
 
 echo ""

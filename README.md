@@ -345,7 +345,7 @@ bash start-prod.sh
 | **第一层：Nginx Basic Auth 网关** | `admin` | `arl_next` | 前置防扫描器爆破（**默认关闭**，可在顶部导航栏安全开关处开启/关闭；修改密码需先关闭再重新开启） |
 | **第二层：ARL-Next 系统登录** | `admin` | 首次启动随机生成 | 既有账号密码保持不变；新密码至少 12 个字符 |
 
-首次部署后，在受信宿主机执行 `docker exec arl-web-prod cat /tmp/arl_initial_admin_password` 读取初始密码；该文件权限为 `0600`，密码不会输出到启动日志。也可在首次启动前通过 `ARL_ADMIN_PASSWORD` 设置至少 12 个字符的初始密码。修改密码并确认登录成功后，可删除容器内的初始密码文件。升级不会重置已有账号；仍在使用旧默认密码的部署应主动修改。
+首次部署后，在受信宿主机执行 `docker exec arl-web-prod cat /tmp/arl_initial_admin_password` 读取初始密码；该文件权限为 `0600`，密码不会输出到启动日志。也可在首次启动前通过 `ARL_ADMIN_PASSWORD` 设置至少 12 个字符的初始密码（注意 `sudo` 默认会重置环境变量，需使用 `sudo ARL_ADMIN_PASSWORD=... bash start-prod.sh`、`sudo -E bash start-prod.sh`，或在部署目录 `.env` 文件中写入 `ARL_ADMIN_PASSWORD=...`）。修改密码并确认登录成功后，建议删除容器内的初始密码文件（`docker exec arl-web-prod rm -f /tmp/arl_initial_admin_password`）。若未及时读取且容器已被重建，请按下方常见问题 Q2 执行 `--reset` 重新生成；升级不会重置已有账号，仍在使用旧默认密码的部署应主动修改。
 
 登录会话有效期为 24 小时。长期 API/MCP 集成请配置独立的 `API_KEY` 并通过请求头发送，详见 [鉴权与安全修复约定](docs/API_GUIDE.md#2-身份鉴权与安全机制)。
 

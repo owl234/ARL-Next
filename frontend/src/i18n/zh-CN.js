@@ -13,6 +13,7 @@ export default {
   login: {
     username: '账号',
     password: '密码',
+    passwordPlaceholder: '请输入密码',
     usernameRequired: '请输入账号!',
     passwordRequired: '请输入密码!',
     signIn: '登录',

@@ -38,6 +38,8 @@ def ensure_admin(db_user, *, reset=False, password=None, password_file='/tmp/arl
         db_user.update_one(query, {'$set': {'password': hash_password(password), 'token': None},
                                    '$unset': {'token_expire_at': ''}})
         print('✅ admin password reset; previous login session revoked.')
+    if not generated and os.path.exists(password_file):
+        os.unlink(password_file)
 
 
 if __name__ == '__main__':

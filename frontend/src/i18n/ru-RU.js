@@ -18,6 +18,7 @@ export default {
   "login": {
     "username": "Имя пользователя",
     "password": "Пароль",
+    "passwordPlaceholder": "Введите пароль",
     "usernameRequired": "Введите имя пользователя.",
     "passwordRequired": "Введите пароль.",
     "signIn": "Войти",

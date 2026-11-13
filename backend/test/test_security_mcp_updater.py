@@ -139,6 +139,7 @@ def test_bootstrap_password_random_private_and_existing_accounts_preserved(app_e
     module.ensure_admin(app_env.db.user, reset=True, password='new-fixture-password', password_file=str(path))
     assert app_env.db.user.find_one()['token'] is None
     assert app_env.credentials.verify_password(app_env.db.user.find_one()['password'], 'new-fixture-password')
+    assert not path.exists()
 
 
 def test_mcp_governance_keys_crud(app_env):

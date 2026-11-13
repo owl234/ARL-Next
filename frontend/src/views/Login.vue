@@ -24,7 +24,7 @@
         </a-form-item>
 
         <a-form-item :label="t('login.password')" name="password" :rules="[{ required: true, message: t('login.passwordRequired') }]">
-          <a-input-password v-model:value="formState.password" placeholder="arlpass" size="large">
+          <a-input-password v-model:value="formState.password" :placeholder="t('login.passwordPlaceholder')" size="large">
             <template #prefix><LockOutlined style="color: rgba(255, 255, 255, 0.45);" /></template>
           </a-input-password>
         </a-form-item>

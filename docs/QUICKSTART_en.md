@@ -87,7 +87,7 @@ Then open `https://<your-server-ip>:5173` (accept the self-signed certificate wa
 docker exec arl-web-prod cat /tmp/arl_initial_admin_password
 ```
 
-Alternatively, set `ARL_ADMIN_PASSWORD` (at least 12 characters) before first startup; no password file is generated in that case. The initial password is not logged. Remove the file after changing the password and confirming login. Login sessions expire after 24 hours.
+Alternatively, set `ARL_ADMIN_PASSWORD` (at least 12 characters) before first startup; no password file is generated in that case (note that `sudo` strips environment variables by default, so pass it via `sudo ARL_ADMIN_PASSWORD=... bash start-prod.sh`, `sudo -E bash start-prod.sh`, or `.env` in the deployment directory). The initial password is not logged. Remove the file after changing the password and confirming login (`docker exec arl-web-prod rm -f /tmp/arl_initial_admin_password`); if the container is recreated before reading it, reset via `--reset` in `README_en.md` FAQ Q2. Login sessions expire after 24 hours.
 
 > Notes: the Nginx Basic Auth front gate is off by default; toggle it in the top navigation bar if needed.
 
