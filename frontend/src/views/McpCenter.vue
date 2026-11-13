@@ -1,9 +1,9 @@
 <template>
-  <div class="mcp-center-container page-container">
-    <!-- 1. 顶部 Hero 卡片 -->
-    <div class="mcp-hero-card">
+  <div class="arl-page-container" :class="{ 'page-wide-text': pageLocale !== 'zh-CN' }">
+    <!-- 1. 顶部吸顶 Hero 卡片 -->
+    <div ref="actionBarRef" class="arl-hero-card">
       <div class="mcp-hero-header">
-        <div class="mcp-hero-left">
+        <div class="arl-hero-left">
           <div class="mcp-hero-title">
             <RobotOutlined class="hero-icon" />
             <span class="title-text">{{ pageText('pages.mcpCenterTitle') }}</span>
@@ -16,8 +16,8 @@
             {{ pageText('pages.mcpCenterSubtitle') }}
           </div>
         </div>
-        <div class="mcp-hero-actions">
-          <a-button @click="refreshAllData" :loading="isRefreshing">
+        <div class="arl-hero-right">
+          <a-button size="small" @click="refreshAllData" :loading="isRefreshing">
             <template #icon><ReloadOutlined /></template>
             {{ pageText('pages.refresh') }}
           </a-button>
@@ -46,7 +46,7 @@
                 <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                   <a-select
                     v-model:value="selectedKeyId"
-                    style="width: 260px;"
+                    style="width: min(260px, 100%); min-width: 180px;"
                     :placeholder="pageText('pages.mcpSelectKeyPlaceholder')"
                     @change="handleKeySelectChange"
                   >
@@ -171,12 +171,13 @@
                   v-model:value="keySearchKeyword"
                   :placeholder="pageText('pages.mcpSearchKeyPlaceholder')"
                   style="width: 260px;"
+                  size="small"
                   allow-clear
                   @search="fetchKeys"
                 />
               </div>
               <div class="toolbar-right">
-                <a-button type="primary" @click="openCreateKeyModal">
+                <a-button type="primary" size="small" @click="openCreateKeyModal">
                   <template #icon><PlusOutlined /></template>
                   {{ pageText('pages.mcpCreateKey') }}
                 </a-button>
@@ -184,20 +185,13 @@
             </div>
 
             <a-table
+              :sticky="stickyConfig"
               :columns="keyColumns"
               :data-source="keyList"
               :loading="isKeysLoading"
               row-key="id"
-              :pagination="{
-                current: keyPagination.page,
-                pageSize: keyPagination.size,
-                total: keyPagination.total,
-                showSizeChanger: true,
-                pageSizeOptions: ['10', '20', '50'],
-                showTotal: (total) => pageText('pages.totalItems', { total })
-              }"
-              @change="handleKeyTableChange"
-              size="middle"
+              :pagination="false"
+              size="small"
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'name'">
@@ -260,7 +254,24 @@
                   </div>
                 </template>
               </template>
+              <template #emptyText>
+                <ArlEmpty :description="pageText('tasks.noData')" />
+              </template>
             </a-table>
+
+            <div class="arl-pagination-bar">
+              <div class="pagination-info">{{ pageText('pages.totalItems', { total: keyPagination.total }) }}</div>
+              <a-pagination
+                size="small"
+                :pageSizeOptions="$pageSizeOptions"
+                v-model:current="keyPagination.page"
+                v-model:pageSize="keyPagination.size"
+                :total="keyPagination.total"
+                show-size-changer
+                @change="handleKeyPageChange"
+                @showSizeChange="handleKeyPageChange"
+              />
+            </div>
           </div>
         </a-tab-pane>
 
@@ -327,10 +338,11 @@
 
             <!-- 筛选栏 -->
             <div class="table-toolbar" style="margin-top: 16px;">
-              <div class="toolbar-left" style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <div class="toolbar-left" style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <a-select
                   v-model:value="logFilter.time_range"
                   style="width: 120px;"
+                  size="small"
                   allow-clear
                   :placeholder="pageText('pages.mcpFilterTimeAll')"
                   @change="handleFilterTimeChange"
@@ -343,6 +355,7 @@
                 <a-select
                   v-model:value="logFilter.tool_name"
                   style="width: 180px;"
+                  size="small"
                   allow-clear
                   :placeholder="pageText('pages.mcpFilterToolPlaceholder')"
                 >
@@ -357,6 +370,7 @@
                 <a-select
                   v-model:value="logFilter.status"
                   style="width: 140px;"
+                  size="small"
                   allow-clear
                   :placeholder="pageText('pages.mcpFilterStatusPlaceholder')"
                   @change="handleFilterStatusChange"
@@ -371,21 +385,22 @@
                   v-model:value="logFilter.target"
                   :placeholder="pageText('pages.mcpFilterTargetPlaceholder')"
                   style="width: 200px;"
+                  size="small"
                   allow-clear
                   @pressEnter="fetchLogs"
                 />
 
-                <a-button type="primary" @click="fetchLogs">
+                <a-button type="primary" size="small" @click="fetchLogs">
                   <template #icon><SearchOutlined /></template>
                   {{ pageText('pages.search') }}
                 </a-button>
-                <a-button @click="resetLogFilter">
+                <a-button size="small" @click="resetLogFilter">
                   {{ pageText('pages.reset') }}
                 </a-button>
               </div>
 
               <div class="toolbar-right">
-                <a-button @click="exportLogsCsv" :loading="isExportingLogs">
+                <a-button size="small" @click="exportLogsCsv" :loading="isExportingLogs">
                   <template #icon><ExportOutlined /></template>
                   {{ pageText('pages.exportCsv') }}
                 </a-button>
@@ -394,25 +409,18 @@
 
             <!-- 审计日志表格 -->
             <a-table
+              :sticky="stickyConfig"
               :columns="logColumns"
               :data-source="logList"
               :loading="isLogsLoading"
               row-key="id"
               :scroll="{ x: 1420 }"
-              :pagination="{
-                current: logPagination.page,
-                pageSize: logPagination.size,
-                total: logPagination.total,
-                showSizeChanger: true,
-                pageSizeOptions: ['10', '20', '50'],
-                showTotal: (total) => pageText('pages.totalItems', { total })
-              }"
+              :pagination="false"
               :custom-row="(record) => ({
                 onClick: () => openLogDetail(record),
                 style: { cursor: 'pointer' }
               })"
-              @change="handleLogTableChange"
-              size="middle"
+              size="small"
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'created_at'">
@@ -495,7 +503,24 @@
                   </a-button>
                 </template>
               </template>
+              <template #emptyText>
+                <ArlEmpty :description="pageText('tasks.noData')" />
+              </template>
             </a-table>
+
+            <div class="arl-pagination-bar">
+              <div class="pagination-info">{{ pageText('pages.totalItems', { total: logPagination.total }) }}</div>
+              <a-pagination
+                size="small"
+                :pageSizeOptions="$pageSizeOptions"
+                v-model:current="logPagination.page"
+                v-model:pageSize="logPagination.size"
+                :total="logPagination.total"
+                show-size-changer
+                @change="handleLogPageChange"
+                @showSizeChange="handleLogPageChange"
+              />
+            </div>
           </div>
         </a-tab-pane>
 
@@ -541,7 +566,7 @@
             </a-card>
 
             <a-card size="small" :title="pageText('pages.mcpQuotaTitle')" class="policy-card" style="margin-top: 16px;">
-              <a-form layout="vertical">
+              <a-form layout="vertical" :label-wrap="true">
                 <a-form-item :label="pageText('pages.mcpMaxSearchLimit')">
                   <a-input-number
                     v-model:value="policyForm.max_search_limit"
@@ -588,7 +613,7 @@
       @cancel="createKeyModalVisible = false"
       destroyOnClose
     >
-      <a-form layout="vertical" style="margin-top: 12px;">
+      <a-form layout="vertical" :label-wrap="true" style="margin-top: 12px;">
         <a-form-item :label="pageText('pages.mcpKeyName')" required>
           <a-input
             v-model:value="newKeyForm.name"
@@ -635,7 +660,7 @@
 
         <div style="font-weight: 500; margin-bottom: 6px;">{{ pageText('pages.mcpYourNewKey') }}:</div>
         <div style="display: flex; gap: 8px; margin-bottom: 16px;">
-          <a-input :value="createdKeyPlaintext" readonly style="font-family: monospace;" />
+          <a-input :value="createdKeyPlaintext" readonly style="font-family: var(--arl-font-mono);" />
           <a-button type="primary" @click="handleCopyCreatedKey">
             <template #icon><CopyOutlined /></template>
             {{ pageText('pages.copy') }}
@@ -707,7 +732,7 @@
             type="error"
             show-icon
             :message="selectedLog.error_message"
-            style="white-space: pre-wrap; font-family: monospace;"
+            style="white-space: pre-wrap; font-family: var(--arl-font-mono);"
           />
           <div v-else class="detail-summary-box">
             {{ selectedLog.summary || '-' }}
@@ -719,7 +744,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue';
+import { ref, reactive, watch, onMounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { onBeforeRouteLeave } from 'vue-router';
 import { message, Modal } from 'ant-design-vue';
@@ -746,11 +771,17 @@ import {
 import request from '@/utils/request';
 import { copyText } from '@/utils/clipboard';
 import { resolveMcpCredential, createStdioServerConfig } from '@/utils/mcpCredentials';
+import { useSticky } from '@/utils/useSticky';
+import { useGlobalPageSize } from '@/utils/useGlobalPageSize';
 
-const { t } = useI18n({ useScope: 'global' });
+const { t, locale: pageLocale } = useI18n({ useScope: 'global' });
 const pageText = t;
 
 defineOptions({ name: 'McpCenter' });
+
+const actionBarRef = ref(null);
+const { stickyConfig } = useSticky(actionBarRef);
+const globalPageSize = useGlobalPageSize(10);
 
 // 1. 全局状态
 const activeTab = ref('client_setup');
@@ -777,7 +808,7 @@ const activeKeyOptions = ref([]);
 const keySearchKeyword = ref('');
 const keyList = ref([]);
 const isKeysLoading = ref(false);
-const keyPagination = reactive({ page: 1, size: 10, total: 0 });
+const keyPagination = reactive({ page: 1, size: globalPageSize.value, total: 0 });
 
 const keyColumns = computed(() => [
   { title: pageText('pages.mcpColName'), dataIndex: 'name', key: 'name' },
@@ -826,7 +857,7 @@ const logFilter = reactive({
 const logList = ref([]);
 const isLogsLoading = ref(false);
 const isExportingLogs = ref(false);
-const logPagination = reactive({ page: 1, size: 10, total: 0 });
+const logPagination = reactive({ page: 1, size: globalPageSize.value, total: 0 });
 
 const logColumns = computed(() => [
   {
@@ -1095,9 +1126,14 @@ const fetchKeys = async () => {
   }
 };
 
-const handleKeyTableChange = (pagination) => {
-  keyPagination.page = pagination.current;
-  keyPagination.size = pagination.pageSize;
+const handleKeyPageChange = (page, pageSize) => {
+  keyPagination.page = page;
+  if (pageSize && pageSize !== keyPagination.size) {
+    keyPagination.size = pageSize;
+  }
+  if (keyPagination.size !== globalPageSize.value) {
+    globalPageSize.value = keyPagination.size;
+  }
   fetchKeys();
 };
 
@@ -1239,11 +1275,21 @@ const fetchLogs = async () => {
   }
 };
 
-const handleLogTableChange = (pagination) => {
-  logPagination.page = pagination.current;
-  logPagination.size = pagination.pageSize;
+const handleLogPageChange = (page, pageSize) => {
+  logPagination.page = page;
+  if (pageSize && pageSize !== logPagination.size) {
+    logPagination.size = pageSize;
+  }
+  if (logPagination.size !== globalPageSize.value) {
+    globalPageSize.value = logPagination.size;
+  }
   fetchLogs();
 };
+
+watch(globalPageSize, (newSize) => {
+  keyPagination.size = newSize;
+  logPagination.size = newSize;
+});
 
 const resetLogFilter = () => {
   activeMetricFilter.value = '';
@@ -1436,43 +1482,26 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.mcp-center-container {
-  padding: 16px;
-}
-
-.mcp-hero-card {
-  background: var(--arl-bg-white, #ffffff);
-  border-radius: 8px;
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  border: 1px solid var(--arl-border-color, #e2e8f0);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  transition: all 0.25s ease;
-}
-
-body.dark-mode .mcp-hero-card {
-  box-shadow: none;
-  border-color: var(--arl-border-color, #333333);
-}
-
 .mcp-hero-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .mcp-hero-title {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600;
-  color: var(--arl-text-color, #1e293b);
+  color: var(--arl-text-color);
 }
 
 .hero-icon {
-  font-size: 24px;
-  color: var(--arl-theme-color, #1890ff);
+  font-size: 18px;
+  color: var(--arl-theme-color);
 }
 
 .status-tag {
@@ -1516,12 +1545,17 @@ body.dark-mode .mcp-hero-card {
 .setup-control-bar {
   display: flex;
   align-items: center;
-  gap: 32px;
+  flex-wrap: wrap;
+  gap: 14px 28px;
   margin-bottom: 18px;
   padding: 12px 16px;
   background: var(--arl-bg-light, #f8fafc);
   border: 1px solid var(--arl-border-color, #e2e8f0);
   border-radius: 6px;
+}
+
+.page-wide-text .setup-control-bar {
+  gap: 12px 20px;
 }
 
 .cert-guide-box {
@@ -1538,13 +1572,20 @@ body.dark-mode .mcp-hero-card {
 .setup-field-group {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+  min-width: 0;
 }
 
 .field-label {
   font-weight: 500;
   font-size: 13px;
-  color: var(--arl-text-color, #334155);
+  color: var(--arl-text-color);
+}
+
+.page-wide-text .field-label {
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .client-tabs-wrapper {
@@ -1554,14 +1595,14 @@ body.dark-mode .mcp-hero-card {
 .client-desc {
   font-size: 13px;
   margin-bottom: 10px;
-  color: var(--arl-text-secondary, #64748b);
+  color: var(--arl-text-secondary);
 }
 
 .config-code-box {
   position: relative;
-  background: #0f172a;
+  background: var(--arl-terminal-bg);
   border-radius: 8px;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--arl-terminal-border);
   overflow: hidden;
 }
 
@@ -1569,8 +1610,8 @@ body.dark-mode .mcp-hero-card {
   margin: 0;
   padding: 18px 20px;
   font-size: 13px;
-  font-family: 'Fira Code', monospace;
-  color: #38bdf8;
+  font-family: var(--arl-font-mono);
+  color: var(--arl-terminal-text);
   overflow-x: auto;
   line-height: 1.6;
 }
@@ -1599,20 +1640,41 @@ body.dark-mode .mcp-hero-card {
 }
 
 .tip-icon {
-  color: var(--arl-theme-color, #1890ff);
+  color: var(--arl-theme-color);
 }
 
 .table-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 14px;
 }
 
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
+}
+
+@media (max-width: 1440px) {
+  .page-wide-text .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1366px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .metrics-grid,
+  .page-wide-text .metrics-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .metric-card {
@@ -1665,24 +1727,24 @@ body.dark-mode .mcp-hero-card {
 
 .metric-active,
 .metric-active:hover {
-  border-color: var(--arl-theme-color, #1890ff) !important;
-  box-shadow: 0 0 0 2px rgba(var(--arl-theme-color-rgb, 24, 144, 255), 0.2) !important;
-  background: rgba(var(--arl-theme-color-rgb, 24, 144, 255), 0.04);
+  border-color: var(--arl-theme-color) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--arl-theme-color) 20%, transparent) !important;
+  background: color-mix(in srgb, var(--arl-theme-color) 4%, transparent);
 }
 
 body.dark-mode .metric-active,
 body.dark-mode .metric-active:hover {
-  border-color: var(--arl-theme-color, #1890ff) !important;
-  box-shadow: 0 0 0 2px rgba(var(--arl-theme-color-rgb, 24, 144, 255), 0.35) !important;
-  background: rgba(var(--arl-theme-color-rgb, 24, 144, 255), 0.12);
+  border-color: var(--arl-theme-color) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--arl-theme-color) 35%, transparent) !important;
+  background: color-mix(in srgb, var(--arl-theme-color) 12%, transparent);
 }
 
 .detail-code-block {
-  background: #0f172a;
+  background: var(--arl-terminal-bg);
   border-radius: 6px;
   padding: 12px 16px;
-  color: #38bdf8;
-  font-family: 'Fira Code', monospace;
+  color: var(--arl-terminal-text);
+  font-family: var(--arl-font-mono);
   font-size: 12px;
   line-height: 1.5;
   max-height: 320px;
@@ -1696,17 +1758,17 @@ body.dark-mode .metric-active:hover {
   border-radius: 6px;
   padding: 10px 14px;
   font-size: 13px;
-  color: var(--arl-text-color, #334155);
+  color: var(--arl-text-color);
   line-height: 1.6;
 }
 
 /* 审计监控表格高级样式 */
 .mcp-time-cell {
   white-space: nowrap;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-family: var(--arl-font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 13px;
-  color: var(--arl-text-color, #1e293b);
+  color: var(--arl-text-color);
 }
 
 .mcp-key-tag {
@@ -1767,7 +1829,7 @@ body.dark-mode .metric-active:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--arl-text-color, #1e293b);
+  color: var(--arl-text-color);
 }
 
 .mcp-target-placeholder {
@@ -1789,7 +1851,7 @@ body.dark-mode .metric-active:hover {
 
 .mcp-target-cell:hover .mcp-cell-copy-btn {
   opacity: 1;
-  color: var(--arl-theme-color, #1890ff);
+  color: var(--arl-theme-color);
 }
 
 .mcp-duration-badge {
@@ -1797,7 +1859,7 @@ body.dark-mode .metric-active:hover {
   padding: 1px 8px;
   border-radius: 10px;
   font-size: 12px;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-family: var(--arl-font-mono);
   font-variant-numeric: tabular-nums;
   font-weight: 500;
   white-space: nowrap;
@@ -1810,9 +1872,9 @@ body.dark-mode .metric-active:hover {
 }
 
 .duration-medium {
-  background-color: #e6f7ff;
-  color: #096dd9;
-  border: 1px solid #91d5ff;
+  background-color: var(--arl-theme-soft-bg);
+  color: var(--arl-theme-color);
+  border: 1px solid var(--arl-theme-soft-border);
 }
 
 .duration-slow {
@@ -1828,9 +1890,9 @@ body.dark-mode .duration-fast {
 }
 
 body.dark-mode .duration-medium {
-  background-color: rgba(24, 144, 255, 0.15);
-  color: #40a9ff;
-  border-color: rgba(24, 144, 255, 0.35);
+  background-color: color-mix(in srgb, var(--arl-theme-color) 16%, transparent);
+  color: var(--arl-primary-light);
+  border-color: var(--arl-theme-soft-border);
 }
 
 body.dark-mode .duration-slow {
@@ -1861,7 +1923,7 @@ body.dark-mode .duration-slow {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  color: var(--arl-text-color, #334155);
+  color: var(--arl-text-color);
 }
 
 .mcp-summary-empty,

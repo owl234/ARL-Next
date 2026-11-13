@@ -629,7 +629,7 @@ defineOptions({
   name: 'Dashboard'
 });
 
-import { ref, computed, reactive, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { 
   DatabaseOutlined, 
@@ -935,7 +935,7 @@ const filteredGroupedLogs = computed(() => {
 
 // 颜色工具
 const colorToRgba = (color, opacity = 1) => {
-  if (!color) return `rgba(24, 144, 255, ${opacity})`;
+  if (!color) return `rgba(250, 84, 28, ${opacity})`;
   const c = color.trim();
   if (c.startsWith('#')) {
     let hex = c.slice(1);
@@ -1052,7 +1052,7 @@ const renderTrendChart = (customColor) => {
   const leaks = lastTrendData.leaks || [];
   const cves = lastTrendData.cves || [];
 
-  const themeColor = customColor || getComputedStyle(document.documentElement).getPropertyValue('--arl-theme-color').trim() || '#1890ff';
+  const themeColor = customColor || getComputedStyle(document.documentElement).getPropertyValue('--arl-theme-color').trim() || '#fa541c';
   const isDark = isDarkMode.value;
 
   const seriesList = [];
@@ -1619,7 +1619,7 @@ onUnmounted(() => {
   transform: scale(1.1);
 }
 .stat-icon-box.primary {
-  background: rgba(24, 144, 255, 0.12);
+  background: var(--arl-theme-soft-bg);
   color: var(--arl-theme-color);
 }
 .stat-icon-box.success {
@@ -1985,7 +1985,7 @@ onUnmounted(() => {
   transition: all 0.2s ease;
 }
 .task-badge:hover {
-  background: var(--arl-badge-hover-bg, rgba(0, 0, 0, 0.06));
+  background: var(--arl-bg-hover);
   filter: brightness(1.1);
 }
 .task-badge.running { color: #52c41a; }
@@ -2319,7 +2319,7 @@ onUnmounted(() => {
   color: #faad14;
 }
 .log-type-tag.info {
-  background: rgba(24, 144, 255, 0.12);
+  background: var(--arl-theme-soft-bg);
   color: var(--arl-theme-color);
 }
 .log-tag-icon {
@@ -2498,7 +2498,7 @@ onUnmounted(() => {
   color: var(--arl-text-color);
   opacity: 0.7;
 }
-.finger-category-tag.cdn { background: rgba(24, 144, 255, 0.1); color: var(--arl-theme-color); }
+.finger-category-tag.cdn { background: var(--arl-theme-soft-bg); color: var(--arl-theme-color); }
 .finger-category-tag.server { background: rgba(82, 196, 26, 0.1); color: #52c41a; }
 .finger-category-tag.frame { background: rgba(114, 46, 209, 0.1); color: #722ed1; }
 
@@ -2516,7 +2516,7 @@ onUnmounted(() => {
 
 .finger-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--arl-theme-color) 0%, rgba(var(--arl-theme-color-rgb, 24, 144, 255), 0.35) 100%);
+  background: linear-gradient(90deg, var(--arl-theme-color) 0%, color-mix(in srgb, var(--arl-theme-color) 35%, transparent) 100%);
   border-radius: 3px;
   transition: width 0.4s ease;
 }
@@ -2623,7 +2623,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .task-type-badge.ip {
-  background: rgba(24, 144, 255, 0.12);
+  background: var(--arl-theme-soft-bg);
   color: var(--arl-theme-color);
 }
 .task-type-badge.domain {
@@ -2662,9 +2662,9 @@ onUnmounted(() => {
   font-size: 10px;
 }
 .task-status-pill.running {
-  background: rgba(24, 144, 255, 0.1);
+  background: var(--arl-theme-soft-bg);
   color: var(--arl-theme-color);
-  border-color: rgba(var(--arl-theme-color-rgb, 24, 144, 255), 0.25);
+  border-color: var(--arl-theme-soft-border);
 }
 .task-status-pill.waiting {
   background: rgba(250, 140, 22, 0.1);
@@ -2695,7 +2695,7 @@ onUnmounted(() => {
 .task-target code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--arl-bg-subtle);
   padding: 1px 4px;
   border-radius: 3px;
   color: var(--arl-text-color);

@@ -12,7 +12,7 @@
     <a-spin :spinning="modalDataLoading || syncLoading" :tip="syncLoading ? taskText('tasks.syncingDataAndQueuingTasks') : taskText('tasks.loadingAssetGroupsAndPreviewData')">
       <div v-if="step === 'form'">
         <!-- 明确"同步"的实际作用，避免被理解为拉取最新数据 -->
-        <div style="background: var(--arl-bg-light, rgba(0,0,0,0.03)); border: 1px solid var(--arl-border-color, rgba(0,0,0,0.08)); border-radius: 4px; padding: 8px 12px; margin-bottom: 16px; font-size: 12px; color: var(--arl-text-color); opacity: 0.85; line-height: 1.6;">
+        <div style="background: var(--arl-bg-light); border: 1px solid var(--arl-border-color); border-radius: 4px; padding: 8px 12px; margin-bottom: 16px; font-size: 12px; color: var(--arl-text-color); opacity: 0.85; line-height: 1.6;">
           {{ taskText('tasks.syncDescription') }}
         </div>
         <a-form :label-wrap="true" :label-col="{ style: { width: taskLocale !== 'zh-CN' ? '140px' : '100px' } }" :wrapper-col="{ style: { width: taskLocale !== 'zh-CN' ? 'calc(100% - 140px)' : 'calc(100% - 100px)' } }">
@@ -68,7 +68,7 @@
           </a-form-item>
 
           <!-- 增量预检摘要与穿透面板 -->
-          <div style="margin: 0 16px 16px 16px; border: 1px solid var(--arl-border-color); border-radius: 6px; overflow: hidden; background: var(--arl-bg-light, rgba(0,0,0,0.02));">
+          <div style="margin: 0 16px 16px 16px; border: 1px solid var(--arl-border-color); border-radius: 6px; overflow: hidden; background: var(--arl-bg-light);">
             <div style="padding: 10px 14px; display: flex; justify-content: space-between; align-items: center;">
               <div style="font-size: 13px;">
                 {{ taskText('tasks.domainSummary', { count: diffStats.totalCount }) }}
@@ -189,7 +189,7 @@
           </div>
         </div>
 
-        <div style="background: var(--arl-bg-light, rgba(0,0,0,0.02)); border: 1px solid var(--arl-border-color); border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+        <div style="background: var(--arl-bg-light); border: 1px solid var(--arl-border-color); border-radius: 8px; padding: 16px; margin-bottom: 24px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: 14px;">
             <span class="task-secondary-label">{{ taskText('tasks.targetGroup') }}</span>
             <span style="font-weight: 600;">
@@ -200,7 +200,7 @@
 
           <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: center;">
             <div style="padding: 12px 8px; background: var(--arl-bg-white); border-radius: 6px; border: 1px solid var(--arl-border-color);">
-              <div style="font-size: 20px; font-weight: bold; color: #1890ff;">+{{ syncResult.insert_count || 0 }}</div>
+              <div style="font-size: 20px; font-weight: bold; color: var(--arl-theme-color);">+{{ syncResult.insert_count || 0 }}</div>
               <div class="task-result-label">{{ taskText('tasks.newDomainsSaved') }}</div>
             </div>
             <div style="padding: 12px 8px; background: var(--arl-bg-white); border-radius: 6px; border: 1px solid var(--arl-border-color);">
@@ -547,7 +547,7 @@ const handleGoToScope = () => {
   color: var(--arl-warning-color, #faad14);
 }
 
-.task-new-count { color: #1890ff; font-weight: bold; margin-right: 8px; }
+.task-new-count { color: var(--arl-theme-color); font-weight: bold; margin-right: 8px; }
 .task-existing-count { color: #8c8c8c; margin-right: 8px; }
 .task-selection-count { margin-left: 8px; color: #52c41a; }
 .task-compact-tag { margin-right: 0; }

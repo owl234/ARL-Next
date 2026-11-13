@@ -91,10 +91,7 @@
       :rowKey="(record) => record._id"
     >
       <template #emptyText>
-        <div style="padding: 40px 0;">
-          <inbox-outlined style="font-size: 48px; color: var(--arl-border-color);" />
-          <div class="page-option-hint">{{ pageText('tasks.noData') }}</div>
-        </div>
+        <ArlEmpty :description="pageText('tasks.noData')" />
       </template>
 
       <template #bodyCell="{ column, record }">
@@ -159,7 +156,7 @@ const { stickyConfig } = useSticky(actionBarRef);
 
 import request from '../utils/request';
 import { message } from 'ant-design-vue';
-import { SearchOutlined, InboxOutlined, PlusOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons-vue';
+import { SearchOutlined, PlusOutlined, UploadOutlined, DownloadOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons-vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
@@ -380,7 +377,6 @@ onDeactivated(() => {
 });
 </script>
 <style scoped>
-.page-option-hint { color: var(--arl-text-color); opacity: 0.45; margin-top: 8px; }
 .page-action-link { cursor: pointer; margin-right: 8px; }
 .page-danger-link { color: #ff4d4f; cursor: pointer; }
 

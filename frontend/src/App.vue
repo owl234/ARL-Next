@@ -56,6 +56,20 @@ const updateGlobalCssVariables = () => {
     root.style.setProperty('--arl-theme-color-rgb', `${r}, ${g}, ${b}`);
   }
 
+  root.style.setProperty('--arl-primary-bg', 'color-mix(in srgb, var(--arl-theme-color) 10%, transparent)');
+  root.style.setProperty('--arl-primary-border', 'color-mix(in srgb, var(--arl-theme-color) 30%, transparent)');
+  root.style.setProperty('--arl-primary-light', 'color-mix(in srgb, var(--arl-theme-color) 65%, #ffffff)');
+  root.style.setProperty('--arl-theme-soft-bg', 'color-mix(in srgb, var(--arl-theme-color) 10%, transparent)');
+  root.style.setProperty('--arl-theme-soft-border', 'color-mix(in srgb, var(--arl-theme-color) 28%, transparent)');
+  root.style.setProperty('--arl-font-mono', "'SFMono-Regular', 'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, 'Courier New', monospace");
+  root.style.setProperty('--arl-bg-hover', isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)');
+  root.style.setProperty('--arl-bg-subtle', isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)');
+  root.style.setProperty('--arl-terminal-bg', isDark ? '#0d0d0d' : '#141414');
+  root.style.setProperty('--arl-terminal-border', isDark ? '#333333' : '#262626');
+  root.style.setProperty('--arl-terminal-text', '#e5e5e5');
+  root.style.setProperty('--arl-text-secondary', isDark ? 'rgba(255, 255, 255, 0.65)' : '#64748b');
+  root.style.setProperty('--arl-bg-sticky', isDark ? (hasBg ? 'rgba(14, 14, 14, 0.88)' : '#111111') : (hasBg ? 'rgba(255, 255, 255, 0.88)' : '#ffffff'));
+  root.style.setProperty('--arl-bg-sticky-header', isDark ? (hasBg ? 'rgba(18, 18, 18, 0.90)' : '#141414') : (hasBg ? 'rgba(248, 250, 252, 0.90)' : '#f8fafc'));
   root.style.setProperty('--arl-bg-light', isDark ? (hasBg ? 'rgba(17, 17, 17, 0.3)' : '#111111') : (hasBg ? 'rgba(241, 245, 249, 0.3)' : '#f1f5f9'));
   root.style.setProperty('--arl-bg-white', isDark ? (hasBg ? 'rgba(17, 17, 17, 0.3)' : '#111111') : (hasBg ? 'rgba(255, 255, 255, 0.3)' : '#ffffff'));
   root.style.setProperty('--arl-bg-card', isDark ? (hasBg ? 'rgba(20, 20, 20, 0.65)' : '#141414') : (hasBg ? 'rgba(255, 255, 255, 0.75)' : '#ffffff'));
@@ -63,7 +77,7 @@ const updateGlobalCssVariables = () => {
   root.style.setProperty('--arl-bg-container', isDark ? (hasBg ? 'rgba(20, 20, 20, 0.65)' : '#141414') : (hasBg ? 'rgba(255, 255, 255, 0.75)' : '#ffffff'));
   root.style.setProperty('--arl-bg-subcard', isDark ? (hasBg ? 'rgba(26, 26, 26, 0.65)' : '#1a1a1a') : (hasBg ? 'rgba(248, 249, 250, 0.85)' : '#f8f9fa'));
   root.style.setProperty('--arl-bg-layout', isDark ? (hasBg ? 'rgba(0, 0, 0, 0.3)' : '#000000') : (hasBg ? 'rgba(241, 245, 249, 0.3)' : '#f1f5f9'));
-  root.style.setProperty('--arl-border-color', isDark ? (hasBg ? 'rgba(51, 51, 51, 0.4)' : '#333333') : (hasBg ? 'rgba(226, 232, 240, 0.4)' : '#e2e8f0'));
+  root.style.setProperty('--arl-border-color', isDark ? (hasBg ? 'rgba(51, 51, 51, 0.5)' : '#333333') : (hasBg ? 'rgba(226, 232, 240, 0.6)' : '#e2e8f0'));
   root.style.setProperty('--arl-text-color', isDark ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.85)');
   root.style.setProperty('--arl-text-secondary', isDark ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.45)');
   
@@ -284,8 +298,11 @@ body.has-bg-image .ant-table {
   background: transparent !important;
 }
 
-body.has-bg-image .ant-table-thead > tr > th {
-  background: var(--arl-bg-light) !important;
+body.has-bg-image .ant-table-thead > tr > th,
+body.has-bg-image .ant-table-sticky-holder {
+  background: var(--arl-bg-sticky-header) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 body.has-bg-image .ant-table-tbody > tr > td {
@@ -321,8 +338,8 @@ body.dark-mode .ant-card-head {
   border-bottom: 1px solid var(--arl-border-color) !important;
 }
 
-body.dark-mode .ant-table-thead > tr > th {
-  background: #111111 !important;
+body:not(.has-bg-image).dark-mode .ant-table-thead > tr > th {
+  background: #141414 !important;
   border-bottom: 1px solid var(--arl-border-color) !important;
   color: rgba(255, 255, 255, 0.85) !important;
 }
@@ -359,22 +376,6 @@ body.has-bg-image .ant-drawer-title,
 body.has-bg-image .ant-modal-close {
   color: var(--arl-text-color) !important;
   background: transparent !important;
-}
-
-/* 滚动条暗黑模式/沉浸模式美化 */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--arl-border-color);
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--arl-theme-color);
 }
 
 

@@ -27,16 +27,9 @@ body {
     background-color: var(--arl-theme-color);
 }
 
-/* 2. 卡片全局悬浮微交互 (Hover 悬浮反馈) */
+/* 2. 卡片全局过渡，默认禁止位移抖动（按需使用 .arl-interactive-card） */
 .ant-card {
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
-}
-.ant-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
-}
-html[data-theme="dark"] .ant-card:hover, body[style*="background-color: rgb(20, 20, 20)"] .ant-card:hover, .ant-card:hover {
-    /* The above shadow is standard, but in dark mode we might want a slightly different shadow or keep it subtle */
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
 
@@ -45,62 +38,61 @@ html[data-theme="dark"] .ant-card:hover, body[style*="background-color: rgb(20, 
 .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:hover > td,
 .ant-table-tbody > tr.ant-table-row:hover > td,
 .ant-table-tbody > tr.ant-table-row-hover > td {
-    background: color-mix(in srgb, var(--arl-theme-color) 12%, #ffffff) !important;
+    background: color-mix(in srgb, var(--arl-theme-color) 10%, var(--arl-bg-card)) !important;
     transition: background-color 0.2s ease !important;
 }
 
 /* 表格行被选中时，也保持不透明以防固定列文字穿透 */
 .ant-table-wrapper .ant-table-tbody > tr.ant-table-row-selected > td {
-    background: color-mix(in srgb, var(--arl-theme-color) 8%, #ffffff) !important;
+    background: color-mix(in srgb, var(--arl-theme-color) 8%, var(--arl-bg-card)) !important;
 }
 
 /* =========================================================
    护眼与高级排版优化 (Eye Care & Typography Polish)
 ========================================================= */
 
-/* 1. 全局字重瘦身 (Reduce bold glaring text to Medium 500) */
-/* 统一消除极其刺眼的 700 bold 字重，最高上限使用 500 */
-h1, h2, h3, h4, h5, h6, 
-.ant-statistic-title, 
-.ant-statistic-content-value, 
-strong, b, .ant-typography strong {
-    font-weight: 500 !important;
+/* 1. Typography Hierarchy (600 Headings & Key Metrics / 500 Labels / 400 Body) */
+h1, h2, h3, h4, h5, h6,
+.ant-statistic-content-value {
+    font-weight: 600;
 }
-
-/* 2. 在暗黑模式下进一步降低高对比度边框的刺眼感 */
-html[data-theme="dark"] .ant-card, 
-html[data-theme="dark"] .ant-table,
-html[data-theme="dark"] .ant-menu {
-    border-color: #333333 !important;
+.ant-statistic-title {
+    font-weight: 500;
 }
 
 /* =========================================================
-   Geek Slate Radii & Diffuse Shadows (兼顾护眼与高级科技感)
+   Unified Card Radii, Subtle Borders & Opt-in Interactive Hover
 ========================================================= */
-/* 1. 大圆角 */
-.ant-card, .ant-modal-content, .ant-table-wrapper {
-    border-radius: 12px !important;
+.ant-card, .ant-modal-content {
+    border-radius: 8px;
 }
 
-/* 2. 弥散阴影 */
-/* 浅色模式阴影：大范围，低透明度，非常柔和 */
+.ant-table-wrapper .ant-table-container {
+    border-radius: 8px;
+}
+
 .ant-card {
-    border: none !important;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01) !important;
-}
-.ant-card:hover {
-    transform: translateY(-4px) !important;
-    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.08) !important;
+    border: 1px solid var(--arl-border-color);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-/* 暗黑模式卡片：Vercel 极简风，纯黑底色上的极深灰卡片，极细暗纹边框 */
-body.dark-mode .ant-card {
-    border: 1px solid #333333 !important;
-    box-shadow: none !important; /* 默认无明显阴影，极致扁平 */
+.arl-interactive-card {
+    transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease, border-color 0.2s ease;
 }
-body.dark-mode .ant-card:hover {
-    box-shadow: 0 0 0 1px #444444, 0 8px 30px rgba(0, 0, 0, 0.8) !important; /* 悬浮微光与加深弥散阴影 */
-    border-color: #444444 !important;
+.arl-interactive-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
+    border-color: color-mix(in srgb, var(--arl-theme-color) 35%, var(--arl-border-color));
+}
+
+/* 暗黑模式卡片：极简扁平深灰卡片 + 极细边框 */
+body.dark-mode .ant-card {
+    border: 1px solid var(--arl-border-color);
+    box-shadow: none;
+}
+body.dark-mode .arl-interactive-card:hover {
+    box-shadow: 0 0 0 1px #444444, 0 8px 24px rgba(0, 0, 0, 0.75);
+    border-color: #444444;
 }
 
 /* 统一暗黑模式的表格和悬浮背景为中性冷淡风深灰，彻底剥离主题色 */
@@ -140,25 +132,35 @@ body.dark-mode .ant-table-wrapper .ant-table-tbody > tr.ant-table-row-selected >
 
 /* 7. 表头 (Table Header) 深度定制，完美适配 Slate 冰霜冷灰调，表头固定列同色一体化 */
 .ant-table-thead > tr > th,
-.ant-table-sticky-holder .ant-table-thead > tr > th,
 .ant-table-thead > tr > th.ant-table-cell-fix-left,
 .ant-table-thead > tr > th.ant-table-cell-fix-right,
 .ant-table-thead > tr > th.ant-table-cell-fix-left-first,
 .ant-table-thead > tr > th.ant-table-cell-fix-left-last,
 .ant-table-thead > tr > th.ant-table-cell-fix-right-first,
-.ant-table-thead > tr > th.ant-table-cell-fix-right-last,
-.ant-table-sticky-holder .ant-table-cell-fix-left,
-.ant-table-sticky-holder .ant-table-cell-fix-right {
+.ant-table-thead > tr > th.ant-table-cell-fix-right-last {
     background: var(--arl-bg-light) !important;
     border-bottom: 1px solid var(--arl-border-color) !important;
     font-weight: 500 !important;
 }
 
-/* 确保 sticky-holder 吸附容器实体化并处于安全层深，阻断纵向数据穿透 */
+.ant-table-sticky-holder .ant-table-thead > tr > th,
+.ant-table-sticky-holder .ant-table-cell-fix-left,
+.ant-table-sticky-holder .ant-table-cell-fix-right {
+    background: var(--arl-bg-sticky-header) !important;
+    border-bottom: 1px solid var(--arl-border-color) !important;
+    font-weight: 500 !important;
+}
+
+/* 确保 sticky-holder 吸附容器高不透/磨砂并处于安全层深，阻断纵向数据穿透 */
 .ant-table-sticky-holder {
-    background: var(--arl-bg-light) !important;
+    background: var(--arl-bg-sticky-header) !important;
     z-index: 9 !important;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+body.has-bg-image .ant-table-sticky-holder {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
 }
 
 /* 8. 美化表格内容区 (tbody) 固定列，彻底解决横向文字穿透与遮挡 */
@@ -214,7 +216,8 @@ body.dark-mode .ant-table-tbody > tr.ant-table-row-selected > td.ant-table-cell-
 .arl-page-container {
     background-color: var(--arl-bg-layout);
     padding: 16px 20px;
-    min-height: calc(100vh - 64px);
+    flex: 1 0 auto;
+    min-height: 0;
     box-sizing: border-box;
 }
 
@@ -223,7 +226,9 @@ body.dark-mode .ant-table-tbody > tr.ant-table-row-selected > td.ant-table-cell-
     position: sticky;
     top: 0;
     z-index: 20;
-    background: var(--arl-bg-white);
+    background: var(--arl-bg-sticky);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--arl-border-color);
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
@@ -314,4 +319,259 @@ body.dark-mode .ant-table-tbody > tr.ant-table-row-selected > td.ant-table-cell-
     color: var(--arl-text-color);
     opacity: 0.65;
 }
+
+/* 6. 统一详情页 Card 标签页 (.arl-detail-tabs, AntD v4) */
+.arl-detail-tabs .ant-tabs-nav {
+    margin-bottom: 12px;
+}
+.arl-detail-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+    border-radius: 6px 6px 0 0;
+    border-color: var(--arl-border-color);
+    background: var(--arl-bg-light);
+    color: var(--arl-text-color);
+    transition: all 0.2s ease;
+}
+.arl-detail-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
+    background: var(--arl-bg-card);
+    border-bottom-color: var(--arl-bg-card);
+}
+.arl-detail-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn {
+    color: var(--arl-theme-color);
+    font-weight: 600;
+}
+
+/* 7. 统一主题弹窗壳 (.arl-theme-modal) */
+.arl-theme-modal .ant-modal-content {
+    background: var(--arl-bg-card);
+    border: 1px solid var(--arl-border-color);
+    border-radius: 8px;
+    color: var(--arl-text-color);
+}
+.arl-theme-modal .ant-modal-header {
+    background: transparent;
+    border-bottom: 1px solid var(--arl-border-color);
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+}
+.arl-theme-modal .ant-modal-title {
+    color: var(--arl-text-color);
+    font-weight: 600;
+}
+.arl-theme-modal .ant-modal-footer {
+    border-top: 1px solid var(--arl-border-color);
+    margin-top: 16px;
+    padding-top: 12px;
+}
+
+/* 8. 统一等宽日志终端 (.arl-mono-terminal) */
+.arl-mono-terminal {
+    background-color: var(--arl-terminal-bg);
+    color: var(--arl-terminal-text);
+    border: 1px solid var(--arl-terminal-border);
+    font-family: var(--arl-font-mono);
+    border-radius: 6px;
+    padding: 14px 16px;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* 9. 统一胶囊视角切换器 (.arl-capsule-switcher — 主题色实心白字) */
+.arl-capsule-switcher {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px;
+    border-radius: 8px;
+    background: var(--arl-bg-light);
+    border: 1px solid var(--arl-border-color);
+    gap: 2px;
+}
+.arl-capsule-switcher .arl-capsule-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.5;
+    color: var(--arl-text-secondary);
+    cursor: pointer;
+    user-select: none;
+    outline: none;
+    transition: all 0.2s ease;
+}
+.arl-capsule-switcher .arl-capsule-item:hover {
+    color: var(--arl-theme-color);
+}
+.arl-capsule-switcher .arl-capsule-item.is-active {
+    background: var(--arl-theme-color);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 2px 6px color-mix(in srgb, var(--arl-theme-color) 28%, transparent);
+}
+.arl-capsule-switcher .arl-capsule-item .arl-capsule-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--arl-font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 0 6px;
+    height: 18px;
+    line-height: 18px;
+    border-radius: 9px;
+    background: var(--arl-bg-hover);
+    color: var(--arl-text-secondary);
+    transition: all 0.2s ease;
+}
+.arl-capsule-switcher .arl-capsule-item.is-active .arl-capsule-count {
+    background: rgba(255, 255, 255, 0.22);
+    color: #ffffff;
+}
+.arl-capsule-switcher .arl-capsule-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--arl-theme-color);
+    display: inline-block;
+    flex-shrink: 0;
+}
+.arl-capsule-switcher .arl-capsule-item.is-active .arl-capsule-dot {
+    background: #ffffff;
+}
+.arl-capsule-switcher .arl-capsule-dot.is-pulse {
+    animation: arlCapsulePulse 1.8s infinite;
+}
+@keyframes arlCapsulePulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.55;
+        transform: scale(0.85);
+    }
+}
+
+/* 10. 详情页返回按钮与分割线 */
+.arl-detail-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid var(--arl-border-color);
+    background: var(--arl-bg-light);
+    color: var(--arl-text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+}
+.arl-detail-back-btn:hover {
+    color: var(--arl-theme-color);
+    border-color: var(--arl-theme-soft-border);
+    background: var(--arl-theme-soft-bg);
+}
+.arl-hero-v-divider {
+    width: 1px;
+    height: 18px;
+    background: var(--arl-border-color);
+    flex-shrink: 0;
+}
+
+/* 11. 底部悬浮批量操作条 (Floating Action Bar) */
+.arl-floating-action-bar {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 18px;
+    max-width: calc(100vw - 32px);
+    background: var(--arl-bg-sticky);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--arl-border-color);
+    border-radius: 100px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+.arl-floating-action-bar .floating-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--arl-text-color);
+    white-space: nowrap;
+}
+.arl-floating-action-bar .floating-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.floating-slide-enter-active,
+.floating-slide-leave-active {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.floating-slide-enter-from,
+.floating-slide-leave-to {
+    opacity: 0;
+    transform: translate(-50%, 16px);
+}
+
+/* 12. 折叠筛选面板统一容器 (.arl-filter-card) */
+.arl-filter-card {
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    background: var(--arl-bg-card);
+    border: 1px solid var(--arl-border-color);
+    border-radius: 8px;
+}
+.arl-filter-card .arl-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 10px 14px;
+    align-items: end;
+}
+.arl-filter-card .arl-filter-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.arl-filter-card .arl-filter-cell-label {
+    font-size: 12px;
+    color: var(--arl-text-secondary);
+    line-height: 1.4;
+}
+.arl-filter-card .arl-filter-operator-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 6px 10px;
+    margin-bottom: 10px;
+    background: var(--arl-bg-light);
+    border: 1px solid var(--arl-border-color);
+    border-radius: 6px;
+}
+.arl-filter-card .arl-filter-footer {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--arl-border-color);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
 

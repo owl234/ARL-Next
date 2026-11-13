@@ -1,472 +1,553 @@
 <template>
   <div class="nuclei-manage-container" :class="{ 'page-wide-text': pageLocale !== 'zh-CN' }">
-    <!-- 统计指示条 -->
-    <div class="stats-overview-bar">
-      <div class="stat-pill">
-        <span class="stat-label">{{ pageText('pages.customTemplates') }}</span>
-        <span class="stat-val highlight">{{ stats.custom_total }}</span>
+    <!-- 吸顶 Hero 控制卡片：胶囊子视角 + 版本状态 + 对应子视角工具栏 -->
+    <div ref="nucleiActionBarRef" class="arl-hero-card">
+      <div class="arl-hero-unified-bar">
+        <div class="arl-hero-left">
+          <div class="arl-capsule-switcher">
+            <button
+              type="button"
+              class="arl-capsule-item"
+              :class="{ 'is-active': innerTab === 'community' }"
+              @click="innerTab = 'community'"
+            >
+              <span>{{ pageText('pages.communityTemplatesReadOnlySearch') }}</span>
+              <span class="arl-capsule-count">{{ stats.community_total ? stats.community_total.toLocaleString() : pageText('pages.scanning') }}</span>
+            </button>
+            <button
+              type="button"
+              class="arl-capsule-item"
+              :class="{ 'is-active': innerTab === 'blacklist' }"
+              @click="innerTab = 'blacklist'"
+            >
+              <span>{{ pageText('pages.falsePositiveBlocklist') }}</span>
+              <span class="arl-capsule-count">{{ stats.blacklist_total || 0 }}</span>
+            </button>
+            <button
+              type="button"
+              class="arl-capsule-item"
+              :class="{ 'is-active': innerTab === 'custom' }"
+              @click="innerTab = 'custom'"
+            >
+              <span>{{ pageText('pages.customTemplateWorkspace') }}</span>
+              <span class="arl-capsule-count">{{ stats.custom_total }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="arl-hero-right nuclei-hero-meta">
+          <span class="nuclei-meta-item">
+            <span class="page-secondary-label">{{ pageText('pages.enabledCustomTemplates') }}</span>
+            <strong class="page-success">{{ stats.custom_enabled }}</strong>
+          </span>
+          <span class="nuclei-meta-item">
+            <span class="page-secondary-label">{{ pageText('pages.communityTemplateVersion') }}</span>
+            <a-tag :color="stats.has_template_update ? 'orange' : 'cyan'" class="page-quiet-status-tag">
+              {{ formatTemplateVersion(stats.template_version) }}
+              <span v-if="stats.has_template_update" class="page-version-note">({{ pageText('pages.templateUpdateAvailable', { version: formatTemplateVersion(stats.template_latest_version) }) }})</span>
+            </a-tag>
+          </span>
+          <span class="nuclei-meta-item">
+            <span class="page-secondary-label">{{ pageText('pages.nucleiEngine') }}</span>
+            <a-tag :color="stats.nuclei_version !== pageText('tasks.unknown') ? 'green' : 'orange'" class="page-quiet-status-tag">
+              {{ formatTemplateVersion(stats.nuclei_version) }}
+            </a-tag>
+          </span>
+        </div>
       </div>
-      <div class="stat-pill">
-        <span class="stat-label">{{ pageText('pages.enabledCustomTemplates') }}</span>
-        <span class="stat-val active">{{ stats.custom_enabled }}</span>
+
+      <!-- 1. 社区模板库工具栏 -->
+      <div v-if="innerTab === 'community'" class="arl-toolbar-row nuclei-sub-toolbar">
+        <div class="arl-filter-group">
+          <div class="arl-filter-item">
+            <span class="arl-filter-label">{{ pageText('pages.keywordCve') }}</span>
+            <a-input
+              v-model:value="communitySearch.search"
+              :placeholder="pageText('pages.searchByCveOrName')"
+              class="page-width-240"
+              size="small"
+              allowClear
+              @pressEnter="onSearchCommunity"
+            />
+          </div>
+          <div class="arl-filter-item">
+            <span class="arl-filter-label">{{ pageText('pages.severityLabel2') }}</span>
+            <a-select
+              v-model:value="communitySearch.severity"
+              class="page-width-130"
+              size="small"
+              allowClear
+              :placeholder="pageText('pages.allSeverities')"
+              @change="onSearchCommunity"
+            >
+              <a-select-option value="critical">{{ pageText('pages.critical') }}</a-select-option>
+              <a-select-option value="high">{{ pageText('pages.high') }}</a-select-option>
+              <a-select-option value="medium">{{ pageText('pages.medium') }}</a-select-option>
+              <a-select-option value="low">{{ pageText('pages.low') }}</a-select-option>
+              <a-select-option value="info">{{ pageText('pages.info') }}</a-select-option>
+            </a-select>
+          </div>
+          <div class="arl-filter-item">
+            <span class="arl-filter-label">{{ pageText('pages.scanStatus') }}</span>
+            <a-select
+              v-model:value="communitySearch.blacklist_status"
+              class="page-width-140"
+              size="small"
+              :placeholder="pageText('tasks.allStatuses')"
+              @change="onSearchCommunity"
+            >
+              <a-select-option value="all">{{ pageText('pages.allTemplates') }}</a-select-option>
+              <a-select-option value="normal">{{ pageText('pages.includedInScans') }}</a-select-option>
+              <a-select-option value="blacklisted">{{ pageText('pages.blockedFalsePositive') }}</a-select-option>
+            </a-select>
+          </div>
+          <a-button size="small" @click="onSearchCommunity">
+            <template #icon><search-outlined /></template>
+            {{ pageText('tasks.search') }}
+          </a-button>
+          <a-button size="small" @click="resetSearchCommunity">{{ pageText('tasks.reset') }}</a-button>
+        </div>
+
+        <div class="arl-actions-group">
+          <a-tag v-if="syncStatus.status === 'syncing'" color="processing" class="page-clickable" @click="openSyncLogModal">
+            <template #icon><sync-outlined spin /></template>
+            {{ pageText('pages.synchronizingCommunityTemplates') }}
+          </a-tag>
+          <a-tag v-else-if="syncStatus.status === 'success'" color="success" class="page-clickable" @click="openSyncLogModal">
+            <template #icon><check-circle-outlined /></template>
+            {{ pageText('pages.synchronizationCompleted') }}{{ syncStatus.diff_count >= 0 ? '+' : '' }}{{ syncStatus.diff_count }}{{ pageText('pages.templates') }}
+          </a-tag>
+          <a-tag v-else-if="syncStatus.status === 'failed'" color="error" class="page-clickable" @click="openSyncLogModal">
+            <template #icon><close-circle-outlined /></template>
+            {{ pageText('pages.synchronizationFailedClickForDetails') }}
+          </a-tag>
+
+          <a-button type="link" size="small" style="padding: 0 4px;" @click="openSyncLogModal">
+            <template #icon><file-text-outlined /></template>
+            {{ pageText('pages.viewSynchronizationLogs') }}
+          </a-button>
+
+          <a-popconfirm
+            :title="pageText('pages.synchronizeTheCommunityTemplateLibraryTheSystemWillUse')"
+            :ok-text="pageText('pages.confirmSynchronization')"
+            :cancel-text="pageText('tasks.cancel')"
+            @confirm="handleSyncCommunity"
+          >
+            <a-button type="primary" size="small" :loading="syncStatus.status === 'syncing'">
+              <template #icon><sync-outlined /></template>
+              {{ pageText('pages.syncLatestCommunityVersion') }}
+            </a-button>
+          </a-popconfirm>
+
+          <a-button size="small" @click="isOfflineModalVisible = true">
+            <template #icon><cloud-upload-outlined /></template>
+            {{ pageText('pages.offlineUpdatePackage') }}
+          </a-button>
+        </div>
       </div>
-      <div class="stat-pill">
-        <span class="stat-label">{{ pageText('pages.communityLibrary') }}</span>
-        <span class="stat-val">{{ stats.community_total ? stats.community_total.toLocaleString() : pageText('pages.scanning') }}</span>
+
+      <!-- 2. 误报黑名单工具栏 -->
+      <div v-else-if="innerTab === 'blacklist'" class="arl-toolbar-row nuclei-sub-toolbar">
+        <div class="arl-filter-group">
+          <div class="arl-filter-item">
+            <span class="arl-filter-label">{{ pageText('pages.keywordLabel3') }}</span>
+            <a-input
+              v-model:value="blacklistSearch.search"
+              :placeholder="pageText('pages.enterAnIdNameOrReasonForBlocking')"
+              class="page-width-240"
+              size="small"
+              allowClear
+              @pressEnter="onSearchBlacklist"
+            />
+          </div>
+          <div class="arl-filter-item">
+            <span class="arl-filter-label">{{ pageText('pages.severityLabel2') }}</span>
+            <a-select
+              v-model:value="blacklistSearch.severity"
+              class="page-width-130"
+              size="small"
+              allowClear
+              :placeholder="pageText('pages.allSeverities')"
+              @change="onSearchBlacklist"
+            >
+              <a-select-option value="critical">{{ pageText('pages.critical') }}</a-select-option>
+              <a-select-option value="high">{{ pageText('pages.high') }}</a-select-option>
+              <a-select-option value="medium">{{ pageText('pages.medium') }}</a-select-option>
+              <a-select-option value="low">{{ pageText('pages.low') }}</a-select-option>
+              <a-select-option value="info">{{ pageText('pages.info') }}</a-select-option>
+            </a-select>
+          </div>
+          <a-button size="small" @click="onSearchBlacklist">
+            <template #icon><search-outlined /></template>
+            {{ pageText('tasks.search') }}
+          </a-button>
+          <a-button size="small" @click="resetSearchBlacklist">{{ pageText('tasks.reset') }}</a-button>
+        </div>
+
+        <div class="arl-actions-group">
+          <span class="page-secondary-label" style="font-size: 12px;">
+            {{ pageText('pages.blockedTemplatesAreExcludedFromAllSubsequentNucleiScans') }}
+          </span>
+          <a-button type="primary" size="small" @click="openAddBlacklistModal">
+            <template #icon><plus-outlined /></template>
+            {{ pageText('pages.addAFalsePositive') }}
+          </a-button>
+          <a-popconfirm
+            :title="pageText('pages.removeTheSelectedTemplatesFromTheFalsePositiveBlocklist')"
+            :ok-text="pageText('pages.confirmRemoval')"
+            :cancel-text="pageText('tasks.cancel')"
+            @confirm="handleBatchRemoveBlacklist"
+            :disabled="blacklistSelectedRowKeys.length === 0"
+          >
+            <a-button danger size="small" :disabled="blacklistSelectedRowKeys.length === 0">
+              <template #icon><delete-outlined /></template>
+              {{ pageText('pages.unblockSelectedTemplates') }}
+            </a-button>
+          </a-popconfirm>
+        </div>
       </div>
-      <div class="stat-pill">
-        <span class="stat-label">{{ pageText('pages.blockedFalsePositives') }}</span>
-        <span class="stat-val" style="color: #fa8c16; font-weight: 600;">{{ stats.blacklist_total || 0 }}</span>
-      </div>
-      <div class="stat-pill">
-        <span class="stat-label">{{ pageText('pages.communityTemplateVersion') }}</span>
-        <a-tag :color="stats.has_template_update ? 'orange' : 'cyan'" style="margin: 0; font-weight: 500;">
-          {{ formatTemplateVersion(stats.template_version) }}
-          <span v-if="stats.has_template_update" class="page-version-note">({{ pageText('pages.templateUpdateAvailable', { version: formatTemplateVersion(stats.template_latest_version) }) }})</span>
-        </a-tag>
-      </div>
-      <div class="stat-pill">
-        <span class="stat-label">{{ pageText('pages.nucleiEngine') }}</span>
-        <a-tag :color="stats.nuclei_version !== pageText('tasks.unknown') ? 'green' : 'orange'" class="page-quiet-status-tag">
-          {{ formatTemplateVersion(stats.nuclei_version) }}
-        </a-tag>
+
+      <!-- 3. 自建模板库工具栏 -->
+      <div v-else class="arl-toolbar-row nuclei-sub-toolbar">
+        <div class="arl-filter-group">
+          <div class="arl-filter-item">
+            <span class="arl-filter-label">{{ pageText('pages.templateId') }}</span>
+            <a-input
+              v-model:value="customSearch.template_id"
+              :placeholder="pageText('pages.eGCve2024')"
+              class="page-width-150"
+              size="small"
+              allowClear
+              @pressEnter="onSearchCustom"
+            />
+          </div>
+          <div class="arl-filter-item">
+            <span class="arl-filter-label">{{ pageText('pages.vulnerabilityName') }}</span>
+            <a-input
+              v-model:value="customSearch.name"
+              :placeholder="pageText('tasks.enterAName')"
+              class="page-width-150"
+              size="small"
+              allowClear
+              @pressEnter="onSearchCustom"
+            />
+          </div>
+          <div class="arl-filter-item">
+            <span class="arl-filter-label">{{ pageText('pages.severityLabel2') }}</span>
+            <a-select
+              v-model:value="customSearch.severity"
+              class="page-width-130"
+              size="small"
+              allowClear
+              :placeholder="pageText('pages.allSeverities')"
+              @change="onSearchCustom"
+            >
+              <a-select-option value="critical">{{ pageText('pages.critical') }}</a-select-option>
+              <a-select-option value="high">{{ pageText('pages.high') }}</a-select-option>
+              <a-select-option value="medium">{{ pageText('pages.medium') }}</a-select-option>
+              <a-select-option value="low">{{ pageText('pages.low') }}</a-select-option>
+              <a-select-option value="info">{{ pageText('pages.info') }}</a-select-option>
+            </a-select>
+          </div>
+          <div class="arl-filter-item">
+            <span class="arl-filter-label">{{ pageText('pages.tags') }}</span>
+            <a-input
+              v-model:value="customSearch.tag"
+              :placeholder="pageText('pages.eGRceSpring')"
+              class="page-width-130"
+              size="small"
+              allowClear
+              @pressEnter="onSearchCustom"
+            />
+          </div>
+          <a-button size="small" @click="onSearchCustom">
+            <template #icon><search-outlined /></template>
+            {{ pageText('tasks.search') }}
+          </a-button>
+          <a-button size="small" @click="resetSearchCustom">{{ pageText('tasks.reset') }}</a-button>
+        </div>
+
+        <div class="arl-actions-group">
+          <a-button type="primary" size="small" @click="openCreateModal">
+            <template #icon><plus-outlined /></template>
+            {{ pageText('pages.newTemplate') }}
+          </a-button>
+          <a-button size="small" @click="isImportModalVisible = true">
+            <template #icon><cloud-upload-outlined /></template>
+            {{ pageText('pages.importTemplates') }}
+          </a-button>
+          <a-button size="small" @click="downloadSampleTemplate">
+            <template #icon><download-outlined /></template>
+            {{ pageText('pages.downloadStandardTemplate') }}
+          </a-button>
+          <a-button size="small" @click="handleExport">
+            <template #icon><cloud-download-outlined /></template>
+            {{ pageText('pages.exportSelectedAll') }}
+          </a-button>
+          <a-button size="small" :disabled="selectedRowKeys.length === 0" @click="handleBatchToggle(true)">
+            {{ pageText('pages.enableSelected') }}
+          </a-button>
+          <a-button size="small" :disabled="selectedRowKeys.length === 0" @click="handleBatchToggle(false)">
+            {{ pageText('pages.disableSelected') }}
+          </a-button>
+          <a-popconfirm
+            :title="pageText('pages.permanentlyDeleteTheSelectedCustomTemplatesThisCannotBe')"
+            :ok-text="pageText('assets.confirm')"
+            :cancel-text="pageText('tasks.cancel')"
+            @confirm="handleBatchDelete"
+            :disabled="selectedRowKeys.length === 0"
+          >
+            <a-button danger size="small" :disabled="selectedRowKeys.length === 0" :loading="batchDeleteLoading">
+              <template #icon><delete-outlined /></template>
+              {{ pageText('tasks.deleteSelected') }}
+            </a-button>
+          </a-popconfirm>
+        </div>
       </div>
     </div>
 
-    <!-- 二级 Sub-Tabs -->
-    <a-tabs v-model:activeKey="innerTab" type="card" class="nuclei-inner-tabs">
-      <!-- 1. 社区模板库 (只读检索) -->
-      <a-tab-pane key="community" :tab="pageText('pages.communityTemplatesReadOnlySearch')">
-        <div class="tab-content-wrapper">
-          <div class="filter-bar-row">
-            <div class="filter-item">
-              <span class="filter-label">{{ pageText('pages.keywordCve') }}</span>
-              <a-input v-model:value="communitySearch.search" :placeholder="pageText('pages.searchByCveOrName')" class="page-width-240" allowClear @pressEnter="onSearchCommunity" />
-            </div>
-            <div class="filter-item">
-              <span class="filter-label">{{ pageText('pages.severityLabel2') }}</span>
-              <a-select v-model:value="communitySearch.severity" class="page-width-130" allowClear :placeholder="pageText('pages.allSeverities')" @change="onSearchCommunity">
-                <a-select-option value="critical">{{ pageText('pages.critical') }}</a-select-option>
-                <a-select-option value="high">{{ pageText('pages.high') }}</a-select-option>
-                <a-select-option value="medium">{{ pageText('pages.medium') }}</a-select-option>
-                <a-select-option value="low">{{ pageText('pages.low') }}</a-select-option>
-                <a-select-option value="info">{{ pageText('pages.info') }}</a-select-option>
-              </a-select>
-            </div>
-            <div class="filter-item">
-              <span class="filter-label">{{ pageText('pages.scanStatus') }}</span>
-              <a-select v-model:value="communitySearch.blacklist_status" class="page-width-140" :placeholder="pageText('tasks.allStatuses')" @change="onSearchCommunity">
-                <a-select-option value="all">{{ pageText('pages.allTemplates') }}</a-select-option>
-                <a-select-option value="normal">{{ pageText('pages.includedInScans') }}</a-select-option>
-                <a-select-option value="blacklisted">{{ pageText('pages.blockedFalsePositive') }}</a-select-option>
-              </a-select>
-            </div>
-            <div class="filter-actions">
-              <a-button type="primary" @click="onSearchCommunity"><template #icon><search-outlined /></template>{{ pageText('tasks.search') }}</a-button>
-              <a-button @click="resetSearchCommunity">{{ pageText('tasks.reset') }}</a-button>
-            </div>
-
-            <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
-              <!-- 同步状态指示 -->
-              <a-tag v-if="syncStatus.status === 'syncing'" color="processing" style="cursor: pointer; padding: 3px 8px;" @click="openSyncLogModal">
-                <template #icon><sync-outlined spin /></template>
-                {{ pageText('pages.synchronizingCommunityTemplates') }}
-              </a-tag>
-              <a-tag v-else-if="syncStatus.status === 'success'" color="success" style="cursor: pointer; padding: 3px 8px;" @click="openSyncLogModal">
-                <template #icon><check-circle-outlined /></template>
-                {{ pageText('pages.synchronizationCompleted') }}{{ syncStatus.diff_count >= 0 ? '+' : '' }}{{ syncStatus.diff_count }}{{ pageText('pages.templates') }}
-              </a-tag>
-              <a-tag v-else-if="syncStatus.status === 'failed'" color="error" style="cursor: pointer; padding: 3px 8px;" @click="openSyncLogModal">
-                <template #icon><close-circle-outlined /></template>
-                {{ pageText('pages.synchronizationFailedClickForDetails') }}
-              </a-tag>
-
-              <!-- 查看日志按钮 -->
-              <a-button type="link" size="small" style="padding: 0 4px;" @click="openSyncLogModal">
-                <template #icon><file-text-outlined /></template>
-                {{ pageText('pages.viewSynchronizationLogs') }}
-              </a-button>
-
-              <!-- 在线同步按钮 -->
+    <!-- 1. 社区模板表格 -->
+    <template v-if="innerTab === 'community'">
+      <a-table
+        :loading="communityLoading"
+        :dataSource="communityList"
+        :columns="communityColumns"
+        :pagination="false"
+        :sticky="stickyConfig"
+        size="small"
+        :rowKey="(record) => record.file_path || record.template_id"
+      >
+        <template #bodyCell="{ column, record, index }">
+          <template v-if="column.key === 'index'">
+            <span>{{ (communityPagination.current - 1) * communityPagination.pageSize + index + 1 }}</span>
+          </template>
+          <template v-if="column.key === 'template_id'">
+            <span class="arl-mono" style="font-weight: 600;">{{ record.template_id }}</span>
+          </template>
+          <template v-if="column.key === 'severity'">
+            <a-tag :color="getSeverityColor(record.severity)" style="font-weight: 500; text-transform: uppercase;">
+              {{ record.severity || 'UNKNOWN' }}
+            </a-tag>
+          </template>
+          <template v-if="column.key === 'status'">
+            <a-tooltip v-if="record.is_blacklisted" :title="record.blacklist_reason ? pageText('pages.reasonForBlockingReason', { reason: record.blacklist_reason }) : pageText('pages.blockedAsAFalsePositiveExcludedFromScans')">
+              <a-tag color="orange" class="page-clickable">{{ pageText('pages.blockedFalsePositiveLabel2') }}</a-tag>
+            </a-tooltip>
+            <a-tag v-else color="blue">{{ pageText('pages.includedInScans') }}</a-tag>
+          </template>
+          <template v-if="column.key === 'file_path'">
+            <span class="arl-mono" style="font-size: 12px; color: var(--arl-text-secondary);">
+              {{ record.file_path }}
+            </span>
+          </template>
+          <template v-if="column.key === 'action'">
+            <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
+              <a @click="viewCommunitySource(record)">
+                <file-text-outlined /> {{ pageText('pages.viewYaml') }}
+              </a>
               <a-popconfirm
-                :title="pageText('pages.synchronizeTheCommunityTemplateLibraryTheSystemWillUse')"
-                :ok-text="pageText('pages.confirmSynchronization')"
+                v-if="record.is_blacklisted"
+                :title="pageText('pages.unblockThisTemplateAndIncludeItInScansAgain')"
+                :ok-text="pageText('pages.unblock')"
                 :cancel-text="pageText('tasks.cancel')"
-                @confirm="handleSyncCommunity"
+                @confirm="handleRemoveBlacklist(record.template_id)"
               >
-                <a-button type="primary" :loading="syncStatus.status === 'syncing'">
-                  <template #icon><sync-outlined /></template>
-                  {{ pageText('pages.syncLatestCommunityVersion') }}
-                </a-button>
+                <a class="page-success"><check-outlined /> {{ pageText('pages.unblock') }}</a>
               </a-popconfirm>
-
-              <!-- 离线更新包按钮 -->
-              <a-button @click="isOfflineModalVisible = true">
-                <template #icon><cloud-upload-outlined /></template>
-                {{ pageText('pages.offlineUpdatePackage') }}
-              </a-button>
+              <a v-else style="color: #fa8c16;" @click="openMarkBlacklistModal(record)">
+                <stop-outlined /> {{ pageText('pages.markAsFalsePositive') }}
+              </a>
             </div>
-          </div>
+          </template>
+        </template>
+        <template #emptyText>
+          <ArlEmpty :description="pageText('tasks.noData')" />
+        </template>
+      </a-table>
 
-          <!-- 社区模板表格 -->
-          <a-table
-            :loading="communityLoading"
-            :dataSource="communityList"
-            :columns="communityColumns"
-            :pagination="false"
-            size="middle"
-            :rowKey="(record) => record.file_path || record.template_id"
-          >
-            <template #bodyCell="{ column, record, index }">
-              <template v-if="column.key === 'index'">
-                <span>{{ (communityPagination.current - 1) * communityPagination.pageSize + index + 1 }}</span>
-              </template>
-              <template v-if="column.key === 'template_id'">
-                <span style="font-family: monospace; font-weight: 600;">{{ record.template_id }}</span>
-              </template>
-              <template v-if="column.key === 'severity'">
-                <a-tag :color="getSeverityColor(record.severity)" style="font-weight: 500; text-transform: uppercase;">
-                  {{ record.severity || 'UNKNOWN' }}
-                </a-tag>
-              </template>
-              <template v-if="column.key === 'status'">
-                <a-tooltip v-if="record.is_blacklisted" :title="record.blacklist_reason ? pageText('pages.reasonForBlockingReason', { reason: record.blacklist_reason }) : pageText('pages.blockedAsAFalsePositiveExcludedFromScans')">
-                  <a-tag color="orange" class="page-clickable">{{ pageText('pages.blockedFalsePositiveLabel2') }}</a-tag>
-                </a-tooltip>
-                <a-tag v-else color="blue">{{ pageText('pages.includedInScans') }}</a-tag>
-              </template>
-              <template v-if="column.key === 'file_path'">
-                <span style="font-family: monospace; font-size: 12px; color: var(--arl-text-color); opacity: 0.65;">
-                  {{ record.file_path }}
-                </span>
-              </template>
-              <template v-if="column.key === 'action'">
-                <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
-                  <a @click="viewCommunitySource(record)">
-                    <file-text-outlined /> {{ pageText('pages.viewYaml') }}
-                  </a>
-                  <a-popconfirm
-                    v-if="record.is_blacklisted"
-                    :title="pageText('pages.unblockThisTemplateAndIncludeItInScansAgain')"
-                    :ok-text="pageText('pages.unblock')"
-                    :cancel-text="pageText('tasks.cancel')"
-                    @confirm="handleRemoveBlacklist(record.template_id)"
-                  >
-                    <a class="page-success"><check-outlined /> {{ pageText('pages.unblock') }}</a>
-                  </a-popconfirm>
-                  <a v-else style="color: #fa8c16;" @click="openMarkBlacklistModal(record)">
-                    <stop-outlined /> {{ pageText('pages.markAsFalsePositive') }}
-                  </a>
-                </div>
-              </template>
-            </template>
-          </a-table>
-
-          <!-- 分页器 -->
-          <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0;">
-            <div style="color: var(--arl-text-color); opacity: 0.65;">
-              {{ pageText('tasks.paginationSummary', { pages: Math.ceil(communityPagination.total / communityPagination.pageSize) || 1, total: communityPagination.total }) }}
-            </div>
-            <a-pagination
-              :pageSizeOptions="$pageSizeOptions"
-              v-model:current="communityPagination.current"
-              v-model:pageSize="communityPagination.pageSize"
-              :total="communityPagination.total"
-              show-size-changer
-              @change="fetchCommunityTemplates"
-            />
-          </div>
+      <div class="arl-pagination-bar">
+        <div class="pagination-info">
+          {{ pageText('tasks.paginationSummary', { pages: Math.ceil(communityPagination.total / communityPagination.pageSize) || 1, total: communityPagination.total }) }}
         </div>
-      </a-tab-pane>
+        <a-pagination
+          :pageSizeOptions="$pageSizeOptions"
+          v-model:current="communityPagination.current"
+          v-model:pageSize="communityPagination.pageSize"
+          :total="communityPagination.total"
+          show-size-changer
+          size="small"
+          @change="handleCommunityPageChange"
+          @showSizeChange="handleCommunityPageChange"
+        />
+      </div>
+    </template>
 
-      <!-- 2. 误报黑名单 (集中治理) -->
-      <a-tab-pane key="blacklist" :tab="pageText('pages.falsePositiveBlocklist')">
-        <div class="tab-content-wrapper">
-          <!-- 顶部操作栏 -->
-          <div class="action-bar-row">
-            <a-button type="primary" @click="openAddBlacklistModal">
-              <template #icon><plus-outlined /></template>
-              {{ pageText('pages.addAFalsePositive') }}
-            </a-button>
-            <a-popconfirm
-              :title="pageText('pages.removeTheSelectedTemplatesFromTheFalsePositiveBlocklist')"
-              :ok-text="pageText('pages.confirmRemoval')"
-              :cancel-text="pageText('tasks.cancel')"
-              @confirm="handleBatchRemoveBlacklist"
-              :disabled="blacklistSelectedRowKeys.length === 0"
-            >
-              <a-button danger :disabled="blacklistSelectedRowKeys.length === 0">
-                <template #icon><delete-outlined /></template>
-                {{ pageText('pages.unblockSelectedTemplates') }}
-              </a-button>
-            </a-popconfirm>
-            <div style="margin-left: auto; color: var(--arl-text-color); opacity: 0.65; font-size: 13px;">
-              {{ pageText('pages.blockedTemplatesAreExcludedFromAllSubsequentNucleiScans') }}
+    <!-- 2. 误报黑名单表格 -->
+    <template v-else-if="innerTab === 'blacklist'">
+      <a-table
+        :loading="blacklistLoading"
+        :dataSource="blacklistItems"
+        :columns="blacklistColumns"
+        :pagination="false"
+        :sticky="stickyConfig"
+        size="small"
+        :rowKey="(record) => record.template_id"
+        :rowSelection="{ selectedRowKeys: blacklistSelectedRowKeys, onChange: onBlacklistSelectChange, preserveSelectedRowKeys: true }"
+      >
+        <template #bodyCell="{ column, record, index }">
+          <template v-if="column.key === 'index'">
+            <span>{{ (blacklistPagination.current - 1) * blacklistPagination.pageSize + index + 1 }}</span>
+          </template>
+          <template v-if="column.key === 'template_id'">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="arl-mono" style="font-weight: 600; color: #fa8c16;">{{ record.template_id }}</span>
+              <a-tooltip :title="pageText('pages.copyTemplateId')">
+                <copy-outlined style="cursor: pointer; opacity: 0.5; font-size: 12px;" @click="copyText(record.template_id)" />
+              </a-tooltip>
             </div>
-          </div>
+          </template>
+          <template v-if="column.key === 'name'">
+            <span style="font-weight: 500;">{{ record.name }}</span>
+          </template>
+          <template v-if="column.key === 'severity'">
+            <a-tag :color="getSeverityColor(record.severity)" style="font-weight: 500; text-transform: uppercase;">
+              {{ record.severity || 'UNKNOWN' }}
+            </a-tag>
+          </template>
+          <template v-if="column.key === 'reason'">
+            <span style="color: var(--arl-text-color); font-size: 13px;">{{ record.reason || '手工标记误报' }}</span>
+          </template>
+          <template v-if="column.key === 'created_at'">
+            <span style="font-size: 12px; opacity: 0.7;">{{ record.created_at || '-' }}</span>
+          </template>
+          <template v-if="column.key === 'action'">
+            <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
+              <a @click="viewCommunitySource(record)">
+                <file-text-outlined /> {{ pageText('pages.viewYaml') }}
+              </a>
+              <a-popconfirm
+                :title="pageText('pages.removeThisTemplateFromTheFalsePositiveBlocklistAnd')"
+                :ok-text="pageText('pages.unblock')"
+                :cancel-text="pageText('tasks.cancel')"
+                @confirm="handleRemoveBlacklist(record.template_id)"
+              >
+                <a class="page-success"><check-outlined /> {{ pageText('pages.unblock') }}</a>
+              </a-popconfirm>
+            </div>
+          </template>
+        </template>
+        <template #emptyText>
+          <ArlEmpty :description="pageText('pages.noFalsePositiveTemplatesBlockedScansWillUseThe')" />
+        </template>
+      </a-table>
 
-          <!-- 搜索过滤栏 -->
-          <div class="filter-bar-row">
-            <div class="filter-item">
-              <span class="filter-label">{{ pageText('pages.keywordLabel3') }}</span>
-              <a-input v-model:value="blacklistSearch.search" :placeholder="pageText('pages.enterAnIdNameOrReasonForBlocking')" class="page-width-240" allowClear @pressEnter="onSearchBlacklist" />
-            </div>
-            <div class="filter-item">
-              <span class="filter-label">{{ pageText('pages.severityLabel2') }}</span>
-              <a-select v-model:value="blacklistSearch.severity" class="page-width-130" allowClear :placeholder="pageText('pages.allSeverities')" @change="onSearchBlacklist">
-                <a-select-option value="critical">{{ pageText('pages.critical') }}</a-select-option>
-                <a-select-option value="high">{{ pageText('pages.high') }}</a-select-option>
-                <a-select-option value="medium">{{ pageText('pages.medium') }}</a-select-option>
-                <a-select-option value="low">{{ pageText('pages.low') }}</a-select-option>
-                <a-select-option value="info">{{ pageText('pages.info') }}</a-select-option>
-              </a-select>
-            </div>
-            <div class="filter-actions">
-              <a-button type="primary" @click="onSearchBlacklist"><template #icon><search-outlined /></template>{{ pageText('tasks.search') }}</a-button>
-              <a-button @click="resetSearchBlacklist">{{ pageText('tasks.reset') }}</a-button>
-            </div>
-          </div>
-
-          <!-- 黑名单数据表格 -->
-          <a-table
-            :loading="blacklistLoading"
-            :dataSource="blacklistItems"
-            :columns="blacklistColumns"
-            :pagination="false"
-            size="middle"
-            :rowKey="(record) => record.template_id"
-            :rowSelection="{ selectedRowKeys: blacklistSelectedRowKeys, onChange: onBlacklistSelectChange, preserveSelectedRowKeys: true }"
-          >
-            <template #bodyCell="{ column, record, index }">
-              <template v-if="column.key === 'index'">
-                <span>{{ (blacklistPagination.current - 1) * blacklistPagination.pageSize + index + 1 }}</span>
-              </template>
-              <template v-if="column.key === 'template_id'">
-                <div style="display: flex; align-items: center; gap: 6px;">
-                  <span style="font-family: monospace; font-weight: 600; color: #fa8c16;">{{ record.template_id }}</span>
-                  <a-tooltip :title="pageText('pages.copyTemplateId')">
-                    <copy-outlined style="cursor: pointer; opacity: 0.5; font-size: 12px;" @click="copyText(record.template_id)" />
-                  </a-tooltip>
-                </div>
-              </template>
-              <template v-if="column.key === 'name'">
-                <span style="font-weight: 500;">{{ record.name }}</span>
-              </template>
-              <template v-if="column.key === 'severity'">
-                <a-tag :color="getSeverityColor(record.severity)" style="font-weight: 500; text-transform: uppercase;">
-                  {{ record.severity || 'UNKNOWN' }}
-                </a-tag>
-              </template>
-              <template v-if="column.key === 'reason'">
-                <span style="color: var(--arl-text-color); font-size: 13px;">{{ record.reason || '手工标记误报' }}</span>
-              </template>
-              <template v-if="column.key === 'created_at'">
-                <span style="font-size: 12px; opacity: 0.7;">{{ record.created_at || '-' }}</span>
-              </template>
-              <template v-if="column.key === 'action'">
-                <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
-                  <a @click="viewCommunitySource(record)">
-                    <file-text-outlined /> {{ pageText('pages.viewYaml') }}
-                  </a>
-                  <a-popconfirm
-                    :title="pageText('pages.removeThisTemplateFromTheFalsePositiveBlocklistAnd')"
-                    :ok-text="pageText('pages.unblock')"
-                    :cancel-text="pageText('tasks.cancel')"
-                    @confirm="handleRemoveBlacklist(record.template_id)"
-                  >
-                    <a class="page-success"><check-outlined /> {{ pageText('pages.unblock') }}</a>
-                  </a-popconfirm>
-                </div>
-              </template>
-            </template>
-            <template #emptyText>
-              <div style="padding: 40px 0;">
-                <inbox-outlined style="font-size: 48px; color: var(--arl-border-color);" />
-                <div class="page-option-hint">{{ pageText('pages.noFalsePositiveTemplatesBlockedScansWillUseThe') }}</div>
-              </div>
-            </template>
-          </a-table>
-
-          <!-- 分页器 -->
-          <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0;">
-            <div style="color: var(--arl-text-color); opacity: 0.65;">
-              {{ pageText('tasks.paginationSummary', { pages: Math.ceil(blacklistPagination.total / blacklistPagination.pageSize) || 1, total: blacklistPagination.total }) }}
-            </div>
-            <a-pagination
-              :pageSizeOptions="$pageSizeOptions"
-              v-model:current="blacklistPagination.current"
-              v-model:pageSize="blacklistPagination.pageSize"
-              :total="blacklistPagination.total"
-              show-size-changer
-              @change="fetchBlacklist"
-            />
-          </div>
+      <div class="arl-pagination-bar">
+        <div class="pagination-info">
+          {{ pageText('tasks.paginationSummary', { pages: Math.ceil(blacklistPagination.total / blacklistPagination.pageSize) || 1, total: blacklistPagination.total }) }}
         </div>
-      </a-tab-pane>
+        <a-pagination
+          :pageSizeOptions="$pageSizeOptions"
+          v-model:current="blacklistPagination.current"
+          v-model:pageSize="blacklistPagination.pageSize"
+          :total="blacklistPagination.total"
+          show-size-changer
+          size="small"
+          @change="handleBlacklistPageChange"
+          @showSizeChange="handleBlacklistPageChange"
+        />
+      </div>
+    </template>
 
-      <!-- 3. 自建模板库 (工作台) -->
-      <a-tab-pane key="custom" :tab="pageText('pages.customTemplateWorkspace')">
-        <div class="tab-content-wrapper">
-          <!-- 顶部操作栏 -->
-          <div class="action-bar-row">
-            <a-button type="primary" @click="openCreateModal">
-              <template #icon><plus-outlined /></template>
-              {{ pageText('pages.newTemplate') }}
-            </a-button>
-            <a-button type="primary" @click="isImportModalVisible = true">
-              <template #icon><cloud-upload-outlined /></template>
-              {{ pageText('pages.importTemplates') }}
-            </a-button>
-            <a-button @click="downloadSampleTemplate">
-              <template #icon><download-outlined /></template>
-              {{ pageText('pages.downloadStandardTemplate') }}
-            </a-button>
-            <a-button @click="handleExport">
-              <template #icon><cloud-download-outlined /></template>
-              {{ pageText('pages.exportSelectedAll') }}
-            </a-button>
-            <a-button :disabled="selectedRowKeys.length === 0" @click="handleBatchToggle(true)">
-              {{ pageText('pages.enableSelected') }}
-            </a-button>
-            <a-button :disabled="selectedRowKeys.length === 0" @click="handleBatchToggle(false)">
-              {{ pageText('pages.disableSelected') }}
-            </a-button>
-            <a-popconfirm
-              :title="pageText('pages.permanentlyDeleteTheSelectedCustomTemplatesThisCannotBe')"
-              :ok-text="pageText('assets.confirm')"
-              :cancel-text="pageText('tasks.cancel')"
-              @confirm="handleBatchDelete"
-              :disabled="selectedRowKeys.length === 0"
-            >
-              <a-button type="primary" danger :disabled="selectedRowKeys.length === 0" :loading="batchDeleteLoading">
-                <template #icon><delete-outlined /></template>
-                {{ pageText('tasks.deleteSelected') }}
-              </a-button>
-            </a-popconfirm>
-          </div>
+    <!-- 3. 自建模板表格 -->
+    <template v-else>
+      <a-table
+        :loading="customLoading"
+        :dataSource="customList"
+        :columns="customColumns"
+        :pagination="false"
+        :sticky="stickyConfig"
+        size="small"
+        :rowKey="(record) => record.template_id"
+        :rowSelection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange, preserveSelectedRowKeys: true }"
+      >
+        <template #bodyCell="{ column, record, index }">
+          <template v-if="column.key === 'index'">
+            <span>{{ (customPagination.current - 1) * customPagination.pageSize + index + 1 }}</span>
+          </template>
 
-          <!-- 搜索与筛选区 -->
-          <div class="filter-bar-row">
-            <div class="filter-item">
-              <span class="filter-label">{{ pageText('pages.templateId') }}</span>
-              <a-input v-model:value="customSearch.template_id" :placeholder="pageText('pages.eGCve2024')" class="page-width-170" allowClear @pressEnter="onSearchCustom" />
+          <template v-if="column.key === 'template_id'">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="arl-mono" style="font-weight: 600; color: var(--arl-text-color);">{{ record.template_id }}</span>
+              <a-tooltip :title="pageText('pages.copyTemplateId')">
+                <copy-outlined style="cursor: pointer; opacity: 0.5; font-size: 12px;" @click="copyText(record.template_id)" />
+              </a-tooltip>
             </div>
-            <div class="filter-item">
-              <span class="filter-label">{{ pageText('pages.vulnerabilityName') }}</span>
-              <a-input v-model:value="customSearch.name" :placeholder="pageText('tasks.enterAName')" class="page-width-170" allowClear @pressEnter="onSearchCustom" />
+          </template>
+
+          <template v-if="column.key === 'name'">
+            <a @click="openEditModal(record)" style="font-weight: 500;">{{ record.name }}</a>
+            <div v-if="record.description" style="font-size: 12px; color: var(--arl-text-secondary); max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              {{ record.description }}
             </div>
-            <div class="filter-item">
-              <span class="filter-label">{{ pageText('pages.severityLabel2') }}</span>
-              <a-select v-model:value="customSearch.severity" class="page-width-130" allowClear :placeholder="pageText('pages.allSeverities')" @change="onSearchCustom">
-                <a-select-option value="critical">{{ pageText('pages.critical') }}</a-select-option>
-                <a-select-option value="high">{{ pageText('pages.high') }}</a-select-option>
-                <a-select-option value="medium">{{ pageText('pages.medium') }}</a-select-option>
-                <a-select-option value="low">{{ pageText('pages.low') }}</a-select-option>
-                <a-select-option value="info">{{ pageText('pages.info') }}</a-select-option>
-              </a-select>
+          </template>
+
+          <template v-if="column.key === 'severity'">
+            <a-tag :color="getSeverityColor(record.severity)" style="font-weight: 500; text-transform: uppercase;">
+              {{ record.severity || 'UNKNOWN' }}
+            </a-tag>
+          </template>
+
+          <template v-if="column.key === 'tags'">
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; max-width: 220px;">
+              <a-tag v-for="tag in (record.tags || []).slice(0, 3)" :key="tag" color="blue" size="small">{{ tag }}</a-tag>
+              <span v-if="(record.tags || []).length > 3" style="font-size: 11px; opacity: 0.6;">+{{ (record.tags || []).length - 3 }}</span>
             </div>
-            <div class="filter-item">
-              <span class="filter-label">{{ pageText('pages.tags') }}</span>
-              <a-input v-model:value="customSearch.tag" :placeholder="pageText('pages.eGRceSpring')" class="page-width-150" allowClear @pressEnter="onSearchCustom" />
-            </div>
-            <div class="filter-actions">
-              <a-button type="primary" @click="onSearchCustom"><template #icon><search-outlined /></template>{{ pageText('tasks.search') }}</a-button>
-              <a-button @click="resetSearchCustom">{{ pageText('tasks.reset') }}</a-button>
-            </div>
-          </div>
+          </template>
 
-          <!-- 自建模板数据表格 -->
-          <a-table
-            :loading="customLoading"
-            :dataSource="customList"
-            :columns="customColumns"
-            :pagination="false"
-            size="middle"
-            :rowKey="(record) => record.template_id"
-            :rowSelection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange, preserveSelectedRowKeys: true }"
-          >
-            <template #bodyCell="{ column, record, index }">
-              <template v-if="column.key === 'index'">
-                <span>{{ (customPagination.current - 1) * customPagination.pageSize + index + 1 }}</span>
-              </template>
-
-              <template v-if="column.key === 'template_id'">
-                <div style="display: flex; align-items: center; gap: 6px;">
-                  <span style="font-family: monospace; font-weight: 600; color: var(--arl-text-color);">{{ record.template_id }}</span>
-                  <a-tooltip :title="pageText('pages.copyTemplateId')">
-                    <copy-outlined style="cursor: pointer; opacity: 0.5; font-size: 12px;" @click="copyText(record.template_id)" />
-                  </a-tooltip>
-                </div>
-              </template>
-
-              <template v-if="column.key === 'name'">
-                <a @click="openEditModal(record)" style="font-weight: 500;">{{ record.name }}</a>
-                <div v-if="record.description" style="font-size: 12px; color: var(--arl-text-color); opacity: 0.55; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                  {{ record.description }}
-                </div>
-              </template>
-
-              <template v-if="column.key === 'severity'">
-                <a-tag :color="getSeverityColor(record.severity)" style="font-weight: 500; text-transform: uppercase;">
-                  {{ record.severity || 'UNKNOWN' }}
-                </a-tag>
-              </template>
-
-              <template v-if="column.key === 'tags'">
-                <div style="display: flex; flex-wrap: wrap; gap: 4px; max-width: 220px;">
-                  <a-tag v-for="tag in (record.tags || []).slice(0, 3)" :key="tag" color="blue" size="small">{{ tag }}</a-tag>
-                  <span v-if="(record.tags || []).length > 3" style="font-size: 11px; opacity: 0.6;">+{{ (record.tags || []).length - 3 }}</span>
-                </div>
-              </template>
-
-              <template v-if="column.key === 'enable'">
-                <a-switch
-                  :checked="record.enable"
-                  :loading="record._toggling"
-                  :checked-children="pageText('pages.enable')"
-                  :un-checked-children="pageText('pages.disable')"
-                  @change="(val) => handleToggleEnable(record, val)"
-                />
-              </template>
-
-              <template v-if="column.key === 'action'">
-                <div style="display: flex; gap: 12px; align-items: center;">
-                  <a @click="openEditModal(record)">{{ pageText('pages.editSource') }}</a>
-                  <a @click="openDryRunDirect(record)" style="color: #52c41a;">
-                    <thunderbolt-outlined /> {{ pageText('pages.debug') }}
-                  </a>
-                  <a-popconfirm :title="pageText('pages.deleteThisTemplate')" :ok-text="pageText('tasks.delete')" :cancel-text="pageText('tasks.cancel')" @confirm="handleSingleDelete(record.template_id)">
-                    <a class="page-danger">{{ pageText('tasks.delete') }}</a>
-                  </a-popconfirm>
-                </div>
-              </template>
-            </template>
-
-            <template #emptyText>
-              <div style="padding: 40px 0;">
-                <inbox-outlined style="font-size: 48px; color: var(--arl-border-color);" />
-                <div class="page-option-hint">{{ pageText('pages.noCustomTemplatesSelectNewTemplateOrImportTemplates') }}</div>
-              </div>
-            </template>
-          </a-table>
-
-          <!-- 分页器 -->
-          <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0;">
-            <div style="color: var(--arl-text-color); opacity: 0.65;">
-              {{ pageText('tasks.paginationSummary', { pages: Math.ceil(customPagination.total / customPagination.pageSize) || 1, total: customPagination.total }) }}
-            </div>
-            <a-pagination
-              :pageSizeOptions="$pageSizeOptions"
-              v-model:current="customPagination.current"
-              v-model:pageSize="customPagination.pageSize"
-              :total="customPagination.total"
-              show-size-changer
-              @change="fetchCustomTemplates"
+          <template v-if="column.key === 'enable'">
+            <a-switch
+              :checked="record.enable"
+              :loading="record._toggling"
+              :checked-children="pageText('pages.enable')"
+              :un-checked-children="pageText('pages.disable')"
+              @change="(val) => handleToggleEnable(record, val)"
             />
-          </div>
+          </template>
+
+          <template v-if="column.key === 'action'">
+            <div style="display: flex; gap: 12px; align-items: center;">
+              <a @click="openEditModal(record)">{{ pageText('pages.editSource') }}</a>
+              <a @click="openDryRunDirect(record)" style="color: #52c41a;">
+                <thunderbolt-outlined /> {{ pageText('pages.debug') }}
+              </a>
+              <a-popconfirm :title="pageText('pages.deleteThisTemplate')" :ok-text="pageText('tasks.delete')" :cancel-text="pageText('tasks.cancel')" @confirm="handleSingleDelete(record.template_id)">
+                <a class="page-danger">{{ pageText('tasks.delete') }}</a>
+              </a-popconfirm>
+            </div>
+          </template>
+        </template>
+
+        <template #emptyText>
+          <ArlEmpty :description="pageText('pages.noCustomTemplatesSelectNewTemplateOrImportTemplates')" />
+        </template>
+      </a-table>
+
+      <div class="arl-pagination-bar">
+        <div class="pagination-info">
+          {{ pageText('tasks.paginationSummary', { pages: Math.ceil(customPagination.total / customPagination.pageSize) || 1, total: customPagination.total }) }}
         </div>
-      </a-tab-pane>
-    </a-tabs>
+        <a-pagination
+          :pageSizeOptions="$pageSizeOptions"
+          v-model:current="customPagination.current"
+          v-model:pageSize="customPagination.pageSize"
+          :total="customPagination.total"
+          show-size-changer
+          size="small"
+          @change="handleCustomPageChange"
+          @showSizeChange="handleCustomPageChange"
+        />
+      </div>
+    </template>
 
     <!-- 弹窗 1：新建 / 编辑自建模板弹窗 (带 Dry Run) -->
     <a-modal
@@ -614,7 +695,7 @@
           </div>
           <div>
             <span class="page-secondary-label">{{ pageText('pages.newTemplates') }}</span>
-            <span style="font-weight: 600; color: #1890ff;">{{ syncStatus.diff_count >= 0 ? '+' : '' }}{{ syncStatus.diff_count }}</span>
+            <span style="font-weight: 600; color: var(--arl-theme-color);">{{ syncStatus.diff_count >= 0 ? '+' : '' }}{{ syncStatus.diff_count }}</span>
           </div>
           <div style="margin-left: auto;">
             <a-button size="small" :loading="syncStatusLoading" @click="fetchSyncStatus">
@@ -639,7 +720,7 @@
               <template #icon><copy-outlined /></template> {{ pageText('pages.copyLogs') }}
             </a-button>
           </div>
-          <pre class="sync-terminal-log">{{ syncStatus.log || pageText('pages.noConsoleLogsSelectSyncLatestCommunityVersionAbove') }}</pre>
+          <pre class="arl-mono-terminal nuclei-sync-terminal">{{ syncStatus.log || pageText('pages.noConsoleLogsSelectSyncLatestCommunityVersionAbove') }}</pre>
         </div>
 
         <div style="display: flex; justify-content: flex-end; gap: 8px;">
@@ -687,7 +768,7 @@
         />
         <div>
           <span class="page-secondary-label-alt">{{ pageText('pages.templateId') }}</span>
-          <span style="font-family: monospace; font-weight: 600; color: #fa8c16; margin-left: 6px;">{{ markModalForm.template_id }}</span>
+          <span class="arl-mono" style="font-weight: 600; color: #fa8c16; margin-left: 6px;">{{ markModalForm.template_id }}</span>
         </div>
         <div>
           <span class="page-secondary-label-alt">{{ pageText('pages.vulnerabilityName') }}</span>
@@ -774,8 +855,14 @@ import { Codemirror } from 'vue-codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
 import request from '../utils/request';
 import { downloadAuthenticated } from '../utils/authenticatedFiles';
+import { useSticky } from '../utils/useSticky';
+import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
+
+const nucleiActionBarRef = ref(null);
+const { stickyConfig } = useSticky(nucleiActionBarRef);
+const globalPageSize = useGlobalPageSize(10);
 
 const editExtensions = [oneDark];
 const uploadHeaders = computed(() => {
@@ -834,7 +921,7 @@ const customSearch = reactive({
 
 const customPagination = reactive({
   current: 1,
-  pageSize: 10,
+  pageSize: globalPageSize.value,
   total: 0
 });
 
@@ -1234,7 +1321,7 @@ const communitySearch = reactive({
 });
 const communityPagination = reactive({
   current: 1,
-  pageSize: 10,
+  pageSize: globalPageSize.value,
   total: 0
 });
 
@@ -1292,7 +1379,7 @@ const blacklistSearch = reactive({
 });
 const blacklistPagination = reactive({
   current: 1,
-  pageSize: 10,
+  pageSize: globalPageSize.value,
   total: 0
 });
 
@@ -1630,6 +1717,27 @@ const copyText = (txt) => {
   message.success(pageText('pages.copiedToClipboard'));
 };
 
+const makePageChangeHandler = (paginationState, fetcher) => (page, pageSize) => {
+  paginationState.current = page;
+  if (pageSize && pageSize !== paginationState.pageSize) {
+    paginationState.pageSize = pageSize;
+  }
+  if (paginationState.pageSize !== globalPageSize.value) {
+    globalPageSize.value = paginationState.pageSize;
+  }
+  fetcher();
+};
+
+const handleCommunityPageChange = makePageChangeHandler(communityPagination, fetchCommunityTemplates);
+const handleBlacklistPageChange = makePageChangeHandler(blacklistPagination, fetchBlacklist);
+const handleCustomPageChange = makePageChangeHandler(customPagination, fetchCustomTemplates);
+
+watch(globalPageSize, (newSize) => {
+  communityPagination.pageSize = newSize;
+  blacklistPagination.pageSize = newSize;
+  customPagination.pageSize = newSize;
+});
+
 watch(innerTab, (newTab) => {
   if (newTab === 'blacklist') {
     fetchBlacklist();
@@ -1654,123 +1762,51 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.sync-terminal-log {
-  background: #181a1f;
-  color: #abb2bf;
-  font-family: 'Fira Code', Menlo, Monaco, Consolas, 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  padding: 14px 16px;
-  border-radius: 6px;
+.nuclei-sync-terminal {
   max-height: 380px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  border: 1px solid var(--arl-border-color);
-  margin: 0;
 }
 
 .nuclei-manage-container {
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
 
-.stats-overview-bar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  background: var(--arl-bg-layout);
-  padding: 12px 16px;
-  border-radius: 6px;
-  border: 1px solid var(--arl-border-color);
-}
-
-.stat-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  padding-right: 16px;
-  border-right: 1px solid var(--arl-border-color);
-}
-.stat-pill:last-child {
-  border-right: none;
-}
-
-.stat-label {
-  color: var(--arl-text-color);
-  opacity: 0.65;
-}
-
-.stat-val {
-  font-weight: 700;
-  font-size: 15px;
-  color: var(--arl-text-color);
-}
-.stat-val.highlight {
-  color: #1890ff;
-}
-.stat-val.active {
-  color: #52c41a;
-}
-
-.tab-content-wrapper {
-  background: var(--arl-bg-layout);
-  padding: 16px;
-  border-radius: 6px;
-  border: 1px solid var(--arl-border-color);
-}
-
-.action-bar-row {
-  display: flex;
-  align-items: center;
+.nuclei-hero-meta {
+  flex-wrap: wrap;
   gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
 }
 
-.filter-bar-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-}
-
-.filter-item {
-  display: flex;
+.nuclei-meta-item {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-.filter-label {
-  font-size: 13px;
-  color: var(--arl-text-color);
-  opacity: 0.85;
+  font-size: 12px;
 }
 
-.filter-actions {
-  display: flex;
-  gap: 10px;
+.nuclei-sub-toolbar {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--arl-border-color);
 }
 
 .dryrun-panel {
-  background: rgba(0, 0, 0, 0.03);
+  background: var(--arl-bg-subtle);
   border: 1px dashed var(--arl-border-color);
   padding: 12px;
   border-radius: 6px;
 }
 
 .dryrun-console {
-  background: #141414;
+  background: var(--arl-terminal-bg);
+  border: 1px solid var(--arl-terminal-border);
   border-radius: 4px;
   padding: 10px;
   margin-top: 8px;
 }
 
 .console-pre {
-  color: #d4d4d4;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  color: var(--arl-terminal-text);
+  font-family: var(--arl-font-mono);
   font-size: 12px;
   line-height: 1.5;
   margin: 0;
@@ -1787,8 +1823,6 @@ onBeforeUnmount(() => {
 .page-width-140 { width: 140px; }
 .page-clickable { cursor: pointer; }
 .page-success { color: #52c41a; }
-.page-option-hint { color: var(--arl-text-color); opacity: 0.45; margin-top: 8px; }
-.page-width-170 { width: 170px; }
 .page-width-150 { width: 150px; }
 .page-danger { color: #ff4d4f; }
 .page-label { font-size: 13px; font-weight: 500; }
@@ -1799,6 +1833,5 @@ onBeforeUnmount(() => {
 .page-secondary-label-alt { font-size: 13px; color: var(--arl-text-color); opacity: 0.65; }
 .page-subtle-label { font-size: 12px; opacity: 0.6; }
 
-.page-wide-text .stats-overview-bar { flex-wrap: wrap; row-gap: 12px; }
-.page-wide-text .filter-label { flex-shrink: 0; }
+.page-wide-text .nuclei-hero-meta { row-gap: 8px; }
 </style>

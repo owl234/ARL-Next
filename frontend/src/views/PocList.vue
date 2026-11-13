@@ -129,10 +129,7 @@
             </template>
           </template>
           <template #emptyText>
-            <div style="padding: 40px 0;">
-              <inbox-outlined style="font-size: 48px; color: var(--arl-border-color);" />
-              <div class="page-option-hint">{{ pageText('tasks.noData') }}</div>
-            </div>
+            <ArlEmpty :description="pageText('tasks.noData')" />
           </template>
         </a-table>
 
@@ -189,7 +186,7 @@
 
           <!-- 修复建议：高亮提示区块 -->
           <template v-else-if="item.key === 'remediation'">
-            <div style="background: rgba(24, 144, 255, 0.08); border-left: 3px solid #1890ff; padding: 8px 12px; border-radius: 4px; color: var(--arl-text-color); white-space: pre-wrap; line-height: 1.6;">
+            <div style="background: var(--arl-theme-soft-bg); border-left: 3px solid var(--arl-theme-color); padding: 8px 12px; border-radius: 4px; color: var(--arl-text-color); white-space: pre-wrap; line-height: 1.6;">
               {{ item.value }}
             </div>
           </template>
@@ -208,7 +205,7 @@
                 :href="url"
                 target="_blank"
                 rel="noopener noreferrer"
-                style="display: inline-flex; align-items: center; gap: 6px; word-break: break-all; color: var(--arl-theme-color, #1890ff);"
+                style="display: inline-flex; align-items: center; gap: 6px; word-break: break-all; color: var(--arl-theme-color);"
               >
                 <link-outlined style="flex-shrink: 0;" />
                 <span>{{ url }}</span>
@@ -769,7 +766,6 @@ onDeactivated(() => {
 });
 </script>
 <style scoped>
-.page-option-hint { color: var(--arl-text-color); opacity: 0.45; margin-top: 8px; }
 .page-muted { color: var(--arl-text-color); opacity: 0.65; }
 .page-fill-space { flex: 1; }
 .page-clickable-label { cursor: pointer;  }

@@ -71,7 +71,7 @@
           {{ pageText('pages.credentialStatusHelp') }}
         </div>
         <a-row :gutter="[8, 8]" style="margin-top: 12px;">
-          <a-col :span="8" v-for="item in credentialOverview" :key="item.key">
+          <a-col :xs="24" :sm="12" :lg="8" v-for="item in credentialOverview" :key="item.key">
             <div class="arl-cred-item" :class="item.configured ? 'is-ok' : 'is-missing'">
               <span class="arl-cred-name">{{ item.label }}</span>
               <a-tag :color="item.configured ? 'green' : (item.required ? 'red' : 'default')" style="margin: 0;">
@@ -113,22 +113,22 @@
               <!-- 1. 空间测绘情报 -->
               <a-card data-setting-anchor="fofa" :title="pageText('pages.assetDiscoveryIntelligenceFofa')" size="small" class="page-config-card">
                 <a-row :gutter="24">
-                  <a-col :span="12">
+                  <a-col :xs="24" :md="12">
                     <a-form-item label="FOFA URL" style="margin-bottom: 12px;">
                       <a-input v-model:value="generalForm.fofa_url" :placeholder="pageText('pages.eGHttpsFofaInfo')" />
                     </a-form-item>
                   </a-col>
-                  <a-col :span="12">
+                  <a-col :xs="24" :md="12">
                     <a-form-item label="FOFA KEY" style="margin-bottom: 12px;">
                       <a-input-password v-model:value="generalForm.fofa_key" :placeholder="pageText('pages.enterYourFofaApiKey')" />
                     </a-form-item>
                   </a-col>
-                  <a-col :span="12">
+                  <a-col :xs="24" :md="12">
                     <a-form-item :label="pageText('pages.maximumQueryPages')" class="page-flush-bottom">
                       <a-input-number v-model:value="generalForm.fofa_max_page" :min="1" style="width: 100%" />
                     </a-form-item>
                   </a-col>
-                  <a-col :span="12">
+                  <a-col :xs="24" :md="12">
                     <a-form-item :label="pageText('pages.resultsPerPage')" class="page-flush-bottom">
                       <a-input-number v-model:value="generalForm.fofa_page_size" :min="1" style="width: 100%" />
                     </a-form-item>
@@ -138,7 +138,7 @@
 
               <a-row :gutter="16">
                 <!-- 2. 企业与代码监控 (左半边) -->
-                <a-col :span="12">
+                <a-col :xs="24" :lg="12">
                   <a-card data-setting-anchor="tyc" :title="pageText('pages.enterpriseDiscoveryCredentialsTianyanchaApi')" size="small" class="page-config-card-min-height">
                     <template #extra>
                       <a-tooltip :title="pageText('pages.optionalEnablesInvestmentRelationshipTraversalAndCrossCheckingAgainst')">
@@ -155,7 +155,7 @@
                 </a-col>
 
                 <!-- 3. 代码与搜索引擎 (右半边) -->
-                <a-col :span="12">
+                <a-col :xs="24" :lg="12">
                   <a-card data-setting-anchor="search_cookie" :title="pageText('pages.searchEnginesAndOpenSourceIntelligence')" size="small" class="page-config-card-fixed">
                     <a-form-item data-setting-anchor="github_token" :label="pageText('pages.githubTokenMonitoringTasks')" class="page-field-spacing">
                       <a-input-password v-model:value="generalForm.github_token" :placeholder="pageText('pages.enterYourGithubPat')" />
@@ -179,7 +179,7 @@
               <a-card data-setting-anchor="query_plugin" :title="pageText('pages.domainCollectionPluginConfigurationQueryPlugin')" size="small" class="page-rounded">
                 <div style="background: var(--arl-bg-light); border-radius: 4px; padding: 12px;">
                   <a-row :gutter="[12, 12]">
-                    <a-col :span="8" v-for="(conf, pluginName) in generalForm.query_plugin_config" :key="pluginName">
+                    <a-col :xs="24" :sm="12" :lg="8" v-for="(conf, pluginName) in generalForm.query_plugin_config" :key="pluginName">
                       <div style="border: 1px solid var(--arl-border-color); background: var(--arl-bg-white); padding: 12px; border-radius: 4px; min-height: 110px; position: relative;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                           <a style="font-weight: 600; text-transform: uppercase; ">{{ pluginName }}</a>
@@ -224,7 +224,7 @@
         <a-tabs v-model:activeKey="dictSubTab" type="card" class="dict-sub-tabs" style="margin-bottom: 16px;">
           <a-tab-pane key="dict" :tab="pageText('pages.textDictionaries')">
             <a-spin :spinning="loading || bruteLoading">
-            <div style="display: flex; gap: 0; height: calc(100vh - 180px); min-height: 580px; border-radius: 12px; overflow: hidden; box-shadow: 0 12px 48px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04); border: 1px solid rgba(0,0,0,0.05); background: var(--arl-bg-white);"> <!-- 左侧语义化菜单与独立滚动 -->
+            <div style="display: flex; gap: 0; height: calc(100vh - 180px); min-height: 580px; border-radius: 12px; overflow: hidden; box-shadow: 0 12px 48px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04); border: 1px solid var(--arl-border-color); background: var(--arl-bg-white);"> <!-- 左侧语义化菜单与独立滚动 -->
             <div style="width: 256px; flex-shrink: 0; border-right: 1px solid var(--arl-border-color); background: var(--arl-bg-white); display: flex; flex-direction: column;">
               <div style="padding: 16px; border-bottom: 1px solid var(--arl-border-color); display: flex; align-items: center; min-height: 64px; box-sizing: border-box;">
                 <span class="page-panel-heading">{{ pageText('pages.dictionaryCategories') }}</span>
@@ -582,7 +582,7 @@
                     </template>
                   </a-alert>
                   <a-row :gutter="24">
-                    <a-col :span="12">
+                    <a-col :xs="24" :lg="12">
                       <a-card data-setting-anchor="performance" :title="pageText('pages.heavyTaskScheduling')" size="small" class="page-config-card-danger">
                         <a-form-item>
                           <template #label>
@@ -635,7 +635,7 @@
                         </a-form-item>
                       </a-card>
                     </a-col>
-                    <a-col :span="12">
+                    <a-col :xs="24" :lg="12">
                       <a-card :title="pageText('pages.lightTaskScheduling')" size="small" class="page-config-card-success">
                         <a-form-item>
                           <template #label>
@@ -677,7 +677,7 @@
                     </a-col>
                   </a-row>
                   <a-row :gutter="24">
-                    <a-col :span="12">
+                    <a-col :xs="24" :lg="12">
                       <a-card :title="pageText('pages.externalIntelligenceTaskScheduling')" size="small" class="page-config-card-info">
                         <a-form-item>
                           <template #label>
@@ -710,7 +710,7 @@
                         </a-form-item>
                       </a-card>
                     </a-col>
-                    <a-col :span="12">
+                    <a-col :xs="24" :lg="12">
                       <a-card :title="pageText('pages.githubMonitoringScheduling')" size="small" class="page-config-card-purple">
                         <a-form-item>
                           <template #label>
@@ -815,12 +815,12 @@
                     </template>
                   </a-alert>
                   <a-row :gutter="24">
-                    <a-col :span="12">
+                    <a-col :xs="24" :md="12">
                       <a-form-item data-setting-anchor="proxy" :label="pageText('pages.systemProxyProxyHttpUrl')">
                         <a-input v-model:value="generalForm.proxy_url" :placeholder="pageText('pages.eGHttp1270018080')" />
                       </a-form-item>
                     </a-col>
-                    <a-col :span="12">
+                    <a-col :xs="24" :md="12">
                       <a-form-item data-setting-anchor="port_top_10" :label="pageText('pages.top10WebPortsUsedByFrontendPortScan')">
                         <a-input v-model:value="generalForm.port_top_10" :placeholder="pageText('pages.separateValuesWithCommas')" />
                       </a-form-item>
@@ -828,7 +828,7 @@
                   </a-row>
 
                   <a-row :gutter="24">
-                    <a-col :span="12">
+                    <a-col :xs="24" :md="12">
                       <a-form-item data-setting-anchor="brute_concurrent" :label="pageText('pages.dnsQueryConcurrencyForRegularSubdomainDiscovery')">
                         <a-input-number v-model:value="generalForm.domain_brute_concurrent" :min="1" style="width: 100%" />
                         <div class="arl-field-hint">
@@ -836,7 +836,7 @@
                         </div>
                       </a-form-item>
                     </a-col>
-                    <a-col :span="12">
+                    <a-col :xs="24" :md="12">
                       <a-form-item :label="pageText('pages.dnsQueryConcurrencyForSubdomainMutationDiscovery')">
                         <a-input-number v-model:value="generalForm.alt_dns_concurrent" :min="1" style="width: 100%" />
                         <div class="arl-field-hint">
@@ -848,12 +848,12 @@
 
 
                   <a-row :gutter="24">
-                    <a-col :span="12">
+                    <a-col :xs="24" :md="12">
                       <a-form-item data-setting-anchor="auth" :label="pageText('pages.apiAuthentication')">
                         <a-switch v-model:checked="generalForm.auth" :checked-children="pageText('pages.on')" :un-checked-children="pageText('pages.off')" />
                       </a-form-item>
                     </a-col>
-                    <a-col :span="12">
+                    <a-col :xs="24" :md="12">
                       <a-form-item label="API Token (Swagger API Key)">
                         <a-input-password v-model:value="generalForm.api_key" :placeholder="pageText('pages.apiKeyOnlyRequiredWhenApiAuthenticationIsEnabled')" />
                       </a-form-item>
@@ -918,32 +918,32 @@
               <!-- 1. 订阅消息类型 -->
               <a-card data-setting-anchor="push_options" :title="pageText('pages.subscribedEvents')" size="small" class="page-config-card-theme">
                 <a-checkbox-group v-model:value="generalForm.push_options" style="width: 100%;">
-                  <a-row>
-                    <a-col :span="6" class="page-form-spacing"><a-checkbox value="task_complete">{{ pageText('pages.assetDiscoveryTaskCompleted') }}</a-checkbox></a-col>
-                    <a-col :span="6" class="page-form-spacing"><a-checkbox value="github_leak">{{ pageText('pages.githubKeywordAlert') }}</a-checkbox></a-col>
-                    <a-col :span="6" class="page-form-spacing"><a-checkbox value="github_cve">{{ pageText('pages.githubCveUpdate') }}</a-checkbox></a-col>
-                    <a-col :span="6" class="page-form-spacing"><a-checkbox value="github_tools">{{ pageText('pages.githubSecurityToolUpdate') }}</a-checkbox></a-col>
-                    <a-col :span="6"><a-checkbox value="github_hackers">{{ pageText('pages.githubResearcherActivity') }}</a-checkbox></a-col>
-                    <a-col :span="6"><a-checkbox value="asset_site">{{ pageText('pages.websiteMonitoringUpdate') }}</a-checkbox></a-col>
+                  <a-row :gutter="[12, 8]">
+                    <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="task_complete">{{ pageText('pages.assetDiscoveryTaskCompleted') }}</a-checkbox></a-col>
+                    <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_leak">{{ pageText('pages.githubKeywordAlert') }}</a-checkbox></a-col>
+                    <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_cve">{{ pageText('pages.githubCveUpdate') }}</a-checkbox></a-col>
+                    <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_tools">{{ pageText('pages.githubSecurityToolUpdate') }}</a-checkbox></a-col>
+                    <a-col :xs="24" :sm="12" :md="8" :xl="6"><a-checkbox value="github_hackers">{{ pageText('pages.githubResearcherActivity') }}</a-checkbox></a-col>
+                    <a-col :xs="24" :sm="12" :md="8" :xl="6"><a-checkbox value="asset_site">{{ pageText('pages.websiteMonitoringUpdate') }}</a-checkbox></a-col>
                   </a-row>
                 </a-checkbox-group>
               </a-card>
 
               <!-- 2. 即时通讯推送配置 (2列) -->
-              <a-row :gutter="16">
+              <a-row :gutter="[16, 16]">
                 <!-- 钉钉 -->
-                <a-col :span="12">
+                <a-col :xs="24" :lg="12">
                   <a-card data-setting-anchor="im" :title="pageText('pages.dingtalkBot')" size="small" class="page-config-card-fixed-short">
                     <template #extra>
                       <a-button type="link" size="small" @click="handleTestPush('dingding')" :loading="testPushLoading.dingding">{{ pageText('pages.sendTest') }}</a-button>
                     </template>
                     <a-row :gutter="12">
-                      <a-col :span="12">
+                      <a-col :xs="24" :sm="12">
                         <a-form-item label="Access Token" style="margin-bottom: 0;">
                           <a-input v-model:value="generalForm.dingding.access_token" :placeholder="pageText('pages.dingtalkToken')" size="small" />
                         </a-form-item>
                       </a-col>
-                      <a-col :span="12">
+                      <a-col :xs="24" :sm="12">
                         <a-form-item :label="pageText('pages.signingSecret')" class="page-flush-bottom">
                           <a-input-password v-model:value="generalForm.dingding.secret" :placeholder="pageText('pages.dingtalkSecret')" size="small" />
                         </a-form-item>
@@ -953,7 +953,7 @@
                 </a-col>
 
                 <!-- 飞书 -->
-                <a-col :span="12">
+                <a-col :xs="24" :lg="12">
                   <a-card :title="pageText('pages.feishuBot')" size="small" class="page-config-card-fixed-short">
                     <template #extra>
                       <a-button type="link" size="small" @click="handleTestPush('feishu')" :loading="testPushLoading.feishu">{{ pageText('pages.sendTest') }}</a-button>
@@ -968,7 +968,7 @@
                 </a-col>
 
                 <!-- 企业微信 -->
-                <a-col :span="12">
+                <a-col :xs="24" :lg="12">
                   <a-card :title="pageText('pages.wecomBot')" size="small" class="page-config-card-fixed-short">
                     <template #extra>
                       <a-button type="link" size="small" @click="handleTestPush('wxwork')" :loading="testPushLoading.wxwork">{{ pageText('pages.sendTest') }}</a-button>
@@ -980,18 +980,18 @@
                 </a-col>
 
                 <!-- Telegram -->
-                <a-col :span="12">
+                <a-col :xs="24" :lg="12">
                   <a-card :title="pageText('pages.telegramBot')" size="small" class="page-config-card-fixed-short">
                     <template #extra>
                       <a-button type="link" size="small" @click="handleTestPush('telegram')" :loading="testPushLoading.telegram">{{ pageText('pages.sendTest') }}</a-button>
                     </template>
                     <a-row :gutter="12">
-                      <a-col :span="12">
+                      <a-col :xs="24" :sm="12">
                         <a-form-item label="Bot Token" style="margin-bottom: 0;">
                           <a-input v-model:value="generalForm.telegram.bot_token" placeholder="Bot Token" size="small" />
                         </a-form-item>
                       </a-col>
-                      <a-col :span="12">
+                      <a-col :xs="24" :sm="12">
                         <a-form-item label="Chat ID" style="margin-bottom: 0;">
                           <a-input v-model:value="generalForm.telegram.chat_id" :placeholder="pageText('pages.recipientChatId')" size="small" />
                         </a-form-item>
@@ -1002,9 +1002,9 @@
               </a-row>
 
               <!-- 3. Webhook & Email (较复杂的配置放下方) -->
-              <a-row :gutter="16">
+              <a-row :gutter="[16, 16]">
                 <!-- 全局 Webhook -->
-                <a-col :span="12">
+                <a-col :xs="24" :lg="12">
                   <a-card data-setting-anchor="webhook" :title="pageText('pages.globalWebhookCallback')" size="small" class="page-config-card-fixed-tall">
                     <template #extra>
                       <a-button type="link" size="small" @click="handleTestPush('webhook')" :loading="testPushLoading.webhook">{{ pageText('pages.sendTest') }}</a-button>
@@ -1019,28 +1019,28 @@
                 </a-col>
 
                 <!-- SMTP 邮件 -->
-                <a-col :span="12">
+                <a-col :xs="24" :lg="12">
                   <a-card :title="pageText('pages.smtpEmailNotifications')" size="small" class="page-config-card-fixed-tall">
                     <template #extra>
                       <a-button type="link" size="small" @click="handleTestPush('email')" :loading="testPushLoading.email">{{ pageText('pages.sendTest') }}</a-button>
                     </template>
                     <a-row :gutter="12">
-                      <a-col :span="16">
+                      <a-col :xs="24" :sm="16">
                         <a-form-item data-setting-anchor="email" :label="pageText('pages.smtpHost')" class="page-form-spacing">
                           <a-input v-model:value="generalForm.email.host" placeholder="smtp.qq.com" size="small" />
                         </a-form-item>
                       </a-col>
-                      <a-col :span="8">
+                      <a-col :xs="24" :sm="8">
                         <a-form-item :label="pageText('tasks.port')" class="page-form-spacing">
                           <a-input-number v-model:value="generalForm.email.port" style="width: 100%;" size="small" />
                         </a-form-item>
                       </a-col>
-                      <a-col :span="12">
+                      <a-col :xs="24" :sm="12">
                         <a-form-item :label="pageText('pages.senderUsername')" class="page-form-spacing">
                           <a-input v-model:value="generalForm.email.username" :placeholder="pageText('pages.senderAccount')" size="small" />
                         </a-form-item>
                       </a-col>
-                      <a-col :span="12">
+                      <a-col :xs="24" :sm="12">
                         <a-form-item :label="pageText('pages.authorizationCodePassword')" class="page-form-spacing">
                           <a-input-password v-model:value="generalForm.email.password" :placeholder="pageText('pages.authorizationPassword')" size="small" />
                         </a-form-item>
@@ -1073,8 +1073,7 @@
 import { useI18n } from 'vue-i18n';
 defineOptions({ name: 'SystemSettings' });
 import {
-  InfoCircleOutlined, ExclamationCircleOutlined,
-  CheckCircleOutlined, CloseCircleOutlined
+  InfoCircleOutlined, ExclamationCircleOutlined
 } from '@ant-design/icons-vue';
 import { ref, reactive, onMounted, onUnmounted, onDeactivated, computed, nextTick, createVNode } from 'vue';
 import { message, Modal } from 'ant-design-vue';
@@ -2858,9 +2857,9 @@ onBeforeRouteLeave(() => {
 }
 
 @keyframes arl-anchor-flash {
-  0% { box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.45); }
-  60% { box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.25); }
-  100% { box-shadow: 0 0 0 0 rgba(22, 119, 255, 0); }
+  0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--arl-theme-color) 45%, transparent); }
+  60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--arl-theme-color) 25%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 /* ================== 未保存改动与推荐值提示样式 ================== */
@@ -2953,9 +2952,9 @@ onBeforeRouteLeave(() => {
   animation: btnPulse 2s infinite;
 }
 @keyframes btnPulse {
-  0% { box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.7); }
-  70% { box-shadow: 0 0 0 10px rgba(24, 144, 255, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(24, 144, 255, 0); }
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--arl-theme-color) 70%, transparent); }
+  70% { box-shadow: 0 0 0 10px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 /* 字典管理现代化升级样式 */
@@ -2974,7 +2973,7 @@ onBeforeRouteLeave(() => {
 .custom-list-item.is-active {
   background: var(--arl-theme-color);
   color: #fff;
-  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--arl-theme-color) 30%, transparent);
 }
 .custom-list-item.is-active .dict-title,
 .custom-list-item.is-active .dict-subtitle {
@@ -3045,7 +3044,7 @@ onBeforeRouteLeave(() => {
 .health-title {
   font-size: 24px;
   font-weight: 700;
-  color: var(--arl-text-color, #1e293b);
+  color: var(--arl-text-color);
   margin: 0;
   letter-spacing: 0.5px;
 }
@@ -3055,10 +3054,10 @@ onBeforeRouteLeave(() => {
   margin-top: 16px;
 }
 .health-stat-card {
-  background: var(--arl-bg-subcard, rgba(255, 255, 255, 0.6));
+  background: var(--arl-bg-subcard);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--arl-border-color, rgba(255, 255, 255, 0.8));
+  border: 1px solid var(--arl-border-color);
   border-radius: 16px;
   padding: 24px 40px;
   min-width: 180px;
@@ -3079,14 +3078,14 @@ onBeforeRouteLeave(() => {
   line-height: 1.2;
 }
 .primary-stat .stat-value {
-  background-image: linear-gradient(135deg, var(--arl-theme-color, #1890ff) 0%, #36cfc9 100%);
+  background-image: linear-gradient(135deg, var(--arl-theme-color) 0%, #36cfc9 100%);
 }
 .warning-stat .stat-value {
   background-image: linear-gradient(135deg, #fa8c16 0%, #ffc53d 100%);
 }
 .stat-label {
   font-size: 14px;
-  color: var(--arl-text-secondary, #64748b);
+  color: var(--arl-text-secondary);
   margin-top: 8px;
   font-weight: 500;
 }
@@ -3095,9 +3094,9 @@ onBeforeRouteLeave(() => {
   align-items: center;
   gap: 8px;
   margin-top: 32px;
-  color: var(--arl-text-secondary, #94a3b8);
+  color: var(--arl-text-secondary);
   font-size: 13px;
-  background: var(--arl-bg-subcard, rgba(255,255,255,0.5));
+  background: var(--arl-bg-subcard);
   padding: 8px 16px;
   border-radius: 20px;
   border: 1px solid var(--arl-border-color, rgba(255,255,255,0.6));
@@ -3235,8 +3234,8 @@ onBeforeRouteLeave(() => {
 
 .update-layer-box {
   margin-bottom: 12px;
-  background: rgba(22, 119, 255, 0.04);
-  border: 1px dashed rgba(22, 119, 255, 0.3);
+  background: var(--arl-theme-soft-bg);
+  border: 1px dashed var(--arl-theme-soft-border);
   border-radius: 6px;
   padding: 8px 12px;
 }
@@ -3245,7 +3244,7 @@ onBeforeRouteLeave(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #1677ff;
+  color: var(--arl-theme-color);
   margin-bottom: 6px;
 }
 
@@ -3271,7 +3270,7 @@ onBeforeRouteLeave(() => {
 
 .layer-id {
   font-weight: 600;
-  color: #1677ff;
+  color: var(--arl-theme-color);
 }
 
 .layer-status {
@@ -3315,7 +3314,7 @@ onBeforeRouteLeave(() => {
 .page-choice-gap { margin-left: 8px; font-size: 12px; }
 .page-strong-heading { font-weight: bold; margin-bottom: 8px; }
 .page-config-card-success { margin-bottom: 16px; border-radius: 6px; border-left: 4px solid #52c41a; }
-.page-config-card-info { margin-bottom: 16px; border-radius: 6px; border-left: 4px solid #1890ff; }
+.page-config-card-info { margin-bottom: 16px; border-radius: 6px; border-left: 4px solid var(--arl-theme-color); }
 .page-config-card-purple { margin-bottom: 16px; border-radius: 6px; border-left: 4px solid #722ed1; }
 .page-config-card-theme { margin-bottom: 16px; border-radius: 6px; border-left: 4px solid var(--arl-theme-color); }
 .page-form-spacing { margin-bottom: 8px; }

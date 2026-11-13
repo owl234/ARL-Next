@@ -1,7 +1,7 @@
 <template>
   <a-layout :style="{ height: '100vh', background: 'transparent' }">
-    <a-layout-sider v-model:collapsed="collapsed" collapsible :trigger="null" :width="locale !== 'zh-CN' ? 240 : 170" :style="{ background: hasBgImage ? (isUIHidden ? 'transparent' : 'rgba(11, 17, 32, 0.6)') : '#0b1120', borderRight: isUIHidden ? 'none' : (isDarkMode ? '1px solid #1e293b' : 'none'), transition: 'all 0.5s' }">
-      <div class="logo-container" @click="toggleUI" :title="t('layout.toggleInterface')" style="height: 64px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 999; position: relative;" :style="{ background: hasBgImage ? 'transparent' : '#0b1120', borderBottom: isDarkMode ? '1px solid #1e293b' : 'none' }">
+    <a-layout-sider v-model:collapsed="collapsed" collapsible :trigger="null" :width="locale !== 'zh-CN' ? 240 : 170" :style="{ background: hasBgImage ? (isUIHidden ? 'transparent' : 'rgba(0, 0, 0, 0.68)') : '#000000', borderRight: isUIHidden ? 'none' : (isDarkMode ? '1px solid #262626' : 'none'), transition: 'all 0.5s' }">
+      <div class="logo-container" @click="toggleUI" :title="t('layout.toggleInterface')" style="height: 64px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 999; position: relative;" :style="{ background: hasBgImage ? 'transparent' : '#000000', borderBottom: isDarkMode ? '1px solid #262626' : 'none' }">
         <DeploymentUnitOutlined class="logo-icon" :style="{ color: 'var(--arl-theme-color)', fontSize: '20px' }" />
         <span class="logo-text" v-show="!collapsed" style="color: #f1f5f9; font-size: 16px; margin-left: 8px; font-weight: 500;">ARL-Next</span>
       </div>
@@ -36,12 +36,12 @@
     </a-layout-sider>
 
     <a-layout :style="{ background: 'transparent', opacity: isUIHidden ? 0 : 1, pointerEvents: isUIHidden ? 'none' : 'auto', transition: 'opacity 0.5s', overflow: 'hidden' }">
-      <a-layout-header class="arl-header" :style="{ background: isDarkMode ? 'rgba(15, 23, 42, 0.75)' : 'rgba(255, 255, 255, 0.75)', borderBottom: '1px solid ' + (isDarkMode ? '#1e293b' : '#e2e8f0') }">
-        <div style="display: flex; align-items: center;">
-          <span class="trigger" @click="() => (collapsed = !collapsed)" style="font-size: 18px; cursor: pointer; margin-right: 24px;">
+      <a-layout-header class="arl-header" :class="{ 'page-wide-text': locale !== 'zh-CN' }" :style="{ background: isDarkMode ? 'rgba(17, 17, 17, 0.85)' : 'rgba(255, 255, 255, 0.82)', borderBottom: '1px solid ' + (isDarkMode ? '#333333' : '#e2e8f0') }">
+        <div class="header-left-group">
+          <span class="trigger" @click="() => (collapsed = !collapsed)" style="font-size: 18px; cursor: pointer; flex-shrink: 0;">
             <menu-unfold-outlined v-if="collapsed" /><menu-fold-outlined v-else />
           </span>
-          <span :style="{ fontSize: '16px', fontWeight: 500, color: isDarkMode ? 'rgba(255,255,255,.85)' : 'var(--arl-text-color)' }">{{ currentPageTitle }}</span>
+          <span class="header-page-title" :style="{ color: isDarkMode ? 'rgba(255,255,255,.85)' : 'var(--arl-text-color)' }">{{ currentPageTitle }}</span>
         </div>
 
         <div class="header-actions">
@@ -49,7 +49,7 @@
           <SupportAuthorPopover />
 
           <a-dropdown>
-            <span class="header-text-action" style="cursor: pointer; margin-right: 24px; display: flex; align-items: center;">
+            <span class="header-text-action" style="cursor: pointer; display: flex; align-items: center;">
               <BgColorsOutlined style="font-size: 16px; margin-right: 4px;" />
               {{ t('layout.theme') }}
             </span>
@@ -75,7 +75,7 @@
           </a-dropdown>
 
           <a-upload :show-upload-list="false" :before-upload="handleUploadBackground" accept="image/*">
-            <span class="header-text-action" style="cursor: pointer; margin-right: 24px; display: flex; align-items: center;">
+            <span class="header-text-action" style="cursor: pointer; display: flex; align-items: center;">
               <PictureOutlined style="font-size: 16px; margin-right: 4px;" />
               {{ t('layout.background') }}
             </span>
@@ -89,7 +89,7 @@
             <a-switch :checked="isBasicAuthEnabled" :loading="isBasicAuthLoading" :disabled="!isBasicAuthOnline" @click="handleBasicAuthSwitchClick" checked-children="🔒" un-checked-children="🔓" />
           </div>
 
-          <span class="header-text-action" style="cursor: pointer; margin-right: 24px; display: flex; align-items: center;" @click="handleShowMcpModal">
+          <span class="header-text-action" style="cursor: pointer; display: flex; align-items: center;" @click="handleShowMcpModal">
             <RobotOutlined style="font-size: 16px; margin-right: 4px;" />
             {{ t('layout.mcp') }}
           </span>
@@ -116,18 +116,12 @@
             </template>
           </a-dropdown>
           
-          <span class="header-text-action header-change-password" @click="showChangePassModal = true">{{ t('account.changePassword') }}</span>
-          
-          <a-tooltip :title="t('layout.signOut')" placement="bottom">
-            <span class="header-icon-action header-icon-danger" style="cursor: pointer;" @click="handleLogout">
-              <LogoutOutlined style="font-size: 16px;" />
-            </span>
-          </a-tooltip>
+
         </div>
       </a-layout-header>
 
-      <a-layout-content class="arl-main-content" style="margin: 16px; display: flex; flex-direction: column; overflow-y: auto; height: 0;">
-        <div :style="{ background: hasBgImage ? (isDarkMode ? 'rgba(15, 23, 42, 0.5)' : 'rgba(255, 255, 255, 0.4)') : (isDarkMode ? '#0f172a' : 'transparent'), flex: '1 0 auto', display: 'flex', flexDirection: 'column', borderRadius: '4px' }">
+      <a-layout-content class="arl-main-content" style="margin: 0; display: flex; flex-direction: column; overflow-y: auto; height: 0;">
+        <div :style="{ background: 'transparent', flex: '1 0 auto', display: 'flex', flexDirection: 'column', borderRadius: '0' }">
           <router-view v-slot="{ Component }">
             <keep-alive include="Dashboard,TaskList,TaskDetail,AssetScope,GroupAssetsDetail,AssetSearch,PlanningTasks,GithubManage,PocList,Fingerprint,Policy,SystemSettings,McpCenter">
               <component :is="Component" />
@@ -141,7 +135,7 @@
     </a-layout>
   </a-layout>
   <a-modal
-      v-model:visible="showMcpModal"
+      v-model:open="showMcpModal"
       :title="pageText('pages.aiAssistantMcpClientConfiguration')"
       @cancel="showMcpModal = false"
       :footer="null"
@@ -231,7 +225,7 @@
           <RobotOutlined style="margin-right: 4px;" />
           {{ pageText('pages.goToMcpCenter') }} →
         </a-button>
-        <a href="https://github.com/owl234/ARL-Next/tree/main/mcp-server" target="_blank" rel="noopener noreferrer" style="font-size: 12px; color: var(--ant-primary-color, #1890ff);">
+        <a href="https://github.com/owl234/ARL-Next/tree/main/mcp-server" target="_blank" rel="noopener noreferrer" style="font-size: 12px; color: var(--arl-theme-color);">
           📖 {{ pageText('pages.mcpDocGuide') }}
         </a>
       </div>
@@ -239,7 +233,7 @@
   </a-modal>
 
   <a-modal
-      v-model:visible="showChangePassModal"
+      v-model:open="showChangePassModal"
       :title="t('account.changePassword')"
       @ok="handleChangePass"
       :confirmLoading="isSubmitting"
@@ -262,7 +256,7 @@
 
   <!-- Basic Auth 配置与开启弹窗 -->
   <a-modal
-    v-model:visible="showBasicAuthModal"
+    v-model:open="showBasicAuthModal"
     :title="pageText('pages.enableNginxBasicAuthProtection')"
     :okText="pageText('pages.enableAndApply')"
     :cancelText="pageText('tasks.cancel')"
@@ -286,7 +280,7 @@
       </a-form-item>
     </a-form>
 
-    <div style="background: var(--arl-bg-light, rgba(0,0,0,0.03)); padding: 12px; border-radius: 6px; border: 1px solid var(--arl-border-color, rgba(255,255,255,0.08)); font-size: 12px; color: var(--arl-text-color); opacity: 0.85;">
+    <div style="background: var(--arl-bg-subtle); padding: 12px; border-radius: 6px; border: 1px solid var(--arl-border-color); font-size: 12px; color: var(--arl-text-color); opacity: 0.85;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
         <span class="page-theme-emphasis">{{ pageText('pages.quickPreset') }}</span>
         <a-button type="link" size="small" class="page-text-action" @click="resetBasicAuthDefaults">{{ pageText('pages.fillDefaultCredentialsAdminArlNext') }}</a-button>
@@ -334,7 +328,6 @@ import {
   LogoutOutlined,
   GlobalOutlined,
   SearchOutlined,
-  DesktopOutlined,
   AppstoreOutlined,
   SettingOutlined,
   ControlOutlined,
@@ -1092,15 +1085,31 @@ const executeToggleBasicAuth = async (checked, username = null, password = null)
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 8px 16px;
   min-height: 64px;
   height: auto;
   line-height: normal;
-  padding: 12px 24px;
+  padding: 10px 20px;
   position: relative;
   z-index: 10;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+
+.header-left-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  flex: 1 1 200px;
+}
+
+.header-page-title {
+  font-size: 16px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-actions {
@@ -1108,10 +1117,21 @@ const executeToggleBasicAuth = async (checked, username = null, password = null)
   flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
-  gap: 12px;
+  gap: 10px 16px;
   min-width: 0;
+  max-width: 100%;
   white-space: nowrap;
   color: var(--arl-text-color);
+}
+
+@media (max-width: 1366px) {
+  .arl-header.page-wide-text {
+    padding: 8px 16px;
+    gap: 8px 12px;
+  }
+  .arl-header.page-wide-text .header-actions {
+    gap: 8px 12px;
+  }
 }
 
 .theme-swatch {
@@ -1127,50 +1147,28 @@ const executeToggleBasicAuth = async (checked, username = null, password = null)
 .theme-orange { background: #fa541c; }
 .theme-pink { background: #eb2f96; }
 
-.header-language-switcher {
-  margin-right: 16px;
-}
-
+.header-language-switcher,
 .header-switch,
 .header-user-settings {
-  margin-right: 24px;
+  margin-right: 0;
   display: flex;
   align-items: center;
 }
 
-.header-user-settings,
-.header-change-password {
+.header-user-settings {
   cursor: pointer;
-}
-
-.header-change-password {
-  margin-right: 24px;
 }
 
 .user-menu-icon {
   margin-right: 8px;
 }
 
-.header-icon-action {
-  color: var(--arl-text-color);
-  transition: color 0.3s;
-}
-.header-icon-action:hover {
-  color: var(--arl-theme-color);
-}
 .header-text-action {
   color: var(--arl-text-color);
   transition: color 0.3s;
 }
 .header-text-action:hover {
   color: var(--arl-theme-color);
-}
-.header-icon-danger {
-  color: var(--arl-text-color);
-  transition: color 0.3s;
-}
-.header-icon-danger:hover {
-  color: #ff4d4f;
 }
 
 /* 屏幕保护叠加层 */
@@ -1236,7 +1234,7 @@ const executeToggleBasicAuth = async (checked, username = null, password = null)
 }
 body.dark-mode .support-author-popover-overlay .ant-popover-inner {
   background: rgba(15, 23, 42, 0.96) !important;
-  border: 1px solid #1e293b !important;
+  border: 1px solid #333333 !important;
   backdrop-filter: blur(16px) !important;
 }
 
@@ -1317,7 +1315,7 @@ body.dark-mode .support-author-popover-overlay .ant-popover-inner {
 /* Sortable 正在被拖动的元素浮动预览状态 (Drag Class) */
 .sidebar-menu-active {
   opacity: 0.96 !important;
-  background: #1e293b !important;
+  background: #1f1f1f !important;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px var(--arl-theme-color) !important;
   border-radius: 6px !important;
   transform: scale(1.02);

@@ -140,10 +140,7 @@
           :rowKey="(record) => record._id"
       >
         <template #emptyText>
-          <div style="padding: 40px 0;">
-            <inbox-outlined style="font-size: 48px; color: var(--arl-border-color);" />
-            <div class="task-option-hint">{{ taskText('tasks.noData') }}</div>
-          </div>
+          <ArlEmpty :description="taskText('tasks.noData')" />
         </template>
 
         <template #bodyCell="{ column, record }">
@@ -217,10 +214,7 @@
           :rowKey="(record) => record._id"
       >
         <template #emptyText>
-          <div style="padding: 40px 0;">
-            <inbox-outlined style="font-size: 48px; color: var(--arl-border-color);" />
-            <div class="task-option-hint">{{ taskText('tasks.noData') }}</div>
-          </div>
+          <ArlEmpty :description="taskText('tasks.noData')" />
         </template>
 
         <template #bodyCell="{ column, record, index }">
@@ -368,7 +362,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useSticky } from '../utils/useSticky';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
-import { SearchOutlined, InboxOutlined, ExclamationCircleOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, PauseCircleOutlined, PlayCircleOutlined, SendOutlined } from '@ant-design/icons-vue';
+import { SearchOutlined, ExclamationCircleOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, PauseCircleOutlined, PlayCircleOutlined, SendOutlined } from '@ant-design/icons-vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import dayjs from 'dayjs';
 
@@ -809,5 +803,4 @@ onDeactivated(() => {
 .task-width-130 { width: 130px; }
 .task-width-110 { width: 110px; }
 .task-width-160 { width: 160px; }
-.task-option-hint { color: var(--arl-text-color); opacity: 0.45; margin-top: 8px; }
 </style>

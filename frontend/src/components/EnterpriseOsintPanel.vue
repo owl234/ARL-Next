@@ -415,17 +415,15 @@
 
         <!-- 标准表格空状态 -->
         <template #emptyText>
-          <div class="empty-default-box">
-            <a-empty :description="assetText('assets.noEnterpriseAssetData')" />
-          </div>
+          <ArlEmpty :description="assetText('assets.noEnterpriseAssetData')" />
         </template>
       </a-table>
 
       <!-- 分页栏 -->
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 12px; margin-top: 10px;">
-        <div class="asset-summary-caption">{{ assetText('tasks.paginationSummary', { pages: Math.ceil(pagination.total / pagination.pageSize) || 1, total: pagination.total }) }}</div>
+      <div class="arl-pagination-bar">
+        <div class="pagination-info">{{ assetText('tasks.paginationSummary', { pages: Math.ceil(pagination.total / pagination.pageSize) || 1, total: pagination.total }) }}</div>
         <a-pagination
-          :pageSizeOptions="['10', '20', '50', '100']"
+          :pageSizeOptions="$pageSizeOptions"
           v-model:current="pagination.current"
           v-model:pageSize="pagination.pageSize"
           :total="pagination.total"
@@ -445,19 +443,19 @@
           </div>
           <div class="floating-actions">
             <!-- 若在资产组内，优先提供直达扩充当前组，免弹窗！ -->
-            <a-button v-if="props.scopeId" type="primary" size="middle" :loading="expandingScopeLoading" @click="handleExpandSelectedToScope">
+            <a-button v-if="props.scopeId" type="primary" size="small" :loading="expandingScopeLoading" @click="handleExpandSelectedToScope">
               <template #icon><plus-circle-outlined /></template>
               {{ assetText('assets.addDomainCount', { count: selectedWebRowKeys.length }) }}
             </a-button>
-            <a-button size="middle" @click="openSyncModalWithSelected">
+            <a-button size="small" @click="openSyncModalWithSelected">
               <template #icon><cloud-sync-outlined /></template>
               {{ props.scopeId ? assetText('assets.syncToAnotherAssetGroup') : assetText('assets.syncToAssetGroupCount', { count: selectedWebRowKeys.length }) }}
             </a-button>
-            <a-button size="middle" @click="handleBatchCopyDomains">
+            <a-button size="small" @click="handleBatchCopyDomains">
               <template #icon><copy-outlined /></template>
               {{ assetText('assets.copyDomain') }}
             </a-button>
-            <a-button size="middle" @click="clearWebSelection">{{ assetText('tasks.clearSelection') }}</a-button>
+            <a-button size="small" @click="clearWebSelection">{{ assetText('tasks.clearSelection') }}</a-button>
           </div>
         </div>
       </transition>
@@ -532,6 +530,7 @@ import {
 import request from '../utils/request';
 import { copyText } from '../utils/clipboard';
 import { formatTaskStatus, formatTaskStatusColor } from '../constants/taskStatus';
+import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import SyncToScopeModal from './SyncToScopeModal.vue';
 import RawDataDrawer from './RawDataDrawer.vue';
 
@@ -701,7 +700,8 @@ const activeTab = ref('web');
 const loading = ref(false);
 const exportLoading = ref(false);
 const refreshLoading = ref(false);
-const pagination = reactive({ current: 1, pageSize: 10, total: 0 });
+const globalPageSize = useGlobalPageSize(10);
+const pagination = reactive({ current: 1, pageSize: globalPageSize.value, total: 0 });
 
 const taskRecord = ref({});
 const taskName = ref('');
@@ -1308,8 +1308,23 @@ const resetSearch = () => {
 };
 
 const handlePaginationChange = (page, pageSize) => {
+  if (pageSize && pageSize !== pagination.pageSize) {
+    pagination.pageSize = pageSize;
+  }
+  if (pagination.pageSize !== globalPageSize.value) {
+    globalPageSize.value = pagination.pageSize;
+  }
   fetchAssets(page, pageSize);
 };
+
+watch(globalPageSize, (newSize) => {
+  if (pagination.pageSize !== newSize) {
+    pagination.pageSize = newSize;
+    if (props.taskId && activeTab.value !== 'log') {
+      fetchAssets(1, newSize);
+    }
+  }
+});
 
 const handleExport = async () => {
   if (!props.taskId) return;
@@ -1377,12 +1392,12 @@ defineExpose({
   justify-content: space-between;
   align-items: center;
   padding: 8px 16px;
-  background: #e6f7ff;
-  border-bottom: 1px solid #91d5ff;
+  background: var(--arl-theme-soft-bg);
+  border-bottom: 1px solid var(--arl-theme-soft-border);
   border-top-left-radius: 8px;
   border-top-right-radius: 8px;
   font-size: 13px;
-  color: #1890ff;
+  color: var(--arl-theme-color);
 }
 
 .updating-banner-content {
@@ -1407,7 +1422,9 @@ defineExpose({
 .osint-sticky-control-box {
   position: sticky;
   z-index: 11;
-  background: var(--arl-bg-white);
+  background: var(--arl-bg-sticky);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-radius: 8px;
   border: 1px solid var(--arl-border-color);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
@@ -1705,55 +1722,6 @@ defineExpose({
   gap: 6px;
 }
 
-/* ================= 标准空状态 ================= */
-.empty-default-box {
-  padding: 40px 0;
-}
-
-/* ================= 悬浮浮动批处理条 (Floating Action Bar) ================= */
-.arl-floating-action-bar {
-  position: fixed;
-  bottom: 28px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
-  background: var(--arl-bg-white);
-  border: 1px solid var(--arl-border-color);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
-  border-radius: 28px;
-  padding: 8px 20px 8px 24px;
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  backdrop-filter: blur(8px);
-}
-
-.floating-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--arl-text-color);
-}
-
-.floating-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.floating-slide-enter-active,
-.floating-slide-leave-active {
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.floating-slide-enter-from,
-.floating-slide-leave-to {
-  opacity: 0;
-  transform: translate(-50%, 20px);
-}
-
 /* ================= 测绘日志卡片与终端 ================= */
 .log-terminal-card {
   border: 1px solid var(--arl-border-color);
@@ -1773,8 +1741,8 @@ defineExpose({
 }
 
 .log-terminal-body {
-  background-color: #001529;
-  color: #e6f7ff;
+  background-color: var(--arl-terminal-bg);
+  color: var(--arl-terminal-text);
   font-family: 'Fira Code', Consolas, Monaco, monospace;
   padding: 14px;
   height: 480px;
@@ -1804,12 +1772,12 @@ defineExpose({
 .log-level.info { color: #52c41a; }
 
 .log-title {
-  color: #40a9ff;
+  color: var(--arl-primary-light);
   margin-right: 8px;
 }
 
 .log-msg {
-  color: #e6f7ff;
+  color: var(--arl-terminal-text);
 }
 
 .log-empty {
@@ -1820,7 +1788,6 @@ defineExpose({
 .asset-small-label { font-size: 11px; }
 .asset-action-hint { font-size: 12px; color: #8c8c8c; margin-top: 4px; display: block; }
 .asset-clickable { cursor: pointer; }
-.asset-summary-caption { color: var(--arl-text-color); opacity: 0.65; font-size: 12px; }
 .asset-selection-number { color: var(--arl-theme-color); margin: 0 4px; }
 .asset-toolbar-heading { font-weight: 600; font-size: 13px; }
 .asset-secondary-caption { color: var(--arl-text-secondary); font-size: 12px; }

@@ -1,38 +1,40 @@
 <template>
-  <div class="arl-task-page">
+  <div class="arl-page-container" :class="{ 'page-wide-text': taskLocale !== 'zh-CN' }">
     <!-- 1. 吸顶操作栏与英雄头部卡片 (一体化常驻吸附在页面最顶部) -->
-    <div ref="actionBarRef" class="arl-task-hero-card">
+    <div ref="actionBarRef" class="arl-hero-card">
       <!-- 顶层主栏：标题 + 视角切换胶囊 + 全局控制与主创建按钮 -->
-      <div class="task-hero-unified-bar">
+      <div class="arl-hero-unified-bar">
         <!-- 左侧：页面标识与顶层 Tab 切换胶囊 -->
-        <div class="task-hero-left">
-          <div class="task-hero-title">
+        <div class="arl-hero-left">
+          <div class="arl-hero-title">
             <span class="title-text">{{ taskText('tasks.taskManagement') }}</span>
           </div>
-          <div class="task-view-capsule-switcher">
+          <div class="arl-capsule-switcher">
             <button
-              class="capsule-btn"
-              :class="{ active: activeMainTab === 'enterprise' }"
+              type="button"
+              class="arl-capsule-item"
+              :class="{ 'is-active': activeMainTab === 'enterprise' }"
               @click="handleMainTabChange('enterprise')"
               :title="taskText('tasks.switchToEnterpriseOsintTasks')"
             >
               <bank-outlined class="capsule-icon" />
               <span>{{ taskText('tasks.enterpriseOsintTasks') }}</span>
-              <span class="capsule-count" v-if="enterpriseMetricCounts.running > 0">
-                <span class="pulse-dot"></span>
+              <span class="arl-capsule-count" v-if="enterpriseMetricCounts.running > 0">
+                <span class="arl-capsule-dot is-pulse"></span>
                 {{ enterpriseMetricCounts.running }} {{ taskText('tasks.running') }}
               </span>
             </button>
             <button
-              class="capsule-btn"
-              :class="{ active: activeMainTab === 'task' }"
+              type="button"
+              class="arl-capsule-item"
+              :class="{ 'is-active': activeMainTab === 'task' }"
               @click="handleMainTabChange('task')"
               :title="taskText('tasks.switchToAssetDiscoveryTasksAsm')"
             >
               <global-outlined class="capsule-icon" />
               <span>{{ taskText('tasks.assetDiscoveryTasks') }}</span>
-              <span class="capsule-count" v-if="taskMetricCounts.running > 0">
-                <span class="pulse-dot"></span>
+              <span class="arl-capsule-count" v-if="taskMetricCounts.running > 0">
+                <span class="arl-capsule-dot is-pulse"></span>
                 {{ taskMetricCounts.running }} {{ taskText('tasks.running') }}
               </span>
             </button>
@@ -40,7 +42,7 @@
         </div>
 
         <!-- 右侧：全局自适应静默轮询开关 + 手动刷新 + 主操作按钮 -->
-        <div class="task-hero-right">
+        <div class="arl-hero-right">
           <a-tooltip :title="autoRefreshEnabled ? taskText('tasks.autoRefreshIsOnRefreshSilentlyEvery9') : taskText('tasks.autoRefreshPaused')">
             <div class="auto-refresh-toggle">
               <a-switch
@@ -176,6 +178,7 @@
                 v-model:value="reconSearchForm.name"
                 :placeholder="taskText('tasks.taskName')"
                 style="width: 220px;"
+                size="small"
                 allowClear
                 @pressEnter="onReconSearch"
               >
@@ -186,6 +189,7 @@
                 v-model:value="reconSearchForm.target"
                 :placeholder="taskText('tasks.searchTargetOrganization')"
                 style="width: 220px;"
+                size="small"
                 allowClear
                 @pressEnter="onReconSearch"
               >
@@ -196,6 +200,7 @@
                 v-model:value="reconSearchForm.status"
                 :placeholder="taskText('tasks.taskStatus')"
                 style="width: 140px;"
+                size="small"
                 allowClear
                 @change="onReconSearch"
               >
@@ -229,14 +234,15 @@
                 :placeholder="[taskText('tasks.startDate'), taskText('tasks.endDate')]"
                 format="YYYY-MM-DD"
                 style="width: 240px;"
+                size="small"
                 allowClear
                 @change="onReconSearch"
               />
             </div>
 
             <div class="filter-actions-group">
-              <a-button type="primary" size="middle" @click="onReconSearch">{{ taskText('tasks.search') }}</a-button>
-              <a-button size="middle" @click="resetReconSearch">{{ taskText('tasks.reset') }}</a-button>
+              <a-button size="small" @click="onReconSearch"><template #icon><search-outlined /></template>{{ taskText('tasks.search') }}</a-button>
+              <a-button size="small" @click="resetReconSearch">{{ taskText('tasks.reset') }}</a-button>
             </div>
           </div>
         </template>
@@ -249,6 +255,7 @@
                 v-model:value="searchForm.name"
                 :placeholder="taskText('tasks.taskName')"
                 style="width: 210px;"
+                size="small"
                 allowClear
                 @pressEnter="onSearch"
               >
@@ -259,6 +266,7 @@
                 v-model:value="searchForm.target"
                 :placeholder="taskText('tasks.targetIpDomainCidr')"
                 style="width: 210px;"
+                size="small"
                 allowClear
                 @pressEnter="onSearch"
               >
@@ -269,6 +277,7 @@
                 v-model:value="searchForm.status"
                 :placeholder="taskText('tasks.taskStatus')"
                 style="width: 140px;"
+                size="small"
                 allowClear
                 @change="onSearch"
               >
@@ -298,10 +307,10 @@
             </div>
 
             <div class="filter-actions-group">
-              <a-button type="primary" size="middle" @click="onSearch">{{ taskText('tasks.search') }}</a-button>
-              <a-button size="middle" @click="resetSearch">{{ taskText('tasks.reset') }}</a-button>
+              <a-button size="small" @click="onSearch"><template #icon><search-outlined /></template>{{ taskText('tasks.search') }}</a-button>
+              <a-button size="small" @click="resetSearch">{{ taskText('tasks.reset') }}</a-button>
               <a-button
-                size="middle"
+                size="small"
                 :type="isAdvancedFilterOpen ? 'primary' : 'default'"
                 :ghost="isAdvancedFilterOpen"
                 @click="isAdvancedFilterOpen = !isAdvancedFilterOpen"
@@ -326,6 +335,7 @@
                   v-model:value="searchForm.task_id"
                   :placeholder="taskText('tasks.enterA24CharacterTaskId')"
                   style="width: 220px;"
+                  size="small"
                   allowClear
                   @pressEnter="onSearch"
                 />
@@ -337,6 +347,7 @@
                   v-model:value="searchForm.type"
                   :placeholder="taskText('tasks.allTypes')"
                   style="width: 180px;"
+                  size="small"
                   allowClear
                   @change="onSearch"
                 >
@@ -354,6 +365,7 @@
                   v-model:value="searchForm.sync_status"
                   :placeholder="taskText('tasks.allStatuses') || '全部状态'"
                   style="width: 130px;"
+                  size="small"
                   allowClear
                   @change="onSearch"
                 >
@@ -367,7 +379,7 @@
               <div class="filter-item">
                 <span class="filter-label">{{ taskText('tasks.websitesLabel') }}</span>
                 <a-input-group compact class="count-input-group">
-                  <a-select v-model:value="searchForm.site_operator" style="width: 65px;">
+                  <a-select v-model:value="searchForm.site_operator" size="small" style="width: 65px;">
                     <a-select-option value="=">=</a-select-option>
                     <a-select-option value=">">&gt;</a-select-option>
                     <a-select-option value="<">&lt;</a-select-option>
@@ -376,6 +388,7 @@
                     v-model:value="searchForm.site_count"
                     :placeholder="taskText('tasks.count')"
                     style="width: 115px;"
+                    size="small"
                     allowClear
                     @pressEnter="onSearch"
                   />
@@ -385,7 +398,7 @@
               <div class="filter-item">
                 <span class="filter-label">{{ taskText('tasks.domainsLabel') }}</span>
                 <a-input-group compact class="count-input-group">
-                  <a-select v-model:value="searchForm.domain_operator" style="width: 65px;">
+                  <a-select v-model:value="searchForm.domain_operator" size="small" style="width: 65px;">
                     <a-select-option value="=">=</a-select-option>
                     <a-select-option value=">">&gt;</a-select-option>
                     <a-select-option value="<">&lt;</a-select-option>
@@ -394,6 +407,7 @@
                     v-model:value="searchForm.domain_count"
                     :placeholder="taskText('tasks.count')"
                     style="width: 115px;"
+                    size="small"
                     allowClear
                     @pressEnter="onSearch"
                   />
@@ -403,7 +417,7 @@
               <div class="filter-item">
                 <span class="filter-label">{{ taskText('tasks.wihRecords') }}</span>
                 <a-input-group compact class="count-input-group">
-                  <a-select v-model:value="searchForm.wih_operator" style="width: 65px;">
+                  <a-select v-model:value="searchForm.wih_operator" size="small" style="width: 65px;">
                     <a-select-option value="=">=</a-select-option>
                     <a-select-option value=">">&gt;</a-select-option>
                     <a-select-option value="<">&lt;</a-select-option>
@@ -412,6 +426,7 @@
                     v-model:value="searchForm.wih_count"
                     :placeholder="taskText('tasks.count')"
                     style="width: 115px;"
+                    size="small"
                     allowClear
                     @pressEnter="onSearch"
                   />
@@ -528,6 +543,7 @@
           :pagination="false"
           :scroll="{ x: 'max-content' }"
           :rowKey="(record) => record._id"
+          size="small"
           class="modern-task-table"
         >
           <template #bodyCell="{ column, record }">
@@ -684,12 +700,12 @@
           </template>
         </a-table>
 
-        <div class="task-pagination-bar">
+        <div class="arl-pagination-bar">
           <div class="pagination-info">
             {{ taskText('tasks.paginationSummary', { pages: Math.ceil(enterprisePagination.total / enterprisePagination.pageSize) || 1, total: enterprisePagination.total }) }}
           </div>
           <a-pagination
-            :pageSizeOptions="['10', '20', '50']"
+            :pageSizeOptions="$pageSizeOptions"
             v-model:current="enterprisePagination.current"
             v-model:pageSize="enterprisePagination.pageSize"
             :total="enterprisePagination.total"
@@ -712,6 +728,7 @@
           :pagination="false"
           :scroll="{ x: 'max-content' }"
           :rowKey="(record) => record.task_id || record._id"
+          size="small"
           class="modern-task-table"
         >
           <template #bodyCell="{ column, record }">
@@ -885,7 +902,7 @@
           </template>
         </a-table>
 
-        <div class="task-pagination-bar">
+        <div class="arl-pagination-bar">
           <div class="pagination-info">
             {{ taskText('tasks.paginationSummary', { pages: Math.ceil(pagination.total / pagination.pageSize) || 1, total: pagination.total }) }}
           </div>
@@ -920,6 +937,7 @@
         ref="formRef"
         :model="formState"
         layout="vertical"
+        :label-wrap="true"
       >
         <!-- A. 基础信息卡片 -->
         <div class="modal-section-card">
@@ -962,7 +980,7 @@
             <span class="section-indicator"></span> {{ taskText('tasks.wordlistsAndPolicies') }}
           </div>
           <a-row :gutter="12">
-            <a-col :span="12">
+            <a-col :xs="24" :sm="12">
               <a-form-item :label="taskText('tasks.subdomainWordlist')" name="domain_brute_type" :rules="[{ required: !!formState.domain_brute, message: taskText('tasks.selectASubdomainWordlist') }]">
                 <a-select v-model:value="formState.domain_brute_type" :disabled="!formState.domain_brute" :placeholder="taskText('tasks.selectAWordlist')">
                   <a-select-option v-for="item in domainDicts" :key="item.name" :value="item.name">{{ describeDict(item) }}</a-select-option>
@@ -970,7 +988,7 @@
                 <div v-if="!formState.domain_brute" class="dict-disabled-hint">{{ taskText('tasks.enableSubdomainEnumerationUnderScanPluginsAndScheduling') }}</div>
               </a-form-item>
             </a-col>
-            <a-col :span="12">
+            <a-col :xs="24" :sm="12">
               <a-form-item :label="taskText('tasks.generatedSubdomainWordlist')" name="alt_dns_dict" :rules="[{ required: !!formState.alt_dns, message: taskText('tasks.selectAGeneratedWordlist') }]">
                 <a-select v-model:value="formState.alt_dns_dict" :disabled="!formState.alt_dns" :placeholder="taskText('tasks.selectAWordlist')">
                   <a-select-option v-for="item in altDnsDicts" :key="item.name" :value="item.name">{{ describeDict(item) }}</a-select-option>
@@ -978,7 +996,7 @@
                 <div v-if="!formState.alt_dns" class="dict-disabled-hint">{{ taskText('tasks.enableDnsWordlistGenerationUnderScanPluginsAnd') }}</div>
               </a-form-item>
             </a-col>
-            <a-col :span="12">
+            <a-col :xs="24" :sm="12">
               <a-form-item :label="taskText('tasks.portScanMode')" name="port_scan_type" :rules="[{ required: !!formState.port_scan, message: taskText('tasks.selectAPortScanPolicy') }]">
                 <a-select v-model:value="formState.port_scan_type" :disabled="!formState.port_scan" :placeholder="taskText('tasks.selectAPolicy')">
                   <a-select-option v-for="item in portDicts" :key="item.name" :value="item.name">{{ describeDict(item) }}</a-select-option>
@@ -986,7 +1004,7 @@
                 <div v-if="!formState.port_scan" class="dict-disabled-hint">{{ taskText('tasks.enablePortScanningUnderScanPluginsAndScheduling') }}</div>
               </a-form-item>
             </a-col>
-            <a-col :span="12">
+            <a-col :xs="24" :sm="12">
               <a-form-item :label="taskText('tasks.fileDiscoveryWordlist')" name="file_leak_dict" :rules="[{ required: !!formState.file_leak, message: taskText('tasks.selectAFileDiscoveryWordlist') }]">
                 <a-select v-model:value="formState.file_leak_dict" :disabled="!formState.file_leak" :placeholder="taskText('tasks.selectAWordlist')">
                   <a-select-option v-for="item in fileLeakDicts" :key="item.name" :value="item.name">{{ describeDict(item) }}</a-select-option>
@@ -1025,7 +1043,7 @@
               </a-button>
             </div>
             <a-row :gutter="[12, 8]">
-              <a-col :span="8" v-for="item in category.plugins" :key="item.key">
+              <a-col :xs="24" :sm="12" :md="8" v-for="item in category.plugins" :key="item.key">
                 <a-checkbox v-model:checked="formState[item.key]">
                   <span class="plugin-check-label">{{ item.label }}</span>
                 </a-checkbox>
@@ -1051,7 +1069,7 @@
       <div style="margin: 16px 0 8px 0;">
         <p class="task-count-caption">{{ taskText('tasks.selectTheAssetGroupThatWillReceiveThis') }}</p>
       </div>
-      <a-form :model="syncFormState" layout="vertical">
+      <a-form :model="syncFormState" layout="vertical" :label-wrap="true">
         <a-form-item :label="taskText('tasks.targetAssetGroup')" name="scope_id" :rules="[{ required: true, message: taskText('tasks.selectAnAssetGroup') }]">
           <AssetScopeSelect v-model:value="syncFormState.scope_id" />
         </a-form-item>
@@ -1075,6 +1093,7 @@
         ref="fofaFormRef"
         :model="fofaForm"
         layout="vertical"
+        :label-wrap="true"
       >
         <a-form-item :label="taskText('tasks.taskName')" name="name" :rules="[{ required: true, message: taskText('tasks.enterATaskName') }]">
           <a-input v-model:value="fofaForm.name" :placeholder="taskText('tasks.enterATaskName')" />
@@ -1140,7 +1159,7 @@ import SyncToScopeModal from '../components/SyncToScopeModal.vue';
 import AssetScopeSelect from '../components/AssetScopeSelect.vue';
 import { getTaskAssetGroupState } from '../utils/taskAssetGroups';
 
-const { t: taskText } = useI18n({ useScope: 'global' });
+const { t: taskText, locale: taskLocale } = useI18n({ useScope: 'global' });
 
 // --- 吸顶配置 ---
 const actionBarRef = ref(null);
@@ -1310,7 +1329,8 @@ const enterpriseTaskList = ref([]);
 const enterpriseLoading = ref(false);
 const enterpriseBatchDeleting = ref(false);
 const enterpriseTaskCache = new Map();
-const enterprisePagination = reactive({ current: 1, pageSize: 10, total: 0 });
+const globalPageSize = useGlobalPageSize(10);
+const enterprisePagination = reactive({ current: 1, pageSize: globalPageSize.value, total: 0 });
 const enterpriseSelectedRowKeys = ref([]);
 const onEnterpriseSelectChange = (keys) => {
   enterpriseSelectedRowKeys.value = keys;
@@ -1367,7 +1387,12 @@ const resetReconSearch = () => {
   onReconSearch();
 };
 
-const handleEnterpriseTableChange = (page, pageSize) => fetchEnterpriseTasks(page, pageSize, false, false);
+const handleEnterpriseTableChange = (page, pageSize) => {
+  if (pageSize && pageSize !== globalPageSize.value) {
+    globalPageSize.value = pageSize;
+  }
+  fetchEnterpriseTasks(page, pageSize || enterprisePagination.pageSize, false, false);
+};
 
 const TYC_QUERY_TYPE_LABELS = {
   get invest() { return taskText('tasks.investments'); },
@@ -1687,15 +1712,19 @@ const handleDeleteEnterprise = async (record) => {
 // ==========================================
 const taskList = ref([]);
 const loading = ref(false);
-const globalPageSize = useGlobalPageSize(10);
 const pagination = reactive({ current: 1, pageSize: globalPageSize.value, total: 0, showSizeChanger: true });
 
 watch(() => pagination.pageSize, (newSize) => {
   globalPageSize.value = newSize;
 });
 
+watch(() => enterprisePagination.pageSize, (newSize) => {
+  globalPageSize.value = newSize;
+});
+
 watch(globalPageSize, (newSize) => {
   pagination.pageSize = newSize;
+  enterprisePagination.pageSize = newSize;
 });
 
 // 列配置
@@ -1896,7 +1925,7 @@ const handleBatchDelete = () => {
     content: createVNode('div', { style: 'margin-top: 8px;' }, [
       createVNode('div', { style: 'margin-bottom: 14px; color: var(--arl-text-color);' }, taskText('tasks.deleteTheSelectedTasksCount', { count: validKeys.length })),
       selectedNames.length > 0 ? createVNode('div', {
-        style: 'max-height: 120px; overflow-y: auto; background: var(--arl-bg-light, rgba(0,0,0,0.03)); padding: 6px 8px; border-radius: 4px; margin-bottom: 14px; font-size: 12px; color: var(--arl-text-color); opacity: 0.85; line-height: 1.6;'
+        style: 'max-height: 120px; overflow-y: auto; background: var(--arl-bg-light); padding: 6px 8px; border-radius: 4px; margin-bottom: 14px; font-size: 12px; color: var(--arl-text-color); opacity: 0.85; line-height: 1.6;'
       }, [
         createVNode('div', { style: 'font-weight: 500; margin-bottom: 4px;' }, taskText('tasks.theFollowingTasksWillBeDeleted', {  })),
         createVNode('div', null, `· ${selectedNames.join('\n· ')}`),
@@ -2584,14 +2613,8 @@ onUnmounted(() => {
 
 <style scoped>
 /* ==========================================================================
-   页面容器与吸顶英雄卡片体系
+   任务管理专属样式（基础容器、Hero、胶囊与分页已收敛至 style.css）
    ========================================================================== */
-.arl-task-page {
-  background-color: var(--arl-bg-layout);
-  padding: 16px 20px;
-  min-height: calc(100vh - 64px);
-}
-
 /* 任务列表「资产组」列：组名需弱化显示，与标签层级区分 */
 .task-asset-group-name {
   font-size: 12px;
@@ -2600,114 +2623,15 @@ onUnmounted(() => {
   word-break: break-all;
 }
 
-.arl-task-hero-card {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  background: var(--arl-bg-white);
-  border: 1px solid var(--arl-border-color);
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  padding: 12px 18px;
-  margin-bottom: 12px;
-  transition: all 0.25s ease;
-}
-
-/* 顶层主栏：左侧胶囊 + 右侧控制 */
-.task-hero-unified-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--arl-border-color);
-}
-
-.task-hero-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.task-hero-title .title-text {
+.arl-hero-title .title-text {
   font-size: 15px;
   font-weight: 600;
   color: var(--arl-text-color);
   letter-spacing: -0.2px;
 }
 
-/* 视角切换胶囊栏 */
-.task-view-capsule-switcher {
-  display: inline-flex;
-  align-items: center;
-  background: var(--arl-bg-light);
-  padding: 3px;
-  border-radius: 6px;
-  border: 1px solid var(--arl-border-color);
-}
-
-.capsule-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border: none;
-  background: transparent;
-  color: var(--arl-text-secondary);
-  font-size: 13px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  line-height: 1.5;
-}
-
-.capsule-btn:hover {
-  color: var(--arl-text-color);
-}
-
-.capsule-btn.active {
-  background: var(--arl-bg-white);
-  color: var(--arl-theme-color);
-  font-weight: 500;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-}
-
 .capsule-icon {
   font-size: 13px;
-}
-
-.capsule-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  padding: 1px 6px;
-  background: rgba(24, 144, 255, 0.1);
-  color: var(--arl-theme-color);
-  border-radius: 10px;
-  font-weight: 500;
-}
-
-.pulse-dot {
-  width: 6px;
-  height: 6px;
-  background-color: #52c41a;
-  border-radius: 50%;
-  animation: pulseBeacon 1.6s infinite ease-in-out;
-}
-
-@keyframes pulseBeacon {
-  0% { transform: scale(0.9); opacity: 0.7; }
-  50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 6px #52c41a; }
-  100% { transform: scale(0.9); opacity: 0.7; }
-}
-
-/* 英雄栏右侧控制区 */
-.task-hero-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 .auto-refresh-toggle {
@@ -2726,7 +2650,7 @@ onUnmounted(() => {
 }
 
 .primary-action-btn {
-  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2);
+  box-shadow: 0 2px 4px color-mix(in srgb, var(--arl-theme-color) 20%, transparent);
 }
 
 /* ==========================================================================
@@ -2734,7 +2658,7 @@ onUnmounted(() => {
    ========================================================================== */
 .task-metric-cards-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   padding: 10px 0;
   border-bottom: 1px solid var(--arl-border-color);
@@ -2760,7 +2684,7 @@ onUnmounted(() => {
 .metric-stat-card.active {
   background: var(--arl-bg-white);
   border-color: var(--arl-theme-color);
-  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.15);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--arl-theme-color) 15%, transparent);
 }
 
 .stat-card-inner {
@@ -2781,7 +2705,7 @@ onUnmounted(() => {
 }
 
 .stat-icon-box.all {
-  background: rgba(24, 144, 255, 0.1);
+  background: var(--arl-theme-soft-bg);
   color: var(--arl-theme-color);
 }
 
@@ -2927,7 +2851,7 @@ onUnmounted(() => {
   gap: 12px;
   margin-top: 8px;
   padding-top: 6px;
-  border-top: 1px solid rgba(0, 0, 0, 0.04);
+  border-top: 1px solid var(--arl-border-color);
 }
 
 /* ==========================================================================
@@ -2938,8 +2862,8 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 16px;
-  background: rgba(24, 144, 255, 0.08);
-  border: 1px solid rgba(24, 144, 255, 0.3);
+  background: var(--arl-theme-soft-bg);
+  border: 1px solid var(--arl-theme-soft-border);
   border-radius: 6px;
   margin-bottom: 12px;
   animation: batchFadeIn 0.25s ease;
@@ -2987,7 +2911,7 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: monospace, sans-serif;
+  font-family: var(--arl-font-mono);
   color: var(--arl-text-color);
 }
 
@@ -3002,7 +2926,7 @@ onUnmounted(() => {
 .target-tooltip-list {
   max-height: 260px;
   overflow-y: auto;
-  font-family: monospace;
+  font-family: var(--arl-font-mono);
 }
 
 .target-item-line {
@@ -3030,7 +2954,7 @@ onUnmounted(() => {
 }
 
 .stat-capsule.site { background: rgba(0, 188, 212, 0.12); color: #00838f; }
-.stat-capsule.domain { background: rgba(24, 144, 255, 0.12); color: #096dd9; }
+.stat-capsule.domain { background: rgba(24, 144, 255, 0.14); color: #1890ff; }
 .stat-capsule.ip { background: rgba(82, 196, 26, 0.12); color: #389e0d; }
 .stat-capsule.wih { background: rgba(250, 173, 20, 0.15); color: #d48806; }
 .stat-capsule.vuln { background: rgba(255, 77, 79, 0.15); color: #cf1322; }
@@ -3076,7 +3000,7 @@ onUnmounted(() => {
 
 .tooltip-section-title {
   font-size: 11px;
-  color: var(--arl-primary-light, #91caff);
+  color: var(--arl-primary-light);
   font-weight: 600;
   margin-top: 4px;
   margin-bottom: 2px;
@@ -3107,10 +3031,10 @@ onUnmounted(() => {
 }
 
 .service-name { opacity: 0.85; }
-.service-elapsed { font-weight: 500; font-family: monospace; }
+.service-elapsed { font-weight: 500; font-family: var(--arl-font-mono); }
 
 .task-id-text {
-  font-family: monospace;
+  font-family: var(--arl-font-mono);
   font-size: 12px;
   color: var(--arl-text-secondary);
 }
@@ -3136,19 +3060,6 @@ onUnmounted(() => {
 }
 .more-action-btn:hover {
   color: var(--arl-theme-color);
-}
-
-/* 分页条 */
-.task-pagination-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 4px 4px 4px;
-}
-
-.pagination-info {
-  font-size: 13px;
-  color: var(--arl-text-secondary);
 }
 
 /* 同步状态标签 */
@@ -3206,7 +3117,7 @@ onUnmounted(() => {
 
 .target-fanout-hint .anticon {
   margin-top: 2px;
-  color: var(--arl-primary-color, #1890ff);
+  color: var(--arl-theme-color);
 }
 
 /* 字典下拉被依赖开关禁用时，显式告知解锁位置，避免用户面对灰置控件无从下手 */
@@ -3303,4 +3214,37 @@ onUnmounted(() => {
 .task-small-caption { font-size: 10px; }
 .task-count-caption { color: var(--arl-text-secondary); font-size: 13px; }
 .task-fill-space { flex: 1; }
+
+.metric-stat-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.page-wide-text .stat-label {
+  line-height: 1.3;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1440px) {
+  .page-wide-text .task-metric-cards-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1366px) {
+  .task-metric-cards-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .task-metric-cards-row,
+  .page-wide-text .task-metric-cards-row {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

@@ -1,8 +1,20 @@
 <template>
-  <div class="policy-detail-container">
-    <div class="policy-detail-header">
-      <a-button type="link" @click="goBack" class="back-link-btn">{{ pageText('pages.backToList') }}</a-button>
-      <h2 class="page-title">{{ isEdit ? pageText('pages.editPolicyConfiguration') : pageText('pages.newScanPolicy') }}</h2>
+  <div class="arl-page-container" :class="{ 'page-wide-text': pageLocale !== 'zh-CN' }">
+    <div class="arl-hero-card policy-detail-hero">
+      <div class="arl-hero-unified-bar policy-hero-bar">
+        <div class="arl-hero-left">
+          <button type="button" class="arl-detail-back-btn" @click="goBack">
+            <arrow-left-outlined />
+            <span>{{ pageText('pages.backToList').replace(/^<\s*/, '') }}</span>
+          </button>
+          <div class="arl-hero-v-divider"></div>
+          <span class="arl-hero-title">{{ isEdit ? pageText('pages.editPolicyConfiguration') : pageText('pages.newScanPolicy') }}</span>
+        </div>
+        <div class="arl-hero-right">
+          <a-button size="small" @click="goBack">{{ pageText('assets.cancel') }}</a-button>
+          <a-button type="primary" size="small" @click="submitPolicy" :loading="submitLoading">{{ pageText('pages.savePolicy') }}</a-button>
+        </div>
+      </div>
     </div>
 
     <a-form :label-wrap="true" :model="policyForm" layout="vertical" class="policy-form-layout">
@@ -11,13 +23,13 @@
         <div class="section-card-title">
           <span class="indicator-bar"></span>{{ pageText('tasks.basicSettings') }}
         </div>
-        <a-row :gutter="16">
-          <a-col :span="12">
+        <a-row :gutter="[16, 8]">
+          <a-col :xs="24" :md="12">
             <a-form-item :label="pageText('tasks.policyName')" required>
               <a-input v-model:value="policyForm.name" :placeholder="pageText('pages.enterAPolicyNameEGComprehensiveDiscovery')" />
             </a-form-item>
           </a-col>
-          <a-col :span="12">
+          <a-col :xs="24" :md="12">
             <a-form-item :label="pageText('pages.policyDescription')">
               <a-input v-model:value="policyForm.desc" :placeholder="pageText('pages.describeWhenToUseThisPolicy')" />
             </a-form-item>
@@ -111,8 +123,8 @@
                 <span class="feature-hint">{{ pageText('pages.probeTcpPortsOnTargetIpAssets') }}</span>
               </div>
               <div v-if="policyForm.ip_config.port_scan" class="sub-config-box">
-                <a-row :gutter="16">
-                  <a-col :span="12">
+                <a-row :gutter="[16, 8]">
+                  <a-col :xs="24" :md="12">
                     <a-form-item :label="pageText('pages.portScanPolicy')" required class="inline-form-item">
                       <a-select v-model:value="policyForm.ip_config.port_scan_type" :placeholder="pageText('tasks.selectAPortScanPolicy')">
                         <a-select-option value="custom">{{ pageText('tasks.customPorts') }}</a-select-option>
@@ -120,7 +132,7 @@
                       </a-select>
                     </a-form-item>
                   </a-col>
-                  <a-col :span="12" v-if="policyForm.ip_config.port_scan_type === 'custom'">
+                  <a-col :xs="24" :md="12" v-if="policyForm.ip_config.port_scan_type === 'custom'">
                     <a-form-item :label="pageText('pages.customPortRange')" required class="inline-form-item">
                       <a-input v-model:value="policyForm.ip_config.port_custom" :placeholder="pageText('pages.eG8044380008080')" />
                     </a-form-item>
@@ -135,8 +147,8 @@
                 </div>
 
                 <div v-if="showAdvancedPortConfig" class="advanced-params-grid">
-                  <a-row :gutter="16">
-                    <a-col :span="8">
+                  <a-row :gutter="[16, 8]">
+                    <a-col :xs="24" :sm="12" :lg="8">
                       <a-form-item :label="pageText('pages.hostTimeout')" class="inline-form-item">
                         <a-select v-model:value="policyForm.ip_config.host_timeout_type">
                           <a-select-option value="default">{{ pageText('pages.default900s') }}</a-select-option>
@@ -144,22 +156,22 @@
                         </a-select>
                       </a-form-item>
                     </a-col>
-                    <a-col :span="8" v-if="policyForm.ip_config.host_timeout_type === 'custom'">
+                    <a-col :xs="24" :sm="12" :lg="8" v-if="policyForm.ip_config.host_timeout_type === 'custom'">
                       <a-form-item :label="pageText('pages.timeoutInSeconds')" required class="inline-form-item">
                         <a-input-number v-model:value="policyForm.ip_config.host_timeout" :min="1" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :lg="8">
                       <a-form-item :label="pageText('pages.probeParallelism')" class="inline-form-item">
                         <a-input-number v-model:value="policyForm.ip_config.port_parallelism" :min="1" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
-                    <a-col :span="8">
+                    <a-col :xs="24" :sm="12" :lg="8">
                       <a-form-item :label="pageText('pages.minimumPacketRate')" class="inline-form-item">
                         <a-input-number v-model:value="policyForm.ip_config.port_min_rate" :min="1" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
-                    <a-col :span="16">
+                    <a-col :xs="24" :lg="16">
                       <a-form-item :label="pageText('pages.excludedPorts')" class="inline-form-item">
                         <a-input v-model:value="policyForm.ip_config.exclude_ports" :placeholder="pageText('pages.excludePortsEG910091021100')" />
                       </a-form-item>
@@ -328,7 +340,7 @@
             <!-- 分页分片渲染：只挂载当前页的 DOM 节点，海量插件零卡顿 -->
             <template v-if="filteredPocList.length > 0">
               <a-row :gutter="[12, 12]" class="plugin-checkbox-grid">
-                <a-col :span="12" v-for="(item, index) in paginatedPocList" :key="item.plugin_name">
+                <a-col :xs="24" :md="12" v-for="(item, index) in paginatedPocList" :key="item.plugin_name">
                   <div class="plugin-item-checkbox" :class="{ 'is-checked': selectedPocNames.has(item.plugin_name) }">
                     <a-checkbox
                       :checked="selectedPocNames.has(item.plugin_name)"
@@ -354,7 +366,7 @@
               </div>
             </template>
             <div v-else class="plugin-empty-box">
-              <a-empty :description="pageText('tasks.noData')" :image="simpleImage" />
+              <ArlEmpty :description="pageText('tasks.noData')" compact />
             </div>
           </div>
 
@@ -384,7 +396,7 @@
             <!-- 分页分片渲染：只挂载当前页的 DOM 节点，海量插件零卡顿 -->
             <template v-if="filteredBruteList.length > 0">
               <a-row :gutter="[12, 12]" class="plugin-checkbox-grid">
-                <a-col :span="12" v-for="(item, index) in paginatedBruteList" :key="item.plugin_name">
+                <a-col :xs="24" :md="12" v-for="(item, index) in paginatedBruteList" :key="item.plugin_name">
                   <div class="plugin-item-checkbox" :class="{ 'is-checked': selectedBruteNames.has(item.plugin_name) }">
                     <a-checkbox
                       :checked="selectedBruteNames.has(item.plugin_name)"
@@ -410,7 +422,7 @@
               </div>
             </template>
             <div v-else class="plugin-empty-box">
-              <a-empty :description="pageText('tasks.noData')" :image="simpleImage" />
+              <ArlEmpty :description="pageText('tasks.noData')" compact />
             </div>
           </div>
         </a-collapse-panel>
@@ -430,11 +442,9 @@
 import { useI18n } from 'vue-i18n';
 import { ref, reactive, shallowRef, watch, onMounted, computed } from 'vue';
 import request from '../utils/request';
-import { message, Empty } from 'ant-design-vue';
-import { SearchOutlined } from '@ant-design/icons-vue';
+import { message } from 'ant-design-vue';
+import { ArrowLeftOutlined, SearchOutlined } from '@ant-design/icons-vue';
 import { useRouter, useRoute } from 'vue-router';
-
-const simpleImage = Empty.PRESENTED_IMAGE_SIMPLE;
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 
@@ -1012,33 +1022,14 @@ const submitPolicy = async () => {
 </script>
 
 <style scoped>
-.policy-detail-container {
-  background-color: var(--arl-bg-layout);
-  padding: 24px;
-  min-height: calc(100vh - 64px);
-  position: relative;
+.policy-detail-hero {
+  max-width: 1040px;
+  margin: 0 auto 16px auto;
 }
 
-.policy-detail-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 24px;
-  border-bottom: 1px solid var(--arl-border-color);
-  padding-bottom: 16px;
-}
-
-.back-link-btn {
-  padding: 0;
-  margin-right: 16px;
-  font-size: 14px;
-  color: var(--arl-theme-color);
-}
-
-.page-title {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--arl-text-color);
+.policy-hero-bar {
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .policy-form-layout {
@@ -1047,7 +1038,7 @@ const submitPolicy = async () => {
 }
 
 .policy-section-card {
-  background: var(--arl-bg-card, #ffffff);
+  background: var(--arl-bg-card);
   border-radius: 8px;
   margin-bottom: 20px;
   border: 1px solid var(--arl-border-color);
@@ -1067,7 +1058,7 @@ const submitPolicy = async () => {
   display: inline-block;
   width: 4px;
   height: 16px;
-  background-color: var(--arl-theme-color, #1890ff);
+  background-color: var(--arl-theme-color);
   border-radius: 2px;
   margin-right: 8px;
 }
@@ -1290,10 +1281,12 @@ const submitPolicy = async () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 12px 16px;
   padding: 10px 24px;
   margin: 32px auto 16px auto;
   width: fit-content;
+  max-width: calc(100vw - 32px);
   background: color-mix(in srgb, var(--arl-bg-card, #141414) 85%, transparent);
   border: 1px solid var(--arl-border-color);
   border-radius: 28px;
@@ -1303,7 +1296,9 @@ const submitPolicy = async () => {
 }
 
 .submit-btn {
-  width: 140px;
+  min-width: 120px;
+  width: auto;
+  padding: 0 22px;
   height: 38px;
   font-size: 14px;
   font-weight: 500;
@@ -1311,7 +1306,9 @@ const submitPolicy = async () => {
 }
 
 .cancel-btn {
-  width: 100px;
+  min-width: 96px;
+  width: auto;
+  padding: 0 20px;
   height: 38px;
   font-size: 14px;
   border-radius: 20px;

@@ -1,137 +1,229 @@
 <template>
-  <div style="background-color: var(--arl-bg-layout); padding: 24px; min-height: calc(100vh - 64px);">
+  <div class="arl-page-container">
     <EnterpriseTaskDetailPanel v-if="isEnterpriseTask" />
     <div v-else>
-      <div ref="actionBarRef" style="position: sticky; top: 0px; z-index: 10; background-color: var(--arl-bg-layout); margin: -24px -24px 16px -24px; padding: 24px 24px 16px 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-    <a-page-header
-      @back="handleBack"
-      style="padding: 0 0 24px 0;"
-    >
-      <template #title>
-        <a-tooltip placement="bottomLeft">
-          <template #title>
-            <div style="word-break: break-all; max-height: 300px; overflow-y: auto; font-weight: normal; font-size: 14px;">
-              <div v-for="(item, index) in targetList" :key="index">
-                {{ item }}
-              </div>
+      <!-- 1. 统一吸顶 Hero 头部卡片 -->
+      <div ref="actionBarRef" class="arl-hero-card">
+        <div class="arl-hero-unified-bar">
+          <div class="arl-hero-left">
+            <button
+              type="button"
+              class="arl-detail-back-btn"
+              @click="handleBack"
+            >
+              <arrow-left-outlined />
+              <span>{{ taskText('pages.backToList').replace(/^<\s*/, '') }}</span>
+            </button>
+
+            <div class="arl-hero-v-divider"></div>
+
+            <a-tooltip placement="bottomLeft">
+              <template #title>
+                <div style="word-break: break-all; max-height: 300px; overflow-y: auto; font-weight: normal; font-size: 13px;">
+                  <div v-for="(item, index) in targetList" :key="index">
+                    {{ item }}
+                  </div>
+                </div>
+              </template>
+              <span class="arl-hero-title">{{ displayTitle }}</span>
+            </a-tooltip>
+
+            <a-tag v-if="taskId && taskStatus" :color="formatTaskStatusColor(taskStatus)">
+              {{ formatTaskStatus(taskStatus) }}
+            </a-tag>
+          </div>
+
+          <div v-if="activeTab !== 'syslog'" class="arl-hero-right">
+            <a-button
+              v-if="tabConfig[effectiveTab]?.exportName"
+              :type="activeTab === 'site' ? 'default' : 'primary'"
+              size="small"
+              @click="handleExport"
+            >
+              <template #icon><download-outlined /></template>
+              {{ taskText('tasks.exportAssetType', { type: tabConfig[effectiveTab].exportName }) }}
+            </a-button>
+            <a-button
+              v-if="activeTab === 'site'"
+              type="primary"
+              size="small"
+              @click="openRiskModal"
+            >
+              <template #icon><bug-outlined /></template>
+              {{ taskText('tasks.createRiskScanningTask') }}
+            </a-button>
+          </div>
+        </div>
+
+        <!-- 维度标签页 -->
+        <a-tabs
+          v-model:activeKey="activeTab"
+          type="card"
+          size="small"
+          class="arl-detail-tabs task-detail-tabs"
+          :class="{ 'is-log-tab': activeTab === 'syslog' }"
+        >
+          <a-tab-pane key="site" :tab="taskId ? taskText('tasks.websitesCountLabel', { count: queryCounts.site }) : taskText('tasks.websites')"></a-tab-pane>
+          <a-tab-pane key="domain" :tab="taskId ? taskText('tasks.subdomainsCount', { count: queryCounts.domain }) : taskText('tasks.subdomains')"></a-tab-pane>
+          <a-tab-pane key="ip" :tab="taskId ? `IP - ${queryCounts.ip}` : 'IP'"></a-tab-pane>
+          <a-tab-pane key="cert" :tab="taskId ? taskText('tasks.sslCertificatesCount', { count: queryCounts.cert }) : taskText('tasks.sslCertificates')"></a-tab-pane>
+          <a-tab-pane key="service" :tab="taskId ? taskText('tasks.servicesCount', { count: (queryCounts.service || 0) + (queryCounts.npoc_service || 0) }) : taskText('tasks.services')"></a-tab-pane>
+          <a-tab-pane key="fileleak" :tab="taskId ? taskText('tasks.fileDisclosuresCount', { count: queryCounts.fileleak }) : taskText('tasks.fileDisclosure')"></a-tab-pane>
+          <a-tab-pane key="url" :tab="taskId ? taskText('tasks.urlsCount', { count: queryCounts.url }) : taskText('tasks.urls')"></a-tab-pane>
+          <a-tab-pane key="cip" :tab="taskId ? taskText('tasks.cClassNetworksCount', { count: queryCounts.cip }) : taskText('tasks.cClassNetworks')"></a-tab-pane>
+          <a-tab-pane key="stat_finger" :tab="taskId ? taskText('tasks.fingerprintStatisticsCount', { count: queryCounts.stat_finger }) : taskText('tasks.fingerprintStatistics')"></a-tab-pane>
+          <a-tab-pane key="wih" :tab="taskId ? `WIH - ${queryCounts.wih}` : 'WIH'"></a-tab-pane>
+          <a-tab-pane key="vuln" :tab="taskId ? taskText('tasks.risksCountLabel', { count: queryCounts.vuln }) : taskText('tasks.risks')"></a-tab-pane>
+          <a-tab-pane key="nuclei_result" :tab="taskId ? `nuclei - ${queryCounts.nuclei_result}` : 'nuclei'"></a-tab-pane>
+          <a-tab-pane v-if="taskId" key="syslog" :tab="taskText('tasks.taskLogs')"></a-tab-pane>
+        </a-tabs>
+
+        <!-- 紧凑单行工具栏 (引擎切换 + 折叠筛选开关 + 批量动作) -->
+        <div v-show="activeTab !== 'syslog'" class="arl-toolbar-row task-detail-toolbar">
+          <div class="arl-filter-group">
+            <div v-if="activeTab === 'service'" class="arl-filter-item">
+              <span class="task-option-heading">{{ taskText('tasks.detectionEngine') }}</span>
+              <a-radio-group v-model:value="serviceEngineType" button-style="solid" size="small" @change="onServiceEngineChange">
+                <a-radio-button value="nmap">{{ taskText('tasks.portServicesNmap') }} <span v-if="taskId">({{ queryCounts.service || 0 }})</span></a-radio-button>
+                <a-radio-button value="npoc">{{ taskText('tasks.pythonPluginServices') }} <span v-if="taskId">({{ queryCounts.npoc_service || 0 }})</span></a-radio-button>
+              </a-radio-group>
             </div>
-          </template>
-          <span>{{ displayTitle }}</span>
-        </a-tooltip>
-      </template>
-    </a-page-header>
 
-    <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs" style="margin-bottom: 16px;">
-      <a-tab-pane key="site" :tab="taskId ? taskText('tasks.websitesCountLabel', { count: queryCounts.site }) : taskText('tasks.websites')"></a-tab-pane>
-      <a-tab-pane key="domain" :tab="taskId ? taskText('tasks.subdomainsCount', { count: queryCounts.domain }) : taskText('tasks.subdomains')"></a-tab-pane>
-      <a-tab-pane key="ip" :tab="taskId ? `IP - ${queryCounts.ip}` : 'IP'"></a-tab-pane>
-      <a-tab-pane key="cert" :tab="taskId ? taskText('tasks.sslCertificatesCount', { count: queryCounts.cert }) : taskText('tasks.sslCertificates')"></a-tab-pane>
-      <a-tab-pane key="service" :tab="taskId ? taskText('tasks.servicesCount', { count: (queryCounts.service || 0) + (queryCounts.npoc_service || 0) }) : taskText('tasks.services')"></a-tab-pane>
-      <a-tab-pane key="fileleak" :tab="taskId ? taskText('tasks.fileDisclosuresCount', { count: queryCounts.fileleak }) : taskText('tasks.fileDisclosure')"></a-tab-pane>
-      <a-tab-pane key="url" :tab="taskId ? taskText('tasks.urlsCount', { count: queryCounts.url }) : taskText('tasks.urls')"></a-tab-pane>
-      <a-tab-pane key="cip" :tab="taskId ? taskText('tasks.cClassNetworksCount', { count: queryCounts.cip }) : taskText('tasks.cClassNetworks')"></a-tab-pane>
-      <a-tab-pane key="stat_finger" :tab="taskId ? taskText('tasks.fingerprintStatisticsCount', { count: queryCounts.stat_finger }) : taskText('tasks.fingerprintStatistics')"></a-tab-pane>
-      <a-tab-pane key="wih" :tab="taskId ? `WIH - ${queryCounts.wih}` : 'WIH'"></a-tab-pane>
-      <a-tab-pane key="vuln" :tab="taskId ? taskText('tasks.risksCountLabel', { count: queryCounts.vuln }) : taskText('tasks.risks')"></a-tab-pane>
-      <a-tab-pane key="nuclei_result" :tab="taskId ? `nuclei - ${queryCounts.nuclei_result}` : 'nuclei'"></a-tab-pane>
-      <a-tab-pane v-if="taskId" key="syslog" :tab="taskText('tasks.taskLogs')"></a-tab-pane>
-    </a-tabs>
+            <a-button
+              v-if="tabConfig[effectiveTab]?.searchFields"
+              size="small"
+              :type="filterExpanded ? 'primary' : 'default'"
+              :ghost="filterExpanded"
+              @click="filterExpanded = !filterExpanded"
+            >
+              <template #icon><filter-outlined /></template>
+              {{ filterExpanded ? taskText('tasks.hideFilters') : taskText('tasks.advancedFilters') }}
+              <a-badge
+                v-if="activeFilterCount > 0"
+                :count="activeFilterCount"
+                :number-style="{ backgroundColor: 'var(--arl-theme-color)', marginLeft: '4px' }"
+              />
+            </a-button>
 
-    <div v-if="activeTab === 'service'" style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px; background: var(--arl-bg-light); padding: 10px 16px; border-radius: 6px; border: 1px solid var(--arl-border-color);">
-      <span class="task-option-heading">{{ taskText('tasks.detectionEngine') }}</span>
-      <a-radio-group v-model:value="serviceEngineType" button-style="solid" size="small" @change="onServiceEngineChange">
-        <a-radio-button value="nmap">{{ taskText('tasks.portServicesNmap') }} <span v-if="taskId">({{ queryCounts.service || 0 }})</span></a-radio-button>
-        <a-radio-button value="npoc">{{ taskText('tasks.pythonPluginServices') }} <span v-if="taskId">({{ queryCounts.npoc_service || 0 }})</span></a-radio-button>
-      </a-radio-group>
-    </div>
+            <a-button
+              v-if="tabConfig[effectiveTab]?.searchFields"
+              size="small"
+              @click="resetSearch"
+            >
+              <template #icon><undo-outlined /></template>
+              {{ taskText('tasks.clearFilters') }}
+            </a-button>
+          </div>
 
-    <div v-if="tabConfig[effectiveTab]?.searchFields && activeTab !== 'syslog'" style="margin-bottom: 16px;">
-      <a-form :model="searchForm" layout="inline" style="row-gap: 16px;">
-      <a-form-item v-for="field in tabConfig[effectiveTab].searchFields" :key="field.key" :label="field.label + '：'">
-        <HttpStatusFilter
-          v-if="field.type === 'httpStatus'"
-          v-model:value="searchForm[field.key]"
-          @change="onSearch"
-        />
-                <a-select
-            v-else-if="field.type === 'select'"
-            v-model:value="searchForm[field.key]"
-            :placeholder="taskText('tasks.selectField', { field: field.label })"
-            style="width: 200px;"
-            allowClear
-            @change="onSearch"
-        >
-          <a-select-option v-for="opt in field.options" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </a-select-option>
-        </a-select>
+          <div class="arl-actions-group">
+            <a-button
+              v-if="canDeleteAssets"
+              danger
+              size="small"
+              :disabled="!hasSelected"
+              @click="handleBatchDelete"
+            >
+              <template #icon><delete-outlined /></template>
+              {{ taskText('tasks.deleteSelected') }}
+            </a-button>
+          </div>
+        </div>
+      </div>
 
-        <div
-            v-else-if="field.hasOperatorSelect"
-            style="display: flex; align-items: center; border: 1px solid var(--arl-border-color); border-radius: 2px; width: 280px; background: var(--arl-bg-white);"
-        >
-          <template v-if="field.type === 'select'">
+      <!-- 2. 可折叠检索条件网格面板 -->
+      <div v-if="filterExpanded && tabConfig[effectiveTab]?.searchFields && activeTab !== 'syslog'" class="arl-filter-card">
+        <div class="arl-filter-grid">
+          <div v-for="field in tabConfig[effectiveTab].searchFields" :key="field.key" class="arl-filter-cell">
+            <span class="arl-filter-cell-label">{{ field.label }}</span>
+            <HttpStatusFilter
+              v-if="field.type === 'httpStatus'"
+              v-model:value="searchForm[field.key]"
+              size="small"
+              @change="onSearch"
+            />
             <a-select
-                v-model:value="searchForm[field.key]"
-                :placeholder="taskText('tasks.selectField', { field: field.label })"
-                :bordered="false"
-                style="flex: 1; box-shadow: none;"
-                allowClear
-                @change="onSearch"
+              v-else-if="field.type === 'select'"
+              v-model:value="searchForm[field.key]"
+              :placeholder="taskText('tasks.selectField', { field: field.label })"
+              size="small"
+              style="width: 100%;"
+              allowClear
+              @change="onSearch"
             >
               <a-select-option v-for="opt in field.options" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
               </a-select-option>
             </a-select>
-          </template>
-          <template v-else>
-            <a-input
-                v-model:value="searchForm[field.key]"
-                :placeholder="field.placeholder || taskText('tasks.enterField', { field: field.label })"
+
+            <div
+              v-else-if="field.hasOperatorSelect"
+              class="task-operator-box"
+            >
+              <template v-if="field.type === 'select'">
+                <a-select
+                  v-model:value="searchForm[field.key]"
+                  :placeholder="taskText('tasks.selectField', { field: field.label })"
+                  :bordered="false"
+                  size="small"
+                  style="flex: 1; box-shadow: none;"
+                  allowClear
+                  @change="onSearch"
+                >
+                  <a-select-option v-for="opt in field.options" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </a-select-option>
+                </a-select>
+              </template>
+              <template v-else>
+                <a-input
+                  v-model:value="searchForm[field.key]"
+                  :placeholder="field.placeholder || taskText('tasks.enterField', { field: field.label })"
+                  :bordered="false"
+                  size="small"
+                  style="flex: 1; box-shadow: none;"
+                  allowClear
+                  @pressEnter="onSearch"
+                >
+                  <template #suffix>
+                    <search-outlined @click="onSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.35;" />
+                  </template>
+                </a-input>
+              </template>
+              <div style="width: 1px; height: 14px; background-color: var(--arl-border-color);"></div>
+              <a-select
+                v-model:value="field.operator"
                 :bordered="false"
-                style="flex: 1; box-shadow: none;"
-                allowClear
-                @pressEnter="onSearch"
+                size="small"
+                style="width: 84px; box-shadow: none;"
+                @change="onSearch"
+              >
+                <a-select-option v-for="op in field.operators" :key="op" :value="op">{{ formatAssetFilterOperator(op) }}</a-select-option>
+              </a-select>
+            </div>
+
+            <a-input
+              v-else
+              v-model:value="searchForm[field.key]"
+              :placeholder="taskText('tasks.enterField', { field: field.label })"
+              size="small"
+              allowClear
+              @pressEnter="onSearch"
             >
               <template #suffix>
-                <search-outlined @click="onSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.25;" />
+                <search-outlined @click="onSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.35;" />
               </template>
             </a-input>
-          </template>
-          <div style="width: 1px; height: 16px; background-color: var(--arl-border-color);"></div>
-          <a-select
-              v-model:value="field.operator"
-              :bordered="false"
-              style="width: 90px; box-shadow: none;"
-              @change="onSearch"
-          >
-            <a-select-option v-for="op in field.operators" :key="op" :value="op">{{ formatAssetFilterOperator(op) }}</a-select-option>
-          </a-select>
+          </div>
         </div>
 
-        <a-input
-            v-else
-            v-model:value="searchForm[field.key]"
-            :placeholder="taskText('tasks.enterField', { field: field.label })"
-            style="width: 200px;"
-            allowClear
-            @pressEnter="onSearch"
-        >
-          <template #suffix>
-            <search-outlined @click="onSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.25;" />
-          </template>
-        </a-input>
-      </a-form-item>
-      </a-form>
-    </div>
-
-    <div v-show="activeTab !== 'syslog'" style="margin-bottom: 16px;">
-      <a-button class="task-spaced-option" @click="resetSearch">{{ taskText('tasks.clearFilters') }}</a-button>
-      <a-button v-if="canDeleteAssets" :disabled="!hasSelected" class="task-spaced-option" @click="handleBatchDelete">{{ taskText('tasks.deleteSelected') }}</a-button>
-      <a-button v-if="tabConfig[effectiveTab]?.exportName" type="primary" class="task-spaced-option" @click="handleExport">{{ taskText('tasks.exportAssetType', { type: tabConfig[effectiveTab].exportName }) }}</a-button>
-      <a-button v-if="activeTab === 'site'" type="primary" @click="openRiskModal">{{ taskText('tasks.createRiskScanningTask') }}</a-button>
-    </div>
-    </div>
+        <div class="arl-filter-footer">
+          <a-button size="small" @click="resetSearch">{{ taskText('tasks.clearFilters') }}</a-button>
+          <a-button type="primary" size="small" @click="onSearch">
+            <template #icon><search-outlined /></template>
+            {{ taskText('tasks.search') }}
+          </a-button>
+        </div>
+      </div>
 
     <a-table
         :sticky="stickyConfig"
@@ -143,7 +235,7 @@
         :pagination="false"
         :scroll="pagination.pageSize >= 100 ? { y: 'calc(100vh - 380px)', x: 'max-content' } : { x: 'max-content' }"
         :virtual="pagination.pageSize >= 100"
-        size="middle"
+        size="small"
         :rowKey="getAssetRowKey"
     >
       <template #bodyCell="{ column, record, index }">
@@ -501,6 +593,9 @@
         </template>
 
       </template>
+      <template #emptyText>
+        <ArlEmpty :description="taskText('tasks.noData')" />
+      </template>
     </a-table>
 
     <WihApiDetailsDrawer v-model:open="wihApiDetailsOpen" :record="wihApiDetailsRecord" :context-key="route.fullPath + ':' + activeTab" />
@@ -543,19 +638,19 @@
       </a-table>
     </a-modal>
 
-    <div v-if="tabConfig[effectiveTab] && activeTab !== 'syslog'" style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px;">
-      <div class="task-muted">{{ taskText('tasks.paginationSummary', { pages: Math.ceil(pagination.total / pagination.pageSize) || 1, total: pagination.total }) }}</div>
-      <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" show-size-changer @change="handleTableChange" @showSizeChange="handleTableChange" />
+    <div v-if="tabConfig[effectiveTab] && activeTab !== 'syslog'" class="arl-pagination-bar">
+      <div class="pagination-info">{{ taskText('tasks.paginationSummary', { pages: Math.ceil(pagination.total / pagination.pageSize) || 1, total: pagination.total }) }}</div>
+      <a-pagination size="small" :pageSizeOptions="$pageSizeOptions" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" show-size-changer @change="handleTableChange" @showSizeChange="handleTableChange" />
     </div>
 
     <div v-show="activeTab === 'syslog'">
       <div style="border: 1px solid var(--arl-border-color); border-radius: 4px; padding: 8px; background-color: var(--arl-bg-light);">
-        <div ref="terminalContainer" style="background-color: #001529; color: #e6f7ff; font-family: 'Fira Code', Consolas, 'Courier New', monospace; padding: 16px; border-radius: 4px; height: calc(100vh - 240px); overflow-y: auto; font-size: 13px; line-height: 1.6; box-shadow: inset 0 2px 8px rgba(0,0,0,0.2);" @mouseenter="pauseScroll = true" @mouseleave="pauseScroll = false">
+        <div ref="terminalContainer" style="background-color: var(--arl-terminal-bg); color: var(--arl-terminal-text); border: 1px solid var(--arl-terminal-border); font-family: var(--arl-font-mono); padding: 16px; border-radius: 6px; height: calc(100vh - 240px); overflow-y: auto; font-size: 13px; line-height: 1.6; box-shadow: inset 0 2px 8px rgba(0,0,0,0.2);" @mouseenter="pauseScroll = true" @mouseleave="pauseScroll = false">
           <div v-for="(log, idx) in syslogList" :key="log._id || log.id || idx" style="margin-bottom: 6px; word-break: break-all; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 4px;">
             <a style="margin-right: 8px;">[{{ log.create_time }}]</a>
             <span :style="{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warning' ? '#faad14' : '#52c41a', fontWeight: 'bold', marginRight: '8px' }">[{{ (log.level || 'info').toUpperCase() }}]</span>
             <a style="margin-right: 8px;" v-if="log.title">[{{ log.title }}]</a>
-            <span style="color: #e6f7ff;">{{ log.message }}</span>
+            <span style="color: var(--arl-terminal-text);">{{ log.message }}</span>
           </div>
           <div v-if="syslogList.length === 0 && !syslogLoading" class="task-log-empty">{{ taskText('tasks.systemNoLogsYetWaitingForLogs') }}</div>
           <div v-if="syslogLoading && syslogList.length === 0" class="task-log-empty">{{ taskText('tasks.systemLoadingLogs') }}</div>
@@ -611,11 +706,11 @@
       <div style="max-height: 500px; overflow-y: auto;">
         <div v-for="(diff, field) in currentDiffData" :key="field" style="margin-bottom: 12px; border: 1px solid var(--arl-border-color); border-radius: 4px; padding: 12px; background: var(--arl-bg-light);">
           <div class="task-diff-heading">{{ taskText('tasks.field') }} {{ field }}</div>
-          <div style="color: #ff4d4f; word-break: break-all; font-family: monospace; line-height: 1.6; margin-bottom: 8px;">
+          <div style="color: #ff4d4f; word-break: break-all; font-family: var(--arl-font-mono); line-height: 1.6; margin-bottom: 8px;">
             <div class="task-diff-caption">{{ taskText('tasks.previousValue') }}</div>
             <div class="task-diff-before">{{ diff.before ?? taskText('tasks.empty') }}</div>
           </div>
-          <div style="color: #52c41a; word-break: break-all; font-family: monospace; line-height: 1.6;">
+          <div style="color: #52c41a; word-break: break-all; font-family: var(--arl-font-mono); line-height: 1.6;">
             <div class="task-diff-caption">{{ taskText('tasks.newValue') }}</div>
             <div class="task-diff-after">{{ diff.after ?? taskText('tasks.empty') }}</div>
           </div>
@@ -638,6 +733,13 @@ import HttpStatusFilter from '../components/HttpStatusFilter.vue';
 import { formatAssetFilterOperator, buildAssetFilterParams } from '../utils/assetFilters';
 import { message, Modal } from 'ant-design-vue';
 import {
+  ArrowLeftOutlined,
+  FilterOutlined,
+  DeleteOutlined,
+  DownloadOutlined,
+  BugOutlined,
+  SearchOutlined,
+  UndoOutlined,
   ExclamationCircleOutlined,
   CloseOutlined
 } from '@ant-design/icons-vue';
@@ -646,6 +748,7 @@ import WihApiDetailsDrawer from '../components/WihApiDetailsDrawer.vue';
 import { isApiEndpointRecord } from '../utils/wihApi';
 import ServiceDetailModal from '../components/ServiceDetailModal.vue';
 import EnterpriseTaskDetailPanel from '../components/EnterpriseTaskDetailPanel.vue';
+import { formatTaskStatus, formatTaskStatusColor } from '../constants/taskStatus';
 import { useSticky } from '../utils/useSticky';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import { copyText as copyToClipboard } from '../utils/clipboard';
@@ -955,6 +1058,16 @@ const hasSelected = computed(() => selectedRowKeys.value.length > 0);
 const onSelectChange = (keys) => { selectedRowKeys.value = keys; };
 
 const searchForm = ref({});
+const filterExpanded = ref(false);
+const activeFilterCount = computed(() => {
+  const fields = tabConfig[effectiveTab.value]?.searchFields;
+  if (!Array.isArray(fields)) return 0;
+  return fields.reduce((acc, f) => {
+    const val = searchForm.value?.[f.key];
+    const hasVal = Array.isArray(val) ? val.length > 0 : (val !== undefined && val !== null && val !== '');
+    return acc + (hasVal ? 1 : 0);
+  }, 0);
+});
 const globalPageSize = useGlobalPageSize(10);
 const pagination = reactive({ current: 1, pageSize: globalPageSize.value, total: 0 });
 let lastFetchedPage = 1;
@@ -1847,8 +1960,20 @@ onDeactivated(() => {
 .wih-api-content { display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
 .wih-api-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 
+.task-detail-tabs :deep(.ant-tabs-nav) { margin-bottom: 10px; }
+.task-detail-tabs.is-log-tab :deep(.ant-tabs-nav) { margin-bottom: 0; }
+.task-detail-toolbar { padding-top: 2px; }
+.task-operator-box {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--arl-border-color);
+  border-radius: 6px;
+  background: var(--arl-bg-white);
+  overflow: hidden;
+  height: 24px;
+}
+
 .task-option-heading { font-weight: 600; font-size: 13px; color: var(--arl-text-color); }
-.task-spaced-option { margin-right: 16px; }
 .task-clickable { cursor: pointer; }
 .task-field-hint { color: var(--arl-text-color); opacity: 0.45; margin-top: 2px; }
 .task-section-heading { font-weight: 600; font-size: 14px; margin-bottom: 12px; }
@@ -1859,7 +1984,6 @@ onDeactivated(() => {
 .task-details-toggle { display: block; margin-top: 12px; text-align: center; cursor: pointer; border-top: 1px dashed var(--arl-border-color); padding-top: 8px; }
 .task-help { cursor: help; }
 .task-icon-action { padding: 0; }
-.task-muted { color: var(--arl-text-color); opacity: 0.65; }
 .task-log-empty { color: rgba(255,255,255,0.45); font-style: italic; }
 .task-diff-heading { font-weight: bold; font-size: 14px; margin-bottom: 8px; border-bottom: 1px solid var(--arl-border-color); padding-bottom: 4px; }
 .task-diff-caption { font-weight: bold; margin-bottom: 4px; }
@@ -1867,7 +1991,7 @@ onDeactivated(() => {
 .task-diff-after { white-space: pre-wrap; background: rgba(82, 196, 26, 0.1); padding: 8px; border-radius: 4px; }
 
 .task-risk-form { margin-top: 20px; }
-.task-site-count :deep(.ant-badge-count) { background-color: #1890ff; color: #fff; cursor: pointer; border-radius: 4px; padding: 0 6px; font-size: 12px; }
+.task-site-count :deep(.ant-badge-count) { background-color: var(--arl-theme-color); color: #fff; cursor: pointer; border-radius: 4px; padding: 0 6px; font-size: 12px; }
 
 .site-header { line-height: 1.5; word-break: break-all; }
 .site-img { width: 16px; height: 16px; margin-right: 8px; vertical-align: middle; }
@@ -1907,7 +2031,7 @@ onDeactivated(() => {
   padding: 0;
   background-color: transparent;
   border: none;
-  font-family: Consolas, Menlo, Courier, monospace;
+  font-family: var(--arl-font-mono);
   font-size: 12px;
   line-height: 1.5;
   color: var(--arl-text-color); opacity: 0.65;
@@ -1930,22 +2054,6 @@ onDeactivated(() => {
   background-color: rgba(144, 147, 153, 0.6);
 }
 
-:deep(.ant-tabs-card-bar .ant-tabs-tab) {
-  border-radius: 2px 2px 0 0 !important;
-  margin-right: 4px !important;
-  border: 1px solid var(--arl-border-color) !important;
-  background: var(--arl-bg-light) !important;
-  transition: all 0.3s;
-}
-:deep(.ant-tabs-card-bar .ant-tabs-tab-active) {
-  background: var(--arl-bg-white) !important;
-  border-bottom-color: transparent !important;
-
-  font-weight: 500;
-}
-:deep(.ant-tabs-tab:hover) {
-
-}
 /* ================= 6. 站点列细节补充 ================= */
 /* Favicon Hash 次级文本与紧凑间距样式 */
 /* 修复 Favicon Hash 发虚的问题：恢复原版字号和深色 */

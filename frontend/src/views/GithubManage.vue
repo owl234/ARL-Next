@@ -1,5 +1,5 @@
 <template>
-  <div style="background-color: var(--arl-bg-layout); padding: 24px; min-height: calc(100vh - 64px);">
+  <div class="arl-page-container">
     
     <!-- 全局 Token 状态提示 -->
     <a-alert
@@ -23,7 +23,7 @@
       </template>
     </a-alert>
 
-    <a-tabs v-model:activeKey="mainTab" type="card" class="main-tabs" size="large">
+    <a-tabs v-model:activeKey="mainTab" type="card" class="main-tabs" size="middle">
       
 <!-- ================= MAIN TAB 2: 威胁情报雷达 (情报侧) ================= -->
 <a-tab-pane key="ti" :tab="pageText('pages.threatIntelligence')">
@@ -33,24 +33,24 @@
 
     <a-tabs v-model:activeKey="activeTabTi">
       <a-tab-pane key="cve_history" :tab="pageText('pages.cveMonitoring')">
-        <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; background: var(--arl-bg-light); padding: 12px 16px; border-radius: 6px;">
-          <div style="display: flex; align-items: center; gap: 16px;">
+        <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; background: var(--arl-bg-light); padding: 10px 14px; border-radius: 6px;">
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
             <div>
               <span class="page-inline-gap">{{ pageText('pages.scheduledMonitoring') }}</span>
-              <a-switch v-model:checked="cveConfig.enabled" @change="saveCveConfig" />
+              <a-switch size="small" v-model:checked="cveConfig.enabled" @change="saveCveConfig" />
             </div>
             <div v-if="cveConfig.enabled">
               <span class="page-inline-gap">{{ pageText('pages.fetchInterval') }}</span>
-              <a-select v-model:value="cveConfig.interval" style="width: 120px" @change="saveCveConfig">
+              <a-select size="small" v-model:value="cveConfig.interval" style="width: 120px" @change="saveCveConfig">
                 <a-select-option :value="6">{{ pageText('pages.every6Hours') }}</a-select-option>
                 <a-select-option :value="12">{{ pageText('pages.every12Hours') }}</a-select-option>
                 <a-select-option :value="24">{{ pageText('pages.every24Hours') }}</a-select-option>
               </a-select>
             </div>
-            <a-button type="primary" ghost @click="runCveOnce" :loading="cveRunLoading || cveConfig.is_running">{{ pageText('pages.scanOnceNow') }}</a-button>
+            <a-button size="small" type="primary" ghost @click="runCveOnce" :loading="cveRunLoading || cveConfig.is_running">{{ pageText('pages.scanOnceNow') }}</a-button>
             <a-tag v-if="cveConfig.is_running" color="processing">{{ pageText('pages.scanningInTheBackground') }}</a-tag>
           </div>
-          <a-button type="dashed" @click="fetchCveData">
+          <a-button size="small" type="dashed" @click="fetchCveData">
             <template #icon><sync-outlined /></template> {{ pageText('pages.refreshData') }}
           </a-button>
         </div>
@@ -58,27 +58,30 @@
         <!-- CVE搜索栏 -->
         <a-form :label-wrap="true" layout="inline" class="page-filter-form">
           <a-form-item :label="pageText('pages.cveId')">
-            <a-input v-model:value="cveSearchForm.cve_name" :placeholder="pageText('pages.enterACveId')" class="page-width-180" allowClear @pressEnter="onCveSearch">
+            <a-input size="small" v-model:value="cveSearchForm.cve_name" :placeholder="pageText('pages.enterACveId')" class="page-width-180" allowClear @pressEnter="onCveSearch">
               <template #suffix><search-outlined @click="onCveSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.25;" /></template>
             </a-input>
           </a-form-item>
           <a-form-item :label="pageText('pages.description')">
-            <a-input v-model:value="cveSearchForm.desc" :placeholder="pageText('pages.enterADescription')" class="page-width-180" allowClear @pressEnter="onCveSearch">
+            <a-input size="small" v-model:value="cveSearchForm.desc" :placeholder="pageText('pages.enterADescription')" class="page-width-180" allowClear @pressEnter="onCveSearch">
               <template #suffix><search-outlined @click="onCveSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.25;" /></template>
             </a-input>
           </a-form-item>
         </a-form>
 
-        <div style="margin-bottom: 16px; display: flex; gap: 16px;">
-          <a-button @click="resetCveSearch">{{ pageText('tasks.clear') }}</a-button>
+        <div style="margin-bottom: 12px; display: flex; gap: 10px;">
+          <a-button size="small" @click="resetCveSearch">{{ pageText('tasks.clear') }}</a-button>
           <a-popconfirm :title="pageText('pages.deleteTheSelectedRecords')" @confirm="handleCveBatchDelete">
-            <a-button type="primary" danger :disabled="!cveHasSelected">{{ pageText('tasks.deleteSelected') }}</a-button>
+            <a-button danger size="small" :disabled="!cveHasSelected">{{ pageText('tasks.deleteSelected') }}</a-button>
           </a-popconfirm>
         </div>
-        <a-table :row-selection="{ selectedRowKeys: cveSelectedRowKeys, onChange: onCveSelectChange, preserveSelectedRowKeys: true }" :loading="cveLoading" :dataSource="pagedCveData" :columns="cveColumns" :pagination="false" size="middle" rowKey="cve_name">
+        <a-table :row-selection="{ selectedRowKeys: cveSelectedRowKeys, onChange: onCveSelectChange, preserveSelectedRowKeys: true }" :loading="cveLoading" :dataSource="pagedCveData" :columns="cveColumns" :pagination="false" size="small" rowKey="cve_name">
+          <template #emptyText>
+            <ArlEmpty :description="pageText('tasks.noData')" />
+          </template>
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'cve_name'">
-              <a :href="record.cve_url" target="_blank" style="color: #ff4d4f; font-weight: bold; font-size: 15px;">
+              <a :href="record.cve_url" target="_blank" style="color: #ff4d4f; font-weight: bold; font-size: 14px;">
                 {{ record.cve_name }} <link-outlined />
               </a>
             </template>
@@ -94,28 +97,28 @@
             </template>
           </template>
         </a-table>
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0; margin-top: 16px;">
-          <div class="page-muted">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(filteredCveData.length / cvePagination.pageSize) || 1, total: filteredCveData.length }) }}</div>
-          <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="cvePagination.current" v-model:pageSize="cvePagination.pageSize" :total="filteredCveData.length" show-size-changer @change="onCveTableChange" @showSizeChange="onCveTableChange" />
+        <div class="arl-pagination-bar">
+          <div class="pagination-info">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(filteredCveData.length / cvePagination.pageSize) || 1, total: filteredCveData.length }) }}</div>
+          <a-pagination size="small" :pageSizeOptions="$pageSizeOptions" v-model:current="cvePagination.current" v-model:pageSize="cvePagination.pageSize" :total="filteredCveData.length" show-size-changer @change="onCveTableChange" @showSizeChange="onCveTableChange" />
         </div>
       </a-tab-pane>
 
       <!-- 子 Tab 2: 武器库追踪 -->
       <a-tab-pane key="tools_target" :tab="pageText('pages.securityToolTracking')">
-        <div style="margin-bottom: 20px; display: flex; justify-content: space-between;">
-          <div style="display: flex; gap: 16px; align-items: center;">
-            <a-button type="primary" @click="openToolAdd">{{ pageText('pages.monitorATool') }}</a-button>
-            <a-button type="primary" ghost @click="runToolsOnce" :loading="toolsRunLoading || toolsConfig.is_running">{{ pageText('pages.scanOnceNow') }}</a-button>
+        <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <a-button size="small" type="primary" @click="openToolAdd">{{ pageText('pages.monitorATool') }}</a-button>
+            <a-button size="small" type="primary" ghost @click="runToolsOnce" :loading="toolsRunLoading || toolsConfig.is_running">{{ pageText('pages.scanOnceNow') }}</a-button>
             <a-tag v-if="toolsConfig.is_running" color="processing">{{ pageText('pages.scanningInTheBackground') }}</a-tag>
             
-            <div style="display: flex; align-items: center; gap: 8px; background: var(--arl-bg-light); padding: 4px 12px; border-radius: 4px; border: 1px solid var(--arl-border-color);">
+            <div style="display: flex; align-items: center; gap: 8px; background: var(--arl-bg-light); padding: 4px 10px; border-radius: 4px; border: 1px solid var(--arl-border-color);">
               <span>{{ pageText('pages.monitoringEnabled') }}</span>
-              <a-switch v-model:checked="toolsConfig.enabled" @change="saveToolsConfig" />
+              <a-switch size="small" v-model:checked="toolsConfig.enabled" @change="saveToolsConfig" />
             </div>
             
-            <div v-if="toolsConfig.enabled" style="display: flex; align-items: center; gap: 8px; background: var(--arl-bg-light); padding: 4px 12px; border-radius: 4px; border: 1px solid var(--arl-border-color);">
+            <div v-if="toolsConfig.enabled" style="display: flex; align-items: center; gap: 8px; background: var(--arl-bg-light); padding: 4px 10px; border-radius: 4px; border: 1px solid var(--arl-border-color);">
               <span>{{ pageText('pages.schedule') }}</span>
-              <a-select v-model:value="toolsConfig.interval" style="width: 120px" @change="saveToolsConfig">
+              <a-select size="small" v-model:value="toolsConfig.interval" style="width: 120px" @change="saveToolsConfig">
                 <a-select-option :value="1">{{ pageText('pages.everyHour') }}</a-select-option>
                 <a-select-option :value="2">{{ pageText('pages.every2Hours') }}</a-select-option>
                 <a-select-option :value="6">{{ pageText('pages.every6Hours') }}</a-select-option>
@@ -124,7 +127,7 @@
               </a-select>
             </div>
           </div>
-          <a-button type="dashed" @click="fetchToolsData">
+          <a-button size="small" type="dashed" @click="fetchToolsData">
             <template #icon><sync-outlined /></template>
             {{ pageText('pages.refreshList') }}
           </a-button>
@@ -133,23 +136,26 @@
         <!-- 武器库搜索栏 -->
         <a-form :label-wrap="true" layout="inline" class="page-filter-form">
           <a-form-item :label="pageText('pages.toolUrl')">
-            <a-input v-model:value="toolsSearchForm.repo_url" :placeholder="pageText('pages.enterAToolUrl')" class="page-width-250" allowClear @pressEnter="onToolsSearch">
+            <a-input size="small" v-model:value="toolsSearchForm.repo_url" :placeholder="pageText('pages.enterAToolUrl')" class="page-width-250" allowClear @pressEnter="onToolsSearch">
               <template #suffix><search-outlined @click="onToolsSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.25;" /></template>
             </a-input>
           </a-form-item>
         </a-form>
 
-        <div style="margin-bottom: 16px; display: flex; gap: 16px;">
-          <a-button @click="resetToolsSearch">{{ pageText('tasks.clear') }}</a-button>
+        <div style="margin-bottom: 12px; display: flex; gap: 10px;">
+          <a-button size="small" @click="resetToolsSearch">{{ pageText('tasks.clear') }}</a-button>
           <a-popconfirm :title="pageText('pages.deleteTheSelectedTools')" @confirm="handleToolsBatchDelete">
-            <a-button type="primary" danger :disabled="!toolsHasSelected">{{ pageText('tasks.deleteSelected') }}</a-button>
+            <a-button danger size="small" :disabled="!toolsHasSelected">{{ pageText('tasks.deleteSelected') }}</a-button>
           </a-popconfirm>
         </div>
 
-        <a-table :row-selection="{ selectedRowKeys: toolsSelectedRowKeys, onChange: onToolsSelectChange, preserveSelectedRowKeys: true }" :loading="toolsLoading" :dataSource="pagedToolsData" :columns="toolsColumns" :pagination="false" size="middle" rowKey="repo_url">
+        <a-table :row-selection="{ selectedRowKeys: toolsSelectedRowKeys, onChange: onToolsSelectChange, preserveSelectedRowKeys: true }" :loading="toolsLoading" :dataSource="pagedToolsData" :columns="toolsColumns" :pagination="false" size="small" rowKey="repo_url">
+          <template #emptyText>
+            <ArlEmpty :description="pageText('tasks.noData')" />
+          </template>
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'repo_url'">
-              <a :href="record.repo_url.replace('api.github.com/repos', 'github.com')" target="_blank" style="color: #1890ff; font-weight: 500;">
+              <a :href="record.repo_url.replace('api.github.com/repos', 'github.com')" target="_blank" style="color: var(--arl-theme-color); font-weight: 500;">
                 {{ record.repo_url.split('/').pop() }} <link-outlined />
               </a>
               <div style="color: var(--arl-text-color); opacity: 0.45; font-size: 12px;">{{ record.repo_url }}</div>
@@ -168,28 +174,28 @@
             </template>
           </template>
         </a-table>
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0; margin-top: 16px;">
-          <div class="page-muted">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(filteredToolsData.length / toolsPagination.pageSize) || 1, total: filteredToolsData.length }) }}</div>
-          <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="toolsPagination.current" v-model:pageSize="toolsPagination.pageSize" :total="filteredToolsData.length" show-size-changer @change="onToolsTableChange" @showSizeChange="onToolsTableChange" />
+        <div class="arl-pagination-bar">
+          <div class="pagination-info">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(filteredToolsData.length / toolsPagination.pageSize) || 1, total: filteredToolsData.length }) }}</div>
+          <a-pagination size="small" :pageSizeOptions="$pageSizeOptions" v-model:current="toolsPagination.current" v-model:pageSize="toolsPagination.pageSize" :total="filteredToolsData.length" show-size-changer @change="onToolsTableChange" @showSizeChange="onToolsTableChange" />
         </div>
       </a-tab-pane>
 
       <!-- 子 Tab 3: 黑客动态监测 -->
       <a-tab-pane key="hackers_target" :tab="pageText('pages.researcherActivity')">
-        <div style="margin-bottom: 20px; display: flex; justify-content: space-between;">
-          <div style="display: flex; gap: 16px; align-items: center;">
-            <a-button type="primary" @click="openHackerAdd">{{ pageText('pages.monitorAResearcher') }}</a-button>
-            <a-button type="primary" ghost @click="runHackersOnce" :loading="hackersRunLoading || hackersConfig.is_running">{{ pageText('pages.scanOnceNow') }}</a-button>
+        <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <a-button size="small" type="primary" @click="openHackerAdd">{{ pageText('pages.monitorAResearcher') }}</a-button>
+            <a-button size="small" type="primary" ghost @click="runHackersOnce" :loading="hackersRunLoading || hackersConfig.is_running">{{ pageText('pages.scanOnceNow') }}</a-button>
             <a-tag v-if="hackersConfig.is_running" color="processing">{{ pageText('pages.scanningInTheBackground') }}</a-tag>
             
-            <div style="display: flex; align-items: center; gap: 8px; background: var(--arl-bg-light); padding: 4px 12px; border-radius: 4px; border: 1px solid var(--arl-border-color);">
+            <div style="display: flex; align-items: center; gap: 8px; background: var(--arl-bg-light); padding: 4px 10px; border-radius: 4px; border: 1px solid var(--arl-border-color);">
               <span>{{ pageText('pages.monitoringEnabled') }}</span>
-              <a-switch v-model:checked="hackersConfig.enabled" @change="saveHackersConfig" />
+              <a-switch size="small" v-model:checked="hackersConfig.enabled" @change="saveHackersConfig" />
             </div>
             
-            <div v-if="hackersConfig.enabled" style="display: flex; align-items: center; gap: 8px; background: var(--arl-bg-light); padding: 4px 12px; border-radius: 4px; border: 1px solid var(--arl-border-color);">
+            <div v-if="hackersConfig.enabled" style="display: flex; align-items: center; gap: 8px; background: var(--arl-bg-light); padding: 4px 10px; border-radius: 4px; border: 1px solid var(--arl-border-color);">
               <span>{{ pageText('pages.schedule') }}</span>
-              <a-select v-model:value="hackersConfig.interval" style="width: 120px" @change="saveHackersConfig">
+              <a-select size="small" v-model:value="hackersConfig.interval" style="width: 120px" @change="saveHackersConfig">
                 <a-select-option :value="1">{{ pageText('pages.everyHour') }}</a-select-option>
                 <a-select-option :value="2">{{ pageText('pages.every2Hours') }}</a-select-option>
                 <a-select-option :value="6">{{ pageText('pages.every6Hours') }}</a-select-option>
@@ -198,11 +204,11 @@
               </a-select>
             </div>
           </div>
-          <div style="display: flex; gap: 16px;">
-            <a-button style="border-color: #fadb14; color: #faad14;" @click="openHackersHistoryDrawer">
+          <div style="display: flex; gap: 10px;">
+            <a-button size="small" style="border-color: #fadb14; color: #faad14;" @click="openHackersHistoryDrawer">
               <template #icon>👀</template> {{ pageText('pages.viewAllDiscoveredTools') }}
             </a-button>
-            <a-button type="dashed" @click="fetchHackersData">
+            <a-button size="small" type="dashed" @click="fetchHackersData">
               <template #icon><sync-outlined /></template>
               {{ pageText('pages.refreshList') }}
             </a-button>
@@ -212,32 +218,30 @@
         <!-- 黑客搜索栏 -->
         <a-form :label-wrap="true" layout="inline" class="page-filter-form">
           <a-form-item label="Github ID：">
-            <a-input v-model:value="hackersSearchForm.github_id" :placeholder="pageText('pages.enterAGithubId')" class="page-width-180" allowClear @pressEnter="onHackersSearch">
+            <a-input size="small" v-model:value="hackersSearchForm.github_id" :placeholder="pageText('pages.enterAGithubId')" class="page-width-180" allowClear @pressEnter="onHackersSearch">
               <template #suffix><search-outlined @click="onHackersSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.25;" /></template>
             </a-input>
           </a-form-item>
         </a-form>
 
-        <div style="margin-bottom: 16px; display: flex; gap: 16px;">
-          <a-button @click="resetHackersSearch">{{ pageText('tasks.clear') }}</a-button>
+        <div style="margin-bottom: 12px; display: flex; gap: 10px;">
+          <a-button size="small" @click="resetHackersSearch">{{ pageText('tasks.clear') }}</a-button>
           <a-popconfirm :title="pageText('pages.deleteTheSelectedResearchers')" @confirm="handleHackersBatchDelete">
-            <a-button type="primary" danger :disabled="!hackersHasSelected">{{ pageText('tasks.deleteSelected') }}</a-button>
+            <a-button danger size="small" :disabled="!hackersHasSelected">{{ pageText('tasks.deleteSelected') }}</a-button>
           </a-popconfirm>
         </div>
 
-        <a-table :row-selection="{ selectedRowKeys: hackersSelectedRowKeys, onChange: onHackersSelectChange, preserveSelectedRowKeys: true }" :loading="hackersLoading" :dataSource="pagedHackersData" :columns="hackersColumns" :pagination="false" size="middle" rowKey="github_id">
+        <a-table :row-selection="{ selectedRowKeys: hackersSelectedRowKeys, onChange: onHackersSelectChange, preserveSelectedRowKeys: true }" :loading="hackersLoading" :dataSource="pagedHackersData" :columns="hackersColumns" :pagination="false" size="small" rowKey="github_id">
           <template #emptyText>
-            <div style="padding: 40px 0;">
-              <inbox-outlined style="font-size: 48px; color: var(--arl-border-color);" />
-              <div class="page-option-hint">{{ pageText('pages.noResearchersMonitored') }}</div>
-              <a-button type="link" @click="hackerForm.github_id = 'knownsec'; submitHackerModal()">{{ pageText('pages.addKnownsec') }}</a-button>
-            </div>
+            <ArlEmpty :description="pageText('pages.noResearchersMonitored')">
+              <a-button type="link" size="small" @click="hackerForm.github_id = 'knownsec'; submitHackerModal()">{{ pageText('pages.addKnownsec') }}</a-button>
+            </ArlEmpty>
           </template>
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'github_id'">
-              <div style="display: flex; align-items: center; gap: 12px;">
-                <a-avatar :src="`https://github.com/${(record.github_id || '').trim()}.png`" size="large" />
-                <a :href="`https://github.com/${(record.github_id || '').trim()}`" target="_blank" style="font-weight: 500; font-size: 15px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <a-avatar :src="`https://github.com/${(record.github_id || '').trim()}.png`" size="default" />
+                <a :href="`https://github.com/${(record.github_id || '').trim()}`" target="_blank" style="font-weight: 500; font-size: 14px;">
                   {{ record.github_id }} <link-outlined />
                 </a>
               </div>
@@ -255,9 +259,9 @@
             </template>
           </template>
         </a-table>
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0; margin-top: 16px;">
-          <div class="page-muted">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(filteredHackersData.length / hackersPagination.pageSize) || 1, total: filteredHackersData.length }) }}</div>
-          <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="hackersPagination.current" v-model:pageSize="hackersPagination.pageSize" :total="filteredHackersData.length" show-size-changer @change="onHackersTableChange" @showSizeChange="onHackersTableChange" />
+        <div class="arl-pagination-bar">
+          <div class="pagination-info">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(filteredHackersData.length / hackersPagination.pageSize) || 1, total: filteredHackersData.length }) }}</div>
+          <a-pagination size="small" :pageSizeOptions="$pageSizeOptions" v-model:current="hackersPagination.current" v-model:pageSize="hackersPagination.pageSize" :total="filteredHackersData.length" show-size-changer @change="onHackersTableChange" @showSizeChange="onHackersTableChange" />
         </div>
       </a-tab-pane>
     </a-tabs>
@@ -270,10 +274,10 @@
           <a-tabs v-model:activeKey="activeTabDlp">
             <!-- 子 Tab 1: 周期策略管理 -->
             <a-tab-pane key="scheduler" :tab="pageText('pages.recurringMonitoringPolicies')">
-        <div style="position: sticky; top: 0px; z-index: 10; background-color: var(--arl-bg-layout); margin: -24px -24px 16px -24px; padding: 24px 24px 16px 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-        <div style="margin-bottom: 20px; display: flex; justify-content: space-between;">
-          <a-button type="primary" @click="openSchedulerAdd">{{ pageText('pages.addPolicy') }}</a-button>
-          <a-button type="dashed" @click="fetchSchedulerData">
+        <div class="github-sticky-toolbar">
+        <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+          <a-button size="small" type="primary" @click="openSchedulerAdd">{{ pageText('pages.addPolicy') }}</a-button>
+          <a-button size="small" type="dashed" @click="fetchSchedulerData">
             <template #icon><sync-outlined /></template>
             {{ pageText('pages.refreshList') }}
           </a-button>
@@ -282,17 +286,17 @@
         <!-- 策略搜索栏 -->
         <a-form :label-wrap="true" layout="inline" class="page-filter-form">
           <a-form-item :label="pageText('pages.policyName')">
-            <a-input v-model:value="schedulerSearchForm.name" :placeholder="pageText('pages.enterAPolicyName')" class="page-width-180" allowClear @pressEnter="onSchedulerSearch">
+            <a-input size="small" v-model:value="schedulerSearchForm.name" :placeholder="pageText('pages.enterAPolicyName')" class="page-width-180" allowClear @pressEnter="onSchedulerSearch">
               <template #suffix><search-outlined @click="onSchedulerSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.25;" /></template>
             </a-input>
           </a-form-item>
           <a-form-item :label="pageText('pages.keyword')">
-            <a-input v-model:value="schedulerSearchForm.keyword" :placeholder="pageText('pages.enterAKeyword')" class="page-width-180" allowClear @pressEnter="onSchedulerSearch">
+            <a-input size="small" v-model:value="schedulerSearchForm.keyword" :placeholder="pageText('pages.enterAKeyword')" class="page-width-180" allowClear @pressEnter="onSchedulerSearch">
               <template #suffix><search-outlined @click="onSchedulerSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.25;" /></template>
             </a-input>
           </a-form-item>
           <a-form-item :label="pageText('tasks.statusLabel')">
-            <a-select v-model:value="schedulerSearchForm.status" :placeholder="pageText('pages.selectAStatus')" class="page-width-180" allowClear @change="onSchedulerSearch">
+            <a-select size="small" v-model:value="schedulerSearchForm.status" :placeholder="pageText('pages.selectAStatus')" class="page-width-180" allowClear @change="onSchedulerSearch">
               <a-select-option value="running">{{ TASK_STATUS_LABEL.running }}</a-select-option>
               <a-select-option value="stop">{{ TASK_STATUS_LABEL.stop }}</a-select-option>
               <a-select-option value="error">{{ TASK_STATUS_LABEL.error }}</a-select-option>
@@ -301,13 +305,13 @@
         </a-form>
 
         <!-- 批量操作 -->
-        <div style="margin-bottom: 16px; display: flex; gap: 8px;">
-          <a-button @click="resetSchedulerSearch">{{ pageText('tasks.clear') }}</a-button>
+        <div style="margin-bottom: 4px; display: flex; gap: 8px;">
+          <a-button size="small" @click="resetSchedulerSearch">{{ pageText('tasks.clear') }}</a-button>
           <a-popconfirm :title="pageText('pages.deleteTheSelectedPolicies')" @confirm="handleSchedulerBatchDelete">
-            <a-button :disabled="!schedulerHasSelected">{{ pageText('tasks.deleteSelected') }}</a-button>
+            <a-button danger size="small" :disabled="!schedulerHasSelected">{{ pageText('tasks.deleteSelected') }}</a-button>
           </a-popconfirm>
           <a-popconfirm :title="pageText('pages.stopTheSelectedPolicies')" @confirm="handleSchedulerBatchStop">
-            <a-button :disabled="!schedulerHasSelected">{{ pageText('tasks.stopSelected') }}</a-button>
+            <a-button size="small" :disabled="!schedulerHasSelected">{{ pageText('tasks.stopSelected') }}</a-button>
           </a-popconfirm>
         </div>
 
@@ -319,14 +323,11 @@
             :dataSource="schedulerData"
             :columns="schedulerColumns"
             :pagination="false"
-            size="middle"
+            size="small"
             :rowKey="(record) => record._id"
         >
           <template #emptyText>
-            <div style="padding: 40px 0;">
-              <inbox-outlined style="font-size: 48px; color: var(--arl-border-color);" />
-              <div class="page-option-hint">{{ pageText('pages.noPolicies') }}</div>
-            </div>
+            <ArlEmpty :description="pageText('pages.noPolicies')" />
           </template>
 
           <template #bodyCell="{ column, record }">
@@ -372,17 +373,17 @@
         </a-table>
 
         <!-- 策略分页 -->
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0;">
-          <div class="page-muted">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(schedulerPagination.total / schedulerPagination.pageSize) || 1, total: schedulerPagination.total }) }}</div>
-          <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="schedulerPagination.current" v-model:pageSize="schedulerPagination.pageSize" :total="schedulerPagination.total" show-size-changer @change="handleSchedulerTableChange" @showSizeChange="handleSchedulerTableChange" />
+        <div class="arl-pagination-bar">
+          <div class="pagination-info">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(schedulerPagination.total / schedulerPagination.pageSize) || 1, total: schedulerPagination.total }) }}</div>
+          <a-pagination size="small" :pageSizeOptions="$pageSizeOptions" v-model:current="schedulerPagination.current" v-model:pageSize="schedulerPagination.pageSize" :total="schedulerPagination.total" show-size-changer @change="handleSchedulerTableChange" @showSizeChange="handleSchedulerTableChange" />
         </div>
       </a-tab-pane>
 
       <!-- 子 Tab 2: 单次扫描任务 -->
       <a-tab-pane key="task" :tab="pageText('pages.oneTimeScanningTasks')">
-        <div style="margin-bottom: 20px; display: flex; justify-content: space-between;">
-          <a-button type="primary" @click="openTaskAdd">{{ pageText('pages.newOneTimeTask') }}</a-button>
-          <a-button type="dashed" @click="fetchTaskData">
+        <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+          <a-button size="small" type="primary" @click="openTaskAdd">{{ pageText('pages.newOneTimeTask') }}</a-button>
+          <a-button size="small" type="dashed" @click="fetchTaskData">
             <template #icon><sync-outlined /></template>
             {{ pageText('pages.refreshList') }}
           </a-button>
@@ -391,17 +392,17 @@
         <!-- 任务搜索栏 -->
         <a-form :label-wrap="true" layout="inline" class="page-filter-form">
           <a-form-item :label="pageText('tasks.taskNameLabel')">
-            <a-input v-model:value="taskSearchForm.name" :placeholder="pageText('tasks.enterATaskName')" class="page-width-180" allowClear @pressEnter="onTaskSearch">
+            <a-input size="small" v-model:value="taskSearchForm.name" :placeholder="pageText('tasks.enterATaskName')" class="page-width-180" allowClear @pressEnter="onTaskSearch">
               <template #suffix><search-outlined @click="onTaskSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.25;" /></template>
             </a-input>
           </a-form-item>
           <a-form-item :label="pageText('pages.keyword')">
-            <a-input v-model:value="taskSearchForm.keyword" :placeholder="pageText('pages.enterAKeyword')" class="page-width-180" allowClear @pressEnter="onTaskSearch">
+            <a-input size="small" v-model:value="taskSearchForm.keyword" :placeholder="pageText('pages.enterAKeyword')" class="page-width-180" allowClear @pressEnter="onTaskSearch">
               <template #suffix><search-outlined @click="onTaskSearch" style="cursor: pointer; color: var(--arl-text-color); opacity: 0.25;" /></template>
             </a-input>
           </a-form-item>
           <a-form-item :label="pageText('tasks.statusLabel')">
-            <a-select v-model:value="taskSearchForm.status" :placeholder="pageText('pages.selectAStatus')" class="page-width-180" allowClear @change="onTaskSearch">
+            <a-select size="small" v-model:value="taskSearchForm.status" :placeholder="pageText('pages.selectAStatus')" class="page-width-180" allowClear @change="onTaskSearch">
               <a-select-option value="waiting">{{ TASK_STATUS_LABEL.waiting }}</a-select-option>
               <a-select-option value="running">{{ TASK_STATUS_LABEL.running }}</a-select-option>
               <a-select-option value="done">{{ TASK_STATUS_LABEL.done }}</a-select-option>
@@ -412,13 +413,13 @@
         </a-form>
 
         <!-- 批量操作 -->
-        <div style="margin-bottom: 16px; display: flex; gap: 8px;">
-          <a-button @click="resetTaskSearch">{{ pageText('tasks.clear') }}</a-button>
+        <div style="margin-bottom: 12px; display: flex; gap: 8px;">
+          <a-button size="small" @click="resetTaskSearch">{{ pageText('tasks.clear') }}</a-button>
           <a-popconfirm :title="pageText('pages.deleteTheSelectedTasks')" @confirm="handleTaskBatchDelete">
-            <a-button :disabled="!taskHasSelected">{{ pageText('tasks.deleteSelected') }}</a-button>
+            <a-button danger size="small" :disabled="!taskHasSelected">{{ pageText('tasks.deleteSelected') }}</a-button>
           </a-popconfirm>
           <a-popconfirm :title="pageText('pages.stopTheSelectedTasks')" @confirm="handleTaskBatchStop">
-            <a-button :disabled="!taskHasSelected">{{ pageText('tasks.stopSelected') }}</a-button>
+            <a-button size="small" :disabled="!taskHasSelected">{{ pageText('tasks.stopSelected') }}</a-button>
           </a-popconfirm>
         </div>
 
@@ -429,14 +430,11 @@
             :dataSource="taskData"
             :columns="taskColumns"
             :pagination="false"
-            size="middle"
+            size="small"
             :rowKey="(record) => record._id"
         >
           <template #emptyText>
-            <div style="padding: 40px 0;">
-              <inbox-outlined style="font-size: 48px; color: var(--arl-border-color);" />
-              <div class="page-option-hint">{{ pageText('pages.noScanningTasks') }}</div>
-            </div>
+            <ArlEmpty :description="pageText('pages.noScanningTasks')" />
           </template>
 
           <template #bodyCell="{ column, record }">
@@ -486,9 +484,9 @@
         </a-table>
 
         <!-- 任务分页 -->
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0;">
-          <div class="page-muted">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(taskPagination.total / taskPagination.pageSize) || 1, total: taskPagination.total }) }}</div>
-          <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="taskPagination.current" v-model:pageSize="taskPagination.pageSize" :total="taskPagination.total" show-size-changer @change="handleTaskTableChange" @showSizeChange="handleTaskTableChange" />
+        <div class="arl-pagination-bar">
+          <div class="pagination-info">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(taskPagination.total / taskPagination.pageSize) || 1, total: taskPagination.total }) }}</div>
+          <a-pagination size="small" :pageSizeOptions="$pageSizeOptions" v-model:current="taskPagination.current" v-model:pageSize="taskPagination.pageSize" :total="taskPagination.total" show-size-changer @change="handleTaskTableChange" @showSizeChange="handleTaskTableChange" />
         </div>
       </a-tab-pane>
     </a-tabs>
@@ -507,10 +505,20 @@
       :open="historyDrawerVisible"
       @close="closeHackersHistoryDrawer"
     >
-      <a-table :loading="historyLoading" :dataSource="hackersHistoryData" :columns="historyColumns" :pagination="true" size="middle" rowKey="full_name">
+      <a-table
+        :loading="historyLoading"
+        :dataSource="hackersHistoryData"
+        :columns="historyColumns"
+        :pagination="{ pageSize: globalPageSize, showSizeChanger: true, pageSizeOptions: $pageSizeOptions, size: 'small' }"
+        size="small"
+        rowKey="full_name"
+      >
+        <template #emptyText>
+          <ArlEmpty :description="pageText('tasks.noData')" compact />
+        </template>
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'full_name'">
-            <a :href="`https://github.com/${record.full_name}`" target="_blank" style="font-weight: 500; color: #1890ff;">
+            <a :href="`https://github.com/${record.full_name}`" target="_blank" style="font-weight: 500; color: var(--arl-theme-color);">
               {{ record.full_name }} <link-outlined />
             </a>
           </template>
@@ -546,17 +554,17 @@
         <!-- Tab 1: 命中结果 -->
         <a-tab-pane key="result" :tab="pageText('pages.codeLeakFindings')">
           <!-- 搜索过滤栏 -->
-          <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; align-items: center;">
-            <a-input v-model:value="resultSearchForm.repo_full_name" :placeholder="pageText('pages.repositoryEGUserRepo')" class="page-width-180" allowClear @pressEnter="onResultSearch">
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; align-items: center;">
+            <a-input size="small" v-model:value="resultSearchForm.repo_full_name" :placeholder="pageText('pages.repositoryEGUserRepo')" class="page-width-180" allowClear @pressEnter="onResultSearch">
               <template #suffix><search-outlined @click="onResultSearch" style="cursor: pointer; opacity: 0.4;" /></template>
             </a-input>
-            <a-input v-model:value="resultSearchForm.path" :placeholder="pageText('pages.filePathEGConfigPy')" class="page-width-180" allowClear @pressEnter="onResultSearch">
+            <a-input size="small" v-model:value="resultSearchForm.path" :placeholder="pageText('pages.filePathEGConfigPy')" class="page-width-180" allowClear @pressEnter="onResultSearch">
               <template #suffix><search-outlined @click="onResultSearch" style="cursor: pointer; opacity: 0.4;" /></template>
             </a-input>
-            <a-input v-model:value="resultSearchForm.human_content" :placeholder="pageText('pages.keywordInCode')" class="page-width-180" allowClear @pressEnter="onResultSearch">
+            <a-input size="small" v-model:value="resultSearchForm.human_content" :placeholder="pageText('pages.keywordInCode')" class="page-width-180" allowClear @pressEnter="onResultSearch">
               <template #suffix><search-outlined @click="onResultSearch" style="cursor: pointer; opacity: 0.4;" /></template>
             </a-input>
-            <a-button @click="resetResultSearch">{{ pageText('assets.reset') }}</a-button>
+            <a-button size="small" @click="resetResultSearch">{{ pageText('assets.reset') }}</a-button>
           </div>
 
           <a-table
@@ -564,14 +572,11 @@
             :dataSource="resultDataSource"
             :columns="resultColumns"
             :pagination="false"
-            size="middle"
+            size="small"
             rowKey="_id"
           >
             <template #emptyText>
-              <div style="padding: 30px 0; text-align: center;">
-                <inbox-outlined style="font-size: 40px; color: var(--arl-border-color);" />
-                <div class="page-option-hint">{{ pageText('pages.noCodeLeakFindings') }}</div>
-              </div>
+              <ArlEmpty :description="pageText('pages.noCodeLeakFindings')" />
             </template>
             <template #bodyCell="{ column, record, text }">
               <template v-if="column.key === 'repo_full_name'">
@@ -585,7 +590,7 @@
                 </a>
               </template>
               <template v-else-if="column.key === 'human_content'">
-                <div style="white-space: pre-wrap; word-break: break-word; font-family: 'SFMono-Regular', Consolas, Monaco, monospace; max-height: 240px; overflow-y: auto; background: var(--arl-bg-light); padding: 10px; border-radius: 6px; border: 1px solid var(--arl-border-color); font-size: 12px; line-height: 1.5; color: var(--arl-text-color);">
+                <div style="white-space: pre-wrap; word-break: break-word; font-family: var(--arl-font-mono); max-height: 240px; overflow-y: auto; background: var(--arl-bg-light); padding: 10px; border-radius: 6px; border: 1px solid var(--arl-border-color); font-size: 12px; line-height: 1.5; color: var(--arl-text-color);">
                   {{ record.human_content }}
                 </div>
               </template>
@@ -598,21 +603,21 @@
             </template>
           </a-table>
 
-          <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 0;">
-            <div class="page-summary-caption">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(resultPagination.total / resultPagination.pageSize) || 1, total: resultPagination.total }) }}</div>
-            <a-pagination size="small" :pageSizeOptions="['10', '20', '50']" v-model:current="resultPagination.current" v-model:pageSize="resultPagination.pageSize" :total="resultPagination.total" show-size-changer @change="handleResultTableChange" />
+          <div class="arl-pagination-bar">
+            <div class="pagination-info">{{ pageText('tasks.paginationSummary', { pages: Math.ceil(resultPagination.total / resultPagination.pageSize) || 1, total: resultPagination.total }) }}</div>
+            <a-pagination size="small" :pageSizeOptions="$pageSizeOptions" v-model:current="resultPagination.current" v-model:pageSize="resultPagination.pageSize" :total="resultPagination.total" show-size-changer @change="handleResultTableChange" @showSizeChange="handleResultTableChange" />
           </div>
         </a-tab-pane>
 
         <!-- Tab 2: 任务日志 (仅单次任务支持 syslog) -->
         <a-tab-pane v-if="resultDrawerType === 'task'" key="log" :tab="pageText('pages.taskLogs')">
           <div style="border: 1px solid var(--arl-border-color); border-radius: 4px; padding: 8px; background-color: var(--arl-bg-light);">
-            <div ref="resultTerminalContainer" style="background-color: #001529; color: #e6f7ff; font-family: 'Fira Code', Consolas, monospace; padding: 14px; border-radius: 4px; height: 500px; overflow-y: auto; font-size: 12px; line-height: 1.6;">
+            <div ref="resultTerminalContainer" style="background-color: var(--arl-terminal-bg); color: var(--arl-terminal-text); border: 1px solid var(--arl-terminal-border); font-family: var(--arl-font-mono); padding: 14px; border-radius: 6px; height: 500px; overflow-y: auto; font-size: 12px; line-height: 1.6;">
               <div v-for="(log, idx) in resultLogDataSource" :key="log._id || idx" style="margin-bottom: 4px; word-break: break-all; border-bottom: 1px dashed rgba(255,255,255,0.08); padding-bottom: 2px;">
                 <span style="margin-right: 8px; opacity: 0.7;">[{{ log.create_time }}]</span>
                 <span :style="{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warning' ? '#faad14' : '#52c41a', fontWeight: 'bold', marginRight: '8px' }">[{{ (log.level || 'info').toUpperCase() }}]</span>
                 <span style="margin-right: 8px;" v-if="log.title">[{{ log.title }}]</span>
-                <span style="color: #e6f7ff;">{{ log.message }}</span>
+                <span style="color: var(--arl-terminal-text);">{{ log.message }}</span>
               </div>
               <div v-if="resultLogDataSource.length === 0 && !resultLogLoading" class="page-log-empty">{{ pageText('pages.systemNoLogsYet') }}</div>
               <div v-if="resultLogLoading" class="page-log-empty">{{ pageText('tasks.systemLoadingLogs') }}</div>
@@ -714,7 +719,7 @@ import { ref, reactive, onMounted, onDeactivated, onUnmounted, computed, watch, 
 import { useRouter, useRoute } from 'vue-router';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
-import { SearchOutlined, InboxOutlined, SyncOutlined, LinkOutlined, ClockCircleOutlined } from '@ant-design/icons-vue';
+import { SearchOutlined, SyncOutlined, LinkOutlined, ClockCircleOutlined } from '@ant-design/icons-vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import { TASK_STATUS_LABEL } from '../constants/taskStatus';
 
@@ -975,7 +980,7 @@ const resultActiveTab = ref('result');
 const resultLoading = ref(false);
 const resultDataSource = ref([]);
 const resultSearchForm = reactive({ path: '', repo_full_name: '', human_content: '' });
-const resultPagination = reactive({ current: 1, pageSize: 10, total: 0 });
+const resultPagination = reactive({ current: 1, pageSize: globalPageSize.value, total: 0 });
 
 const resultColumns = [
   { get title() { return pageText('pages.repository'); }, dataIndex: 'repo_full_name', key: 'repo_full_name', width: 220 },
@@ -1047,7 +1052,12 @@ const resetResultSearch = () => {
 
 const handleResultTableChange = (page, pageSize) => {
   resultPagination.current = page;
-  resultPagination.pageSize = pageSize;
+  if (pageSize && pageSize !== resultPagination.pageSize) {
+    resultPagination.pageSize = pageSize;
+  }
+  if (resultPagination.pageSize !== globalPageSize.value) {
+    globalPageSize.value = resultPagination.pageSize;
+  }
   fetchResultData();
 };
 
@@ -1407,6 +1417,7 @@ watch(globalPageSize, (newSize) => {
   toolsPagination.pageSize = newSize;
   hackersPagination.pageSize = newSize;
   cvePagination.pageSize = newSize;
+  resultPagination.pageSize = newSize;
 });
 
 watch(() => schedulerPagination.pageSize, (newSize) => { globalPageSize.value = newSize; });
@@ -1414,6 +1425,7 @@ watch(() => taskPagination.pageSize, (newSize) => { globalPageSize.value = newSi
 watch(() => toolsPagination.pageSize, (newSize) => { globalPageSize.value = newSize; });
 watch(() => hackersPagination.pageSize, (newSize) => { globalPageSize.value = newSize; });
 watch(() => cvePagination.pageSize, (newSize) => { globalPageSize.value = newSize; });
+watch(() => resultPagination.pageSize, (newSize) => { globalPageSize.value = newSize; });
 
 const pagedCveData = computed(() => {
   const start = (cvePagination.current - 1) * cvePagination.pageSize;
@@ -1643,20 +1655,26 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.search-row { display: flex; flex-wrap: wrap; gap: 16px 12px; align-items: center; }
-.search-item { display: flex; align-items: center; }
-.search-item .label { color: var(--arl-text-color); margin-right: 8px; min-width: 70px; text-align: right; white-space: nowrap; }
-
 .page-settings-link { margin-left: 4px; }
 .page-inline-gap { margin-right: 8px; }
 .page-width-180 { width: 180px; }
 .page-flush-bottom { margin-bottom: 0; }
-.page-muted { color: var(--arl-text-color); opacity: 0.65; }
 .page-width-250 { width: 250px; }
 .page-placeholder { color: var(--arl-text-color); opacity: 0.25; }
-.page-option-hint { color: var(--arl-text-color); opacity: 0.45; margin-top: 8px; }
 .page-summary-caption { color: var(--arl-text-color); opacity: 0.65; font-size: 12px; }
 .page-log-empty { color: rgba(255,255,255,0.45); font-style: italic; }
+
+.github-sticky-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: var(--arl-bg-sticky);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 12px 0 8px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--arl-border-color);
+}
 
 .page-filter-form { row-gap: 16px; margin-bottom: 16px; }
 .page-modal-form { margin-top: 20px; }

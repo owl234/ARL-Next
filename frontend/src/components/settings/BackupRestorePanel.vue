@@ -36,8 +36,16 @@
         :columns="backupColumns"
         rowKey="filename"
         :loading="backupListLoading"
-        size="middle"
-        :pagination="{ pageSize: 10, showTotal: total => pageText('pages.backupArchiveCount', { count: total }) }"
+        size="small"
+        :pagination="{
+          pageSize: globalPageSize,
+          showSizeChanger: true,
+          pageSizeOptions: $pageSizeOptions,
+          size: 'small',
+          onChange: handleBackupPageChange,
+          onShowSizeChange: handleBackupPageChange,
+          showTotal: total => pageText('pages.backupArchiveCount', { count: total })
+        }"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'filename'">
@@ -113,7 +121,7 @@
           :message="pageText('pages.backupCollections')"
         />
 
-        <a-form layout="vertical">
+        <a-form layout="vertical" :label-wrap="true">
           <a-form-item :label="pageText('pages.backupContents')">
             <div style="background: var(--arl-bg-light); border: 1px solid var(--arl-border-color); padding: 12px 16px; border-radius: 6px;">
               <a-checkbox v-model:checked="createBackupForm.includeScreenshots">
@@ -153,7 +161,7 @@
           :customRequest="handleCustomUploadBackup"
         >
           <p class="ant-upload-drag-icon">
-            <InboxOutlined style="font-size: 48px; color: #1677ff;" />
+            <InboxOutlined style="font-size: 48px; color: var(--arl-theme-color);" />
           </p>
           <p class="ant-upload-text" style="font-size: 15px; font-weight: 500;">{{ pageText('pages.backupUploadDrop') }}</p>
           <p class="ant-upload-hint" style="font-size: 12px; color: var(--arl-text-color); opacity: 0.6;">{{ pageText('pages.backupUploadFormat') }}</p>
@@ -236,7 +244,7 @@
               <span class="heartbeat-dot"></span>
               <span>{{ pageText('pages.backupInProgress') }}</span>
             </div>
-            <div style="font-family: monospace; font-size: 13px; font-weight: 600; color: var(--arl-text-color); background: rgba(0,0,0,0.04); padding: 2px 8px; border-radius: 4px;">
+            <div style="font-family: monospace; font-size: 13px; font-weight: 600; color: var(--arl-text-color); background: var(--arl-bg-subtle); padding: 2px 8px; border-radius: 4px;">
               {{ pageText('pages.backupElapsed', { seconds: progressElapsed }) }}
             </div>
           </div>
@@ -255,7 +263,7 @@
               </span>
             </span>
           </div>
-          <span style="font-size: 13px; font-weight: 600; color: #1677ff;">{{ progressPercent }}%</span>
+          <span style="font-size: 13px; font-weight: 600; color: var(--arl-theme-color);">{{ progressPercent }}%</span>
         </div>
         <a-progress
           :percent="progressPercent"
@@ -266,7 +274,7 @@
       </div>
 
       <!-- 终端控制台 -->
-      <div style="background-color: #141414; border: 1px solid #333; color: #00ff66; padding: 14px; border-radius: 6px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; height: 320px; overflow-y: auto; box-shadow: inset 0 2px 8px rgba(0,0,0,0.4);" ref="backupTerminalRef">
+      <div class="arl-mono-terminal" style="height: 320px; overflow-y: auto; box-shadow: inset 0 2px 8px rgba(0,0,0,0.4);" ref="backupTerminalRef">
         <pre style="margin: 0; white-space: pre-wrap; font-family: inherit; color: inherit; background: transparent; border: none; padding: 0; font-size: 12px; line-height: 1.6;">{{ progressLogs.join('\n') }}</pre>
       </div>
 
@@ -298,8 +306,16 @@ import {
   UploadOutlined, DeleteOutlined, ReloadOutlined, InboxOutlined
 } from '@ant-design/icons-vue';
 import request from '@/utils/request';
+import { useGlobalPageSize } from '@/utils/useGlobalPageSize';
 
 const { t: pageText } = useI18n({ useScope: 'global' });
+
+const globalPageSize = useGlobalPageSize(10);
+const handleBackupPageChange = (_page, pageSize) => {
+  if (pageSize && pageSize !== globalPageSize.value) {
+    globalPageSize.value = pageSize;
+  }
+};
 
 const reloadPage = () => {
   window.location.reload();

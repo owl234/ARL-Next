@@ -1,54 +1,72 @@
 <template>
-  <div style="background-color: var(--arl-bg-layout); min-height: calc(100vh - 64px);">
-    <div ref="actionBarRef" style="position: sticky; top: 0px; z-index: 10; background-color: var(--arl-bg-layout); margin: -24px -24px 16px -24px; padding: 24px 24px 16px 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-      <a-page-header
-        @back="handleBack"
-        style="padding: 0 0 24px 0;"
-      >
-        <template #title>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <a-tooltip placement="bottomLeft">
-              <template #title>
-                <div style="word-break: break-all; max-height: 300px; overflow-y: auto; font-weight: normal; font-size: 14px;">
-                  <div v-for="(item, index) in targetList" :key="index">
-                    {{ item }}
-                  </div>
+  <div class="enterprise-task-detail-panel">
+    <!-- 1. 统一吸顶 Hero 头部卡片 -->
+    <div ref="actionBarRef" class="arl-hero-card">
+      <div class="arl-hero-unified-bar">
+        <div class="arl-hero-left">
+          <button
+            type="button"
+            class="arl-detail-back-btn"
+            @click="handleBack"
+          >
+            <arrow-left-outlined />
+            <span>{{ taskText('pages.backToList').replace(/^<\s*/, '') }}</span>
+          </button>
+
+          <div class="arl-hero-v-divider"></div>
+
+          <a-tooltip placement="bottomLeft">
+            <template #title>
+              <div style="word-break: break-all; max-height: 300px; overflow-y: auto; font-weight: normal; font-size: 13px;">
+                <div v-for="(item, index) in targetList" :key="index">
+                  {{ item }}
                 </div>
-              </template>
-              <span style="cursor: default;">{{ displayTitle }}</span>
-            </a-tooltip>
-            <a-tag v-if="taskTypeLabel" color="blue">{{ taskTypeLabel }}</a-tag>
-            <a-tag v-if="taskStatusLabel" :color="taskStatusColor">{{ taskStatusLabel }}</a-tag>
-            <a-tag
-              v-if="taskRecord.synced_scope_id"
-              color="blue"
-              style="cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
-              @click="goToScope(taskRecord.synced_scope_id, taskRecord.synced_scope_name)"
-              :title="taskText('tasks.openThisAssetGroup')"
-            >
-              <export-outlined />
-              <span>{{ taskText('tasks.managedIn') }} {{ taskRecord.synced_scope_name || taskText('tasks.assetGroup') }}</span>
-            </a-tag>
-          </div>
-        </template>
-        <template #extra>
+              </div>
+            </template>
+            <span class="arl-hero-title" style="cursor: default;">{{ displayTitle }}</span>
+          </a-tooltip>
+          <a-tag v-if="taskTypeLabel" color="blue">{{ taskTypeLabel }}</a-tag>
+          <a-tag v-if="taskStatusLabel" :color="taskStatusColor">{{ taskStatusLabel }}</a-tag>
+          <a-tag
+            v-if="taskRecord.synced_scope_id"
+            color="blue"
+            style="cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
+            @click="goToScope(taskRecord.synced_scope_id, taskRecord.synced_scope_name)"
+            :title="taskText('tasks.openThisAssetGroup')"
+          >
+            <export-outlined />
+            <span>{{ taskText('tasks.managedIn') }} {{ taskRecord.synced_scope_name || taskText('tasks.assetGroup') }}</span>
+          </a-tag>
+        </div>
+
+        <div class="arl-hero-right">
           <a-tooltip v-if="taskStatus === 'done' && (taskRecord.statistic?.web_cnt === 0)" :title="taskText('tasks.thisTaskHasNoWebsiteAssetsToSync')">
-            <a-button type="primary" disabled>
-              <cloud-sync-outlined /> {{ taskText('tasks.syncToAssetGroup') }}
+            <a-button type="primary" size="small" disabled>
+              <template #icon><cloud-sync-outlined /></template>
+              {{ taskText('tasks.syncToAssetGroup') }}
             </a-button>
           </a-tooltip>
           <a-button
             v-else
             type="primary"
+            size="small"
             @click="openSyncModal"
             :disabled="taskStatus !== 'done' && taskStatus !== 'stop'"
           >
-            <cloud-sync-outlined /> {{ taskRecord.synced_scope_id ? (taskRecord.has_increment ? taskText('tasks.syncNewAssetsToAssetGroup') : taskText('tasks.syncToAssetGroupAgain')) : taskText('tasks.syncToAssetGroup') }}
+            <template #icon><cloud-sync-outlined /></template>
+            {{ taskRecord.synced_scope_id ? (taskRecord.has_increment ? taskText('tasks.syncNewAssetsToAssetGroup') : taskText('tasks.syncToAssetGroupAgain')) : taskText('tasks.syncToAssetGroup') }}
           </a-button>
-        </template>
-      </a-page-header>
+        </div>
+      </div>
 
-      <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs" :style="activeTab === 'log' ? 'margin-bottom: 0;' : 'margin-bottom: 16px;'" @change="onTabChange">
+      <a-tabs
+        v-model:activeKey="activeTab"
+        type="card"
+        size="small"
+        class="arl-detail-tabs enterprise-detail-tabs"
+        :class="{ 'is-log-tab': activeTab === 'log' }"
+        @change="onTabChange"
+      >
         <a-tab-pane key="web" :tab="taskText('tasks.websiteIcpRecordsCount', { count: queryCounts.web })"></a-tab-pane>
         <a-tab-pane key="app" :tab="`APP - ${queryCounts.app}`"></a-tab-pane>
         <a-tab-pane key="mapp" :tab="taskText('tasks.miniProgramsCount', { count: queryCounts.mapp })"></a-tab-pane>
@@ -59,38 +77,88 @@
         <a-tab-pane key="log" :tab="taskText('tasks.executionLogs')"></a-tab-pane>
       </a-tabs>
 
-      <div v-show="activeTab !== 'log'">
-        <div style="margin-bottom: 16px;">
-          <a-form :model="searchForm" layout="inline" style="row-gap: 16px;">
-            <template v-for="col in dynamicColumns" :key="col.key">
-              <a-form-item v-if="col.key !== 'index' && col.key !== 'raw' && col.key !== 'icon' && col.key !== 'examineDate' && col.key !== 'updateRecordTime'" :label="col.title + ':'">
-                <a-input-group compact v-if="['amount', 'percent'].includes(col.dataIndex)">
-                  <a-select v-model:value="searchFormOp[col.dataIndex]" style="width: 70px" :options="[{value:'eq',label:'='},{value:'gt',label:'>'},{value:'lt',label:'<'}]" />
-                  <a-input v-model:value="searchForm[col.dataIndex]" class="task-width-130" :placeholder="taskText('tasks.enterField', { field: col.title })" @pressEnter="onSearch">
-                    <template #suffix><search-outlined @click="onSearch" style="color: var(--arl-text-color); opacity: 0.25; cursor: pointer;"/></template>
-                  </a-input>
-                </a-input-group>
-                <a-input v-else v-model:value="searchForm[col.dataIndex]" :placeholder="taskText('tasks.enterField', { field: col.title })" class="task-width-180" allowClear @pressEnter="onSearch">
-                  <template #suffix><search-outlined @click="onSearch" style="color: var(--arl-text-color); opacity: 0.25; cursor: pointer;"/></template>
-                </a-input>
-              </a-form-item>
-            </template>
-          </a-form>
-        </div>
-        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-          <a-button @click="resetSearch">{{ taskText('tasks.clear') }}</a-button>
-          <a-button type="primary" :loading="exportLoading" @click="handleExport">
-            <template #icon><download-outlined /></template>
-            {{ taskText('tasks.exportData') }}
+      <div v-show="activeTab !== 'log'" class="arl-toolbar-row">
+        <div class="arl-filter-group">
+          <a-button
+            size="small"
+            :type="filterExpanded ? 'primary' : 'default'"
+            :ghost="filterExpanded"
+            @click="filterExpanded = !filterExpanded"
+          >
+            <template #icon><filter-outlined /></template>
+            {{ filterExpanded ? taskText('tasks.hideFilters') : taskText('tasks.advancedFilters') }}
+            <a-badge
+              v-if="activeFilterCount > 0"
+              :count="activeFilterCount"
+              :number-style="{ backgroundColor: 'var(--arl-theme-color)', marginLeft: '4px' }"
+            />
           </a-button>
+          <a-button size="small" @click="resetSearch">
+            <template #icon><undo-outlined /></template>
+            {{ taskText('tasks.clear') }}
+          </a-button>
+        </div>
+
+        <div class="arl-actions-group">
           <a-button
             v-if="activeTab === 'web' && selectedWebRowKeys.length > 0"
             type="dashed"
+            size="small"
             @click="openSyncModalWithSelected"
           >
-            <cloud-sync-outlined /> {{ taskText('tasks.syncSelectedDomainCount', { count: selectedWebRowKeys.length }) }}
+            <template #icon><cloud-sync-outlined /></template>
+            {{ taskText('tasks.syncSelectedDomainCount', { count: selectedWebRowKeys.length }) }}
+          </a-button>
+          <a-button size="small" :loading="exportLoading" @click="handleExport">
+            <template #icon><download-outlined /></template>
+            {{ taskText('tasks.exportData') }}
           </a-button>
         </div>
+      </div>
+    </div>
+
+    <!-- 2. 可折叠检索条件网格面板 -->
+    <div v-if="filterExpanded && activeTab !== 'log'" class="arl-filter-card">
+      <div class="arl-filter-grid">
+        <div v-for="col in filterColumns" :key="col.key" class="arl-filter-cell">
+          <span class="arl-filter-cell-label">{{ col.title }}</span>
+          <a-input-group compact v-if="['amount', 'percent'].includes(col.dataIndex)" style="display: flex;">
+            <a-select
+              v-model:value="searchFormOp[col.dataIndex]"
+              size="small"
+              style="width: 66px; flex-shrink: 0;"
+              :options="[{value:'eq',label:'='},{value:'gt',label:'>'},{value:'lt',label:'<'}]"
+            />
+            <a-input
+              v-model:value="searchForm[col.dataIndex]"
+              size="small"
+              style="flex: 1;"
+              :placeholder="taskText('tasks.enterField', { field: col.title })"
+              allowClear
+              @pressEnter="onSearch"
+            >
+              <template #suffix><search-outlined @click="onSearch" style="color: var(--arl-text-color); opacity: 0.35; cursor: pointer;"/></template>
+            </a-input>
+          </a-input-group>
+          <a-input
+            v-else
+            v-model:value="searchForm[col.dataIndex]"
+            :placeholder="taskText('tasks.enterField', { field: col.title })"
+            size="small"
+            allowClear
+            @pressEnter="onSearch"
+          >
+            <template #suffix><search-outlined @click="onSearch" style="color: var(--arl-text-color); opacity: 0.35; cursor: pointer;"/></template>
+          </a-input>
+        </div>
+      </div>
+
+      <div class="arl-filter-footer">
+        <a-button size="small" @click="resetSearch">{{ taskText('tasks.clear') }}</a-button>
+        <a-button type="primary" size="small" @click="onSearch">
+          <template #icon><search-outlined /></template>
+          {{ taskText('tasks.search') }}
+        </a-button>
       </div>
     </div>
 
@@ -105,8 +173,7 @@
         :scroll="pagination.pageSize >= 100 ? { y: 'calc(100vh - 380px)', x: 'max-content' } : { x: 'max-content' }"
         :virtual="pagination.pageSize >= 100"
         :rowKey="(record) => record._id || record.id || record.domain || record.ym || Math.random()"
-        size="middle"
-        style="margin-bottom: 16px;"
+        size="small"
         @change="handleTableChange"
       >
         <template #bodyCell="{ column, record, text, index }">
@@ -150,22 +217,25 @@
             {{ text || '-' }}
           </template>
         </template>
+        <template #emptyText>
+          <ArlEmpty :description="taskText('tasks.noData')" />
+        </template>
       </a-table>
 
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px;">
-        <div class="task-muted">{{ taskText('tasks.paginationSummary', { pages: Math.ceil(pagination.total / pagination.pageSize) || 1, total: pagination.total }) }}</div>
-        <a-pagination :pageSizeOptions="$pageSizeOptions" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" show-size-changer @change="handlePaginationChange" @showSizeChange="handlePaginationChange" />
+      <div class="arl-pagination-bar">
+        <div class="pagination-info">{{ taskText('tasks.paginationSummary', { pages: Math.ceil(pagination.total / pagination.pageSize) || 1, total: pagination.total }) }}</div>
+        <a-pagination size="small" :pageSizeOptions="$pageSizeOptions" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" show-size-changer @change="handlePaginationChange" @showSizeChange="handlePaginationChange" />
       </div>
     </div>
 
     <div v-show="activeTab === 'log'">
       <div style="border: 1px solid var(--arl-border-color); border-radius: 4px; padding: 8px; background-color: var(--arl-bg-light);">
-        <div ref="terminalContainer" style="background-color: #001529; color: #e6f7ff; font-family: 'Fira Code', Consolas, 'Courier New', monospace; padding: 16px; border-radius: 4px; height: calc(100vh - 240px); overflow-y: auto; font-size: 13px; line-height: 1.6; box-shadow: inset 0 2px 8px rgba(0,0,0,0.2);" @mouseenter="pauseScroll = true" @mouseleave="pauseScroll = false">
+        <div ref="terminalContainer" style="background-color: var(--arl-terminal-bg); color: var(--arl-terminal-text); border: 1px solid var(--arl-terminal-border); font-family: var(--arl-font-mono); padding: 16px; border-radius: 4px; height: calc(100vh - 240px); overflow-y: auto; font-size: 13px; line-height: 1.6; box-shadow: inset 0 2px 8px rgba(0,0,0,0.2);" @mouseenter="pauseScroll = true" @mouseleave="pauseScroll = false">
           <div v-for="(log, idx) in syslogList" :key="idx" style="margin-bottom: 6px; word-break: break-all; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 4px;">
             <a style="margin-right: 8px;">[{{ log.create_time }}]</a>
             <span :style="{ color: log.level === 'error' ? '#ff4d4f' : log.level === 'warning' ? '#faad14' : '#52c41a', fontWeight: 'bold', marginRight: '8px' }">[{{ (log.level || 'info').toUpperCase() }}]</span>
             <a style="margin-right: 8px;">[{{ log.title }}]</a>
-            <span style="color: #e6f7ff;">{{ log.message }}</span>
+            <span style="color: var(--arl-terminal-text);">{{ log.message }}</span>
           </div>
           <div v-if="syslogLoading && syslogList.length === 0" class="task-log-hint">{{ taskText('tasks.systemLoadingTaskExecutionLogs') }}</div>
           <div v-else-if="syslogList.length === 0" class="task-log-empty">{{ taskText('tasks.systemNoLogsYetTheTaskHasNot') }}</div>
@@ -187,7 +257,7 @@ import { useI18n } from 'vue-i18n';
 
 import { ref, reactive, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { SearchOutlined, DownloadOutlined, CloudSyncOutlined, ExportOutlined } from '@ant-design/icons-vue';
+import { ArrowLeftOutlined, FilterOutlined, UndoOutlined, SearchOutlined, DownloadOutlined, CloudSyncOutlined, ExportOutlined } from '@ant-design/icons-vue';
 import SyncToScopeModal from './SyncToScopeModal.vue';
 import { message } from 'ant-design-vue';
 import request from '../utils/request';
@@ -498,6 +568,15 @@ const handleExport = async () => {
 
 const searchForm = reactive({});
 const searchFormOp = reactive({ amount: 'eq', percent: 'eq' });
+const filterExpanded = ref(false);
+const filterColumns = computed(() =>
+  (dynamicColumns.value || []).filter(
+    col => !['index', 'raw', 'icon', 'examineDate', 'updateRecordTime'].includes(col.key)
+  )
+);
+const activeFilterCount = computed(() =>
+  Object.values(searchForm).filter(v => v !== undefined && v !== null && v !== '').length
+);
 
 const hasActiveSearch = () => {
   return Object.values(searchForm).some((val) => val !== undefined && val !== null && val !== '');
@@ -794,9 +873,8 @@ onActivated(() => {
 </script>
 
 <style scoped>
-.task-width-130 { width: 130px }
-.task-width-180 { width: 180px; }
-.task-muted { color: var(--arl-text-color); opacity: 0.65; }
+.enterprise-detail-tabs :deep(.ant-tabs-nav) { margin-bottom: 10px; }
+.enterprise-detail-tabs.is-log-tab :deep(.ant-tabs-nav) { margin-bottom: 0; }
 .task-log-hint { color: rgba(255,255,255,0.65); font-style: italic; }
 .task-log-empty { color: rgba(255,255,255,0.45); font-style: italic; }
 </style>

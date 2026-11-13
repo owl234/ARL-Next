@@ -13,6 +13,7 @@
         ref="formRef"
         :model="formState"
         layout="vertical"
+        :label-wrap="true"
         @finish="onFinish"
         @finishFailed="validationFailed = true"
         @submit.prevent
@@ -104,7 +105,7 @@ const onFinish = async (values) => {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: radial-gradient(circle at 50% 30%, #1e293b 0%, #0b1120 100%);
+  background: radial-gradient(circle at 50% 30%, #141414 0%, #000000 100%);
 }
 
 .login-card {

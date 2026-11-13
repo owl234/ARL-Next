@@ -114,7 +114,7 @@
               
               <!-- CNAME 规则 -->
               <div class="native-code-wrapper" style="flex: none; display: flex; flex-direction: column; padding: 0;">
-                <div style="padding: 8px 16px; background: rgba(0,0,0,0.02); border-bottom: 1px solid var(--arl-border-color); font-weight: 500; font-size: 13px; color: var(--arl-text-color); display: flex; justify-content: space-between; align-items: center;">
+                <div style="padding: 8px 16px; background: var(--arl-bg-subtle); border-bottom: 1px solid var(--arl-border-color); font-weight: 500; font-size: 13px; color: var(--arl-text-color); display: flex; justify-content: space-between; align-items: center;">
                   <span>{{ pageText('pages.cnameRulesLabel2') }}{{ (selectedCdn.cname_domain || []).length }})</span>
                   <a-button size="small" type="text" @click="() => copyTextList(selectedCdn.cname_domain, pageText('pages.cnameRulesLabel3'))">
                     {{ pageText('pages.copy') }}
@@ -135,7 +135,7 @@
 
               <!-- IP CIDR 规则 -->
               <div class="native-code-wrapper" style="flex: none; display: flex; flex-direction: column; padding: 0;">
-                <div style="padding: 8px 16px; background: rgba(0,0,0,0.02); border-bottom: 1px solid var(--arl-border-color); font-weight: 500; font-size: 13px; color: var(--arl-text-color); display: flex; justify-content: space-between; align-items: center;">
+                <div style="padding: 8px 16px; background: var(--arl-bg-subtle); border-bottom: 1px solid var(--arl-border-color); font-weight: 500; font-size: 13px; color: var(--arl-text-color); display: flex; justify-content: space-between; align-items: center;">
                   <span>{{ pageText('pages.ipCidrRules') }}{{ (selectedCdn.ip_cidr || []).length }})</span>
                   <a-button size="small" type="text" @click="() => copyTextList(selectedCdn.ip_cidr, pageText('pages.ipCidrRulesLabel2'))">
                     {{ pageText('pages.copy') }}
@@ -414,7 +414,7 @@ defineExpose({
 .custom-list-item.is-active {
   background: var(--arl-theme-color);
   color: #fff;
-  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--arl-theme-color) 30%, transparent);
 }
 .custom-list-item.is-active .dict-title,
 .custom-list-item.is-active .dict-subtitle {
@@ -438,7 +438,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--arl-bg-white, #f8fafc);
+  background: var(--arl-bg-white);
   overflow: hidden;
 }
 .health-dashboard-bg {
@@ -472,7 +472,7 @@ defineExpose({
 .health-title {
   font-size: 24px;
   font-weight: 700;
-  color: var(--arl-text-color, #1e293b);
+  color: var(--arl-text-color);
   margin: 0;
   letter-spacing: 0.5px;
 }
@@ -482,10 +482,10 @@ defineExpose({
   margin-top: 16px;
 }
 .health-stat-card {
-  background: var(--arl-bg-subcard, rgba(255, 255, 255, 0.6));
+  background: var(--arl-bg-subcard);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--arl-border-color, rgba(255, 255, 255, 0.8));
+  border: 1px solid var(--arl-border-color);
   border-radius: 16px;
   padding: 24px 40px;
   min-width: 180px;
@@ -506,14 +506,14 @@ defineExpose({
   line-height: 1.2;
 }
 .primary-stat .stat-value {
-  background-image: linear-gradient(135deg, var(--arl-theme-color, #1890ff) 0%, #36cfc9 100%);
+  background-image: linear-gradient(135deg, var(--arl-theme-color) 0%, #36cfc9 100%);
 }
 .warning-stat .stat-value {
   background-image: linear-gradient(135deg, #fa8c16 0%, #ffc53d 100%);
 }
 .stat-label {
   font-size: 14px;
-  color: var(--arl-text-secondary, #64748b);
+  color: var(--arl-text-secondary);
   margin-top: 8px;
   font-weight: 500;
 }
@@ -522,12 +522,12 @@ defineExpose({
   align-items: center;
   gap: 8px;
   margin-top: 32px;
-  color: var(--arl-text-secondary, #94a3b8);
+  color: var(--arl-text-secondary);
   font-size: 13px;
-  background: var(--arl-bg-subcard, rgba(255,255,255,0.5));
+  background: var(--arl-bg-subcard);
   padding: 8px 16px;
   border-radius: 20px;
-  border: 1px solid var(--arl-border-color, rgba(255,255,255,0.6));
+  border: 1px solid var(--arl-border-color);
 }
 .pulse-dot {
   width: 8px;

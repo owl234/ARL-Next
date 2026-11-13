@@ -1,14 +1,14 @@
 <template>
-  <div style="background-color: var(--arl-bg-layout); padding: 12px 16px; min-height: calc(100vh - 64px);">
+  <div class="arl-page-container">
     <!-- 1. 一体化资产画像 Hero 头部卡片 (常驻吸附在页面最顶部 top: 0，极简单行整合) -->
     <div ref="heroRef" class="arl-hero-card hero-sticky-card">
       <div class="hero-unified-bar">
         <!-- 左侧：返回 + 标题 + 分组标签 + 类型 + 测绘状态 (去重) -->
         <div class="hero-left-section" :class="{ 'hero-left-section-wide': assetLocale !== 'zh-CN' }">
-          <a-button type="text" class="hero-back-btn" @click="handleBack" :title="assetText('assets.backToAssetGroupList')">
-            <template #icon><arrow-left-outlined /></template>
+          <button type="button" class="arl-detail-back-btn" @click="handleBack" :title="assetText('assets.backToAssetGroupList')">
+            <arrow-left-outlined />
             <span>{{ assetText('assets.backToAssetGroups') }}</span>
-          </a-button>
+          </button>
 
           <div class="hero-title-wrapper">
             <a-tooltip :title="targetName" placement="bottomLeft">
@@ -22,7 +22,7 @@
             </a-tag>
           </div>
 
-          <div class="hero-v-divider"></div>
+          <div class="arl-hero-v-divider"></div>
 
           <div class="hero-meta-section">
             <template v-if="boundIcpTaskId">
@@ -64,27 +64,29 @@
 
         <!-- 右侧：OSINT / ASM 视角切换胶囊 -->
         <div class="hero-right-section">
-          <div class="capsule-switcher">
+          <div class="arl-capsule-switcher">
             <button
-              class="capsule-btn"
-              :class="{ active: currentView === 'osint' }"
+              type="button"
+              class="arl-capsule-item"
+              :class="{ 'is-active': currentView === 'osint' }"
               @click="currentView = 'osint'"
               :title="assetText('assets.switchToEnterpriseOsintAssets')"
             >
               <bank-outlined class="capsule-icon" />
               <span>{{ assetText('assets.enterpriseAssetsOsint') }}</span>
-              <span class="capsule-count" v-if="osintTotalCount > 0">{{ osintTotalCount }}</span>
-              <span v-if="scopeHasIncrement" class="capsule-dot"></span>
+              <span class="arl-capsule-count" v-if="osintTotalCount > 0">{{ osintTotalCount }}</span>
+              <span v-if="scopeHasIncrement" class="arl-capsule-dot"></span>
             </button>
             <button
-              class="capsule-btn"
-              :class="{ active: currentView === 'asm' }"
+              type="button"
+              class="arl-capsule-item"
+              :class="{ 'is-active': currentView === 'asm' }"
               @click="currentView = 'asm'"
               :title="assetText('assets.switchToNetworkExposureAssets')"
             >
               <global-outlined class="capsule-icon" />
               <span>{{ assetText('assets.networkExposureAsm') }}</span>
-              <span class="capsule-count" v-if="asmTotalCount > 0">{{ asmTotalCount }}</span>
+              <span class="arl-capsule-count" v-if="asmTotalCount > 0">{{ asmTotalCount }}</span>
             </button>
           </div>
         </div>
@@ -649,9 +651,7 @@
       </template>
 
       <template #emptyText>
-        <div class="empty-default-box">
-          <a-empty :description="assetText('assets.noAssetData')" />
-        </div>
+        <ArlEmpty :description="assetText('assets.noAssetData')" />
       </template>
     </a-table>
 
@@ -708,8 +708,8 @@
     </a-modal>
 
 
-    <div v-if="tabConfig[effectiveTab]" style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px; margin-top: 10px;">
-      <div class="asset-summary-caption">{{ assetText('tasks.paginationSummary', { pages: Math.ceil(pagination.total / pagination.pageSize) || 1, total: pagination.total }) }}</div>
+    <div v-if="tabConfig[effectiveTab]" class="arl-pagination-bar">
+      <div class="pagination-info">{{ assetText('tasks.paginationSummary', { pages: Math.ceil(pagination.total / pagination.pageSize) || 1, total: pagination.total }) }}</div>
       <a-pagination size="small" :pageSizeOptions="$pageSizeOptions" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="pagination.total" show-size-changer @change="handleTableChange" @showSizeChange="handleTableChange" />
     </div>
 
@@ -721,15 +721,15 @@
           <span>{{ assetText('tasks.selected') }} <b class="asset-selection-number">{{ selectedRowKeys.length }}</b> {{ assetText('assets.assets') }}</span>
         </div>
         <div class="floating-actions">
-          <a-button danger size="middle" @click="handleBatchDelete">
+          <a-button danger size="small" @click="handleBatchDelete">
             <template #icon><delete-outlined /></template>
             {{ assetText('tasks.deleteSelected') }}
           </a-button>
-          <a-button v-if="activeTab === 'site'" type="primary" size="middle" @click="openRiskModal">
+          <a-button v-if="activeTab === 'site'" type="primary" size="small" @click="openRiskModal">
             <template #icon><bug-outlined /></template>
             {{ assetText('assets.riskScanCount', { count: selectedRowKeys.length }) }}
           </a-button>
-          <a-button size="middle" @click="selectedRowKeys = []">{{ assetText('tasks.clearSelection') }}</a-button>
+          <a-button size="small" @click="selectedRowKeys = []">{{ assetText('tasks.clearSelection') }}</a-button>
         </div>
       </div>
     </transition>
@@ -752,7 +752,7 @@
       @refreshed="(newTid) => { if (newTid) { boundIcpTaskId = newTid; scopeUpdatingTaskId = ''; fetchBoundTaskDetail(newTid); fetchScopeMeta(); } }"
     />
     <div v-else class="osint-unbound-box">
-      <a-empty :description="assetText('assets.noOrganizationLinked')" />
+      <ArlEmpty :description="assetText('assets.noOrganizationLinked')" />
     </div>
   </div>
 
@@ -2449,9 +2449,9 @@ onDeactivated(() => {
 .wih-api-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 
 .hero-left-section-wide { flex-wrap: wrap; row-gap: 6px; overflow: visible; }
-.filter-field-label.filter-field-label-wide { width: 112px; white-space: normal; overflow: visible; text-overflow: clip; }
+.filter-field-label.filter-field-label-wide { width: 112px; white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.3; word-break: break-word; }
 .asset-increment-badge :deep(.ant-badge-count) { background-color: #52c41a; font-size: 10px; }
-.asset-site-count :deep(.ant-badge-count) { background-color: #1890ff; color: #fff; cursor: pointer; border-radius: 4px; padding: 0 6px; font-size: 12px; }
+.asset-site-count :deep(.ant-badge-count) { background-color: var(--arl-theme-color); color: #fff; cursor: pointer; border-radius: 4px; padding: 0 6px; font-size: 12px; }
 
 .operator-op-select-wide { width: 130px !important; min-width: 130px; }
 
@@ -2472,15 +2472,13 @@ onDeactivated(() => {
   border-radius: 10px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--arl-primary-color, #1890ff);
-  background: var(--arl-primary-bg, rgba(24, 144, 255, 0.1));
-  border: 1px solid var(--arl-primary-border, rgba(24, 144, 255, 0.3));
+  color: var(--arl-theme-color);
+  background: var(--arl-theme-soft-bg);
+  border: 1px solid var(--arl-theme-soft-border);
 }
 /* 🚨 将原本的 gap: 16px 24px 改为更紧凑的 16px 12px */
 .scroll-x { width: 100%; max-width: 400px; overflow-x: auto; }
 .scroll-x pre { margin: 0; font-family: Consolas, monospace; font-size: 12px; color: var(--arl-text-color); opacity: 0.65; }
-:deep(.ant-tabs-card-bar .ant-tabs-tab) { border-radius: 2px 2px 0 0 !important; margin-right: 4px !important; border: 1px solid var(--arl-border-color) !important; background: var(--arl-bg-light) !important; }
-:deep(.ant-tabs-card-bar .ant-tabs-tab-active) { background: var(--arl-bg-white) !important;  font-weight: 500; border-bottom-color: transparent !important; }
 
 .site-header { line-height: 1.5; word-break: break-all; }
 .site-img { width: 16px; height: 16px; margin-right: 8px; vertical-align: middle; }
@@ -2599,31 +2597,13 @@ onDeactivated(() => {
   flex: 1 1 auto;
 }
 
-.hero-back-btn {
-  padding: 4px 8px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border-radius: 4px;
-  color: var(--arl-text-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  flex-shrink: 0;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.hero-back-btn:hover {
-  background: var(--arl-bg-light);
-  color: var(--arl-theme-color);
-}
-
 .hero-title-wrapper {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  flex-shrink: 0;
+  max-width: 100%;
+  flex-shrink: 1;
 }
 
 .hero-title-text {
@@ -2645,14 +2625,6 @@ onDeactivated(() => {
   padding: 0 6px;
   line-height: 18px;
   margin-right: 0;
-  flex-shrink: 0;
-}
-
-.hero-v-divider {
-  width: 1px;
-  height: 14px;
-  background-color: var(--arl-border-color);
-  margin: 0 4px;
   flex-shrink: 0;
 }
 
@@ -2718,92 +2690,6 @@ onDeactivated(() => {
   flex-shrink: 0;
 }
 
-/* 下层：专属独立行 OSINT / ASM 视角切换 Tab 栏 (浅底通栏，靠左对齐，视觉焦点突出) */
-.hero-view-switcher {
-  background: var(--arl-bg-light);
-  border-top: 1px solid var(--arl-border-color);
-  padding: 5px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  min-height: 38px;
-}
-
-.capsule-switcher {
-  display: inline-flex;
-  background: var(--arl-bg-white);
-  padding: 3px;
-  border-radius: 7px;
-  border: 1px solid var(--arl-border-color);
-  gap: 3px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
-}
-
-.capsule-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 14px;
-  border-radius: 5px;
-  border: none;
-  background: transparent;
-  color: var(--arl-text-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  user-select: none;
-  line-height: 20px;
-}
-.capsule-btn:hover {
-  color: var(--arl-text-color);
-  background: rgba(0, 0, 0, 0.03);
-}
-.capsule-btn.active {
-  background: var(--arl-theme-color);
-  color: #fff;
-  font-weight: 600;
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--arl-theme-color) 35%, transparent);
-}
-
-.capsule-icon {
-  font-size: 14px;
-}
-
-.capsule-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-weight: 600;
-  background: var(--arl-bg-light);
-  color: var(--arl-text-secondary);
-  border: 1px solid var(--arl-border-color);
-  transition: all 0.2s;
-}
-.capsule-btn.active .capsule-count {
-  background: rgba(255, 255, 255, 0.25);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.capsule-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #52c41a;
-  margin-left: 2px;
-}
-.capsule-btn.active .capsule-dot {
-  background: #fff;
-  box-shadow: 0 0 4px #fff;
-}
-
 /* 响应式优雅降级：极端窄屏下标题与操作自适应折行 */
 @media screen and (max-width: 1080px) {
   .hero-title-bar {
@@ -2826,7 +2712,9 @@ onDeactivated(() => {
   position: sticky;
   top: 0px;
   z-index: 12;
-  background: var(--arl-bg-white);
+  background: var(--arl-bg-sticky);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
   margin-bottom: 8px !important;
 }
@@ -2835,7 +2723,9 @@ onDeactivated(() => {
 .asm-control-box {
   position: sticky;
   z-index: 11;
-  background: var(--arl-bg-white);
+  background: var(--arl-bg-sticky);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-radius: 8px;
   border: 1px solid var(--arl-border-color);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
@@ -3060,61 +2950,12 @@ onDeactivated(() => {
   gap: 6px;
 }
 
-/* ================= 极简空状态 (Standard Empty State) ================= */
-.empty-default-box {
-  padding: 40px 0;
-}
-
 .osint-unbound-box {
   background: var(--arl-bg-white);
   border-radius: 8px;
   border: 1px solid var(--arl-border-color);
   padding: 60px 0;
   margin-top: 16px;
-}
-
-/* ================= 悬浮浮动操作条 (Floating Action Bar) ================= */
-.arl-floating-action-bar {
-  position: fixed;
-  bottom: 28px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
-  background: var(--arl-bg-white);
-  border: 1px solid var(--arl-border-color);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
-  border-radius: 28px;
-  padding: 8px 20px 8px 24px;
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  backdrop-filter: blur(8px);
-}
-
-.floating-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--arl-text-color);
-}
-
-.floating-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.floating-slide-enter-active,
-.floating-slide-leave-active {
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.floating-slide-enter-from,
-.floating-slide-leave-to {
-  opacity: 0;
-  transform: translate(-50%, 24px);
 }
 
 /* ================= 表格内悬停高频操作按钮 ================= */
@@ -3192,7 +3033,7 @@ div:hover > .chain-action-btn {
   font-family: Consolas, Menlo, Courier, monospace;
   font-size: 11px;
   line-height: 1.45;
-  color: #334155;
+  color: var(--arl-text-color);
   opacity: 0.85;
   white-space: pre;
   word-wrap: normal;
@@ -3275,7 +3116,6 @@ div:hover > .chain-action-btn {
 .asset-option-heading { font-weight: 600; font-size: 13px; color: var(--arl-text-color); }
 .asset-clickable { cursor: pointer; }
 .asset-field-hint { color: var(--arl-text-color); opacity: 0.45; margin-top: 2px; }
-.asset-summary-caption { color: var(--arl-text-color); opacity: 0.65; font-size: 12px; }
 .asset-selection-number { color: var(--arl-theme-color); margin: 0 4px; }
 .asset-risk-form { margin-top: 20px; }
 .asset-flush-bottom { margin-bottom: 0; }

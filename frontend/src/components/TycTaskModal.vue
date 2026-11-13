@@ -445,7 +445,7 @@ const handleSubmit = async () => {
 }
 
 .arl-settings-row:hover {
-  border-color: var(--arl-theme-color, #1890ff);
+  border-color: var(--arl-theme-color);
 }
 
 .settings-row-left {
@@ -477,7 +477,7 @@ const handleSubmit = async () => {
 }
 
 .settings-row-help:hover {
-  color: var(--arl-theme-color, #1890ff);
+  color: var(--arl-theme-color);
 }
 
 .settings-row-subtitle {

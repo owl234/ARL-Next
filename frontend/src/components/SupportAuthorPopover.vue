@@ -208,7 +208,6 @@ const handleCopyWechat = async () => {
 /* 导航栏触发入口 */
 .support-header-entry {
   cursor: pointer;
-  margin-right: 24px;
   display: inline-flex;
   align-items: center;
   user-select: none;
@@ -269,7 +268,7 @@ const handleCopyWechat = async () => {
   width: 320px;
   padding: 4px;
   box-sizing: border-box;
-  color: var(--arl-text-color, #1e293b);
+  color: var(--arl-text-color);
   user-select: none;
 }
 
@@ -294,7 +293,7 @@ const handleCopyWechat = async () => {
 .support-card-title {
   font-size: 15px;
   font-weight: 600;
-  background: linear-gradient(135deg, var(--arl-theme-color, #fa541c), #ff7a45);
+  background: linear-gradient(135deg, var(--arl-theme-color), color-mix(in srgb, var(--arl-theme-color) 75%, #ffffff));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -339,11 +338,11 @@ const handleCopyWechat = async () => {
 }
 
 .support-tab-btn.active {
-  background: var(--arl-theme-color, #fa541c);
+  background: var(--arl-theme-color);
   color: #ffffff !important;
   opacity: 1;
   font-weight: 500;
-  box-shadow: 0 2px 8px rgba(250, 84, 28, 0.25);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--arl-theme-color) 28%, transparent);
 }
 
 .tab-icon {
@@ -412,12 +411,12 @@ const handleCopyWechat = async () => {
 .support-panel-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--arl-text-color, #1e293b);
+  color: var(--arl-text-color);
   margin-bottom: 4px;
 }
 
 .highlight-text {
-  color: var(--arl-theme-color, #fa541c);
+  color: var(--arl-theme-color);
 }
 
 .support-panel-desc {
@@ -460,7 +459,7 @@ const handleCopyWechat = async () => {
   font-size: 13px;
   font-weight: 600;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  color: var(--arl-theme-color, #fa541c);
+  color: var(--arl-theme-color);
 }
 
 .copy-wechat-btn {
@@ -469,16 +468,16 @@ const handleCopyWechat = async () => {
   gap: 3px;
   padding: 2px 8px;
   font-size: 11px;
-  border: 1px solid var(--arl-theme-color, #fa541c);
+  border: 1px solid var(--arl-theme-color);
   background: transparent;
-  color: var(--arl-theme-color, #fa541c);
+  color: var(--arl-theme-color);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .copy-wechat-btn:hover {
-  background: var(--arl-theme-color, #fa541c);
+  background: var(--arl-theme-color);
   color: #ffffff;
 }
 

@@ -85,10 +85,7 @@
                 <a-badge :count="chainData.site?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.site?.length, '#1890ff')" />
               </div>
             </template>
-            <div v-if="!chainData.site || chainData.site.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noRelatedWebsitesFound') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.site || chainData.site.length === 0" compact :description="assetText('assets.noRelatedWebsitesFound')" />
             <div v-else class="drawer-site-list">
               <div v-for="(siteItem, idx) in chainData.site" :key="idx" class="drawer-site-item">
                 <div class="drawer-site-meta">
@@ -126,10 +123,7 @@
                 <a-badge :count="chainData.domain_records?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.domain_records?.length, '#52c41a')" />
               </div>
             </template>
-            <div v-if="!chainData.domain_records || chainData.domain_records.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noSubdomainDnsRecordsFound') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.domain_records || chainData.domain_records.length === 0" compact :description="assetText('assets.noSubdomainDnsRecordsFound')" />
             <a-table
               v-else
               :dataSource="chainData.domain_records"
@@ -161,10 +155,7 @@
                 <a-badge :count="chainData.ip?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.ip?.length, '#722ed1')" />
               </div>
             </template>
-            <div v-if="!chainData.ip || chainData.ip.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noRelatedIpAssetsFound') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.ip || chainData.ip.length === 0" compact :description="assetText('assets.noRelatedIpAssetsFound')" />
             <a-table
               v-else
               :dataSource="chainData.ip"
@@ -207,10 +198,7 @@
                 <a-badge :count="chainData.cert?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.cert?.length, '#13c2c2')" />
               </div>
             </template>
-            <div v-if="!chainData.cert || chainData.cert.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noRelatedSslCertificatesFound') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.cert || chainData.cert.length === 0" compact :description="assetText('assets.noRelatedSslCertificatesFound')" />
             <div v-else>
               <div v-for="(certItem, idx) in chainData.cert" :key="idx" class="drawer-cert-item">
                 <div class="cert-host-tag">{{ certItem.ip || certItem.host }}{{ certItem.port ? ':' + certItem.port : '' }}</div>
@@ -233,10 +221,7 @@
                 <a-badge :count="chainData.service?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.service?.length, '#fa8c16')" />
               </div>
             </template>
-            <div v-if="!chainData.service || chainData.service.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noOpenNetworkServicesFound') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.service || chainData.service.length === 0" compact :description="assetText('assets.noOpenNetworkServicesFound')" />
             <div v-else class="drawer-services-grid">
               <div v-for="(srv, idx) in chainData.service" :key="idx" class="service-pill">
                 <div class="service-name-tag">{{ srv.service_name || 'service' }}</div>
@@ -257,10 +242,7 @@
                 <a-badge :count="chainData.fileleak?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.fileleak?.length, '#faad14')" />
               </div>
             </template>
-            <div v-if="!chainData.fileleak || chainData.fileleak.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noSuspectedSensitiveFileDisclosuresFound') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.fileleak || chainData.fileleak.length === 0" compact :description="assetText('assets.noSuspectedSensitiveFileDisclosuresFound')" />
             <a-table
               v-else
               :dataSource="chainData.fileleak"
@@ -286,10 +268,7 @@
                 <a-badge :count="chainData.url?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.url?.length, '#2f54eb')" />
               </div>
             </template>
-            <div v-if="!chainData.url || chainData.url.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noRelatedDiscoveredUrlsFound') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.url || chainData.url.length === 0" compact :description="assetText('assets.noRelatedDiscoveredUrlsFound')" />
             <a-table
               v-else
               :dataSource="chainData.url"
@@ -315,10 +294,7 @@
                 <a-badge :count="chainData.cip?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.cip?.length, '#eb2f96')" />
               </div>
             </template>
-            <div v-if="!chainData.cip || chainData.cip.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noRelatedCClassNetworksFound') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.cip || chainData.cip.length === 0" compact :description="assetText('assets.noRelatedCClassNetworksFound')" />
             <a-table
               v-else
               :dataSource="chainData.cip"
@@ -353,10 +329,7 @@
                 <a-badge :count="statFingerList.length" :show-zero="true" :number-style="getBadgeStyle(statFingerList.length, '#1d39c4')" />
               </div>
             </template>
-            <div v-if="statFingerList.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noRelatedTechnologyOrComponentFingerprintsFound') }}</span>
-            </div>
+            <ArlEmpty v-if="statFingerList.length === 0" compact :description="assetText('assets.noRelatedTechnologyOrComponentFingerprintsFound')" />
             <a-table
               v-else
               :dataSource="statFingerList"
@@ -385,10 +358,7 @@
                 <a-badge :count="chainData.wih?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.wih?.length, '#fa8c16')" />
               </div>
             </template>
-            <div v-if="!chainData.wih || chainData.wih.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noWebInfoHunterWihDisclosureRecordsFound') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.wih || chainData.wih.length === 0" compact :description="assetText('assets.noWebInfoHunterWihDisclosureRecordsFound')" />
             <a-table
               v-else
               :dataSource="chainData.wih"
@@ -422,10 +392,7 @@
                 <a-badge :count="chainData.vuln?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.vuln?.length, '#f5222d')" />
               </div>
             </template>
-            <div v-if="!chainData.vuln || chainData.vuln.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noApplicationVulnerabilitiesDetected') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.vuln || chainData.vuln.length === 0" compact :description="assetText('assets.noApplicationVulnerabilitiesDetected')" />
             <div v-else class="drawer-vuln-list">
               <div v-for="(v, idx) in chainData.vuln" :key="'v-'+idx" class="vuln-item-card">
                 <div class="vuln-header">
@@ -446,10 +413,7 @@
                 <a-badge :count="chainData.npoc_service?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.npoc_service?.length, '#722ed1')" />
               </div>
             </template>
-            <div v-if="!chainData.npoc_service || chainData.npoc_service.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noPythonNpocServiceRecordsFound') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.npoc_service || chainData.npoc_service.length === 0" compact :description="assetText('assets.noPythonNpocServiceRecordsFound')" />
             <a-table
               v-else
               :dataSource="chainData.npoc_service"
@@ -478,10 +442,7 @@
                 <a-badge :count="chainData.nuclei_result?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.nuclei_result?.length, '#fa541c')" />
               </div>
             </template>
-            <div v-if="!chainData.nuclei_result || chainData.nuclei_result.length === 0" class="drawer-empty-row">
-              <inbox-outlined class="empty-row-icon" />
-              <span>{{ assetText('assets.noNucleiVulnerabilitySignaturesMatched') }}</span>
-            </div>
+            <ArlEmpty v-if="!chainData.nuclei_result || chainData.nuclei_result.length === 0" compact :description="assetText('assets.noNucleiVulnerabilitySignaturesMatched')" />
             <div v-else class="drawer-vuln-list">
               <div v-for="(n, idx) in chainData.nuclei_result" :key="'n-'+idx" class="vuln-item-card">
                 <div class="vuln-header">
@@ -541,7 +502,6 @@ import {
   RadarChartOutlined,
   CodeOutlined,
   FireOutlined,
-  InboxOutlined,
   VerticalAlignTopOutlined
 } from '@ant-design/icons-vue';
 import request from '../utils/request';
@@ -696,7 +656,7 @@ const getBadgeStyle = (cnt, activeColor) => {
   if (cnt && cnt > 0) {
     return { backgroundColor: activeColor };
   }
-  return { backgroundColor: '#f0f0f0', color: '#8c8c8c' };
+  return { backgroundColor: 'var(--arl-bg-hover)', color: 'var(--arl-text-secondary)' };
 };
 
 const getSeverityColor = (sev) => {
@@ -820,7 +780,7 @@ const downloadChainJson = () => {
   width: 36px;
   height: 36px;
   border-radius: 8px;
-  background: rgba(250, 84, 28, 0.1);
+  background: var(--arl-theme-soft-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -944,12 +904,12 @@ const downloadChainJson = () => {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #40a9ff 0%, #1890ff 50%, #096dd9 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--arl-theme-color) 78%, #ffffff) 0%, var(--arl-theme-color) 55%, color-mix(in srgb, var(--arl-theme-color) 80%, #000000) 100%);
   color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 6px 18px rgba(24, 144, 255, 0.38), 0 2px 6px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--arl-theme-color) 38%, transparent), 0 2px 6px rgba(0, 0, 0, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.3);
   transition: all 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
   backdrop-filter: blur(4px);
@@ -963,8 +923,8 @@ const downloadChainJson = () => {
 
 .chain-back-top-btn:hover .back-top-circle {
   transform: translateY(-4px) scale(1.08);
-  box-shadow: 0 10px 24px rgba(24, 144, 255, 0.52), 0 4px 10px rgba(0, 0, 0, 0.15);
-  background: linear-gradient(135deg, #69c0ff 0%, #1890ff 45%, #0050b3 100%);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--arl-theme-color) 50%, transparent), 0 4px 10px rgba(0, 0, 0, 0.15);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--arl-theme-color) 65%, #ffffff) 0%, var(--arl-theme-color) 50%, color-mix(in srgb, var(--arl-theme-color) 75%, #000000) 100%);
 }
 
 .chain-back-top-btn:hover .back-top-icon {
@@ -973,7 +933,7 @@ const downloadChainJson = () => {
 
 .chain-back-top-btn:active .back-top-circle {
   transform: translateY(-1px) scale(0.96);
-  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--arl-theme-color) 30%, transparent);
 }
 
 .fade-enter-active,
@@ -993,25 +953,6 @@ const downloadChainJson = () => {
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
-}
-
-/* 紧凑型空状态行 */
-.drawer-empty-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: var(--arl-bg-light);
-  border-radius: 6px;
-  color: var(--arl-text-secondary);
-  font-size: 12px;
-  border: 1px dashed var(--arl-border-color);
-}
-
-.empty-row-icon {
-  font-size: 14px;
-  opacity: 0.55;
 }
 
 .drawer-site-list {
@@ -1118,7 +1059,7 @@ const downloadChainJson = () => {
 .cert-host-tag {
   font-weight: 600;
   font-family: monospace;
-  color: var(--arl-primary-color);
+  color: var(--arl-theme-color);
   margin-bottom: 6px;
 }
 
@@ -1144,7 +1085,7 @@ const downloadChainJson = () => {
 .service-name-tag {
   font-size: 12px;
   font-weight: 600;
-  color: var(--arl-primary-color);
+  color: var(--arl-theme-color);
   margin-bottom: 4px;
 }
 

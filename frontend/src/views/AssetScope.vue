@@ -1,21 +1,23 @@
 <template>
-  <div style="min-height: calc(100vh - 96px); background-color: var(--arl-bg-layout); position: relative;">
-    <!-- 隐形定位锚点 (用于精准定位 fixed 侧边栏左边界) -->
-    <div ref="sidebarAnchorRef" style="position: absolute; top: 0; left: 0; width: 0; height: 0; pointer-events: none;"></div>
+  <div :class="{ 'page-wide-text': assetLocale !== 'zh-CN' }" style="min-height: calc(100vh - 64px); padding: 16px 20px; background-color: var(--arl-bg-layout); position: relative;">
+    <!-- 隐形定位锚点 (用于精准定位 fixed 侧边栏左/顶边界) -->
+    <div ref="sidebarAnchorRef" style="position: absolute; top: 16px; left: 20px; width: 0; height: 0; pointer-events: none;"></div>
 
     <!-- 左侧集团分组固定侧边栏 (Fixed 视口绝对锁定，绝不随页面滚动) -->
     <div
       class="asset-group-sidebar"
       :style="{
         position: 'fixed',
-        top: '80px',
+        top: (sidebarTop || 80) + 'px',
         bottom: '16px',
-        left: (sidebarLeft || 186) + 'px',
+        left: (sidebarLeft ?? defaultSidebarLeft) + 'px',
         width: isSidebarCollapsed ? '0px' : '240px',
         overflow: 'hidden',
         opacity: isSidebarCollapsed ? 0 : 1,
-        transition: 'width 0.25s, opacity 0.25s, left 0.2s',
-        background: 'var(--arl-bg-white)',
+        transition: 'width 0.25s, opacity 0.25s, left 0.2s, top 0.2s',
+        background: 'var(--arl-bg-sticky)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
         borderRight: isSidebarCollapsed ? 'none' : '1px solid var(--arl-border-color)',
         display: 'flex',
         flexDirection: 'column',
@@ -26,7 +28,7 @@
       <div class="sidebar-header">
         <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
           <ApartmentOutlined style="font-size: 16px; color: var(--arl-theme-color); flex-shrink: 0;" />
-          <span class="asset-sidebar-heading" style="white-space: nowrap;">{{ assetText('assets.organizationGroupCatalog') }}</span>
+          <span class="asset-sidebar-heading" :title="assetText('assets.organizationGroupCatalog')" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ assetText('assets.organizationGroupCatalog') }}</span>
           <a-tooltip :title="assetText('assets.organizationGroupCatalogTooltip')" placement="right">
             <question-circle-outlined style="font-size: 13px; color: var(--arl-text-color); opacity: 0.45; cursor: pointer; flex-shrink: 0;" />
           </a-tooltip>
@@ -127,15 +129,15 @@
     <!-- 侧边栏折叠把手（展开态：垂直居中悬浮在 Fixed 侧边栏右边缘） -->
     <div
       v-if="!isSidebarCollapsed"
-      @click="isSidebarCollapsed = true"
+      @click="toggleGroupSidebar(true)"
       :style="{
         position: 'fixed',
         top: '50%',
         transform: 'translateY(-50%)',
-        left: ((sidebarLeft || 186) + 240) + 'px',
+        left: ((sidebarLeft ?? defaultSidebarLeft) + 240) + 'px',
         width: '14px',
         height: '44px',
-        background: 'var(--arl-bg-white)',
+        background: 'var(--arl-bg-sticky)',
         border: '1px solid var(--arl-border-color)',
         borderLeft: 'none',
         borderRadius: '0 6px 6px 0',
@@ -156,14 +158,14 @@
     <!-- 侧边栏展开把手（收起态：细条垂直居中，高度撑满） -->
     <div
       v-if="isSidebarCollapsed"
-      @click="isSidebarCollapsed = false"
+      @click="toggleGroupSidebar(false)"
       :style="{
         position: 'fixed',
-        top: '80px',
+        top: (sidebarTop || 80) + 'px',
         bottom: '16px',
-        left: (sidebarLeft || 186) + 'px',
+        left: (sidebarLeft ?? defaultSidebarLeft) + 'px',
         width: '26px',
-        background: 'var(--arl-bg-white)',
+        background: 'var(--arl-bg-sticky)',
         borderRight: '1px solid var(--arl-border-color)',
         display: 'flex',
         flexDirection: 'column',
@@ -373,9 +375,8 @@
           :columns="columns"
           :pagination="false"
           :scroll="{ x: 1000 }"
-          bordered
           class="arl-scope-table"
-          size="middle"
+          size="small"
           :rowKey="(record) => record._id"
         >
           <template #bodyCell="{ column, record }">
@@ -450,7 +451,7 @@
                                   <div v-if="record.domain_status?.[item]?.task_name"><b>{{ assetText('assets.relatedTask') }}</b> {{ record.domain_status[item].task_name }}</div>
                                   <div v-if="record.domain_status?.[item]?.sync_time"><b>{{ assetText('assets.syncedAt') }}</b> {{ record.domain_status[item].sync_time }}</div>
                                   <div v-if="record.domain_status?.[item]?.task_id" style="margin-top: 4px; border-top: 1px dashed rgba(255,255,255,0.3); padding-top: 4px;">
-                                    <a style="color: #40a9ff; font-weight: 500;" @click="goToReconDetail(record.domain_status[item].task_id)">
+                                    <a style="color: var(--arl-theme-color); font-weight: 500;" @click="goToReconDetail(record.domain_status[item].task_id)">
                                       {{ assetText('assets.viewEnterpriseTaskDetails') }}
                                     </a>
                                   </div>
@@ -597,7 +598,7 @@
               <div style="font-size: 13px; color: var(--arl-text-color); opacity: 0.65; max-width: 600px; margin: 0 auto 18px; line-height: 1.6;">
                 {{ assetText('assets.emptyGuideDesc') }}
               </div>
-              <div style="display: inline-flex; align-items: center; gap: 8px; background: var(--arl-bg-light, rgba(0,0,0,0.02)); border: 1px solid var(--arl-border-color); border-radius: 6px; padding: 10px 18px; margin-bottom: 24px; font-size: 12px; color: var(--arl-text-color); opacity: 0.85;">
+              <div style="display: inline-flex; align-items: center; gap: 8px; background: var(--arl-bg-light); border: 1px solid var(--arl-border-color); border-radius: 6px; padding: 10px 18px; margin-bottom: 24px; font-size: 12px; color: var(--arl-text-color); opacity: 0.85;">
                 <ApartmentOutlined style="color: var(--arl-theme-color);" />
                 <span>{{ assetText('assets.architectureHierarchyTip') }}</span>
               </div>
@@ -610,17 +611,18 @@
                 </a-button>
               </div>
             </div>
-            <a-empty v-else :description="assetText('tasks.noData')" />
+            <ArlEmpty v-else :description="assetText('tasks.noData')" />
           </template>
         </a-table>
 
-        <div class="table-pagination-footer">
-          <div class="pagination-summary">{{ assetText('tasks.paginationSummary', { pages: Math.ceil(pagination.total / pagination.pageSize) || 1, total: pagination.total }) }}</div>
+        <div class="arl-pagination-bar">
+          <div class="pagination-info">{{ assetText('tasks.paginationSummary', { pages: Math.ceil(pagination.total / pagination.pageSize) || 1, total: pagination.total }) }}</div>
           <a-pagination
             :pageSizeOptions="$pageSizeOptions"
             v-model:current="pagination.current"
             v-model:pageSize="pagination.pageSize"
             :total="pagination.total"
+            size="small"
             show-size-changer
             @change="handleTableChange"
             @showSizeChange="handleTableChange"
@@ -835,7 +837,7 @@
 
                 <div v-if="wizardAutoScan" style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--arl-border-color);">
                   <a-row :gutter="12">
-                    <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
+                    <a-col :xs="24" :md="assetLocale !== 'zh-CN' ? 24 : 12">
                       <a-form-item :label="assetText('tasks.scanPolicy')" :label-col="{ style: { width: assetLocale !== 'zh-CN' ? '160px' : '80px' } }" :wrapper-col="{ style: { width: assetLocale !== 'zh-CN' ? 'calc(100% - 160px)' : 'calc(100% - 80px)' } }" :class="assetLocale !== 'zh-CN' ? 'asset-form-spacing' : 'asset-flush-bottom'" required>
                         <a-select
                           v-model:value="wizardPolicyId"
@@ -845,7 +847,7 @@
                         />
                       </a-form-item>
                     </a-col>
-                    <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
+                    <a-col :xs="24" :md="assetLocale !== 'zh-CN' ? 24 : 12">
                       <a-form-item :label="assetText('tasks.taskTypeLabel')" :label-col="{ style: { width: assetLocale !== 'zh-CN' ? '160px' : '80px' } }" :wrapper-col="{ style: { width: assetLocale !== 'zh-CN' ? 'calc(100% - 160px)' : 'calc(100% - 80px)' } }" class="asset-flush-bottom">
                         <a-radio-group v-model:value="wizardTaskType" size="small">
                           <a-radio-button value="oneshot">{{ assetText('assets.oneTimeScan') }}</a-radio-button>
@@ -863,7 +865,7 @@
                   <span class="asset-section-caption">{{ assetText('tasks.advancedDiscoverySettings') }}</span>
                 </div>
                 <a-row :gutter="16">
-                  <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
+                  <a-col :xs="24" :md="assetLocale !== 'zh-CN' ? 24 : 12">
                     <a-form-item
                       :label="assetText('tasks.investmentDepthLabel')"
                       :label-col="{ style: { width: assetLocale !== 'zh-CN' ? '160px' : '90px' } }"
@@ -881,7 +883,7 @@
                       />
                     </a-form-item>
                   </a-col>
-                  <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
+                  <a-col :xs="24" :md="assetLocale !== 'zh-CN' ? 24 : 12">
                     <a-form-item
                       :label="assetText('tasks.minimumOwnershipLabel')"
                       :label-col="{ style: { width: assetLocale !== 'zh-CN' ? '160px' : '90px' } }"
@@ -974,13 +976,13 @@
             </div>
           </div>
 
-          <a-form layout="vertical" style="background: var(--arl-bg-light); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--arl-border-color); margin-bottom: 20px;">
+          <a-form layout="vertical" :label-wrap="true" style="background: var(--arl-bg-light); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--arl-border-color); margin-bottom: 20px;">
             <a-form-item :label="assetText('assets.automaticDiscovery')" class="asset-form-spacing">
               <a-checkbox v-model:checked="wizardAutoScan">{{ assetText('assets.runActiveDiscoveryOnTheSelectedDomainsNow') }}</a-checkbox>
             </a-form-item>
             <template v-if="wizardAutoScan">
               <a-row :gutter="16">
-                <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
+                <a-col :xs="24" :md="assetLocale !== 'zh-CN' ? 24 : 12">
                   <a-form-item :label="assetText('tasks.taskTypeLabel')" :class="assetLocale !== 'zh-CN' ? 'asset-form-spacing' : 'asset-flush-bottom'">
                     <a-radio-group v-model:value="wizardTaskType">
                       <a-radio-button value="oneshot">{{ assetText('assets.oneTimeScan') }}</a-radio-button>
@@ -988,7 +990,7 @@
                     </a-radio-group>
                   </a-form-item>
                 </a-col>
-                <a-col :span="assetLocale !== 'zh-CN' ? 24 : 12">
+                <a-col :xs="24" :md="assetLocale !== 'zh-CN' ? 24 : 12">
                   <a-form-item :label="assetText('tasks.scanPolicy')" class="asset-flush-bottom" required>
                     <a-select v-model:value="wizardPolicyId" :placeholder="assetText('tasks.selectAScanPolicy')" :options="policyList.map(p => ({ value: p._id, label: p.name }))" />
                   </a-form-item>
@@ -1333,7 +1335,7 @@
       <div style="font-size: 12px; color: var(--arl-text-color); opacity: 0.75; margin-bottom: 14px; line-height: 1.6;">
         {{ assetText('assets.quickCreateOrganizationDesc') }}
       </div>
-      <a-form layout="vertical">
+      <a-form layout="vertical" :label-wrap="true">
         <a-form-item :label="assetText('assets.organizationGroupName')" required>
           <a-input
             v-model:value="quickGroupName"
@@ -1391,7 +1393,7 @@
         <a-radio-group v-model:value="deleteGroupForm.action" style="display: flex; flex-direction: column; gap: 12px; width: 100%;">
           <div
             style="border: 1px solid var(--arl-border-color); border-radius: 6px; padding: 12px; cursor: pointer; transition: all 0.2s;"
-            :style="deleteGroupForm.action === 'dissolve' ? { borderColor: 'var(--arl-theme-color)', background: 'rgba(250, 84, 28, 0.03)' } : {}"
+            :style="deleteGroupForm.action === 'dissolve' ? { borderColor: 'var(--arl-theme-color)', background: 'var(--arl-theme-soft-bg)' } : {}"
             @click="deleteGroupForm.action = 'dissolve'"
           >
             <a-radio value="dissolve" style="font-weight: 500; align-items: flex-start;">
@@ -1407,7 +1409,7 @@
           <div
             style="border: 1px solid var(--arl-border-color); border-radius: 6px; padding: 12px; transition: all 0.2s;"
             :style="[
-              deleteGroupForm.action === 'transfer' ? { borderColor: 'var(--arl-theme-color)', background: 'rgba(250, 84, 28, 0.03)' } : {},
+              deleteGroupForm.action === 'transfer' ? { borderColor: 'var(--arl-theme-color)', background: 'var(--arl-theme-soft-bg)' } : {},
               availableTransferGroups.length === 0 ? { opacity: 0.6, cursor: 'not-allowed' } : { cursor: 'pointer' }
             ]"
             @click="availableTransferGroups.length > 0 && (deleteGroupForm.action = 'transfer')"
@@ -1554,14 +1556,33 @@ import { ref, reactive, computed, createVNode, watch, onActivated, onDeactivated
 import Sortable from 'sortablejs';
 import { useSticky } from '../utils/useSticky';
 const sidebarAnchorRef = ref(null);
-const sidebarLeft = ref(186);
+const sidebarLeft = ref(null);
+const sidebarTop = ref(80);
+let sidebarRafId = null;
 
 const updateSidebarLeft = () => {
   if (sidebarAnchorRef.value) {
     const rect = sidebarAnchorRef.value.getBoundingClientRect();
-    if (rect.left > 0) {
+    if (rect.left >= 0) {
       sidebarLeft.value = rect.left;
     }
+    if (rect.top > 0) {
+      sidebarTop.value = rect.top;
+    }
+  }
+};
+
+const scheduleSidebarMetricsSync = () => {
+  updateSidebarLeft();
+  syncResponsiveSidebarCollapse();
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    if (sidebarRafId !== null) {
+      window.cancelAnimationFrame(sidebarRafId);
+    }
+    sidebarRafId = window.requestAnimationFrame(() => {
+      sidebarRafId = null;
+      updateSidebarLeft();
+    });
   }
 };
 
@@ -1667,7 +1688,7 @@ const getDomainStatusLabel = (record, domain) => {
 const getDomainTagStyle = (record, domain) => {
   return {
     background: 'var(--arl-bg-light, #f8fafc)',
-    color: 'var(--arl-text-color, #334155)',
+    color: 'var(--arl-text-color)',
     borderColor: 'var(--arl-border-color, #e2e8f0)',
     marginRight: '0'
   };
@@ -1802,7 +1823,24 @@ const resetSearch = () => {
 const handleTableChange = (page, pageSize) => { pagination.current = page; pagination.pageSize = pageSize; fetchData(); };
 
 
-const isSidebarCollapsed = ref(false);
+const defaultSidebarLeft = computed(() => (assetLocale.value !== 'zh-CN' ? 260 : 190));
+const getShouldAutoCollapseSidebar = () => (
+  typeof window !== 'undefined' && (window.innerWidth < 1366 || (assetLocale.value !== 'zh-CN' && window.innerWidth < 1440))
+);
+const userToggledSidebar = ref(false);
+const isSidebarCollapsed = ref(getShouldAutoCollapseSidebar());
+const toggleGroupSidebar = (collapsed) => {
+  userToggledSidebar.value = true;
+  isSidebarCollapsed.value = collapsed;
+};
+const syncResponsiveSidebarCollapse = () => {
+  if (!userToggledSidebar.value) {
+    isSidebarCollapsed.value = getShouldAutoCollapseSidebar();
+  }
+};
+watch(assetLocale, () => {
+  nextTick(scheduleSidebarMetricsSync);
+});
 const activeGroupId = ref('all');
 const groupSearchKey = ref('');
 const groupList = ref([]);
@@ -2190,23 +2228,31 @@ const submitBatchMove = async () => {
 
 // initialize
 let siderObserver = null;
+let contentResizeObserver = null;
 
 onMounted(() => {
   if (route.path === '/group') {
     fetchGroups();
   }
-  updateSidebarLeft();
-  window.addEventListener('resize', updateSidebarLeft);
+  scheduleSidebarMetricsSync();
+  window.addEventListener('resize', scheduleSidebarMetricsSync);
   const siderEl = document.querySelector('.ant-layout-sider');
   if (siderEl) {
     const handleSiderChange = () => {
-      updateSidebarLeft();
+      scheduleSidebarMetricsSync();
       setTimeout(updateSidebarLeft, 250);
       setTimeout(updateSidebarLeft, 550);
     };
     siderObserver = new MutationObserver(handleSiderChange);
     siderObserver.observe(siderEl, { attributes: true, attributeFilter: ['style', 'class'] });
     siderEl.addEventListener('transitionend', updateSidebarLeft);
+  }
+  const contentEl = document.querySelector('.ant-layout-content');
+  if (contentEl && typeof ResizeObserver !== 'undefined') {
+    contentResizeObserver = new ResizeObserver(() => {
+      scheduleSidebarMetricsSync();
+    });
+    contentResizeObserver.observe(contentEl);
   }
   loadPendingReconTasks();
   if (pendingReconTasks.value.some(t => t.status === 'running')) {
@@ -3541,12 +3587,23 @@ onDeactivated(() => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener('resize', updateSidebarLeft);
+  window.removeEventListener('resize', scheduleSidebarMetricsSync);
+  if (sidebarRafId !== null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+    window.cancelAnimationFrame(sidebarRafId);
+    sidebarRafId = null;
+  }
   const siderEl = document.querySelector('.ant-layout-sider');
   if (siderEl) {
     siderEl.removeEventListener('transitionend', updateSidebarLeft);
   }
-  if (siderObserver) siderObserver.disconnect();
+  if (siderObserver) {
+    siderObserver.disconnect();
+    siderObserver = null;
+  }
+  if (contentResizeObserver) {
+    contentResizeObserver.disconnect();
+    contentResizeObserver = null;
+  }
   if (sortableInstance) {
     sortableInstance.destroy();
     sortableInstance = null;
@@ -3645,13 +3702,13 @@ onUnmounted(() => {
 
 /* 一体化卡片容器 */
 .arl-scope-main-card {
-  background: var(--arl-bg-white, #ffffff);
-  border: 1px solid var(--arl-border-color, #e2e8f0);
+  background: var(--arl-bg-white);
+  border: 1px solid var(--arl-border-color);
   border-radius: 10px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
   padding: 20px 24px;
   position: relative;
-  min-height: calc(100vh - 128px);
+  min-height: calc(100vh - 104px);
 }
 
 /* 顶部吸附操作区 */
@@ -3659,12 +3716,14 @@ onUnmounted(() => {
   position: sticky;
   top: 0px;
   z-index: 10;
-  background-color: var(--arl-bg-white, #ffffff);
+  background-color: var(--arl-bg-sticky);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   margin: -20px -24px 16px -24px;
   padding: 20px 24px 14px 24px;
   border-top-left-radius: 10px;
   border-top-right-radius: 10px;
-  border-bottom: 1px solid var(--arl-border-color, #e2e8f0);
+  border-bottom: 1px solid var(--arl-border-color);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.02);
 }
 
@@ -3741,8 +3800,8 @@ onUnmounted(() => {
   gap: 6px;
   font-size: 13px;
   padding: 4px 12px;
-  background: rgba(250, 84, 28, 0.08);
-  border: 1px solid rgba(250, 84, 28, 0.2);
+  background: var(--arl-theme-soft-bg);
+  border: 1px solid var(--arl-theme-soft-border);
   border-radius: 6px;
 }
 
@@ -3830,7 +3889,7 @@ onUnmounted(() => {
   border-radius: 4px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
-  color: var(--arl-text-color, #334155);
+  color: var(--arl-text-color);
   max-width: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3838,9 +3897,9 @@ onUnmounted(() => {
 }
 .scope-compact-count-badge {
   font-size: 11px;
-  color: var(--arl-theme-color, #1890ff);
-  background: rgba(24, 144, 255, 0.08);
-  border: 1px solid rgba(24, 144, 255, 0.2);
+  color: var(--arl-theme-color);
+  background: var(--arl-theme-soft-bg);
+  border: 1px solid var(--arl-theme-soft-border);
   border-radius: 10px;
   padding: 1px 7px;
   cursor: pointer;
@@ -3849,7 +3908,7 @@ onUnmounted(() => {
   transition: all 0.2s ease;
 }
 .scope-compact-count-badge:hover {
-  background: var(--arl-theme-color, #1890ff);
+  background: var(--arl-theme-color);
   color: #fff;
 }
 .scope-compact-progress-row {
@@ -3935,13 +3994,13 @@ onUnmounted(() => {
   justify-content: space-between;
   padding: 3px 6px;
   border-radius: 4px;
-  background: var(--arl-bg-light, #fafafa);
+  background: var(--arl-bg-light);
   font-size: 12px;
   cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 .scope-popover-item:hover {
-  background: rgba(24, 144, 255, 0.08);
+  background: var(--arl-theme-soft-bg);
 }
 .scope-popover-item-main {
   display: flex;
@@ -4063,19 +4122,6 @@ onUnmounted(() => {
   opacity: 1;
 }
 
-/* 分页条 */
-.table-pagination-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 4px 0 4px;
-}
-.pagination-summary {
-  color: var(--arl-text-color);
-  opacity: 0.65;
-  font-size: 13px;
-}
-
 /* 左侧集团侧边栏样式 */
 .sidebar-header {
   padding: 14px 16px;
@@ -4128,7 +4174,7 @@ onUnmounted(() => {
   transition: all 0.2s ease !important;
 }
 .sidebar-group-menu :deep(.ant-menu-item-selected) {
-  background-color: rgba(250, 84, 28, 0.08) !important;
+  background-color: var(--arl-theme-soft-bg) !important;
   color: var(--arl-theme-color) !important;
   font-weight: 600 !important;
 }
@@ -4186,7 +4232,7 @@ onUnmounted(() => {
 }
 
 .group-nav-item-active {
-  background-color: rgba(250, 84, 28, 0.08) !important;
+  background-color: var(--arl-theme-soft-bg) !important;
   color: var(--arl-theme-color) !important;
   font-weight: 600 !important;
 }
@@ -4221,7 +4267,7 @@ onUnmounted(() => {
 
 .group-drag-handle:hover {
   opacity: 1 !important;
-  background: rgba(250, 84, 28, 0.1);
+  background: var(--arl-theme-soft-bg);
 }
 
 .group-drag-handle:active {
@@ -4242,7 +4288,7 @@ onUnmounted(() => {
 .group-drag-active {
   opacity: 0.96 !important;
   background: var(--arl-bg-white) !important;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(250, 84, 28, 0.12) !important;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12), 0 2px 6px color-mix(in srgb, var(--arl-theme-color) 16%, transparent) !important;
   border: 1px solid var(--arl-theme-color) !important;
   border-radius: 6px !important;
   transform: scale(1.02);
@@ -4253,10 +4299,10 @@ onUnmounted(() => {
 /* 目标位置的幽灵占位符状态 (Ghost Class) */
 .group-drag-ghost {
   opacity: 0.55 !important;
-  background: rgba(250, 84, 28, 0.06) !important;
+  background: var(--arl-theme-soft-bg) !important;
   border: 1px dashed var(--arl-theme-color) !important;
   border-radius: 6px !important;
-  box-shadow: inset 0 0 8px rgba(250, 84, 28, 0.08) !important;
+  box-shadow: inset 0 0 8px var(--arl-theme-soft-bg) !important;
 }
 
 /* 选中但未开始移动状态 (Chosen Class) */
@@ -4288,7 +4334,7 @@ onUnmounted(() => {
 .asset-width-160 { width: 160px; }
 .asset-theme-text { color: var(--arl-theme-color); }
 .asset-form-spacing { margin-bottom: 8px; }
-.asset-theme-fallback { color: var(--arl-theme-color, #1890ff); }
+.asset-theme-fallback { color: var(--arl-theme-color); }
 .asset-inline-icon { margin-right: 4px; }
 .asset-text-action { padding: 0; height: auto; }
 .asset-risk-form { margin-top: 20px; }
@@ -4305,8 +4351,8 @@ onUnmounted(() => {
 
 .mode-card {
   position: relative;
-  background: var(--arl-bg-light, #fafafa);
-  border: 1.5px solid var(--arl-border-color, #d9d9d9);
+  background: var(--arl-bg-light);
+  border: 1.5px solid var(--arl-border-color);
   border-radius: 8px;
   padding: 12px 14px;
   cursor: pointer;
@@ -4318,16 +4364,16 @@ onUnmounted(() => {
 }
 
 .mode-card:hover {
-  border-color: var(--arl-theme-color, #1890ff);
-  background: var(--arl-bg-white, #ffffff);
+  border-color: var(--arl-theme-color);
+  background: var(--arl-bg-white);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   transform: translateY(-1px);
 }
 
 .mode-card-active {
-  border-color: var(--arl-theme-color, #1890ff) !important;
-  background: var(--arl-bg-white, #ffffff) !important;
-  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.12), 0 3px 10px rgba(0, 0, 0, 0.08) !important;
+  border-color: var(--arl-theme-color) !important;
+  background: var(--arl-bg-white) !important;
+  box-shadow: 0 0 0 2px var(--arl-theme-soft-bg), 0 3px 10px rgba(0, 0, 0, 0.08) !important;
 }
 
 .mode-card-header {
@@ -4378,15 +4424,15 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  background: var(--arl-bg-white, #ffffff);
-  border: 1px solid var(--arl-border-color, #e8e8e8);
+  background: var(--arl-bg-white);
+  border: 1px solid var(--arl-border-color);
   border-radius: 6px;
   margin-top: 10px;
   transition: border-color 0.2s;
 }
 
 .arl-settings-row:hover {
-  border-color: var(--arl-theme-color, #1890ff);
+  border-color: var(--arl-theme-color);
 }
 
 .settings-row-left {
@@ -4407,23 +4453,23 @@ onUnmounted(() => {
 .settings-row-title {
   font-size: 13px;
   font-weight: 500;
-  color: var(--arl-text-color, #262626);
+  color: var(--arl-text-color);
 }
 
 .settings-row-help {
-  color: #bfbfbf;
+  color: var(--arl-text-secondary);
   cursor: pointer;
   font-size: 13px;
   transition: color 0.2s;
 }
 
 .settings-row-help:hover {
-  color: var(--arl-theme-color, #1890ff);
+  color: var(--arl-theme-color);
 }
 
 .settings-row-subtitle {
   font-size: 12px;
-  color: var(--arl-text-color, #8c8c8c);
+  color: var(--arl-text-secondary);
   opacity: 0.75;
   line-height: 1.4;
 }
@@ -4441,5 +4487,17 @@ onUnmounted(() => {
   opacity: 0.75;
   min-width: 72px;
   white-space: nowrap;
+}
+
+.page-wide-text .settings-row-status {
+  min-width: auto;
+  white-space: normal;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.page-wide-text .settings-row-right {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 </style>

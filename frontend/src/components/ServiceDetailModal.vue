@@ -50,11 +50,11 @@
               :href="getEndpointUrl(record)"
               target="_blank"
               rel="noopener noreferrer"
-              style="font-family: monospace; font-size: 13px; text-decoration: underline;"
+              style="font-family: var(--arl-font-mono); font-size: 13px; text-decoration: underline;"
             >
               {{ record.ip }}:{{ record.port_id }}
             </a>
-            <span v-else style="font-family: monospace; font-size: 13px;">
+            <span v-else style="font-family: var(--arl-font-mono); font-size: 13px;">
               {{ record.ip }}:{{ record.port_id }}
             </span>
           </div>
@@ -86,12 +86,15 @@
 <script setup>
 import { useI18n } from 'vue-i18n';
 
-import { ref, computed, watch, reactive } from 'vue';
+import { ref, computed, watch, reactive, getCurrentInstance } from 'vue';
 import { message } from 'ant-design-vue';
 import { SearchOutlined, CopyOutlined } from '@ant-design/icons-vue';
 import { copyText } from '../utils/clipboard';
+import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 
 const { t: taskText } = useI18n({ useScope: 'global' });
+const pageSizeOptions = getCurrentInstance()?.appContext.config.globalProperties.$pageSizeOptions || ['10', '20', '50', '100', '200', '500'];
+const globalPageSize = useGlobalPageSize(10);
 
 const props = defineProps({
   open: { type: Boolean, required: true },
@@ -104,14 +107,24 @@ const searchKeyword = ref('');
 
 const pagination = reactive({
   current: 1,
-  pageSize: 10,
+  pageSize: globalPageSize.value,
+  size: 'small',
   showSizeChanger: true,
-  pageSizeOptions: ['10', '20', '50', '100'],
+  pageSizeOptions,
   showTotal: (total) => taskText('tasks.totalCount', { count: total }),
   onChange: (page, pageSize) => {
     pagination.current = page;
-    pagination.pageSize = pageSize;
+    if (pageSize && pageSize !== pagination.pageSize) {
+      pagination.pageSize = pageSize;
+    }
+    if (pagination.pageSize !== globalPageSize.value) {
+      globalPageSize.value = pagination.pageSize;
+    }
   }
+});
+
+watch(globalPageSize, (newSize) => {
+  pagination.pageSize = newSize;
 });
 
 const totalCount = computed(() => {

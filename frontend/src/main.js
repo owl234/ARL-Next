@@ -1,7 +1,7 @@
 import { createApp } from 'vue'
+import 'ant-design-vue/dist/reset.css' // Vue3/Antd4 的样式引入方式
 import './style.css'
 import App from './App.vue'
-import 'ant-design-vue/dist/reset.css' // Vue3/Antd4 的样式引入方式
 import router from './router'
 import { i18n, initializeLocale } from './i18n'
 

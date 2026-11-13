@@ -15,7 +15,7 @@
           </span>
         </a-descriptions-item>
         <a-descriptions-item v-if="hasNewVersion" :label="pageText('pages.releaseNotes')">
-          <div class="markdown-release-notes hide-scrollbar" v-html="renderedReleaseNotes" style="max-height: 380px; overflow-y: auto; line-height: 1.6; font-size: 13px; background: rgba(0,0,0,0.02); padding: 12px 16px; border-radius: 6px; border: 1px solid var(--arl-border-color);"></div>
+          <div class="markdown-release-notes hide-scrollbar" v-html="renderedReleaseNotes" style="max-height: 380px; overflow-y: auto; line-height: 1.6; font-size: 13px; background: var(--arl-bg-subtle); padding: 12px 16px; border-radius: 6px; border: 1px solid var(--arl-border-color);"></div>
         </a-descriptions-item>
       </a-descriptions>
 
@@ -60,7 +60,7 @@
               <span class="heartbeat-dot"></span>
               <span>{{ pageText('pages.runningLabel2') }}</span>
             </div>
-            <div style="font-family: monospace; font-size: 13px; font-weight: 600; color: var(--arl-text-color); background: rgba(0,0,0,0.04); padding: 2px 8px; border-radius: 4px;">
+            <div style="font-family: monospace; font-size: 13px; font-weight: 600; color: var(--arl-text-color); background: var(--arl-bg-subtle); padding: 2px 8px; border-radius: 4px;">
               {{ pageText('pages.elapsed') }} {{ formattedElapsedTime }}
             </div>
           </div>
@@ -71,7 +71,7 @@
       <div style="margin-bottom: 12px; background: var(--arl-bg-light); border: 1px solid var(--arl-border-color); padding: 10px 14px; border-radius: 6px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
           <span style="font-size: 13px; font-weight: 500; color: var(--arl-text-color);">{{ currentStageTitle }}</span>
-          <span style="font-size: 13px; font-weight: 600; color: #1677ff;">{{ updateProgress }}%</span>
+          <span style="font-size: 13px; font-weight: 600; color: var(--arl-theme-color);">{{ updateProgress }}%</span>
         </div>
         <a-progress :percent="updateProgress" :show-info="false" :status="updateHasError ? 'exception' : (updateFinished ? 'success' : 'active')" stroke-linecap="square" />
       </div>
@@ -162,7 +162,7 @@ const renderedReleaseNotes = computed(() => {
   html = html.replace(/^# (.*$)/gim, '<h2 style="margin: 16px 0 8px 0; font-weight: 700; font-size: 15px; color: var(--arl-text-color);">$1</h2>');
 
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong style="font-weight: 600;">$1</strong>');
-  html = html.replace(/`([^`]+)`/g, '<code style="background: rgba(0,0,0,0.06); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 12px;">$1</code>');
+  html = html.replace(/`([^`]+)`/g, '<code style="background: var(--arl-bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 12px;">$1</code>');
 
   html = html.replace(/^\s*-\s+(.*$)/gim, '<li style="margin-left: 18px; line-height: 1.8; list-style-type: disc;">$1</li>');
   html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, '<li style="margin-left: 18px; line-height: 1.8; list-style-type: decimal;">$2</li>');
@@ -463,8 +463,8 @@ defineExpose({
 
 .update-layer-box {
   margin-bottom: 12px;
-  background: rgba(22, 119, 255, 0.04);
-  border: 1px dashed rgba(22, 119, 255, 0.3);
+  background: var(--arl-theme-soft-bg);
+  border: 1px dashed var(--arl-theme-soft-border);
   border-radius: 6px;
   padding: 8px 12px;
 }
@@ -473,7 +473,7 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #1677ff;
+  color: var(--arl-theme-color);
   margin-bottom: 6px;
 }
 
@@ -499,7 +499,7 @@ defineExpose({
 
 .layer-id {
   font-weight: 600;
-  color: #1677ff;
+  color: var(--arl-theme-color);
 }
 
 .layer-status {

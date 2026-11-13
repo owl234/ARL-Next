@@ -10,11 +10,10 @@
       rowKey="ip"
     >
       <template #emptyText>
-        <a-empty v-if="loadFailed"
-                 :description="taskText('tasks.failedToLoadCClassNetworkDetailsClose')">
+        <ArlEmpty v-if="loadFailed" :description="taskText('tasks.failedToLoadCClassNetworkDetailsClose')" compact>
           <a-button size="small" type="primary" @click="fetchDetail">{{ taskText('tasks.reload') }}</a-button>
-        </a-empty>
-        <a-empty v-else :description="taskText('tasks.noAssociatedDomainRecordsForThisCClass')" />
+        </ArlEmpty>
+        <ArlEmpty v-else :description="taskText('tasks.noAssociatedDomainRecordsForThisCClass')" compact />
       </template>
       <template #bodyCell="{ column, record, index }">
         <template v-if="column.key === 'index'">
@@ -22,11 +21,11 @@
         </template>
         <template v-else-if="column.key === 'domains'">
           <div v-if="record.domains && record.domains.length > 0">
-            <div v-for="(domain, idx) in record.domains" :key="idx" style="font-family: monospace;">
+            <div v-for="(domain, idx) in record.domains" :key="idx" style="font-family: var(--arl-font-mono);">
               {{ domain }}
             </div>
           </div>
-          <span v-else style="color: #ccc;">-</span>
+          <span v-else style="color: var(--arl-text-secondary);">-</span>
         </template>
       </template>
     </a-table>
