@@ -19,7 +19,7 @@ def sync_task_to_scope(task_id, scope_id, push_flag=False):
         tasks.update_one(query, {"$set": {
             "sync_status": TaskSyncStatus.RUNNING, "sync_scope_id": scope_id,
             "sync_scope_name": scope.get("name", "")
-        }, "$unset": {"sync_error": ""}})
+        }, "$unset": {"sync_error": "", "sync_summary": ""}})
         sync_asset(task_id=task_id, scope_id=scope_id, push_flag=push_flag)
         tasks.update_one(query, {"$set": {
             "sync_status": TaskSyncStatus.DEFAULT, "synced_scope_id": scope_id,

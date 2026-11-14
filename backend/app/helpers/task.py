@@ -366,8 +366,10 @@ def restart_task(task_id):
     task_data["celery_id"] = ""
     task_data.pop("statistic", None)
     task_data.pop("error_msg", None)
+    task_data.pop("phase_errors", None)
     task_data.pop("end_reason", None)
     task_data.pop("sync_status", None)
+    task_data.pop("sync_summary", None)
     for field in ("sync_error", "sync_scope_id", "sync_scope_name", "synced_scope_id", "synced_scope_name"):
         task_data.pop(field, None)
     task_data.pop("task_id", None)

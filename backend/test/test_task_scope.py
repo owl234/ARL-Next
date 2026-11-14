@@ -220,7 +220,8 @@ class ScopeSubmissionTests(ScopeFixture):
         item = self.create()[0]
         old_id = ObjectId(item['task_id'])
         self.db.task.update_one({'_id': old_id}, {'$set': {'status': 'done', 'sync_status': 'error', 'sync_error': 'old',
-            'synced_scope_id': str(self.scope_id), 'sync_scope_id': str(self.scope_id)}})
+            'synced_scope_id': str(self.scope_id), 'sync_scope_id': str(self.scope_id),
+            'sync_summary': {'total_new': 3, 'total_update': 1}, 'phase_errors': {'alt_dns': 'timeout'}}})
         restarted = self.restart(item['task_id'])
         self.assertNotEqual(restarted['task_id'], item['task_id'])
         fresh = self.stored(restarted)
@@ -228,6 +229,8 @@ class ScopeSubmissionTests(ScopeFixture):
         self.assertEqual(fresh['sync_status'], 'default')
         self.assertNotIn('sync_error', fresh)
         self.assertNotIn('synced_scope_id', fresh)
+        self.assertNotIn('sync_summary', fresh)
+        self.assertNotIn('phase_errors', fresh)
         self.assertEqual(self.db.task.find_one({'_id': old_id})['sync_error'], 'old')
 
     def test_restart_revalidates_deleted_or_changed_group_before_dispatch(self):
@@ -347,9 +350,11 @@ class ScopeSyncTests(ScopeFixture):
     def test_sync_failure_and_manual_retry_clear_error_after_success(self):
         item = self.create()[0]
         self.add_results(item['task_id'])
+        self.db.task.update_one({'_id': ObjectId(item['task_id'])}, {'$set': {'sync_summary': {'total_new': 2, 'total_update': 1}}})
         with patch.object(self.core_sync_module, 'sync_asset', side_effect=RuntimeError('fixture database failure')):
             self.assertFalse(self.sync(item['task_id'], str(self.scope_id)))
         self.assertEqual(self.stored(item)['sync_error'], 'fixture database failure')
+        self.assertNotIn('sync_summary', self.stored(item))
         self.assertTrue(self.sync(item['task_id'], str(self.scope_id)))
         self.assertNotIn('sync_error', self.stored(item))
         self.assertEqual(self.db.asset_site.count_documents({}), 1)
@@ -447,6 +452,31 @@ class HTTPTests(ScopeFixture):
         self.assertNotEqual(result['code'], 200)
         self.assertEqual(self.stored(item)['sync_status'], 'error')
         self.assertEqual(self.db.site.count_documents({}), 1)
+
+    def test_resync_clears_stale_sync_summary_on_claim_and_dispatch_failure(self):
+        item = self.create()[0]
+        self.add_results(item['task_id'])
+        self.db.task.update_one({'_id': ObjectId(item['task_id'])}, {'$set': {
+            'status': 'done',
+            'sync_status': 'default',
+            'sync_summary': {'total_new': 5, 'total_update': 2},
+        }})
+        result = self.post('sync/', {'task_id': item['task_id'], 'scope_id': str(self.scope_id)})
+        self.assertEqual(result['code'], 200)
+        claimed = self.stored(item)
+        self.assertEqual(claimed['sync_status'], 'waiting')
+        self.assertNotIn('sync_summary', claimed)
+
+        self.db.task.update_one({'_id': ObjectId(item['task_id'])}, {'$set': {
+            'sync_status': 'default',
+            'sync_summary': {'total_new': 4, 'total_update': 1},
+        }})
+        self.queue.error = RuntimeError('fixture queue unavailable')
+        failed = self.post('sync/', {'task_id': item['task_id'], 'scope_id': str(self.scope_id)})
+        self.assertNotEqual(failed['code'], 200)
+        errored = self.stored(item)
+        self.assertEqual(errored['sync_status'], 'error')
+        self.assertNotIn('sync_summary', errored)
 
 
 if __name__ == '__main__':

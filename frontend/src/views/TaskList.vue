@@ -1175,7 +1175,7 @@ import {
 import TycTaskModal from '../components/TycTaskModal.vue';
 import SyncToScopeModal from '../components/SyncToScopeModal.vue';
 import AssetScopeSelect from '../components/AssetScopeSelect.vue';
-import { getTaskAssetGroupState } from '../utils/taskAssetGroups';
+import { getTaskAssetGroupState, hasSyncSummary } from '../utils/taskAssetGroups';
 
 const { t: taskText, locale: taskLocale } = useI18n({ useScope: 'global' });
 
@@ -1776,12 +1776,6 @@ const getStatusIcon = (status) => {
 };
 
 const formatStatusText = (status) => formatTaskStatus(status);
-
-const hasSyncSummary = (record) => {
-  const s = record?.sync_summary;
-  if (!s || typeof s !== 'object') return false;
-  return Number(s.total_new || 0) > 0 || Number(s.total_update || 0) > 0;
-};
 
 const hasTaskErrorNotice = (record) => {
   if (!record) return false;

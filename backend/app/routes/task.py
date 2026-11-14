@@ -504,7 +504,7 @@ class SyncTask(ARLResource):
             "sync_status": TaskSyncStatus.WAITING,
             "sync_scope_id": scope_id,
             "sync_scope_name": asset_scope_data.get("name", "")
-        }, "$unset": {"sync_error": ""}})
+        }, "$unset": {"sync_error": "", "sync_summary": ""}})
         if not claimed:
             return utils.build_ret(ErrorMsg.TaskSyncDealing, {"task_id": task_id})
 

@@ -67,7 +67,6 @@ const updateGlobalCssVariables = () => {
   root.style.setProperty('--arl-terminal-bg', isDark ? '#0d0d0d' : '#141414');
   root.style.setProperty('--arl-terminal-border', isDark ? '#333333' : '#262626');
   root.style.setProperty('--arl-terminal-text', '#e5e5e5');
-  root.style.setProperty('--arl-text-secondary', isDark ? 'rgba(255, 255, 255, 0.65)' : '#64748b');
   root.style.setProperty('--arl-bg-sticky', isDark ? (hasBg ? 'rgba(14, 14, 14, 0.88)' : '#111111') : (hasBg ? 'rgba(255, 255, 255, 0.88)' : '#ffffff'));
   root.style.setProperty('--arl-bg-sticky-header', isDark ? (hasBg ? 'rgba(18, 18, 18, 0.90)' : '#141414') : (hasBg ? 'rgba(248, 250, 252, 0.90)' : '#f8fafc'));
   root.style.setProperty('--arl-bg-light', isDark ? (hasBg ? 'rgba(17, 17, 17, 0.3)' : '#111111') : (hasBg ? 'rgba(241, 245, 249, 0.3)' : '#f1f5f9'));
@@ -79,7 +78,7 @@ const updateGlobalCssVariables = () => {
   root.style.setProperty('--arl-bg-layout', isDark ? (hasBg ? 'rgba(0, 0, 0, 0.3)' : '#000000') : (hasBg ? 'rgba(241, 245, 249, 0.3)' : '#f1f5f9'));
   root.style.setProperty('--arl-border-color', isDark ? (hasBg ? 'rgba(51, 51, 51, 0.5)' : '#333333') : (hasBg ? 'rgba(226, 232, 240, 0.6)' : '#e2e8f0'));
   root.style.setProperty('--arl-text-color', isDark ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.85)');
-  root.style.setProperty('--arl-text-secondary', isDark ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.45)');
+  root.style.setProperty('--arl-text-secondary', isDark ? 'rgba(255, 255, 255, 0.65)' : '#64748b');
   
   if (isDark) {
     document.body.classList.add('dark-mode');

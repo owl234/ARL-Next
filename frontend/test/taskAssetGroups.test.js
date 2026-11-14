@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import { parse, compileScript } from 'vue/compiler-sfc';
-import { createAssetScopeLoader, getTaskAssetGroupState } from '../src/utils/taskAssetGroups.js';
+import { createAssetScopeLoader, getTaskAssetGroupState, hasSyncSummary } from '../src/utils/taskAssetGroups.js';
 import { i18n } from '../src/i18n/index.js';
 
 const state = () => ({ search: '', page: 1, options: [], loading: false, hasMore: true });
@@ -177,4 +177,21 @@ test('shared selector retains selected label while searching another page and cl
   assert.equal(context.selectedOption.value, null);
   assert.equal(events[0][0], 'update:value');
   assert.equal(events[0][1], 'group-a');
+});
+
+test('hasSyncSummary hides stale badges while sync is waiting, running, or failed', () => {
+  const withSummary = { sync_summary: { total_new: 2, total_update: 1 } };
+  assert.equal(hasSyncSummary(withSummary), true);
+  assert.equal(hasSyncSummary({ ...withSummary, sync_status: 'default' }), true);
+  assert.equal(hasSyncSummary({ sync_summary: { total_new: 0, total_update: 0 }, sync_status: 'default' }), false);
+  for (const sync_status of ['waiting', 'running', 'error']) {
+    assert.equal(hasSyncSummary({ ...withSummary, sync_status }), false);
+  }
+});
+
+test('App.vue sets --arl-text-secondary once without overwriting it later', () => {
+  const source = fs.readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8');
+  const matches = source.match(/--arl-text-secondary/g) || [];
+  assert.equal(matches.length, 1);
+  assert.ok(source.includes("root.style.setProperty('--arl-text-secondary', isDark ? 'rgba(255, 255, 255, 0.65)' : '#64748b');"));
 });

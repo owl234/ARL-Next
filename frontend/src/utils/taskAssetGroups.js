@@ -46,3 +46,11 @@ export function getTaskAssetGroupState(task) {
   const terminal = ['done', 'stop', 'error'].includes(task.status);
   return { id, label, color: 'default', text: terminal ? taskText('tasks.syncPending') : taskText('tasks.syncAfterCompletion') };
 }
+
+export function hasSyncSummary(record) {
+  if (!record) return false;
+  if (record.sync_status && record.sync_status !== 'default') return false;
+  const s = record.sync_summary;
+  if (!s || typeof s !== 'object') return false;
+  return Number(s.total_new || 0) > 0 || Number(s.total_update || 0) > 0;
+}
