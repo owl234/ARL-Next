@@ -818,7 +818,8 @@ class CheckUpdate(ARLResource):
         检查系统版本更新与获取更新日志（带内存缓存与本地回退）
         """
         force_refresh = flask_req.args.get('refresh', '').lower() in ('1', 'true')
-        result_data = check_system_update_info(force_refresh=force_refresh)
+        lang = flask_req.args.get('lang', 'zh-CN')
+        result_data = check_system_update_info(force_refresh=force_refresh, lang=lang)
         return {"code": 200, "message": "success", "data": result_data}
 
 @ns.route('/request_update_token')

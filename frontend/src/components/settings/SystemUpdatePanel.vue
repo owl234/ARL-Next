@@ -1,21 +1,49 @@
 <template>
   <div class="tab-content" style="padding: 20px;">
     <a-card data-setting-anchor="update" :title="pageText('pages.systemUpdateManagement')" :bordered="false" class="page-dialog-content">
+      <template #extra>
+        <a-button size="small" :loading="checkingVersion" @click="checkVersion(true)">
+          <template #icon><ReloadOutlined /></template>
+          {{ pageText('pages.checkForUpdates') }}
+        </a-button>
+      </template>
       <a-descriptions bordered :column="1">
         <a-descriptions-item :label="pageText('pages.currentVersionLabel2')">
           <a-tag color="blue">{{ formatSystemVersion(localVersion) }}</a-tag>
         </a-descriptions-item>
         <a-descriptions-item :label="pageText('pages.latestAvailableVersion')">
-          <a-tag :color="hasNewVersion ? 'red' : 'green'">{{ formatSystemVersion(remoteVersion) }}</a-tag>
+          <a-tag :color="hasNewVersion ? 'red' : (isOffline ? 'orange' : 'green')">{{ formatSystemVersion(remoteVersion) }}</a-tag>
           <span v-if="hasNewVersion" style="margin-left: 10px; color: #f5222d; font-weight: bold;">
             {{ pageText('pages.newVersionAvailableAnUpdateIsRecommended') }}
+          </span>
+          <span v-else-if="isOffline" style="margin-left: 10px; color: #faad14;">
+            {{ pageText('pages.unableToReachGithubCheckNetwork') }}
           </span>
           <span v-else-if="remoteVersion" style="margin-left: 10px; color: #52c41a;">
             {{ pageText('pages.alreadyUpToDate') }}
           </span>
         </a-descriptions-item>
-        <a-descriptions-item v-if="hasNewVersion" :label="pageText('pages.releaseNotes')">
-          <div class="markdown-release-notes hide-scrollbar" v-html="renderedReleaseNotes" style="max-height: 380px; overflow-y: auto; line-height: 1.6; font-size: 13px; background: var(--arl-bg-subtle); padding: 12px 16px; border-radius: 6px; border: 1px solid var(--arl-border-color);"></div>
+        <a-descriptions-item :label="pageText('pages.releaseNotes')">
+          <div v-if="checkingVersion && !renderedReleaseNotes" class="release-notes-placeholder">
+            {{ pageText('pages.loadingLabel2') }}
+          </div>
+          <div
+            v-else-if="renderedReleaseNotes"
+            class="markdown-release-notes"
+            v-html="renderedReleaseNotes"
+          ></div>
+          <div v-else class="release-notes-empty">
+            <span>{{ hasNewVersion ? pageText('pages.releaseNotesLoadFailedHint') : pageText('pages.noLocalReleaseNotesFound') }}</span>
+            <div class="release-notes-empty-actions">
+              <a-button size="small" :loading="checkingVersion" @click="checkVersion(true)">
+                <template #icon><ReloadOutlined /></template>
+                {{ pageText('pages.retryFetchReleaseNotes') }}
+              </a-button>
+              <a :href="releaseHtmlUrl" target="_blank" rel="noopener noreferrer">
+                {{ pageText('pages.viewOnGithubReleases') }}
+              </a>
+            </div>
+          </div>
         </a-descriptions-item>
       </a-descriptions>
 
@@ -104,13 +132,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onActivated, onDeactivated, onUnmounted, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { message, Modal } from 'ant-design-vue';
-import { GithubOutlined } from '@ant-design/icons-vue';
+import { GithubOutlined, ReloadOutlined } from '@ant-design/icons-vue';
 import request from '@/utils/request';
 
-const { t: pageText } = useI18n({ useScope: 'global' });
+const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 
 const reloadPage = () => {
   window.location.reload();
@@ -124,7 +152,11 @@ const formatSystemVersion = (version) => {
 const localVersion = ref('');
 const remoteVersion = ref('');
 const releaseNotes = ref('');
+const releaseHtmlUrl = ref('https://github.com/owl234/ARL-Next/releases');
 const hasNewVersion = ref(false);
+const isOffline = ref(false);
+const checkingVersion = ref(false);
+const checkVersionSeq = ref(0);
 const forceUpdateMode = ref(false);
 
 const updateModalVisible = ref(false);
@@ -151,46 +183,86 @@ const formattedElapsedTime = computed(() => {
 });
 
 const renderedReleaseNotes = computed(() => {
-  if (!releaseNotes.value) return '';
-  let html = releaseNotes.value
+  const source = (releaseNotes.value || '').replace(/\u0000/g, '').trim();
+  if (!source) return '';
+
+  const tokens = [];
+  const stash = (fragment) => {
+    const idx = tokens.length;
+    tokens.push(fragment);
+    return `\u0000TOKEN_${idx}\u0000`;
+  };
+
+  let html = source
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 
-  html = html.replace(/^### (.*$)/gim, '<h4 style="margin: 12px 0 6px 0; font-weight: 600; font-size: 13px; color: var(--arl-text-color);">$1</h4>');
-  html = html.replace(/^## (.*$)/gim, '<h3 style="margin: 14px 0 8px 0; font-weight: 700; font-size: 14px; color: var(--arl-text-color);">$1</h3>');
-  html = html.replace(/^# (.*$)/gim, '<h2 style="margin: 16px 0 8px 0; font-weight: 700; font-size: 15px; color: var(--arl-text-color);">$1</h2>');
+  html = html.replace(/`([^`\n]+)`/g, (_, code) => stash(`<code>${code}</code>`));
 
-  html = html.replace(/\*\*(.*?)\*\*/g, '<strong style="font-weight: 600;">$1</strong>');
-  html = html.replace(/`([^`]+)`/g, '<code style="background: var(--arl-bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 12px;">$1</code>');
+  html = html.replace(/\[([^\]]+)\]\(((?:https?:\/\/|\.?\/)[^)\s]+)\)/g, (_, label, rawHref) => {
+    const resolved = rawHref.startsWith('http')
+      ? rawHref
+      : `https://github.com/owl234/ARL-Next/blob/main/${rawHref.replace(/^\.\//, '')}`;
+    return stash(`<a href="${resolved}" target="_blank" rel="noopener noreferrer">${label}</a>`);
+  });
 
-  html = html.replace(/^\s*-\s+(.*$)/gim, '<li style="margin-left: 18px; line-height: 1.8; list-style-type: disc;">$1</li>');
-  html = html.replace(/^\s*(\d+)\.\s+(.*$)/gim, '<li style="margin-left: 18px; line-height: 1.8; list-style-type: decimal;">$2</li>');
+  html = html.replace(/https?:\/\/[^\s<>"')\]]+?(?=[.,;:!?]?(?:\s|$))/g, (url) =>
+    stash(`<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`)
+  );
 
-  html = html.replace(/\n\n/g, '<div style="height: 6px;"></div>');
-  html = html.replace(/\n/g, '<br/>');
-  html = html.replace(/<br\/>\s*<li/g, '<li').replace(/<\/li>\s*<br\/>/g, '</li>');
+  html = html.replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, '<hr/>');
+  html = html.replace(/^### (.*$)/gim, '<h4>$1</h4>');
+  html = html.replace(/^## (.*$)/gim, '<h3>$1</h3>');
+  html = html.replace(/^# (.*$)/gim, '<h2>$1</h2>');
+  html = html.replace(/^&gt;\s?(.*$)/gim, '<blockquote>$1</blockquote>');
 
-  return html;
+  html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+
+  html = html.replace(/^\s*[-*]\s+(.*$)/gim, '<li class="md-ul">$1</li>');
+  html = html.replace(/^\s*\d+\.\s+(.*$)/gim, '<li class="md-ol">$1</li>');
+
+  html = html.replace(/\r?\n\r?\n/g, '<div class="md-gap"></div>');
+  html = html.replace(/\r?\n/g, '<br/>');
+  html = html
+    .replace(/(<\/h[234]>|<hr\/>|<\/blockquote>)\s*<br\/>/g, '$1')
+    .replace(/<br\/>\s*(<h[234]>|<hr\/>|<blockquote>|<li\b)/g, '$1')
+    .replace(/<\/li>\s*<br\/>/g, '</li>');
+
+  return html.replace(/\u0000TOKEN_(\d+)\u0000/g, (_, idx) => tokens[Number(idx)] ?? '');
 });
 
 const checkVersion = async (force = false) => {
+  if (force && checkingVersion.value) return;
+  const seq = ++checkVersionSeq.value;
+  checkingVersion.value = true;
   try {
-    const res = await request.get('/api/system_config/check_update', { params: force ? { refresh: 1 } : {} });
+    const params = { lang: pageLocale.value || 'zh-CN' };
+    if (force) params.refresh = 1;
+    const res = await request.get('/api/system_config/check_update', { params });
+    if (seq !== checkVersionSeq.value) return;
     if (res.code === 200 && res.data) {
       localVersion.value = res.data.local_version || '未知版本';
       remoteVersion.value = res.data.remote_version || localVersion.value;
       hasNewVersion.value = Boolean(res.data.has_new_version);
+      isOffline.value = Boolean(res.data.is_offline);
       releaseNotes.value = res.data.release_notes || '';
+      releaseHtmlUrl.value = res.data.html_url || 'https://github.com/owl234/ARL-Next/releases';
     }
   } catch (e) {
+    if (seq !== checkVersionSeq.value) return;
     console.error('检查版本更新失败', e);
     try {
       const localRes = await request.get('/api/system_config/local_version');
-      if (localRes.code === 200) {
+      if (seq === checkVersionSeq.value && localRes.code === 200) {
         localVersion.value = localRes.data.version;
       }
     } catch (_) {}
+  } finally {
+    if (seq === checkVersionSeq.value) {
+      checkingVersion.value = false;
+    }
   }
 };
 
@@ -404,7 +476,23 @@ const closeModals = () => {
   stopUpdateTimers();
 };
 
+// 面板可能延迟挂载于已激活的 KeepAlive 页面 Tab 内，用失活标记区分首次激活与切页重返。
+let hasDeactivated = false;
 onMounted(() => {
+  checkVersion();
+});
+
+onDeactivated(() => {
+  hasDeactivated = true;
+});
+
+onActivated(() => {
+  if (!hasDeactivated) return;
+  hasDeactivated = false;
+  checkVersion();
+});
+
+watch(pageLocale, () => {
   checkVersion();
 });
 
@@ -421,17 +509,114 @@ defineExpose({
 
 <style scoped>
 .page-dialog-content { max-width: 800px; }
+.page-dialog-content :deep(.ant-descriptions-item-label) { width: 150px; min-width: 130px; }
 .page-sidebar-heading { font-weight: 600; font-size: 15px; color: var(--arl-text-color); }
 .page-small-heading { font-weight: 600; font-size: 12px; }
 .page-primary-action { border-radius: 6px; padding: 0 32px; font-weight: 600; }
 .page-rounded { border-radius: 6px; }
 
-.hide-scrollbar::-webkit-scrollbar {
-  display: none;
+.markdown-release-notes {
+  max-height: 380px;
+  overflow-y: auto;
+  line-height: 1.6;
+  font-size: 13px;
+  background: var(--arl-bg-subtle);
+  padding: 12px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--arl-border-color);
+  word-break: break-word;
 }
-.hide-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+
+.markdown-release-notes :deep(h2) {
+  margin: 14px 0 8px 0;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--arl-text-color);
+}
+
+.markdown-release-notes :deep(h3) {
+  margin: 12px 0 8px 0;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--arl-text-color);
+}
+
+.markdown-release-notes :deep(h4) {
+  margin: 10px 0 6px 0;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--arl-text-color);
+}
+
+.markdown-release-notes :deep(h2:first-child),
+.markdown-release-notes :deep(h3:first-child),
+.markdown-release-notes :deep(h4:first-child) {
+  margin-top: 0;
+}
+
+.markdown-release-notes :deep(strong) {
+  font-weight: 600;
+}
+
+.markdown-release-notes :deep(code) {
+  background: var(--arl-bg-hover);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--arl-font-mono, monospace);
+  font-size: 12px;
+}
+
+.markdown-release-notes :deep(a) {
+  color: var(--arl-theme-color);
+  text-decoration: underline;
+}
+
+.markdown-release-notes :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--arl-border-color);
+  margin: 12px 0;
+}
+
+.markdown-release-notes :deep(blockquote) {
+  margin: 8px 0;
+  padding: 4px 10px;
+  border-left: 3px solid var(--arl-border-color);
+  color: var(--arl-text-secondary);
+}
+
+.markdown-release-notes :deep(li.md-ul) {
+  margin-left: 18px;
+  line-height: 1.8;
+  list-style-type: disc;
+}
+
+.markdown-release-notes :deep(li.md-ol) {
+  margin-left: 18px;
+  line-height: 1.8;
+  list-style-type: decimal;
+}
+
+.markdown-release-notes :deep(.md-gap) {
+  height: 6px;
+}
+
+.release-notes-placeholder,
+.release-notes-empty {
+  padding: 12px 16px;
+  border-radius: 6px;
+  background: var(--arl-bg-subtle);
+  border: 1px dashed var(--arl-border-color);
+  color: var(--arl-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.release-notes-empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .update-heartbeat-badge {
