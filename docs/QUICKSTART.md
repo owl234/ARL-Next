@@ -3,8 +3,6 @@
 > 目标：5 分钟走通「登录 → 建组 → 下发首个任务 → 查看结果」最小闭环。
 > 本页仅保留最小路径，细节下沉至 `README.md`、`docs/API_GUIDE.md` 与 `CHANGELOG.md`。
 
-<p align="center"><img src="../img/quickstart-login.jpeg" alt="登录页" width="850"></p>
-
 ---
 
 ## 本次更新预览（v1.4.3）
@@ -78,6 +76,8 @@ chmod +x start-prod.sh && bash start-prod.sh
 </details>
 
 部署完成后访问 `https://<你的服务器IP>:5173`（首次自签名证书按浏览器提示继续前往）。
+
+<p align="center"><img src="../img/quickstart-login.png" alt="登录页" width="520"></p>
 
 | 验证层级 | 默认账号 | 默认密码 | 说明 |
 | :--- | :--- | :--- | :--- |

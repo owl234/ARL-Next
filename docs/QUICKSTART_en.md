@@ -3,8 +3,6 @@
 > Goal: complete the minimal loop "log in → create group → launch first task → review results" in 5 minutes.
 > This page keeps only the minimal path; details live in `README_en.md`, `docs/API_GUIDE_en.md`, and `CHANGELOG_en.md`.
 
-<p align="center"><img src="../img/quickstart-login.jpeg" alt="Login" width="850"></p>
-
 ---
 
 ## What changed in this release (v1.4.3)
@@ -78,6 +76,8 @@ chmod +x start-prod.sh && bash start-prod.sh
 </details>
 
 Then open `https://<your-server-ip>:5173` (accept the self-signed certificate warning on first visit).
+
+<p align="center"><img src="../img/quickstart-login.png" alt="Login" width="520"></p>
 
 | Layer | Default user | Default password | Notes |
 | :--- | :--- | :--- | :--- |
