@@ -6,6 +6,26 @@ This document records all major version evolution, new features, performance opt
 
 ---
 
+## [v1.4.6] - 2026-11-14
+
+### 🚀 New Features
+- **Attack-chain asset profile drawer overhaul and task sync incremental summary**: updated `ChainDrawer.vue` to apply `rootClassName` for theme padding and background alignment, adding dual sticky headers with a scroll-spy anchor rail, a default toggle hiding empty sections, loading skeletons, 10-row pagination, and trilingual support; converted `GroupAssetsDetail.vue` profile triggers into persistent lightweight pill buttons; persisted `sync_summary` (`total_new` / `total_update` and category breakdown) in `sync_asset` and rendered incremental sync badges alongside tiered phase failure notices (`phase_errors`, `error_msg`) in `TaskList.vue`.
+
+### 🛠️ Performance & Refactoring
+- **Packet-phase concurrency leasing and DNS resolution resilience**: added `packet_lease.py` combining atomic MongoDB leases with local `flock` fallback around packet-heavy `massdns` and `port_scan` phases (bounded by `system_config` or `1` slot by default, overridable within `1–16` via the internal `ARL_PACKET_PHASE_SLOTS` environment variable) with startup and failure cleanup of stale slots; extracted shared `dns_client` featuring public DNS rotation, transient timeout retries distinct from `NXDOMAIN`, recursive CNAME tracking, and reuse of pre-resolved `massdns` records to mitigate silent drops under concurrency.
+- **Dual-state worker concurrency convergence and idle shrink fix**: exposed `pending_convergence` and `pending_nodes` runtime metrics in `/api/system_config/performance` and `SystemSettings.vue`; added `scheduler.reconcile_worker_concurrency()` to align concurrency drift when workers become idle; restored previous `SIGTERM` handlers upon exit from `celerytask.run_task()` so idle worker pools respond properly to `pool_shrink`.
+- **Frontend visual tokens, shared empty-state component, and multi-locale layout unification**: consolidated global card, border, background, terminal, and sticky CSS tokens across `App.vue` and `style.css` (and removed the redundant `0.45` opacity `--arl-text-secondary` overwrite in `App.vue`); extracted `ArlEmpty.vue` and unified `.arl-pagination-bar` styling and responsive layouts across Chinese, English, and Russian locales.
+
+### 🐛 Bug Fixes & Hardening
+- **Worker boot generation tracking and orphan task convergence**: recorded per-worker `WORKER_BOOT_ID` and `worker_instances` snapshots during startup and task execution to recognize and converge orphaned tasks left by restarted or absent workers; implemented tiered `safe_phase` fault handling separating critical discovery failures from auxiliary phase errors while preserving partial results.
+- **Fail-closed fingerprint deletion and cross-worker cache invalidation**: introduced the `fingerprint_deleted` tombstone collection and `fingerprint_initialized_v1` sentinel to prevent deleted rules from reappearing on cache refresh, scan execution, or restart; added `system_config`-backed `_fingerprint_cache_version` invalidation and `RLock` protection in `fingerprint_cache.py`; added aggregation-deduplicated unique indexes on `fingerprint.name` and `fingerprint_deleted.name` in `arlupdate.py`; updated `Fingerprint.vue` with deletion loading guards, deterministic `-update_date,-_id` sorting, non-preserved cross-page selection, and `human_rule` filter alignment.
+- **KeepAlive view refresh and stale sync metadata cleanup**: added `onActivated` refresh with `firstActivation` deduplication to the policy list and null-safety guards in `PolicyDetail.vue`; fixed KeepAlive sidebar anchor drift in `AssetScope.vue`; cleared prior `sync_summary` across task re-sync (`SyncTask.post`, `sync_task_to_scope`) and task restart (`restart_task`, also clearing `phase_errors`), and gated `hasSyncSummary` against `waiting`, `running`, and `error` sync states.
+
+### 🛡️ Security & Configuration
+- **Bootstrap admin password preflight validation and documentation updates**: validated `ARL_ADMIN_PASSWORD` length (12–1024 chars from environment or `.env`) in `start-prod.sh` after Python environment setup, printing flow-specific login and `--reset` instructions while distinguishing Nginx Basic Auth from platform credentials; cleared stale `/tmp/arl_initial_admin_password` in `inject_user.py` whenever no random password is generated; replaced the legacy `"arlpass"` placeholder in `Login.vue` with localized prompts, and synchronized bilingual README, Quickstart, and API Guide docs.
+
+---
+
 ## [v1.4.5] - 2026-11-05
 
 ### 🚀 New Features

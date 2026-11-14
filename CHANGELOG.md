@@ -6,6 +6,26 @@
 
 ---
 
+## [v1.4.6] - 2026-11-14
+
+### 🚀 新增功能
+- **全链路资产画像抽屉重构与任务同步增量摘要**：`ChainDrawer.vue` 改用 `rootClassName` 对齐主题边距与背景，上线吸顶主头部与滚动联动锚点条、空记录维度默认折叠开关、加载骨架屏、10 行分页及中/英/俄三语适配；`GroupAssetsDetail.vue` 画像入口升级为常驻轻量胶囊按钮；后端 `sync_asset` 完成同步后记录 `sync_summary`（按资产分类及 `total_new`/`total_update` 汇总），并在 `TaskList.vue` 展示增量徽章与分级阶段异常提示（`phase_errors`、`error_msg`）。
+
+### 🛠️ 性能与重构
+- **发包阶段并发租约与 DNS 并发解析容错**：新增 `packet_lease.py`，结合 MongoDB 原子租约与本地 `flock` 兜底，在 `massdns` 与 `port_scan` 等发包阶段按槽位限制并发（默认沿用 `system_config` 或 1 槽位，支持内部环境变量 `ARL_PACKET_PHASE_SLOTS` 在 `1–16` 范围内覆写），并在启动清理与异常回收路径释放残留租约；抽离公共 `dns_client`，支持公共 DNS 轮询、区分 `NXDOMAIN` 与瞬态超时重试、递归 CNAME 解析及复用 `massdns` 预解析记录，缓解高并发解析丢结果风险。
+- **并发双态收敛与空闲缩容机制修复**：`/api/system_config/performance` 与 `SystemSettings.vue` 新增 `pending_convergence` / `pending_nodes` 待收敛态展示；`scheduler.reconcile_worker_concurrency()` 在节点空闲时自动补齐扩缩容对齐；修复 `celerytask.run_task()` 退出未恢复原 `SIGTERM` 处理器导致空闲 Worker 无法响应 `pool_shrink` 的问题。
+- **全局前端视觉令牌、空状态组件与多语言布局统一**：在 `App.vue` 与 `style.css` 中统一卡片、边框、背景、终端及吸顶 CSS 变量（并移除 `App.vue` 中重复覆写 `--arl-text-secondary` 为旧透明度 `0.45` 的赋值）；抽离公共 `ArlEmpty.vue` 空状态组件并统一 `.arl-pagination-bar` 与中/英/俄三语响应式布局。
+
+### 🐛 问题修复与加固
+- **Worker 启动代际跟踪与滞留任务快速收敛**：Worker 就绪与任务执行阶段记录 `WORKER_BOOT_ID` 与 `worker_instances` 快照，结合心跳识别容器重启或已离线节点的滞留任务并收敛状态；引入分级 `safe_phase` 容错，关键发现阶段失败显式阻断并保留局部可用资产，辅助阶段降级记录阶段异常。
+- **指纹删除保护与跨 Worker 缓存失效**：新增 `fingerprint_deleted` 墓碑集合与 `fingerprint_initialized_v1` 初始化标记，避免已删除指纹在缓存刷新、扫描执行或服务重启后被重新回填；`fingerprint_cache.py` 引入基于 `system_config` 的 `_fingerprint_cache_version` 跨 Worker 缓存版本号与 `RLock` 保护；`arlupdate.py` 基于聚合管道去重后为 `fingerprint.name` 与 `fingerprint_deleted.name` 建立唯一索引；`Fingerprint.vue` 补充删除加载锁、`-update_date,-_id` 稳定排序、翻页勾选隔离与 `human_rule` 筛选对齐。
+- **KeepAlive 状态刷新与任务重同步/重启清理**：策略列表页增加 `onActivated` 与 `firstActivation` 防重，同步加固 `PolicyDetail.vue` 提交空值兜底；修复 `AssetScope.vue` 在 KeepAlive 离屏切换下的侧栏偏移；任务重新同步（`SyncTask.post`、`sync_task_to_scope`）及任务重启（`restart_task`）同步清理历史 `sync_summary`（以及 `restart_task` 中的 `phase_errors`），并在 `hasSyncSummary` 中屏蔽 `waiting`/`running`/`error` 同步态下的旧徽章展示。
+
+### 🛡️ 安全与配置
+- **首次部署管理员密码前置校验与引导文档完善**：`start-prod.sh` 在 Python 环境检查后校验环境变量与 `.env` 中 `ARL_ADMIN_PASSWORD`（12–1024 字符），按首次随机密码、预设环境变量与既有账号三类情况输出对应登录与 `--reset` 引导，并明确区分 Nginx Basic Auth 与平台登录口令；`inject_user.py` 在未生成随机密码时清理遗留 `/tmp/arl_initial_admin_password`；`Login.vue` 移除过期 `"arlpass"` 占位符；同步更新中英文 README、快速启动与 API 接口文档。
+
+---
+
 ## [v1.4.5] - 2026-11-05
 
 ### 🚀 新增功能
