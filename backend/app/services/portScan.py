@@ -1,3 +1,5 @@
+import ipaddress
+import re
 from app import utils
 from app.utils import nmap, is_valid_exclude_ports
 from app.utils.packet_lease import acquire_packet_slot
@@ -5,6 +7,183 @@ from app.config import Config
 from app.modules import get_alive_ports
 
 logger = utils.get_logger()
+
+VALID_HOST_DISCOVERY_MODES = ("auto", "skip", "probe")
+
+
+def normalize_host_discovery_mode(mode, strict=False):
+    """Normalize host discovery mode to 'auto', 'skip', or 'probe'."""
+    if mode is None:
+        return "auto"
+    if not isinstance(mode, str):
+        if strict:
+            raise ValueError("host_discovery_mode must be one of: auto, skip, probe")
+        return "auto"
+    normalized = mode.strip().lower()
+    if not normalized:
+        return "auto"
+    if normalized in VALID_HOST_DISCOVERY_MODES:
+        return normalized
+    if strict:
+        raise ValueError("host_discovery_mode must be one of: auto, skip, probe")
+    return "auto"
+
+
+def _parse_single_port_token(token):
+    """Parse a port token ('80' or '8000-8010') into an inclusive (start, end) tuple."""
+    if not token:
+        return None
+    cleaned = token.strip()
+    if ":" in cleaned and cleaned.split(":", 1)[0].upper() in ("T", "U", "S"):
+        cleaned = cleaned.split(":", 1)[1].strip()
+    if "-" in cleaned:
+        parts = cleaned.split("-", 1)
+        try:
+            start = int(parts[0].strip())
+            end = int(parts[1].strip())
+        except ValueError:
+            return None
+        if start > end:
+            start, end = end, start
+    else:
+        try:
+            start = end = int(cleaned)
+        except ValueError:
+            return None
+    if end < 0 or start > 65535:
+        return None
+    return (max(0, start), min(65535, end))
+
+
+def _parse_port_intervals(ports_str):
+    """Parse comma-separated ports/ranges into sorted, merged (start, end) intervals."""
+    if not ports_str:
+        return []
+    if isinstance(ports_str, (list, tuple, set)):
+        raw = ",".join(str(x) for x in ports_str)
+    else:
+        raw = str(ports_str)
+    intervals = []
+    for token in raw.split(","):
+        parsed = _parse_single_port_token(token)
+        if parsed is not None:
+            intervals.append(parsed)
+    if not intervals:
+        return []
+    intervals.sort()
+    merged = [intervals[0]]
+    for start, end in intervals[1:]:
+        prev_start, prev_end = merged[-1]
+        if start <= prev_end + 1:
+            merged[-1] = (prev_start, max(prev_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _count_expanded_ports(ports_str):
+    """Count total unique TCP ports after expanding comma-separated ranges."""
+    return sum(end - start + 1 for start, end in _parse_port_intervals(ports_str))
+
+
+def _subtract_intervals(base_interval, exclude_intervals):
+    """Subtract sorted exclude intervals from a single (start, end) interval."""
+    cur, b_end = base_interval
+    remaining = []
+    for e_start, e_end in exclude_intervals:
+        if e_end < cur:
+            continue
+        if e_start > b_end:
+            break
+        if e_start > cur:
+            remaining.append((cur, e_start - 1))
+        cur = max(cur, e_end + 1)
+        if cur > b_end:
+            break
+    if cur <= b_end:
+        remaining.append((cur, b_end))
+    return remaining
+
+
+def _subtract_excluded_ports(alive_ports_str, exclude_ports_str):
+    """Remove excluded ports from alive_ports_str, preserving untouched token formatting."""
+    if not alive_ports_str or not exclude_ports_str:
+        return alive_ports_str
+    exclude_intervals = _parse_port_intervals(exclude_ports_str)
+    if not exclude_intervals:
+        return alive_ports_str
+    result_tokens = []
+    for raw_token in str(alive_ports_str).split(","):
+        token = raw_token.strip()
+        if not token:
+            continue
+        parsed = _parse_single_port_token(token)
+        if parsed is None:
+            result_tokens.append(token)
+            continue
+        remaining = _subtract_intervals(parsed, exclude_intervals)
+        if len(remaining) == 1 and remaining[0] == parsed:
+            result_tokens.append(token)
+        else:
+            for start, end in remaining:
+                result_tokens.append(str(start) if start == end else "{}-{}".format(start, end))
+    return ",".join(result_tokens)
+
+
+def _count_single_target_ips(token):
+    """Estimate expanded IP count for one target token (IP, CIDR, IPv4 range, or host)."""
+    if not token:
+        return 0
+    try:
+        ipaddress.ip_address(token)
+        return 1
+    except ValueError:
+        pass
+    if "/" in token:
+        try:
+            return ipaddress.ip_network(token, strict=False).num_addresses
+        except ValueError:
+            pass
+    short_range = re.fullmatch(r"(\d+\.\d+\.\d+\.)(\d+)-(\d+)", token)
+    if short_range:
+        prefix, start_s, end_s = short_range.groups()
+        try:
+            ipaddress.IPv4Address(prefix + start_s)
+            end_octet = int(end_s)
+            start_octet = int(start_s)
+            if 0 <= end_octet <= 255 and end_octet >= start_octet:
+                return end_octet - start_octet + 1
+        except ValueError:
+            pass
+    if "-" in token:
+        left, right = token.split("-", 1)
+        try:
+            start_ip = ipaddress.IPv4Address(left.strip())
+            end_ip = ipaddress.IPv4Address(right.strip())
+            if int(end_ip) >= int(start_ip):
+                return int(end_ip) - int(start_ip) + 1
+        except ValueError:
+            pass
+    return 1
+
+
+def _count_target_ips(targets):
+    """Count total expanded target IPs across a list or whitespace-separated target string."""
+    if not targets:
+        return 0
+    if isinstance(targets, str):
+        raw_items = [targets]
+    else:
+        raw_items = targets
+    tokens = []
+    for item in raw_items:
+        if not item:
+            continue
+        for token in str(item).split():
+            if token:
+                tokens.append(token)
+    unique_tokens = list(dict.fromkeys(tokens))
+    return sum(_count_single_target_ips(token) for token in unique_tokens)
 
 
 class PortScan:
@@ -17,10 +196,13 @@ class PortScan:
     """
     def __init__(self, targets, ports=None, service_detect=False, os_detect=False,
                  port_parallelism=None, port_min_rate=None, custom_host_timeout=None,
-                 exclude_ports=None, alive_port=None,
+                 exclude_ports=None, alive_port=None, host_discovery_mode="auto",
                  ):
         self.targets = " ".join(targets)
         self.ports = ports
+        self.host_discovery_mode = normalize_host_discovery_mode(host_discovery_mode)
+        self.target_ip_count = _count_target_ips(targets)
+        self.expanded_port_count = _count_expanded_ports(self.ports)
         self.max_host_group = 32 # Nmap 每次并行扫描的 IP 组大小
         # 存活探测端口集：如果不用 ICMP (ping)，就靠探测这些高频端口来判断主机是否存活
         if alive_port:
@@ -63,24 +245,49 @@ class PortScan:
             self.host_timeout += 60 * 4
             self.nmap_arguments += " -O"
 
-        # 【第一性原理：防蜜罐与防网络阻塞】
-        # 如果要扫描的端口数 > 60个，说明是中大规模扫描，不建议用全端口禁 ping (-Pn)。
-        # 改为发特定的 TCP 包 (-PE -PS) 去探活，活的才扫，死的直接跳过。并且减少重试次数 (-max-retries 2)。
-        if len(self.ports.split(",")) > 60:
-            self.nmap_arguments += " -PE -PS{}".format(self.alive_port)
-            self.max_retries = 2
+        # 【第一性原理：基于 IP 规模 × 展开端口数的二维探活决策】
+        # 1. host_discovery_mode == "skip": 强制 -Pn
+        # 2. host_discovery_mode == "probe": 强制 -PE -PS<alive_port>
+        # 3. host_discovery_mode == "auto" (默认):
+        #    - 端口数 <= 60 (且非全端口): 始终 -Pn
+        #    - 端口数 61~2000 (覆盖 Top100/Top1000): IP <= 16 用 -Pn，IP > 16 用 -PE -PS
+        #    - 端口数 > 2000 或全端口 (1-65535): IP <= 2 用 -Pn，IP > 2 用 -PE -PS
+        is_all_ports = (isinstance(self.ports, str) and self.ports.strip() == "1-65535") or self.expanded_port_count >= 65535
+        if self.host_discovery_mode == "skip":
+            use_host_discovery = False
+        elif self.host_discovery_mode == "probe":
+            use_host_discovery = True
+        elif is_all_ports or self.expanded_port_count > 2000:
+            use_host_discovery = self.target_ip_count > 2
+        elif self.expanded_port_count > 60:
+            use_host_discovery = self.target_ip_count > 16
         else:
-            # 端口少的话，直接 -Pn (默认所有主机存活，不探活直接扫)，最准。
-            if self.ports != "1-65535":
-                self.nmap_arguments += " -Pn"
+            use_host_discovery = False
+
+        self.effective_alive_port = self.alive_port
+        if use_host_discovery:
+            if self.exclude_ports:
+                self.effective_alive_port = _subtract_excluded_ports(
+                    self.alive_port, self.exclude_ports
+                )
+            if self.effective_alive_port:
+                self.discovery_strategy = "-PE -PS"
+                self.nmap_arguments += " -PE -PS{}".format(self.effective_alive_port)
+            else:
+                self.discovery_strategy = "-PE"
+                self.nmap_arguments += " -PE"
+        else:
+            self.discovery_strategy = "-Pn"
+            self.nmap_arguments += " -Pn"
+
+        if self.expanded_port_count > 60 or is_all_ports:
+            self.max_retries = 2
 
         # 全端口(1-65535)扫描是极度危险且耗时的操作，必须采用极端的调优参数
-        if self.ports == "1-65535":
+        if is_all_ports:
             self.max_host_group = 2             # 减小并发组，防止把路由器连接数打满
             self.min_rate = max(self.min_rate, 800) # 强制提高发包下限速率
             self.parallelism = max(self.parallelism, 128)
-
-            self.nmap_arguments += " -PE -PS{}".format(self.alive_port)
             self.host_timeout += 60 * 5
             self.max_retries = 2
 
@@ -110,8 +317,17 @@ class PortScan:
     def run(self):
         if not self.targets or not self.targets.strip():
             return []
-        logger.info("nmap target {}  ports {}  arguments {}".format(
-            self.targets[:20], self.ports[:20], self.nmap_arguments))
+        logger.info(
+            "nmap target {}  ports {}  ips={} expanded_ports={} discovery_mode={} strategy={}  arguments {}".format(
+                self.targets[:20],
+                (self.ports or "")[:20],
+                self.target_ip_count,
+                self.expanded_port_count,
+                self.host_discovery_mode,
+                self.discovery_strategy,
+                self.nmap_arguments,
+            )
+        )
         nm = nmap.PortScanner()
         # [执行扫描] 申请重发包租约槽位并阻塞执行，避免多任务高并发扫端口打爆主机状态表
         with acquire_packet_slot(phase="port_scan"):
@@ -170,7 +386,7 @@ class PortScan:
 
 def port_scan(targets, ports=None, service_detect=False, os_detect=False,
               port_parallelism=32, port_min_rate=64, custom_host_timeout=None, exclude_ports=None,
-              alive_port=None):
+              alive_port=None, host_discovery_mode="auto"):
     """
     [高级封装层]
     供外部 Celery Task 调用的入口函数。
@@ -185,5 +401,6 @@ def port_scan(targets, ports=None, service_detect=False, os_detect=False,
                   custom_host_timeout=custom_host_timeout,
                   exclude_ports=exclude_ports,
                   alive_port=alive_port,
+                  host_discovery_mode=host_discovery_mode,
                   )
     return ps.run()

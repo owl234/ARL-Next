@@ -2,6 +2,7 @@ from flask_restx import fields, Namespace
 from app.utils import get_logger, auth
 from . import base_query_fields, ARLResource, get_arl_parser
 from app.modules import ErrorMsg
+from app.services.portScan import normalize_host_discovery_mode
 from app import utils
 from bson import ObjectId
 from flask_restx.fields import Nested
@@ -59,6 +60,7 @@ ip_config_fields = ns.model('ipConfig', {
     "port_parallelism": fields.Integer(description="探测报文并行度", default=32),
     "port_min_rate": fields.Integer(description="最少发包速率", default=60),
     "exclude_ports": fields.String(description="排除扫描端口", default=""),
+    "host_discovery_mode": fields.String(description="主机存活探测策略(auto|skip|probe)", default="auto"),
 })
 
 '''站点相关配置选项'''
@@ -136,6 +138,13 @@ class AddARLPolicy(ARLResource):
         if exclude_ports:
             if not utils.is_valid_exclude_ports(exclude_ports):
                 return utils.build_ret(ErrorMsg.ExcludePortsInvalid, {"exclude_ports": exclude_ports})
+
+        try:
+            ip_config["host_discovery_mode"] = normalize_host_discovery_mode(
+                ip_config.get("host_discovery_mode"), strict=True
+            )
+        except ValueError as e:
+            return utils.build_ret(str(e), {"host_discovery_mode": ip_config.get("host_discovery_mode")})
 
         # 🛡️ 发包并发与速率参数范围防御与归一化
         try:
@@ -370,6 +379,18 @@ class EditPolicy(ARLResource):
         if incoming_exclude_ports is not None and str(incoming_exclude_ports).strip():
             if not utils.is_valid_exclude_ports(str(incoming_exclude_ports).strip()):
                 return utils.build_ret(ErrorMsg.ExcludePortsInvalid, {"exclude_ports": str(incoming_exclude_ports).strip()})
+
+        if "host_discovery_mode" in incoming_ip:
+            try:
+                ip_cfg["host_discovery_mode"] = normalize_host_discovery_mode(
+                    incoming_ip.get("host_discovery_mode"), strict=True
+                )
+            except ValueError as e:
+                return utils.build_ret(str(e), {"host_discovery_mode": incoming_ip.get("host_discovery_mode")})
+        else:
+            ip_cfg["host_discovery_mode"] = normalize_host_discovery_mode(
+                ip_cfg.get("host_discovery_mode"), strict=False
+            )
 
         # 🛡️ 自定义端口格式校验
         if incoming_ip.get("port_scan_type") == "custom":

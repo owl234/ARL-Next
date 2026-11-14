@@ -8,6 +8,7 @@ from app.modules import TaskStatus, ErrorMsg, TaskSyncStatus, CeleryAction, Task
 from app.helpers import get_options_by_policy_id, submit_task_task,\
     submit_risk_cruising, get_scope_by_scope_id, check_target_in_scope
 from app.helpers.task import get_task_data, restart_task
+from app.services.portScan import normalize_host_discovery_mode
 from app.utils.task_statistics import get_task_statistics, attach_task_statistics
 
 
@@ -37,6 +38,7 @@ base_search_task_fields = {
     'options.domain_brute_type': fields.String(description="域名爆破类型"),
     'options.port_scan_type': fields.Boolean(description="端口扫描类型"),
     'options.port_scan': fields.Boolean(description="是否的端口扫描"),
+    'options.host_discovery_mode': fields.String(description="主机存活探测策略(auto|skip|probe)"),
     'options.service_detection': fields.Boolean(description="是否开启服务识别"),
     'options.service_brute': fields.Boolean(description="是否开启服务弱口令爆破"),
     'options.os_detection': fields.Boolean(description="是否开启操作系统识别"),
@@ -92,6 +94,7 @@ add_task_fields = ns.model('AddTask', { # 创建添加任务命名空间。
     'domain_brute_type': fields.String(example="test"),
     "port_scan_type": fields.String(example="test", description="端口扫描类型"),
     "port_scan": fields.Boolean(example=True),
+    "host_discovery_mode": fields.String(example="auto", default="auto", description="主机存活探测策略(auto|skip|probe)"),
     "service_detection": fields.Boolean(example=False),
     "service_brute": fields.Boolean(example=False),
     "os_detection": fields.Boolean(example=False),
@@ -212,6 +215,13 @@ class ARLTask(ARLResource): # 继承我们在阶段一拆解过的“大基类�
 
         # 1. 解析前端传来的 JSON 表单数据
         args = self.parse_args(add_task_fields)
+
+        try:
+            args["host_discovery_mode"] = normalize_host_discovery_mode(
+                args.get("host_discovery_mode"), strict=True
+            )
+        except ValueError as e:
+            return utils.build_ret(ErrorMsg.Error, {"error": str(e)})
 
         # 2. 分离核心参数：用 pop 把任务名和目标单独拿出来，
         #    这样 args 字典里剩下的就全是纯粹的“扫描选项(options)”了（比如 port_scan: True）

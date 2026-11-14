@@ -171,6 +171,16 @@
                         <a-input-number v-model:value="policyForm.ip_config.port_min_rate" :min="1" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
+                    <a-col :xs="24" :sm="12" :lg="8">
+                      <a-form-item :label="pageText('tasks.hostDiscoveryMode')" class="inline-form-item">
+                        <a-select v-model:value="policyForm.ip_config.host_discovery_mode">
+                          <a-select-option value="auto">{{ pageText('tasks.hostDiscoveryAuto') }}</a-select-option>
+                          <a-select-option value="skip">{{ pageText('tasks.hostDiscoverySkip') }}</a-select-option>
+                          <a-select-option value="probe">{{ pageText('tasks.hostDiscoveryProbe') }}</a-select-option>
+                        </a-select>
+                        <template #extra>{{ pageText('tasks.hostDiscoveryAutoHint') }}</template>
+                      </a-form-item>
+                    </a-col>
                     <a-col :xs="24" :lg="16">
                       <a-form-item :label="pageText('pages.excludedPorts')" class="inline-form-item">
                         <a-input v-model:value="policyForm.ip_config.exclude_ports" :placeholder="pageText('pages.excludePortsEG910091021100')" />
@@ -483,7 +493,8 @@ const initPolicyForm = () => ({
     host_timeout: 900,
     port_parallelism: 32,
     port_min_rate: 60,
-    exclude_ports: ''
+    exclude_ports: '',
+    host_discovery_mode: 'auto'
   },
   site_config: {
     site_identify: false,
@@ -857,6 +868,9 @@ onMounted(async () => {
         if (policyForm.ip_config.port_scan_type) {
           policyForm.ip_config.port_scan_type = normalizePortDict(policyForm.ip_config.port_scan_type);
         }
+        if (!['auto', 'skip', 'probe'].includes(policyForm.ip_config.host_discovery_mode)) {
+          policyForm.ip_config.host_discovery_mode = 'auto';
+        }
 
         // 统一双轨服务识别回填：若历史开启了 npoc_service_detection 或 service_detection，均视为开启
         const isSvcDetect = !!(data.policy?.ip_config?.service_detection || data.policy?.npoc_service_detection);
@@ -869,7 +883,11 @@ onMounted(async () => {
         }
 
         // 若配置了自定义高级发包参数，自动展开高级参数面板
-        if (policyForm.ip_config.host_timeout_type === 'custom' || policyForm.ip_config.exclude_ports) {
+        if (
+          policyForm.ip_config.host_timeout_type === 'custom'
+          || policyForm.ip_config.exclude_ports
+          || (policyForm.ip_config.host_discovery_mode && policyForm.ip_config.host_discovery_mode !== 'auto')
+        ) {
           showAdvancedPortConfig.value = true;
         }
 

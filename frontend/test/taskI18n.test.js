@@ -197,3 +197,35 @@ test('中英文提交使用相同的扫描配置、计划类型、时间和用�
     { url: '/task_schedule/', payload: scheduleForm },
   ]);
 });
+
+test('存活探测模式默认与摘要仅在覆盖值时显示，策略默认 auto 且语言切换同步更新', () => {
+  i18n.global.locale.value = 'zh-CN';
+  const taskFixture = component('views/TaskList.vue', { pluginList: [] });
+  taskFixture.read('defaultPlugins');
+  const defaults = taskFixture.read('defaultFormState');
+  assert.equal(defaults.host_discovery_mode, 'auto');
+
+  const getDetailedOptions = taskFixture.read('getDetailedOptions');
+  const autoTags = getDetailedOptions({ port_scan: true, port_scan_type: 'top100', host_discovery_mode: 'auto' });
+  assert.equal(autoTags.some(t => t.includes('存活探测') || t.includes('Host discovery')), false);
+
+  const skipTagsZh = getDetailedOptions({ port_scan: true, host_discovery_mode: 'skip' });
+  assert.deepEqual(plain(skipTagsZh), ['存活探测: 强制 -Pn']);
+
+  i18n.global.locale.value = 'en-US';
+  const probeTagsEn = getDetailedOptions({ port_scan: true, host_discovery_mode: 'probe' });
+  assert.deepEqual(plain(probeTagsEn), ['Host discovery: Force -PE -PS']);
+
+  const presetState = reactive({ ...defaults, host_discovery_mode: 'probe' });
+  const presetFixture = component('views/TaskList.vue', {
+    formState: presetState,
+    message: { info() {} },
+  });
+  presetFixture.read('defaultPlugins');
+  presetFixture.read('applyPreset')('fast');
+  assert.equal(presetState.host_discovery_mode, 'auto');
+
+  const policyFixture = component('views/PolicyDetail.vue');
+  const policyDefaults = policyFixture.read('initPolicyForm')();
+  assert.equal(policyDefaults.ip_config.host_discovery_mode, 'auto');
+});

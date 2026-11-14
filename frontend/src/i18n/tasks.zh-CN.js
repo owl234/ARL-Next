@@ -758,5 +758,13 @@ export default {
   "fuzzing": "字典探测",
   "partialFailureNotice": "部分阶段异常（不影响已产出资产）：{error}",
   "syncSummaryBreakdown": "入库统计：本次新增 {newCount} 项 · 更新存量 {updateCount} 项",
-  "syncSummaryBadge": "+{newCount} / ~{updateCount}"
+  "syncSummaryBadge": "+{newCount} / ~{updateCount}",
+  "hostDiscoveryMode": "存活探测策略",
+  "hostDiscoveryAuto": "智能匹配（小规模直扫 -Pn / 大规模先探活）",
+  "hostDiscoverySkip": "强制跳过探活（-Pn 直接扫描）",
+  "hostDiscoveryProbe": "强制先探活再扫（-PE -PS）",
+  "hostDiscoveryOptionTag": "存活探测: {mode}",
+  "hostDiscoverySkipShort": "强制 -Pn",
+  "hostDiscoveryProbeShort": "强制 -PE -PS",
+  "hostDiscoveryAutoHint": "默认按 IP 数 × 端口数自动决定：≤60 端口直扫 -Pn；61~2000 端口超过 16 个 IP 或 >2000/全端口超过 2 个 IP 时先探活"
 };

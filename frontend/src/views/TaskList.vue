@@ -1023,6 +1023,17 @@
               </a-form-item>
             </a-col>
             <a-col :xs="24" :sm="12">
+              <a-form-item :label="taskText('tasks.hostDiscoveryMode')" name="host_discovery_mode">
+                <a-select v-model:value="formState.host_discovery_mode" :disabled="!formState.port_scan">
+                  <a-select-option value="auto">{{ taskText('tasks.hostDiscoveryAuto') }}</a-select-option>
+                  <a-select-option value="skip">{{ taskText('tasks.hostDiscoverySkip') }}</a-select-option>
+                  <a-select-option value="probe">{{ taskText('tasks.hostDiscoveryProbe') }}</a-select-option>
+                </a-select>
+                <div v-if="!formState.port_scan" class="dict-disabled-hint">{{ taskText('tasks.enablePortScanningUnderScanPluginsAndScheduling') }}</div>
+                <div v-else class="dict-disabled-hint">{{ taskText('tasks.hostDiscoveryAutoHint') }}</div>
+              </a-form-item>
+            </a-col>
+            <a-col :xs="24" :sm="12">
               <a-form-item :label="taskText('tasks.fileDiscoveryWordlist')" name="file_leak_dict" :rules="[{ required: !!formState.file_leak, message: taskText('tasks.selectAFileDiscoveryWordlist') }]">
                 <a-select v-model:value="formState.file_leak_dict" :disabled="!formState.file_leak" :placeholder="taskText('tasks.selectAWordlist')">
                   <a-select-option v-for="item in fileLeakDicts" :key="item.name" :value="item.name">{{ describeDict(item) }}</a-select-option>
@@ -1829,6 +1840,14 @@ const getDetailedOptions = (options) => {
     const typeMap = { test: taskText('tasks.test'), top100: 'TOP100', top1000: 'TOP1000', all: taskText('tasks.allPorts') };
     detailed.push(taskText('tasks.portScanPolicyName', { name: typeMap[options.port_scan_type] || options.port_scan_type.toUpperCase() }));
   }
+  if (options.host_discovery_mode && options.host_discovery_mode !== 'auto') {
+    const modeLabel = options.host_discovery_mode === 'skip'
+      ? taskText('tasks.hostDiscoverySkipShort')
+      : options.host_discovery_mode === 'probe'
+        ? taskText('tasks.hostDiscoveryProbeShort')
+        : options.host_discovery_mode;
+    detailed.push(taskText('tasks.hostDiscoveryOptionTag', { mode: modeLabel }));
+  }
   if (options.alt_dns_dict) {
     detailed.push(taskText('tasks.generatedSubdomainWordlistName', { name: options.alt_dns_dict }));
   }
@@ -2295,6 +2314,7 @@ const defaultFormState = {
   related_scope_id: undefined,
   domain_brute_type: undefined,
   port_scan_type: undefined,
+  host_discovery_mode: 'auto',
   alt_dns_dict: undefined,
   file_leak_dict: undefined,
   ...defaultPlugins
@@ -2357,6 +2377,7 @@ const applyPreset = (type) => {
     formState.port_scan = true;
     formState.skip_scan_cdn_ip = true;
     formState.site_identify = true;
+    formState.host_discovery_mode = 'auto';
     message.info(taskText('tasks.quickDiscoveryPresetApplied'));
   } else if (type === 'normal') {
     Object.keys(defaultPlugins).forEach(k => { formState[k] = defaultPlugins[k]; });
@@ -2364,6 +2385,7 @@ const applyPreset = (type) => {
     formState.file_leak = true;
     formState.service_detection = true;
     formState.ssl_cert = true;
+    formState.host_discovery_mode = 'auto';
     message.info(taskText('tasks.standardDiscoveryPresetApplied'));
   } else if (type === 'deep') {
     // 「深度全量」会一并关闭「跳过 CDN」，显著扩大扫描面，先向用户明示后果再套用
@@ -2376,6 +2398,7 @@ const applyPreset = (type) => {
       onOk: () => {
         Object.keys(defaultPlugins).forEach(k => { formState[k] = true; });
         formState.skip_scan_cdn_ip = false;
+        formState.host_discovery_mode = 'auto';
         message.info(taskText('tasks.fullDiscoveryPresetApplied'));
       }
     });

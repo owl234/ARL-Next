@@ -99,6 +99,24 @@
 
 任务创建支持按资产组圈定范围；Nuclei YAML/ZIP 导入由 PoC 管理页提供，此处不再重复实现。
 
+### 端口扫描存活探测策略 (`host_discovery_mode`)
+
+`POST /api/task/`（顶层字段 `host_discovery_mode`）、`POST /api/policy/add/` 与 `POST /api/policy/edit/`（位于 `policy.ip_config.host_discovery_mode`）支持设置端口扫描前的主机存活探测模式，同时支持通过 `GET /api/task/?options.host_discovery_mode=<mode>` 按策略筛选任务：
+
+| 取值 | 行为说明 |
+| :--- | :--- |
+| `auto`（默认，缺失或空值时按此处理） | 按「展开后的目标 IP 数 × 展开后的扫描端口数」自动选择：<br>• 端口数 `<= 60`（且非 `1-65535`）：始终 `-Pn` 直扫<br>• 端口数 `61~2000`（覆盖 `top100` / `top1000`）：`<= 16` 个 IP 用 `-Pn`，`> 16` 个 IP 用 `-PE -PS<alive_port>`<br>• 端口数 `> 2000` 或 `1-65535`：`<= 2` 个 IP 用 `-Pn`，`> 2` 个 IP 用 `-PE -PS<alive_port>` |
+| `skip` | 强制跳过存活探测，固定使用 `-Pn` 直接扫描端口 |
+| `probe` | 强制先执行存活探测（`-PE -PS<alive_port>`），仅对存活主机继续扫描 |
+
+> **约束说明**：传入 `auto` / `skip` / `probe` 之外的非空值将被服务端拒绝。启用 `-PE -PS` 探活时，系统会自动从常用探测端口集（`port_alive.txt`）中剔除 `exclude_ports` 所列端口；若探测端口全部被排除，则退化为仅发送 `-PE` 探测。
+
+示例（强制对目标网段直接 `-Pn` 扫描）：
+
+```json
+{"name": "内网直扫", "target": "192.0.2.0/24", "port_scan": true, "port_scan_type": "top100", "host_discovery_mode": "skip"}
+```
+
 ### 任务生命周期与删除最佳实践
 
 若需通过自动化脚本删除正在执行中的任务，必须严格执行两阶段操作：

@@ -380,6 +380,7 @@ class HTTPTests(ScopeFixture):
         env.update(ns=Namespace('task'), auth=auth_env['auth'], utils=self.utils, ObjectId=ObjectId,
                    conn=self.db.__getitem__, celerytask=types.SimpleNamespace(arl_task=self.queue), logger=self.logger,
                    ErrorMsg=errors, submit_task_task=self.submit, **self.constants)
+        load_nodes('app/services/portScan.py', env, ['VALID_HOST_DISCOVERY_MODES', 'normalize_host_discovery_mode'])
         load_nodes('app/routes/task.py', env, ['add_task_fields', 'sync_task_fields'])
         tree = ast.parse((ROOT / 'app/routes/task.py').read_text())
         for cls in tree.body:

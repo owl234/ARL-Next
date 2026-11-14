@@ -758,5 +758,13 @@ export default {
   "quickAppIcpNumber": "Регистрационный номер быстрого приложения",
   "partialFailureNotice": "Частичные ошибки этапов (обнаруженные активы сохранены): {error}",
   "syncSummaryBreakdown": "Итог синхронизации: новых {newCount} · обновлено {updateCount}",
-  "syncSummaryBadge": "+{newCount} / ~{updateCount}"
+  "syncSummaryBadge": "+{newCount} / ~{updateCount}",
+  "hostDiscoveryMode": "Режим обнаружения хостов",
+  "hostDiscoveryAuto": "Авто (-Pn для малых целей, -PE -PS для крупных)",
+  "hostDiscoverySkip": "Пропустить проверку (-Pn прямое сканирование)",
+  "hostDiscoveryProbe": "Принудительная проверка (-PE -PS)",
+  "hostDiscoveryOptionTag": "Обнаружение хостов: {mode}",
+  "hostDiscoverySkipShort": "Принудительно -Pn",
+  "hostDiscoveryProbeShort": "Принудительно -PE -PS",
+  "hostDiscoveryAutoHint": "Автоматически (IP x порты): <=60 портов всегда -Pn; 61-2000 портов при >16 IP; >2000 или все порты при >2 IP - сначала -PE -PS"
 };

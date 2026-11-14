@@ -758,5 +758,13 @@ export default {
   "fuzzing": "Fuzzing",
   "partialFailureNotice": "Partial phase errors (discovered assets preserved): {error}",
   "syncSummaryBreakdown": "Sync breakdown: {newCount} new · {updateCount} updated",
-  "syncSummaryBadge": "+{newCount} / ~{updateCount}"
+  "syncSummaryBadge": "+{newCount} / ~{updateCount}",
+  "hostDiscoveryMode": "Host discovery mode",
+  "hostDiscoveryAuto": "Auto (-Pn on small scope, -PE -PS on large)",
+  "hostDiscoverySkip": "Force skip discovery (-Pn direct scan)",
+  "hostDiscoveryProbe": "Force host discovery (-PE -PS probe first)",
+  "hostDiscoveryOptionTag": "Host discovery: {mode}",
+  "hostDiscoverySkipShort": "Force -Pn",
+  "hostDiscoveryProbeShort": "Force -PE -PS",
+  "hostDiscoveryAutoHint": "Default auto matrix (IPs x ports): <=60 ports always use -Pn; 61-2000 ports probe >16 IPs; >2000 or all ports probe >2 IPs"
 };

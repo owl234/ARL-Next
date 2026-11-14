@@ -99,6 +99,24 @@ The task list distinguishes synchronization after completion, queued synchroniza
 
 Task creation supports scoping by asset group; Nuclei YAML/ZIP import is provided by the PoC management page and is not duplicated here.
 
+### Port Scan Host Discovery Strategy (`host_discovery_mode`)
+
+`POST /api/task/` (top-level `host_discovery_mode`), `POST /api/policy/add/`, and `POST /api/policy/edit/` (`policy.ip_config.host_discovery_mode`) configure Nmap host discovery before TCP port scanning. Tasks can also be filtered via `GET /api/task/?options.host_discovery_mode=<mode>`:
+
+| Value | Behavior |
+| :--- | :--- |
+| `auto` (default; omitted, `null`, or empty resolves to `auto`) | Selects strategy from expanded target IPs × expanded TCP ports:<br>• `<= 60` ports (and not `1-65535`): always `-Pn`<br>• `61–2000` ports (covers `top100` / `top1000`): `-Pn` for `<= 16` IPs; `-PE -PS<alive_port>` for `> 16` IPs<br>• `> 2000` ports or `1-65535`: `-Pn` for `<= 2` IPs; `-PE -PS<alive_port>` for `> 2` IPs |
+| `skip` | Force direct port scan with `-Pn` (skip host discovery) |
+| `probe` | Force host discovery with `-PE -PS<alive_port>` before scanning ports |
+
+> **Validation & Exclusions**: Non-empty values other than `auto`, `skip`, and `probe` are rejected. When host discovery runs (`-PE -PS`), ports configured in `exclude_ports` are automatically subtracted from the alive-port list (falling back to `-PE` only if every alive port is excluded).
+
+Example (force direct `-Pn` scan on an RFC 5737 block):
+
+```json
+{"name": "Direct segment scan", "target": "192.0.2.0/24", "port_scan": true, "port_scan_type": "top100", "host_discovery_mode": "skip"}
+```
+
 ### Best Practices for Task Deletion
 
 To delete currently running tasks programmatically, execute a two-stage sequence:
