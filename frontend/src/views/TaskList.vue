@@ -744,6 +744,14 @@
                   </a-tag>
                 </a-tooltip>
                 <div class="task-asset-group-name">{{ getTaskAssetGroupState(record).label }}</div>
+                <a-tooltip
+                  v-if="hasSyncSummary(record)"
+                  :title="taskText('tasks.syncSummaryBreakdown', { newCount: record.sync_summary.total_new || 0, updateCount: record.sync_summary.total_update || 0 })"
+                >
+                  <div class="task-sync-breakdown">
+                    {{ taskText('tasks.syncSummaryBadge', { newCount: record.sync_summary.total_new || 0, updateCount: record.sync_summary.total_update || 0 }) }}
+                  </div>
+                </a-tooltip>
               </template>
               <span v-else>-</span>
             </template>
@@ -821,27 +829,37 @@
             </template>
 
             <template v-else-if="column.key === 'status'">
-              <a-tooltip v-if="record.service && record.service.length > 0" placement="bottom">
-                <template #title>
-                  <div class="service-time-tooltip">
-                    <div class="tooltip-header">{{ taskText('tasks.pluginExecutionTimes') }}</div>
-                    <div v-for="(item, index) in record.service" :key="index" class="tooltip-row">
-                      <span class="service-name">{{ pluginNameMap[item.name] || item.name }}:</span>
-                      <span class="service-elapsed">{{ item.elapsed }}</span>
+              <div class="task-status-cell">
+                <a-tooltip v-if="record.service && record.service.length > 0" placement="bottom">
+                  <template #title>
+                    <div class="service-time-tooltip">
+                      <div class="tooltip-header">{{ taskText('tasks.pluginExecutionTimes') }}</div>
+                      <div v-for="(item, index) in record.service" :key="index" class="tooltip-row">
+                        <span class="service-name">{{ pluginNameMap[item.name] || item.name }}:</span>
+                        <span class="service-elapsed">{{ item.elapsed }}</span>
+                      </div>
                     </div>
+                  </template>
+                  <div style="display: inline-block; cursor: pointer;">
+                    <a-tag :color="getStatusTagColor(record.status)" class="task-status-tag">
+                      <component :is="getStatusIcon(record.status)" :spin="isStatusRunning(record.status)" />
+                      <span>{{ formatStatusText(record.status) }}</span>
+                    </a-tag>
                   </div>
-                </template>
-                <div style="display: inline-block; cursor: pointer;">
-                  <a-tag :color="getStatusTagColor(record.status)" class="task-status-tag">
-                    <component :is="getStatusIcon(record.status)" :spin="isStatusRunning(record.status)" />
-                    <span>{{ formatStatusText(record.status) }}</span>
-                  </a-tag>
-                </div>
-              </a-tooltip>
-              <a-tag v-else :color="getStatusTagColor(record.status)" class="task-status-tag">
-                <component :is="getStatusIcon(record.status)" :spin="isStatusRunning(record.status)" />
-                <span>{{ formatStatusText(record.status) }}</span>
-              </a-tag>
+                </a-tooltip>
+                <a-tag v-else :color="getStatusTagColor(record.status)" class="task-status-tag">
+                  <component :is="getStatusIcon(record.status)" :spin="isStatusRunning(record.status)" />
+                  <span>{{ formatStatusText(record.status) }}</span>
+                </a-tag>
+                <a-tooltip v-if="hasTaskErrorNotice(record)" placement="top">
+                  <template #title>
+                    <div class="task-error-tooltip">{{ formatTaskErrorTooltip(record) }}</div>
+                  </template>
+                  <ExclamationCircleOutlined
+                    :class="record.status === 'error' ? 'task-error-notice-icon' : 'task-partial-warn-icon'"
+                  />
+                </a-tooltip>
+              </div>
             </template>
 
             <template v-else-if="column.key === 'task_id'">
@@ -1758,6 +1776,36 @@ const getStatusIcon = (status) => {
 };
 
 const formatStatusText = (status) => formatTaskStatus(status);
+
+const hasSyncSummary = (record) => {
+  const s = record?.sync_summary;
+  if (!s || typeof s !== 'object') return false;
+  return Number(s.total_new || 0) > 0 || Number(s.total_update || 0) > 0;
+};
+
+const hasTaskErrorNotice = (record) => {
+  if (!record) return false;
+  if (record.error_msg) return true;
+  if (record.phase_errors && Object.keys(record.phase_errors).length > 0) return true;
+  return record.status === 'error' && Boolean(record.end_reason);
+};
+
+const formatTaskErrorTooltip = (record) => {
+  if (!record) return '';
+  let detail = record.error_msg || '';
+  if (!detail && record.phase_errors && typeof record.phase_errors === 'object') {
+    detail = Object.entries(record.phase_errors)
+      .map(([phase, msg]) => `[${phase}] ${msg}`)
+      .join('；');
+  }
+  if (!detail && record.status === 'error' && record.end_reason) {
+    detail = record.end_reason;
+  }
+  if (record.status === 'done' && detail) {
+    return taskText('tasks.partialFailureNotice', { error: detail });
+  }
+  return detail;
+};
 
 const formatOptionsSummary = (options) => {
   if (!options) return taskText('tasks.defaultConfiguration');
@@ -3008,6 +3056,38 @@ onUnmounted(() => {
 }
 
 /* 状态标签 */
+.task-status-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.task-partial-warn-icon {
+  color: #faad14;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.task-error-notice-icon {
+  color: #ff4d4f;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.task-error-tooltip {
+  max-width: 360px;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.task-sync-breakdown {
+  margin-top: 2px;
+  font-size: 11px;
+  font-family: var(--arl-font-mono);
+  color: var(--arl-text-secondary);
+}
+
 .task-status-tag {
   display: inline-flex;
   align-items: center;

@@ -95,7 +95,7 @@ Before creating any tasks in a batch, the backend checks group existence and ver
 
 The task list distinguishes synchronization after completion, queued synchronization, active synchronization, success, and failure. Failure reasons appear in a tooltip. Scan results and synchronization status are retained independently; selecting a group does not indicate successful synchronization. The group and target scope are checked again before synchronization.
 
-`POST /api/task/sync/` supports finished domain and IP tasks with `task_id` and `scope_id`. Full scope validation still applies. The request records a queued state before dispatch and records dispatch errors. Both automatic and manual synchronization record `synced_scope_id` / `synced_scope_name` on success or `sync_error` on failure, without automatic retries.
+`POST /api/task/sync/` supports finished domain and IP tasks with `task_id` and `scope_id`. Full scope validation still applies. The request records a queued state before dispatch and records dispatch errors. Both automatic and manual synchronization record `synced_scope_id` / `synced_scope_name` along with `sync_summary` (`total_new`, `total_update`, and per-type `new` / `update` breakdowns) on success or `sync_error` on failure, without automatic retries. Partial errors in auxiliary phases preserve discovered assets and record details in `error_msg` and `phase_errors`, while failures in critical discovery phases transition the task to `error`.
 
 Task creation supports scoping by asset group; Nuclei YAML/ZIP import is provided by the PoC management page and is not duplicated here.
 

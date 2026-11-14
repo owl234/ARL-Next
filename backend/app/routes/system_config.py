@@ -156,17 +156,31 @@ class Performance(ARLResource):
         except Exception:
             pass
 
+        target_heavy = config.get("celery_heavy_concurrency", 1)
+        target_light = config.get("celery_light_concurrency", 1)
+        target_github = config.get("github_concurrency", 1)
+
+        pending_items = []
+        if runtime_heavy is not None and runtime_heavy != target_heavy:
+            pending_items.append({"queue": "arltask_heavy", "label": "重任务", "target": target_heavy, "runtime": runtime_heavy})
+        if runtime_light is not None and runtime_light != target_light:
+            pending_items.append({"queue": "arltask_light", "label": "轻任务", "target": target_light, "runtime": runtime_light})
+        if runtime_github is not None and runtime_github != target_github:
+            pending_items.append({"queue": "arlgithub", "label": "GitHub 监控", "target": target_github, "runtime": runtime_github})
+
         return {
             "code": 200,
             "message": "success",
             "data": {
-                "celery_heavy_concurrency": config.get("celery_heavy_concurrency", 1),
-                "celery_light_concurrency": config.get("celery_light_concurrency", 1),
+                "celery_heavy_concurrency": target_heavy,
+                "celery_light_concurrency": target_light,
                 "osint_concurrency": config.get("osint_concurrency", 1),
-                "github_concurrency": config.get("github_concurrency", 1),
+                "github_concurrency": target_github,
                 "runtime_heavy_concurrency": runtime_heavy,
                 "runtime_light_concurrency": runtime_light,
-                "runtime_github_concurrency": runtime_github
+                "runtime_github_concurrency": runtime_github,
+                "pending_convergence": len(pending_items) > 0,
+                "pending_nodes": pending_items
             }
         }
 
@@ -204,6 +218,7 @@ class Performance(ARLResource):
         update_performance_config(new_heavy, new_light, new_osint, new_github)
 
         feedback_messages = ["性能配置已保存。"]
+        pending_nodes = []
 
         # 每次提交都读取运行状态，相同目标值可以重试此前失败的调整。
         # 说明：pool_grow/pool_shrink 的 ok 回复仅代表命令被接收，不代表并发数已变化
@@ -227,10 +242,26 @@ class Performance(ARLResource):
                     nodes = [node for node in stats if key in node]
                     if not nodes:
                         feedback_messages.append(f"未检测到在线的{label} Worker 节点，将在下次重启生效；")
+                        pending_nodes.append({
+                            "queue": key,
+                            "label": label,
+                            "node": None,
+                            "target": desired,
+                            "runtime": None,
+                            "reason": "offline",
+                        })
                     for node in nodes:
                         before = _runtime_pool_size(stats.get(node))
                         if before is None:
                             feedback_messages.append(f"{label}节点 {node} 未返回运行进程数，请稍后重试；")
+                            pending_nodes.append({
+                                "queue": key,
+                                "label": label,
+                                "node": node,
+                                "target": desired,
+                                "runtime": None,
+                                "reason": "unknown_runtime",
+                            })
                             continue
                         diff = desired - before
                         if diff == 0:
@@ -243,9 +274,25 @@ class Performance(ARLResource):
                             if not isinstance(result, dict) or 'ok' not in result or 'error' in result:
                                 error = result.get('error', '未收到节点确认') if isinstance(result, dict) else '未收到节点确认'
                                 feedback_messages.append(f"{label}节点 {node} 调整未确认 ({error})，请稍后重新提交以重试；")
+                                pending_nodes.append({
+                                    "queue": key,
+                                    "label": label,
+                                    "node": node,
+                                    "target": desired,
+                                    "runtime": before,
+                                    "reason": "unconfirmed",
+                                })
                                 continue
                         except Exception as e:
                             feedback_messages.append(f"{label}节点 {node} 热扩缩容执行异常 ({e})，请稍后重新提交以重试；")
+                            pending_nodes.append({
+                                "queue": key,
+                                "label": label,
+                                "node": node,
+                                "target": desired,
+                                "runtime": before,
+                                "reason": "rpc_error",
+                            })
                             continue
                         # 池伸缩是异步补齐，命令返回后进程数不会立即变化，需等待收敛再判定。
                         after, reached = _wait_pool_size(inspector, node, desired)
@@ -253,23 +300,65 @@ class Performance(ARLResource):
                             feedback_messages.append(f"{label}节点 {node} 已{action}至 {after} 个并发进程；")
                         elif after is None:
                             feedback_messages.append(f"{label}节点 {node} 已接收{action}指令，但未回读运行进程数，请稍后重新提交以核实；")
+                            pending_nodes.append({
+                                "queue": key,
+                                "label": label,
+                                "node": node,
+                                "target": desired,
+                                "runtime": None,
+                                "reason": "unverified",
+                            })
                         else:
                             # 命令被接收但进程数未达目标（如进程仍被任务占用导致缩容暂缓）。
                             feedback_messages.append(
                                 f"{label}节点 {node} 已接收{action}指令，运行进程数仍为 {after}，"
-                                f"请稍后重新提交以重试；"
+                                f"请稍后重新提交以重试（任务空闲后调度器也将自动对齐）；"
                             )
+                            pending_nodes.append({
+                                "queue": key,
+                                "label": label,
+                                "node": node,
+                                "target": desired,
+                                "runtime": after,
+                                "reason": "busy_deferred" if diff < 0 else "pending_settle",
+                            })
             else:
                 feedback_messages.append("Celery 服务未响应，请稍后重新提交以重试；配置也将在重启时生效。")
+                pending_nodes.append({
+                    "queue": "all",
+                    "label": "Celery",
+                    "node": None,
+                    "target": None,
+                    "runtime": None,
+                    "reason": "celery_unresponsive",
+                })
         except Exception as e:
             feedback_messages.append(f"热扩缩容通信异常 ({e})，请稍后重新提交以重试或重启容器。")
+            pending_nodes.append({
+                "queue": "all",
+                "label": "Celery",
+                "node": None,
+                "target": None,
+                "runtime": None,
+                "reason": "rpc_exception",
+            })
 
         if diff_osint != 0:
             feedback_messages.append("OSINT 任务并发将在 10 秒内由后台看门狗自动更新。")
 
         return {
             "code": 200,
-            "message": " ".join(feedback_messages)
+            "message": " ".join(feedback_messages),
+            "pending_convergence": len(pending_nodes) > 0,
+            "pending_nodes": pending_nodes,
+            "data": {
+                "pending_convergence": len(pending_nodes) > 0,
+                "pending_nodes": pending_nodes,
+                "celery_heavy_concurrency": new_heavy,
+                "celery_light_concurrency": new_light,
+                "osint_concurrency": new_osint,
+                "github_concurrency": new_github if new_github is not None else old_config.get("github_concurrency", 1),
+            }
         }
 
 

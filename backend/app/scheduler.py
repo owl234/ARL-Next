@@ -524,29 +524,45 @@ def cleanup_zombie_tasks(window_seconds=1800):
     """
     🛡️【系统韧性与活性双重探测】清理因系统异常重启或中断的真正僵尸任务
     1. Celery 活性探测：活跃任务绝对不收敛；
-    2. 心跳安全时间窗：任务在 window_seconds (默认30分钟) 内有活跃心跳/启动时间，防御 Inspect 瞬时超时；
-    3. 监控任务保留审计：严禁物理删除，标记为 TaskStatus.ERROR 并保留 end_reason，平滑延后调度。
+    2. 实例代际与确定失联快收敛：若记录的 Worker 实例已重启更换 boot_id，或目标节点存活响应 Inspect 但未持有该 celery_id，无需等待 30 分钟直接收敛；
+    3. 心跳安全时间窗：当 Worker 失联/无响应 Inspect 时，若在 window_seconds (默认30分钟) 内有活跃心跳/启动时间，防御误杀；
+    4. 监控任务保留审计：严禁物理删除，标记为 TaskStatus.ERROR 并保留 end_reason，平滑延后调度。
     """
     non_running_statuses = [TaskStatus.DONE, TaskStatus.WAITING, TaskStatus.ERROR, TaskStatus.STOP]
     zombie_tasks = list(conn('task').find({"status": {"$nin": non_running_statuses}}))
     if not zombie_tasks:
         return 0
 
-    # 1. Celery 活性双重探测：获取存活 Worker 正在执行的任务集合
+    # 1. Celery 活性双重探测：获取存活 Worker 与正在执行的任务集合
     active_celery_ids = set()
+    responding_workers = set()
     try:
         from app.celerytask import celery as celery_app
         inspector = celery_app.control.inspect(timeout=5.0)
         active_map = inspector.active() if inspector else None
-        if active_map:
+        if isinstance(active_map, dict):
             for worker_name, tasks in active_map.items():
                 if isinstance(tasks, list):
+                    responding_workers.add(str(worker_name))
                     for t in tasks:
                         if isinstance(t, dict) and t.get("id"):
                             active_celery_ids.add(str(t["id"]))
-        logger.info(f"Celery inspect found {len(active_celery_ids)} active tasks across workers")
+        logger.info(
+            f"Celery inspect found {len(active_celery_ids)} active tasks across {len(responding_workers)} responding workers"
+        )
     except Exception as e:
         logger.warning(f"Failed to inspect celery active tasks: {e}")
+
+    # 2. 读取各 Worker 实例最新启动代际 (boot_id)，实现重启快速感知
+    worker_boot_map = {}
+    try:
+        wi_col = conn('worker_instances')
+        if wi_col and hasattr(wi_col, 'find'):
+            for wdoc in wi_col.find({}):
+                if isinstance(wdoc, dict) and wdoc.get("worker_node") and wdoc.get("boot_id"):
+                    worker_boot_map[str(wdoc["worker_node"])] = str(wdoc["boot_id"])
+    except Exception as we:
+        logger.debug(f"Failed to query worker_instances: {we}")
 
     now = time.time()
     converged_count = 0
@@ -560,18 +576,56 @@ def cleanup_zombie_tasks(window_seconds=1800):
             logger.info(f"Task {task_id} (celery_id: {celery_id}) is actively executing in Celery, skipping convergence.")
             continue
 
-        # b. 心跳安全时间窗：结合任务最后更新时间或开始时间（若在 30 分钟内活跃），防御 Celery Inspect 瞬时超时
         latest_act = _get_task_latest_activity(task)
-        if latest_act is not None and (now - latest_act) < window_seconds:
-            logger.info(
-                f"Task {task_id} (celery_id: {celery_id}) was active {now - latest_act:.1f}s ago "
-                f"(within {window_seconds}s heartbeat window), skipping convergence."
-            )
-            continue
+        worker_node = str(task.get("worker_node", "") or "")
+        task_boot_id = str(task.get("worker_boot_id", "") or "")
+
+        worker_rebooted = bool(
+            worker_node
+            and task_boot_id
+            and worker_node in worker_boot_map
+            and worker_boot_map[worker_node] != task_boot_id
+        )
+        worker_confirmed_absent = bool(
+            worker_node
+            and worker_node in responding_workers
+            and celery_id
+            and celery_id != "celery_id_placeholder"
+        )
+
+        # b. 未确认节点重启且未收到该节点在线确认时，保留 30 分钟心跳安全时间窗，防御 Inspect 瞬时超时
+        if not (worker_rebooted or worker_confirmed_absent):
+            if latest_act is not None and (now - latest_act) < window_seconds:
+                logger.info(
+                    f"Task {task_id} (celery_id: {celery_id}) was active {now - latest_act:.1f}s ago "
+                    f"(within {window_seconds}s heartbeat window), skipping convergence."
+                )
+                continue
+
+        # 收敛前二次回查数据库，防止在 Inspect 期间任务刚好正常完成引起的竞态覆写
+        try:
+            fresh_doc = conn('task').find_one({"_id": task["_id"]})
+            if isinstance(fresh_doc, dict) and fresh_doc.get("status") in non_running_statuses:
+                logger.info(
+                    f"Task {task_id} already transitioned to {fresh_doc.get('status')} before convergence, skipping."
+                )
+                continue
+        except Exception:
+            pass
+
+        if worker_rebooted:
+            fast_tag = "worker_rebooted"
+            converge_error_msg = f"检测到执行节点 {worker_node} 已重启（代际变更），原任务进程丢失，已快速收敛"
+        elif worker_confirmed_absent:
+            fast_tag = "worker_confirmed_absent"
+            converge_error_msg = f"执行节点 {worker_node} 在线核验未持有该任务进程 (celery_id={celery_id})，已快速收敛"
+        else:
+            fast_tag = "heartbeat_timeout"
+            converge_error_msg = f"任务心跳超时失联且 Inspect 未检测到活跃执行，已由看门狗自动收敛"
 
         # 确认为真正失活的僵尸任务，执行收敛
         logger.warning(
-            f"Converging confirmed zombie task: {task_id}, status: {task.get('status')}, "
+            f"Converging confirmed zombie task ({fast_tag}): {task_id}, status: {task.get('status')}, "
             f"celery_id: {celery_id}, elapsed since activity: {now - (latest_act or 0):.1f}s"
         )
 
@@ -581,6 +635,12 @@ def cleanup_zombie_tasks(window_seconds=1800):
         except Exception as e:
             logger.warning(f"Failed to clean temporary disk files for zombie task {task_id}: {e}")
 
+        # 立即释放该任务可能残留占用的高发包互斥槽位
+        try:
+            from app.utils.packet_lease import release_task_packet_slots
+            release_task_packet_slots(task_id, collection=conn('packet_phase_lease'))
+        except Exception:
+            pass
 
         curr_date = utils.curr_date()
         is_monitor = (task.get("task_tag") == "monitor")
@@ -591,7 +651,8 @@ def cleanup_zombie_tasks(window_seconds=1800):
             {"$set": {
                 "status": TaskStatus.ERROR,
                 "end_time": curr_date,
-                "end_reason": "服务重启/异常中断"
+                "end_reason": "服务重启/异常中断",
+                "error_msg": converge_error_msg
             }}
         )
 
@@ -601,8 +662,8 @@ def cleanup_zombie_tasks(window_seconds=1800):
                 syslog_col.insert_one({
                     "task_id": task_id,
                     "message": (
-                        f"【⚠️ 异常收敛】任务因失联且在安全时间窗内无活跃心跳（最后记录阶段: {task.get('status')}），"
-                        f"由系统看门狗自动收敛为 ERROR 终止态（通常因宿主机 OOM Killer 强杀、Worker 进程崩溃或节点异常重启导致）。"
+                        f"【⚠️ 异常收敛 ({fast_tag})】{converge_error_msg}（最后记录阶段: {task.get('status')}），"
+                        f"已由系统看门狗自动收敛为 ERROR 终止态。"
                     ),
                     "level": "ERROR",
                     "time": curr_date,
@@ -631,6 +692,84 @@ def cleanup_zombie_tasks(window_seconds=1800):
 
     return converged_count
         
+def reconcile_worker_concurrency():
+    """
+    巡检并自动对齐 Celery Worker 运行时进程池与数据库中保存的目标并发配置：
+    - 当运行进程数低于目标配置时，执行 pool_grow 扩容；
+    - 当运行进程数高于目标配置（例如用户保存缩容时有任务占用导致暂缓），仅在该节点当前无活跃任务时执行 pool_shrink 空闲缩容。
+    """
+    try:
+        from app.utils.performance_config import get_performance_config
+        from app.celerytask import celery as celery_app
+    except Exception:
+        return 0
+
+    try:
+        cfg = get_performance_config()
+    except Exception as e:
+        logger.debug(f"reconcile_worker_concurrency failed to read config: {e}")
+        return 0
+
+    try:
+        inspector = celery_app.control.inspect(timeout=1.5)
+        stats = inspector.stats() if inspector else None
+        if not isinstance(stats, dict) or not stats:
+            return 0
+        active_map = inspector.active() or {}
+    except Exception as e:
+        logger.debug(f"reconcile_worker_concurrency inspect failed: {e}")
+        return 0
+
+    queue_targets = [
+        ("arltask_heavy", max(1, int(cfg.get("celery_heavy_concurrency", 1)))),
+        ("arltask_light", max(1, int(cfg.get("celery_light_concurrency", 1)))),
+        ("arlgithub", max(1, int(cfg.get("github_concurrency", 1)))),
+    ]
+
+    adjusted = 0
+    for node, node_stats in stats.items():
+        if not isinstance(node_stats, dict):
+            continue
+        pool = node_stats.get("pool")
+        processes = pool.get("processes") if isinstance(pool, dict) else None
+        if not isinstance(processes, list):
+            continue
+        current = len(processes)
+
+        desired = None
+        for key, val in queue_targets:
+            if key in str(node):
+                desired = val
+                break
+        if desired is None or current == desired:
+            continue
+
+        diff = desired - current
+        if diff > 0:
+            try:
+                celery_app.control.pool_grow(n=diff, destination=[node], reply=True, timeout=1.5)
+                logger.info(f"reconcile_worker_concurrency: grew {node} from {current} to {desired}")
+                adjusted += 1
+            except Exception as e:
+                logger.warning(f"reconcile_worker_concurrency: pool_grow failed on {node}: {e}")
+        else:
+            node_active = active_map.get(node) if isinstance(active_map, dict) else None
+            if isinstance(node_active, list) and len(node_active) == 0:
+                try:
+                    celery_app.control.pool_shrink(n=abs(diff), destination=[node], reply=True, timeout=1.5)
+                    logger.info(f"reconcile_worker_concurrency: shrank idle {node} from {current} toward {desired}")
+                    adjusted += 1
+                except Exception as e:
+                    logger.warning(f"reconcile_worker_concurrency: pool_shrink failed on {node}: {e}")
+            else:
+                logger.debug(
+                    f"reconcile_worker_concurrency: deferring shrink on busy node {node} "
+                    f"(runtime={current}, target={desired})"
+                )
+
+    return adjusted
+
+
 def cleanup_orphan_tmp_files(max_age_seconds=604800):
     """
     清理 TMP_PATH 目录下的孤儿临时文件（如强行终止任务遗留的 wih、nuclei、massdns 等中间文件）
@@ -702,6 +841,12 @@ def run_forever():
 
         # 企业全景测绘自动纳管建组（原前端轮询职责下沉至后端）
         icp_auto_group_scheduler()
+
+        # Worker 运行时并发与配置目标空闲对齐（弥补任务执行中缩容暂缓的场景）
+        try:
+            reconcile_worker_concurrency()
+        except Exception as rec_err:
+            logger.debug(f"reconcile_worker_concurrency tick error: {rec_err}")
 
         # 每小时自动巡检并清理一次孤儿临时文件
         curr_time = time.time()

@@ -755,5 +755,8 @@ export default {
   "taskId": "Идентификатор задачи",
   "fuzzing": "Фаззинг",
   "quickAppName": "Название быстрого приложения",
-  "quickAppIcpNumber": "Регистрационный номер быстрого приложения"
+  "quickAppIcpNumber": "Регистрационный номер быстрого приложения",
+  "partialFailureNotice": "Частичные ошибки этапов (обнаруженные активы сохранены): {error}",
+  "syncSummaryBreakdown": "Итог синхронизации: новых {newCount} · обновлено {updateCount}",
+  "syncSummaryBadge": "+{newCount} / ~{updateCount}"
 };

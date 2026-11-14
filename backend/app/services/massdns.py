@@ -1,5 +1,6 @@
 from app import utils
 from app.config import Config
+from app.utils.packet_lease import acquire_packet_slot
 import os
 
 logger = utils.get_logger()
@@ -76,8 +77,16 @@ class MassDNS:
                    ]
 
         logger.info(" ".join(command))
-        # 阻塞调用系统命令，设置极其夸张的超时时间（5天），因为在极限大字典下，爆破可能需要非常久
-        utils.exec_system(command, timeout=5*24*60*60)
+        # 阻塞调用系统命令并抢占重发包租约槽位，避免多任务同时满速 UDP 爆破击垮宿主机 NAT/DNS
+        with acquire_packet_slot(phase="massdns"):
+            completed = utils.exec_system(command, timeout=5*24*60*60)
+
+        returncode = getattr(completed, "returncode", 0)
+        if returncode not in (0, None):
+            logger.warning("massdns exited with returncode=%s output_exists=%s", returncode, os.path.exists(self.mass_dns_output_path))
+            if not os.path.exists(self.mass_dns_output_path):
+                self._delete_file()
+                raise RuntimeError(f"massdns failed with exit code {returncode}")
 
     def parse_mass_dns_output(self):
         """
@@ -86,38 +95,40 @@ class MassDNS:
         安检中最核心的逻辑是：过滤泛解析。
         """
         output = []
-        with open(self.mass_dns_output_path, "r+", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                data = line.split(" ")
-                if len(data) != 3:
-                    continue
-                domain, _type, record = data
-                record = record.strip().strip(".")
+        try:
+            with open(self.mass_dns_output_path, "r+", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    data = line.split(" ")
+                    if len(data) != 3:
+                        continue
+                    domain, _type, record = data
+                    record = record.strip().strip(".")
 
-                # 【泛解析对抗】：
-                # 如果发现解析出来的 IP，存在于事先测好的“黑名单 IP（泛解析IP）”里，
-                # 说明这是个假域名（不管你输入什么鬼画符子域名，DNS 都给你指到同一个页面），直接丢弃！
-                if record in self.wildcard_domain_ip:
-                    continue
+                    # 【泛解析对抗】：
+                    # 如果发现解析出来的 IP，存在于事先测好的“黑名单 IP（泛解析IP）”里，
+                    # 说明这是个假域名（不管你输入什么鬼画符子域名，DNS 都给你指到同一个页面），直接丢弃！
+                    if record in self.wildcard_domain_ip:
+                        continue
 
-                item = {
-                    "domain": domain.strip("."),
-                    "type": _type,
-                    "record": record
-                }
-                output.append(item)
-
-        # 阅后即焚，防止服务器硬盘被临时文件撑爆
-        self._delete_file()
+                    item = {
+                        "domain": domain.strip("."),
+                        "type": _type,
+                        "record": record
+                    }
+                    output.append(item)
+        finally:
+            # 阅后即焚，防止服务器硬盘被临时文件撑爆
+            self._delete_file()
         return output
 
     def _delete_file(self):
-        try:
-            os.unlink(self.domain_gen_output_path)
-            os.unlink(self.mass_dns_output_path)
-        except Exception as e:
-            logger.warning(e)
+        for path in (self.domain_gen_output_path, self.mass_dns_output_path):
+            try:
+                if os.path.exists(path):
+                    os.unlink(path)
+            except Exception as e:
+                logger.warning(e)
 
     def run(self):
         """经典的 准备 -> 执行 -> 回收 三段式流水线"""

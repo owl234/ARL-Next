@@ -1,5 +1,8 @@
+import os
 import signal
+import socket
 import time
+import uuid
 from bson import ObjectId
 from app.config import Config
 from celery import Celery, platforms, current_task
@@ -24,6 +27,11 @@ platforms.C_FORCE_ROOT = True
 
 from celery.signals import task_prerun, task_postrun, worker_process_init, task_failure
 try:
+    from celery.signals import worker_ready, worker_shutdown
+except ImportError:
+    worker_ready = None
+    worker_shutdown = None
+try:
     from celery.exceptions import WorkerLostError
 except ImportError:
     try:
@@ -32,8 +40,61 @@ except ImportError:
         WorkerLostError = None
 
 from app.utils import arl_task_id_var, MongoSyslogHandler
+from app.utils.packet_lease import release_task_packet_slots
 import threading
 _token_local = threading.local()
+
+WORKER_BOOT_ID = f"{socket.gethostname()}:{int(time.time())}:{uuid.uuid4().hex[:8]}"
+WORKER_BOOT_TIME = time.time()
+
+
+def _resolve_worker_nodename(obj=None):
+    if obj is not None:
+        hostname = getattr(obj, "hostname", None)
+        if hostname:
+            return str(hostname)
+    env_name = os.environ.get("CELERY_WORKER_NAME")
+    if env_name:
+        return str(env_name)
+    return socket.gethostname()
+
+
+def _register_worker_instance(sender=None, status="ready", **kw):
+    try:
+        worker_node = _resolve_worker_nodename(sender)
+        col = utils.conn_db("worker_instances")
+        if col and hasattr(col, "update_one"):
+            col.update_one(
+                {"_id": worker_node},
+                {
+                    "$set": {
+                        "worker_node": worker_node,
+                        "boot_id": WORKER_BOOT_ID,
+                        "boot_time": WORKER_BOOT_TIME,
+                        "pid": os.getpid(),
+                        "status": status,
+                        "updated_at": time.time(),
+                    }
+                },
+                upsert=True,
+            )
+    except Exception:
+        pass
+
+
+def on_worker_ready(sender=None, **kw):
+    _register_worker_instance(sender=sender, status="ready")
+
+
+def on_worker_shutdown(sender=None, **kw):
+    _register_worker_instance(sender=sender, status="stopped")
+
+
+if worker_ready is not None:
+    worker_ready.connect(on_worker_ready)
+if worker_shutdown is not None:
+    worker_shutdown.connect(on_worker_shutdown)
+
 
 @worker_process_init.connect
 def setup_worker_process(**kw):
@@ -64,6 +125,31 @@ def setup_task_context(task_id, task, args, kwargs, **kw):
                 
         token = arl_task_id_var.set(str(business_task_id))
         _token_local.token = token
+
+        worker_node = _resolve_worker_nodename(getattr(task, "request", None))
+        worker_meta = {
+            "worker_node": worker_node,
+            "worker_boot_id": WORKER_BOOT_ID,
+            "worker_boot_time": WORKER_BOOT_TIME,
+        }
+        updated = False
+        if business_task_id and business_task_id != "global":
+            b_str = str(business_task_id)
+            if ObjectId.is_valid(b_str):
+                for col_name in ("task", "github_task"):
+                    col = utils.conn_db(col_name)
+                    if col and hasattr(col, "update_one"):
+                        res = col.update_one({"_id": ObjectId(b_str)}, {"$set": worker_meta})
+                        if getattr(res, "matched_count", 0) > 0:
+                            updated = True
+                            break
+        if not updated and task_id:
+            for col_name in ("task", "github_task"):
+                col = utils.conn_db(col_name)
+                if col and hasattr(col, "update_one"):
+                    res = col.update_one({"celery_id": str(task_id)}, {"$set": worker_meta})
+                    if getattr(res, "matched_count", 0) > 0:
+                        break
     except Exception:
         pass
 
@@ -190,6 +276,8 @@ def handle_task_failure(sender=None, task_id=None, exception=None, args=None, kw
         except Exception as db_err:
             logger.error(f"Failed to update task {db_id} status on failure: {db_err}")
 
+        release_task_packet_slots(str(db_id), collection=utils.conn_db("packet_phase_lease"))
+
         # 异步线程清理临时文件，规避 Celery 主进程同步 I/O 阻塞导致 RabbitMQ 心跳超时
         try:
             threading.Thread(
@@ -277,8 +365,35 @@ def sigterm_handler(signum, frame):
     utils.exit_gracefully(signum, frame)
 
 
+def _install_sigterm_handler():
+    """Install task SIGTERM handler on main thread and return previous handler."""
+    try:
+        return signal.signal(signal.SIGTERM, sigterm_handler)
+    except ValueError:
+        return None
+
+
+def _restore_sigterm_handler(prev_handler):
+    """Restore previous SIGTERM handler when run_task returns control to Celery pool."""
+    if prev_handler is None:
+        return
+    try:
+        if signal.getsignal(signal.SIGTERM) is sigterm_handler:
+            signal.signal(signal.SIGTERM, prev_handler)
+    except ValueError:
+        pass
+
+
 def run_task(options):
-    signal.signal(signal.SIGTERM, sigterm_handler)
+    """Execute one queued task while scoping the task SIGTERM handler to the active run."""
+    prev_sigterm = _install_sigterm_handler()
+    try:
+        _run_task_with_managed_signal(options)
+    finally:
+        _restore_sigterm_handler(prev_sigterm)
+
+
+def _run_task_with_managed_signal(options):
     action = options.get("celery_action")
     data = options.get("data")
     action_map = {

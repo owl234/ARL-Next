@@ -28,7 +28,7 @@ try:
 except ImportError:
     colorlog = None
 import logging
-import dns.resolver
+from .dns_client import get_ip, get_cname, get_ip_with_status, extract_massdns_records
 from tld import get_tld
 from datetime import datetime
 try:
@@ -306,41 +306,7 @@ def get_logger():
     return logger
 
 
-def get_ip(domain, log_flag=True):
-    domain = domain.strip()
-    logger = get_logger()
-    ips = []
-    try:
-        answers = dns.resolver.resolve(domain, 'A')
-        for rdata in answers:
-            if rdata.address == '0.0.0.1':
-                continue
-            ips.append(rdata.address)
-    except dns.resolver.NXDOMAIN as e:
-        if log_flag:
-            logger.info("{} {}".format(domain, e))
-
-    except Exception as e:
-        if log_flag:
-            logger.warning("{} {}".format(domain, e))
-
-    return ips
-
-
-def get_cname(domain, log_flag=True):
-    logger = get_logger()
-    cnames = []
-    try:
-        answers = dns.resolver.resolve(domain, 'CNAME')
-        for rdata in answers:
-            cnames.append(str(rdata.target).strip(".").lower())
-    except dns.resolver.NoAnswer as e:
-        if log_flag:
-            logger.debug(e)
-    except Exception as e:
-        logger.warning("{} {}".format(domain, e))
-
-    return cnames
+# get_ip 与 get_cname 统一由 dns_client 模块提供（支持直连公共 DNS 池与瞬时超时重试）。
 
 
 def domain_parsed(domain, fail_silently=True):

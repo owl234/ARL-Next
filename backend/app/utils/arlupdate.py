@@ -1389,6 +1389,44 @@ def ensure_mcp_governance_schema():
         logging.getLogger().warning(f"ensure_mcp_governance_schema failed: {e}")
 
 
+def ensure_packet_lease_schema():
+    """初始化高发包阶段有限并发槽位配置、索引并回收过期残留租约"""
+    import time
+    import logging
+    log = logging.getLogger()
+    try:
+        cfg_col = conn_db("system_config")
+        if hasattr(cfg_col, "update_one"):
+            cfg_col.update_one(
+                {"_id": "packet_lease"},
+                {"$setOnInsert": {"max_slots": 1}},
+                upsert=True,
+            )
+    except Exception as e:
+        log.warning(f"ensure_packet_lease_schema system_config init failed: {e}")
+
+    try:
+        lease_col = conn_db("packet_phase_lease")
+        if hasattr(lease_col, "update_many"):
+            now = time.time()
+            lease_col.update_many(
+                {"state": "busy", "expires_at": {"$lt": now}},
+                {
+                    "$set": {
+                        "state": "free",
+                        "owner_id": "",
+                        "task_id": "",
+                        "phase": "",
+                        "expires_at": 0.0,
+                    }
+                },
+            )
+        if hasattr(lease_col, "create_index"):
+            lease_col.create_index([("state", 1), ("expires_at", 1)], background=True)
+    except Exception as e:
+        log.warning(f"ensure_packet_lease_schema lease_col failed: {e}")
+
+
 def arl_update():
     if is_run_flask_routes():
         return
@@ -1464,6 +1502,7 @@ def arl_update():
         _run_step("heal_stale_updating_icp_tasks", heal_stale_updating_icp_tasks)
         _run_step("migrate_icp_auto_group_intent", migrate_icp_auto_group_intent)
         _run_step("ensure_mcp_governance_schema", ensure_mcp_governance_schema)
+        _run_step("ensure_packet_lease_schema", ensure_packet_lease_schema)
         db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
     except Exception as e:
         import logging

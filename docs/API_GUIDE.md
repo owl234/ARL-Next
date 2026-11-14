@@ -95,7 +95,7 @@
 
 任务列表的资产组列区分完成后同步、等待同步、同步中、已同步和同步失败；失败原因在提示中展示。扫描结果与同步状态独立保留，选择了资产组不代表已经同步成功。同步前再次检查组是否存在及任务目标范围；组被删除或范围改变时不继续同步。
 
-`POST /api/task/sync/` 支持已结束的域名和 IP 任务，参数为 `task_id`、`scope_id`；仍需完整范围校验。同步任务派发前记录等待状态，派发失败记录原因。自动同步和手动同步成功后记录 `synced_scope_id` / `synced_scope_name`，失败时记录 `sync_error`，不自动重试。
+`POST /api/task/sync/` 支持已结束的域名和 IP 任务，参数为 `task_id`、`scope_id`；仍需完整范围校验。同步任务派发前记录等待状态，派发失败记录原因。自动同步和手动同步成功后记录 `synced_scope_id` / `synced_scope_name` 及 `sync_summary`（包含 `total_new` 新增计数、`total_update` 存量更新计数与按资产维度的 `new` / `update` 明细），失败时记录 `sync_error`，不自动重试。对于非核心阶段发生的局部异常，任务仍保留已发现资产并正常进入终态，同时在 `error_msg` 与 `phase_errors` 字段记录分阶段异常明细；核心发现阶段失败则使任务进入 `error` 状态。
 
 任务创建支持按资产组圈定范围；Nuclei YAML/ZIP 导入由 PoC 管理页提供，此处不再重复实现。
 

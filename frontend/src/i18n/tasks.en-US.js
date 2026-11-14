@@ -755,5 +755,8 @@ export default {
   "geoLocation": "Location",
   "version": "Version",
   "taskId": "Task ID",
-  "fuzzing": "Fuzzing"
+  "fuzzing": "Fuzzing",
+  "partialFailureNotice": "Partial phase errors (discovered assets preserved): {error}",
+  "syncSummaryBreakdown": "Sync breakdown: {newCount} new · {updateCount} updated",
+  "syncSummaryBadge": "+{newCount} / ~{updateCount}"
 };

@@ -80,9 +80,10 @@ class TaskHeartbeat(object):
 class CommonTask(object):
     def __init__(self, task_id):
         self.task_id = task_id
+        self._phase_errors = {}
 
     @contextmanager
-    def safe_phase(self, phase_name: str, base_update=None):
+    def safe_phase(self, phase_name: str, base_update=None, critical: bool = False):
         if base_update:
             base_update.update_task_field("status", phase_name)
         logger.info(f"Start phase: {phase_name} for task {self.task_id}")
@@ -93,14 +94,31 @@ class CommonTask(object):
             except Exception as e:
                 logger.error(f"[容错阻断] 阶段 {phase_name} 发生致命错误: {e}")
                 logger.error(traceback.format_exc())
+                phase_errors = getattr(self, "_phase_errors", None)
+                if isinstance(phase_errors, dict):
+                    phase_errors[phase_name] = str(e)
+                    summary_msg = "; ".join(f"[{k}] {v}" for k, v in phase_errors.items())
+                else:
+                    summary_msg = str(e)
                 if base_update:
-                    base_update.update_task_field("error_msg", str(e))
+                    base_update.update_task_field("error_msg", summary_msg)
+                    if isinstance(phase_errors, dict):
+                        base_update.update_task_field("phase_errors", dict(phase_errors))
                     base_update.update_services(f"{phase_name}_error", 0.0)
+                if critical:
+                    raise
             finally:
                 elapse = time.time() - t1
                 logger.info(f"End phase: {phase_name} for task {self.task_id}, cost: {elapse:.2f}s")
                 if base_update:
                     base_update.update_services(phase_name, elapse)
+
+    def _has_critical_empty_failure(self, critical_phases, has_results: bool) -> bool:
+        """当关键发现阶段抛错且最终未产出有效资产时，阻止伪装为 DONE。"""
+        phase_errors = getattr(self, "_phase_errors", None) or {}
+        if has_results:
+            return False
+        return any(p in phase_errors for p in critical_phases)
 
     def insert_task_stat(self):
         query = {

@@ -162,6 +162,8 @@ def wrap_domain_executors(base_domain=None, scheduler_id=None, scope_id=None, op
             update_scope_domain_status(scope_id, base_domain, "probed", task_id)
     except Exception as e:
         logger.exception(e)
+        domain_executor.update_task_field("error_msg", str(e))
+        domain_executor.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         domain_executor.update_task_field("status", TaskStatus.ERROR)
         domain_executor.update_task_field("end_time", utils.curr_date())
         if scope_id and base_domain:
@@ -236,6 +238,8 @@ def oneshot_domain_executors(base_domain=None, scope_id=None, options=None, name
             update_scope_domain_status(scope_id, base_domain, "probed", task_id)
     except Exception as e:
         logger.exception(e)
+        domain_executor.update_task_field("error_msg", str(e))
+        domain_executor.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         domain_executor.update_task_field("status", TaskStatus.ERROR)
         domain_executor.update_task_field("end_time", utils.curr_date())
         if scope_id and base_domain:
@@ -274,7 +278,7 @@ class DomainExecutor(DomainTask):
         for domain_info in self.domain_info_list:
             self.domain_set.add(domain_info.domain)
 
-        with self.safe_phase("domain_sync", base_update):
+        with self.safe_phase("domain_sync", base_update, critical=True):
             self.set_scope_domain()
             target_scope_domains = {d for d in self.scope_domain_set if d == self.base_domain or d.endswith("." + self.base_domain)}
             new_domain_set = self.domain_set | target_scope_domains
@@ -304,13 +308,15 @@ class DomainExecutor(DomainTask):
                 self.start_poc_run()
             
         if self.options.get("file_leak"):
-            if hasattr(self, 'web_site_fetch') and self.web_site_fetch:
-                self.web_site_fetch.run_func("file_leak", self.web_site_fetch.file_leak)
+            with self.safe_phase("file_leak", base_update):
+                if hasattr(self, 'web_site_fetch') and self.web_site_fetch:
+                    self.web_site_fetch.run_func("file_leak", self.web_site_fetch.file_leak)
 
         # nuclei_scan 放在最后执行，防止高并发扫描把目标打挂或者触发IP封禁
         if self.options.get("nuclei_scan"):
-            if hasattr(self, 'web_site_fetch') and self.web_site_fetch:
-                self.web_site_fetch.run_func("nuclei_scan", self.web_site_fetch.nuclei_scan)
+            with self.safe_phase("nuclei_scan", base_update):
+                if hasattr(self, 'web_site_fetch') and self.web_site_fetch:
+                    self.web_site_fetch.run_func("nuclei_scan", self.web_site_fetch.nuclei_scan)
 
         with self.safe_phase("task_stats", base_update):
             # cidr ip 结果统计，插入cip 集合中
@@ -767,7 +773,10 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options, task_id=None
     except Exception as e:
         logger.warning("error on ip_executor {}".format(executor.ip_target))
         logger.exception(e)
+        executor.base_update_task.update_task_field("error_msg", str(e))
+        executor.base_update_task.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         executor.base_update_task.update_task_field("status", TaskStatus.ERROR)
+        executor.base_update_task.update_task_field("end_time", utils.curr_date())
         from app.helpers.scope import update_scope_domain_status
         for ip in target.split():
             update_scope_domain_status(scope_id, ip, "error", getattr(executor, 'task_id', None))
@@ -786,6 +795,8 @@ def oneshot_ip_executors(target, scope_id, task_name, options, task_id=None):
     except Exception as e:
         logger.warning("error on oneshot_ip_executors {}".format(executor.ip_target))
         logger.exception(e)
+        executor.base_update_task.update_task_field("error_msg", str(e))
+        executor.base_update_task.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         executor.base_update_task.update_task_field("status", TaskStatus.ERROR)
         executor.base_update_task.update_task_field("end_time", utils.curr_date())
         from app.helpers.scope import update_scope_domain_status

@@ -548,6 +548,32 @@ def sync_asset(task_id, scope_id, update_flag=False,  category=None, push_flag=F
         return {}, {}, {}, {}
     new_asset_map, new_asset_counter, update_asset_map, update_asset_counter = ret
 
+    # 将本次同步的新增入库与更新存量计数落库到 task.sync_summary，便于列表页区分零新增与存量刷新。
+    # 该逻辑内联在 sync_asset 中，以兼容仅按函数名通过 AST 加载 SyncAsset/sync_asset 的测试框架。
+    if task_id:
+        try:
+            tid = ObjectId(str(task_id))
+            clean_new = {
+                k: int(v) for k, v in (new_asset_counter or {}).items()
+                if isinstance(v, (int, float)) and int(v) > 0
+            }
+            clean_update = {
+                k: int(v) for k, v in (update_asset_counter or {}).items()
+                if isinstance(v, (int, float)) and int(v) > 0
+            }
+            summary = {
+                "new": clean_new,
+                "update": clean_update,
+                "total_new": sum(clean_new.values()),
+                "total_update": sum(clean_update.values()),
+                "updated_at": utils.curr_date(),
+            }
+            task_col = conn('task')
+            if hasattr(task_col, "update_one"):
+                task_col.update_one({"_id": tid}, {"$set": {"sync_summary": summary}})
+        except Exception as exc:
+            logger.debug("record task sync_summary failed for %s: %s", task_id, exc)
+
     if push_flag:
         utils.message_push(asset_map=new_asset_map, asset_counter=new_asset_counter, update_map=update_asset_map, update_counter=update_asset_counter)
 

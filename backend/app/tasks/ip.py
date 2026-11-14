@@ -273,7 +273,7 @@ class IPTask(CommonTask):
         
         '''***端口扫描开始***'''
         if self.options.get("port_scan"):
-            with self.safe_phase("port_scan", base_update):
+            with self.safe_phase("port_scan", base_update, critical=True):
                 self.port_scan()
 
         # 存储服务信息
@@ -286,7 +286,7 @@ class IPTask(CommonTask):
             with self.safe_phase("ssl_cert", base_update):
                 self.ssl_cert()
 
-        with self.safe_phase("find_site", base_update):
+        with self.safe_phase("find_site", base_update, critical=True):
             self.find_site()
 
         # 站点基础信息获取 (已剔除高危漏扫，纯净 Recon)
@@ -341,4 +341,7 @@ def ip_task(ip_target, task_id, options):
         d.run()
     except Exception as e:
         logger.exception(e)
-        d.base_update_task.update_task_field("status", "error")
+        d.base_update_task.update_task_field("error_msg", str(e))
+        d.base_update_task.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
+        d.base_update_task.update_task_field("status", TaskStatus.ERROR)
+        d.base_update_task.update_task_field("end_time", utils.curr_date())

@@ -581,6 +581,13 @@
                       </div>
                     </template>
                   </a-alert>
+                  <a-alert
+                    v-if="pendingConvergence"
+                    type="warning"
+                    show-icon
+                    class="performance-pending-alert"
+                    :message="pendingConvergenceText"
+                  />
                   <a-row :gutter="24">
                     <a-col :xs="24" :lg="12">
                       <a-card data-setting-anchor="performance" :title="pageText('pages.heavyTaskScheduling')" size="small" class="page-config-card-danger">
@@ -2533,8 +2540,30 @@ const performanceForm = ref({
   github_concurrency: 1,
 });
 const runtimePerformance = ref({ runtime_heavy_concurrency: null, runtime_light_concurrency: null, runtime_github_concurrency: null });
+const pendingConvergence = ref(false);
+const pendingNodes = ref([]);
 const performanceLoading = ref(false);
 const performanceSaveLoading = ref(false);
+
+const pendingConvergenceText = computed(() => {
+  if (!pendingConvergence.value) return '';
+  const details = (pendingNodes.value || [])
+    .filter((item) => item && item.queue && item.queue !== 'all')
+    .map((item) => {
+      const runtimeLabel = item.runtime === null || item.runtime === undefined
+        ? pageText('pages.performanceRuntimeOffline')
+        : String(item.runtime);
+      return pageText('pages.performanceQueueTargetRuntime', {
+        label: item.label || item.queue,
+        target: item.target ?? '-',
+        runtime: runtimeLabel
+      });
+    })
+    .join('；');
+  return pageText('pages.performanceConvergencePendingAlert', {
+    details: details || pageText('pages.performanceRuntimeOffline')
+  });
+});
 
 const fetchPerformanceConfig = async () => {
   performanceLoading.value = true;
@@ -2548,6 +2577,8 @@ const fetchPerformanceConfig = async () => {
       runtimePerformance.value.runtime_heavy_concurrency = res.data.runtime_heavy_concurrency ?? null;
       runtimePerformance.value.runtime_light_concurrency = res.data.runtime_light_concurrency ?? null;
       runtimePerformance.value.runtime_github_concurrency = res.data.runtime_github_concurrency ?? null;
+      pendingConvergence.value = Boolean(res.data.pending_convergence);
+      pendingNodes.value = Array.isArray(res.data.pending_nodes) ? res.data.pending_nodes : [];
       performanceBaseline.value = cloneDeep(performanceForm.value);
     } else {
       message.error(res.message || pageText('pages.failedToLoadPerformanceSettings'));
@@ -2577,7 +2608,16 @@ const savePerformanceConfig = async () => {
     });
     
     if (res.code === 200) {
-      message.success(res.message || pageText('pages.performanceSettingsUpdated'), 5);
+      const isPending = Boolean(res.pending_convergence || res.data?.pending_convergence);
+      if (isPending) {
+        pendingConvergence.value = true;
+        pendingNodes.value = res.pending_nodes || res.data?.pending_nodes || [];
+        message.warning(res.message || pageText('pages.performanceSettingsUpdated'), 6);
+      } else {
+        pendingConvergence.value = false;
+        pendingNodes.value = [];
+        message.success(res.message || pageText('pages.performanceSettingsUpdated'), 5);
+      }
       performanceBaseline.value = cloneDeep(performanceForm.value);
       fetchPerformanceConfig();
     } else {
@@ -3331,4 +3371,5 @@ onBeforeRouteLeave(() => {
 .page-wide-text .arl-cred-summary { flex-wrap: wrap; row-gap: 8px; }
 .page-wide-text .arl-cred-item { flex-wrap: wrap; gap: 6px; }
 .page-wide-text :deep(.ant-card-head-title) { white-space: normal; line-height: 1.5; padding: 12px 0; }
+.performance-pending-alert { margin-bottom: 16px; border-radius: 6px; }
 </style>

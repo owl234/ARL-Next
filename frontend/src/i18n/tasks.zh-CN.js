@@ -755,5 +755,8 @@ export default {
   "geoLocation": "地理位置",
   "version": "版本",
   "taskId": "任务 ID",
-  "fuzzing": "字典探测"
+  "fuzzing": "字典探测",
+  "partialFailureNotice": "部分阶段异常（不影响已产出资产）：{error}",
+  "syncSummaryBreakdown": "入库统计：本次新增 {newCount} 项 · 更新存量 {updateCount} 项",
+  "syncSummaryBadge": "+{newCount} / ~{updateCount}"
 };

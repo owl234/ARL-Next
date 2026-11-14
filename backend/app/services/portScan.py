@@ -1,5 +1,6 @@
 from app import utils
 from app.utils import nmap, is_valid_exclude_ports
+from app.utils.packet_lease import acquire_packet_slot
 from app.config import Config
 from app.modules import get_alive_ports
 
@@ -107,11 +108,14 @@ class PortScan:
                 self.nmap_arguments += " --exclude-ports {}".format(self.exclude_ports)
 
     def run(self):
+        if not self.targets or not self.targets.strip():
+            return []
         logger.info("nmap target {}  ports {}  arguments {}".format(
             self.targets[:20], self.ports[:20], self.nmap_arguments))
         nm = nmap.PortScanner()
-        # [执行扫描] 这个函数会阻塞，直到所有 IP 扫描完毕
-        nm.scan(hosts=self.targets, ports=self.ports, arguments=self.nmap_arguments)
+        # [执行扫描] 申请重发包租约槽位并阻塞执行，避免多任务高并发扫端口打爆主机状态表
+        with acquire_packet_slot(phase="port_scan"):
+            nm.scan(hosts=self.targets, ports=self.ports, arguments=self.nmap_arguments)
         
         ip_info_list = []
         for host in nm.all_hosts():

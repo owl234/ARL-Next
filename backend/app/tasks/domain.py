@@ -47,8 +47,15 @@ class DomainBrute(object):
     def _resolver(self):
         domains = []
         domain_cname_record = []
+        self.domain_cnames = []
+        self.brute_domain_map = {}
+
+        # 先从 MassDNS 原始输出中聚合直接得到的 A 与 CNAME 解析结果，避免重复全量二次解析
+        massdns_records = utils.extract_massdns_records(self.brute_out)
+        pre_resolved_ips = {}
+
         for x in self.brute_out:
-            current_domain = x["domain"].lower()
+            current_domain = x["domain"].lower().strip(".")
             if not utils.domain_parsed(current_domain):
                 continue
 
@@ -62,11 +69,11 @@ class DomainBrute(object):
             if current_domain not in domains:
                 domains.append(current_domain)
 
-            self.brute_domain_map[current_domain] = x["record"]
-
             if x["type"] == 'CNAME':
-                self.domain_cnames.append(current_domain)
-                current_record_domain = x['record']
+                if current_domain not in self.domain_cnames:
+                    self.domain_cnames.append(current_domain)
+                current_record_domain = x['record'].strip().strip(".").lower()
+                self.brute_domain_map[current_domain] = current_record_domain
 
                 if not utils.domain_parsed(current_record_domain):
                     continue
@@ -75,16 +82,26 @@ class DomainBrute(object):
                     continue
                 if current_record_domain not in domain_cname_record:
                     domain_cname_record.append(current_record_domain)
+            elif current_domain not in self.brute_domain_map:
+                self.brute_domain_map[current_domain] = x["record"]
+
+            cached_entry = massdns_records.get(current_domain)
+            if cached_entry and cached_entry.get("ips") and current_domain not in pre_resolved_ips:
+                pre_resolved_ips[current_domain] = list(cached_entry["ips"])
 
         for domain in domain_cname_record:
             if not domain.endswith(self.base_domain_scope):
                 continue
             if domain not in domains:
                 domains.append(domain)
+            cached_entry = massdns_records.get(domain.lower().strip("."))
+            if cached_entry and cached_entry.get("ips") and domain not in pre_resolved_ips:
+                pre_resolved_ips[domain] = list(cached_entry["ips"])
 
         start_time = time.time()
-        logger.info("start resolver {} {}".format(self.base_domain, len(domains)))
-        self.resolver_map = services.resolver_domain(domains)
+        logger.info("start resolver {} total={} cached_a={}".format(
+            self.base_domain, len(domains), len(pre_resolved_ips)))
+        self.resolver_map = services.resolver_domain(domains, pre_resolved=pre_resolved_ips)
         elapse = time.time() - start_time
         logger.info("end resolver {} result {}, elapse {}".format(self.base_domain,
                                                                   len(self.resolver_map), elapse))
@@ -674,7 +691,7 @@ class DomainTask(CommonTask):
         logger.info("end arl fetch {} {} elapse {}".format(
             self.base_domain, len(domain_info_list), elapse))
 
-    def build_domain_info(self, domains):
+    def build_domain_info(self, domains, pre_resolved=None):
         """
         构建domain_info_list 带去重功能
         """
@@ -705,7 +722,7 @@ class DomainTask(CommonTask):
 
         if self.task_tag == "monitor":
             return fake_list
-        domain_info_list = services.build_domain_info(fake_list)
+        domain_info_list = services.build_domain_info(fake_list, pre_resolved=pre_resolved)
 
         return domain_info_list
 
@@ -751,7 +768,8 @@ class DomainTask(CommonTask):
             if dom:
                 self.domain_source_map[dom.lower().strip()] = CollectSource.ALTDNS
 
-        alt_domain_info_list = self.build_domain_info(alt_dns_out)
+        alt_pre_resolved = utils.extract_massdns_records(alt_dns_out)
+        alt_domain_info_list = self.build_domain_info(alt_dns_out, pre_resolved=alt_pre_resolved)
         if self.task_tag == "task":
             alt_domain_info_list = self.clear_domain_info_by_record(alt_domain_info_list)
 
@@ -940,9 +958,12 @@ class DomainTask(CommonTask):
 
     def domain_fetch(self):
         '''****域名爆破开始****'''
+        has_fallback_discovery = bool(
+            self.options.get("arl_search") or self.options.get("dns_query_plugin")
+        )
         if self.options.get("domain_brute"):
             self.update_task_field("status", "domain_brute")
-            with self.safe_phase("domain_brute", self.base_update_task):
+            with self.safe_phase("domain_brute", self.base_update_task, critical=not has_fallback_discovery):
                 self.domain_brute()
         else:
             domain_info = self.build_single_domain_info(self.base_domain)
@@ -963,6 +984,9 @@ class DomainTask(CommonTask):
             self.update_task_field("status", "arl_search")
             with self.safe_phase("arl_search", self.base_update_task):
                 self.arl_search()
+
+        if self._has_critical_empty_failure(["domain_brute"], bool(self.domain_info_list)):
+            raise RuntimeError(self._phase_errors.get("domain_brute", "domain_brute 阶段失败且无可用域名产出"))
 
         '''***智能域名生成****'''
         if self.options.get("alt_dns"):
@@ -1053,7 +1077,7 @@ class DomainTask(CommonTask):
 
     def start_site_fetch(self):
         self.update_task_field("status", "find_site")
-        with self.safe_phase("find_site", self.base_update_task):
+        with self.safe_phase("find_site", self.base_update_task, critical=True):
             self.find_site()
 
         # 对 domain_info_list 进行清空，回收内存
@@ -1317,5 +1341,7 @@ def domain_task(base_domain, task_id, options):
         d.run()
     except Exception as e:
         logger.exception(e)
+        d.update_task_field("error_msg", str(e))
+        d.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         d.update_task_field("status", TaskStatus.ERROR)
         d.update_task_field("end_time", utils.curr_date())
