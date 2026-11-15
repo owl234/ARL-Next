@@ -766,5 +766,11 @@ export default {
   "hostDiscoveryOptionTag": "Host discovery: {mode}",
   "hostDiscoverySkipShort": "Force -Pn",
   "hostDiscoveryProbeShort": "Force -PE -PS",
-  "hostDiscoveryAutoHint": "Default auto matrix (IPs x ports): <=60 ports always use -Pn; 61-2000 ports probe >16 IPs; >2000 or all ports probe >2 IPs"
+  "hostDiscoveryAutoHint": "Default auto matrix (IPs x ports): <=60 ports always use -Pn; 61-2000 ports probe >16 IPs; >2000 or all ports probe >2 IPs",
+  "proxyExitDirectTag": "Egress: Direct",
+  "proxyExitBackupTag": "Backup Egress: {name}",
+  "proxyExitProxiedTag": "Proxy Egress: {name}",
+  "proxyExitBlockedTag": "Egress Cooldown ({sec}s)",
+  "proxyExitUnavailableTag": "Proxy Unavailable",
+  "proxyConfigureEgressLink": "Proxy Settings"
 };

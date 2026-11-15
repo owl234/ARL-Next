@@ -42,9 +42,32 @@ const semaphore = new ConcurrencySemaphore(2); // 严格限制 Chromium 最多�
 // 2. 浏览器实例与动态引用计数管理
 // ==========================================
 let currentBrowserWrapper = null;
+let browserInitPromise = null;
 let requestsCount = 0;
 let isRotating = false;
 const MAX_REQUESTS = 200; // 每 200 次请求自愈轮转一次 (平衡 V8 堆内存释放与 Chromium 启动开销)
+
+function normalizeProxyArg(raw) {
+    if (!raw || typeof raw !== 'string') return '';
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    try {
+        const parsed = new URL(trimmed);
+        if (parsed.username || parsed.password) {
+            return '';
+        }
+        const scheme = parsed.protocol.replace(/:$/, '').toLowerCase();
+        if (scheme === 'socks5h') {
+            return `socks5://${parsed.host}`;
+        }
+        if (scheme === 'http' || scheme === 'https' || scheme === 'socks5') {
+            return `${scheme}://${parsed.host}`;
+        }
+        return '';
+    } catch (e) {
+        return '';
+    }
+}
 
 class BrowserWrapper {
     constructor(browser) {
@@ -98,22 +121,56 @@ class BrowserWrapper {
 }
 
 async function launchBrowserInstance() {
+    const args = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--ignore-certificate-errors',
+        '--disable-gpu',
+        '--js-flags=--max-old-space-size=512',
+        '--disable-site-isolation-trials',
+        '--disable-extensions',
+        '--mute-audio'
+    ];
     const browser = await puppeteer.launch({
         executablePath: '/usr/bin/chromium',
-        args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox', 
-            '--disable-dev-shm-usage', 
-            '--ignore-certificate-errors', 
-            '--disable-gpu',
-            '--js-flags=--max-old-space-size=512',
-            '--disable-site-isolation-trials',
-            '--disable-extensions',
-            '--mute-audio'
-        ],
+        args,
         ignoreHTTPSErrors: true
     });
     return new BrowserWrapper(browser);
+}
+
+/**
+ * 为每次扫描请求创建独立 incognito 上下文，确保 CDP 层的代理配置按请求精确生效且互不串扰。
+ */
+async function createContextForProxy(browser, proxyServerRaw = '') {
+    const normalizedProxy = normalizeProxyArg(proxyServerRaw);
+    if (normalizedProxy) {
+        return browser.createIncognitoBrowserContext({ proxyServer: normalizedProxy });
+    }
+    return browser.createIncognitoBrowserContext();
+}
+
+async function ensureActiveBrowser() {
+    if (currentBrowserWrapper && currentBrowserWrapper.browser && currentBrowserWrapper.browser.isConnected()) {
+        return currentBrowserWrapper;
+    }
+    if (!browserInitPromise) {
+        browserInitPromise = (async () => {
+            const oldWrapper = currentBrowserWrapper;
+            const newWrapper = await launchBrowserInstance();
+            currentBrowserWrapper = newWrapper;
+            requestsCount = 0;
+            if (oldWrapper) {
+                oldWrapper.retire();
+            }
+            console.log('[BrowserManager] Initialized active Chromium instance (per-context proxy isolation)');
+            return newWrapper;
+        })().finally(() => {
+            browserInitPromise = null;
+        });
+    }
+    return browserInitPromise;
 }
 
 async function checkRotation() {
@@ -138,7 +195,7 @@ async function checkRotation() {
     }
 }
 
-function analyzeUrl(url, targetWrapper) {
+function analyzeUrl(url, targetWrapper, proxyServer = '') {
     return new Promise(async (resolve, reject) => {
         let page;
         let context;
@@ -162,8 +219,8 @@ function analyzeUrl(url, targetWrapper) {
                 return;
             }
 
-            // Create a new incognito context for isolation
-            context = await targetWrapper.browser.createIncognitoBrowserContext();
+            // Create a new incognito context for isolation (binding per-request proxy via CDP)
+            context = await createContextForProxy(targetWrapper.browser, proxyServer);
             page = await context.newPage();
             
             // Bypass WAF by mocking User-Agent and webdriver
@@ -267,7 +324,7 @@ function analyzeUrl(url, targetWrapper) {
     });
 }
 
-function takeScreenshot(url, targetWrapper) {
+function takeScreenshot(url, targetWrapper, proxyServer = '') {
     return new Promise(async (resolve, reject) => {
         let page;
         let context;
@@ -297,7 +354,7 @@ function takeScreenshot(url, targetWrapper) {
                 return;
             }
 
-            context = await targetWrapper.browser.createIncognitoBrowserContext();
+            context = await createContextForProxy(targetWrapper.browser, proxyServer);
             page = await context.newPage();
             
             // Bypass WAF by mocking User-Agent and webdriver
@@ -419,8 +476,9 @@ const server = http.createServer(async (req, res) => {
                     return;
                 }
                 
-                // 绑定当前接收请求时的目标 BrowserWrapper 实例
-                const targetWrapper = currentBrowserWrapper;
+                // 获取常驻 BrowserWrapper 实例（代理在 incognito context 级别按请求隔离绑定）
+                const proxyServer = data.proxy_server || '';
+                const targetWrapper = await ensureActiveBrowser();
                 if (!targetWrapper || !targetWrapper.browser) {
                     res.writeHead(503);
                     res.end('Browser instance is initializing');
@@ -434,9 +492,9 @@ const server = http.createServer(async (req, res) => {
                 let result;
                 try {
                     if (req.url === '/screenshot') {
-                        result = await takeScreenshot(url, targetWrapper);
+                        result = await takeScreenshot(url, targetWrapper, proxyServer);
                     } else {
-                        result = await analyzeUrl(url, targetWrapper);
+                        result = await analyzeUrl(url, targetWrapper, proxyServer);
                     }
                 } finally {
                     semaphore.release();

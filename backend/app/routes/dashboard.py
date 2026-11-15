@@ -322,6 +322,11 @@ class DashboardSysInfo(ARLResource):
                 "hackers": total_github_hackers
             }
         }
+        try:
+            from app.services.proxy_service import get_proxy_runtime_summary
+            data["proxy"] = get_proxy_runtime_summary("osint")
+        except Exception:
+            data["proxy"] = None
         _DASHBOARD_CACHE["sysinfo"] = {"data": data, "ts": time.time()}
         return utils.build_ret(ErrorMsg.Success, data)
 

@@ -113,6 +113,7 @@ def patch_content(response, timeout=None, max_size=10*1024*1024):
 
 def http_req(url, method='get', **kwargs):
     resilient_ssl = kwargs.pop('resilient_ssl', False)
+    proxy_domain = kwargs.pop('proxy_domain', None)
 
     # Third-party APIs and callbacks carry credentials and must verify TLS.
     # Reconnaissance callers explicitly opt out for self-signed target sites.
@@ -128,10 +129,19 @@ def http_req(url, method='get', **kwargs):
     kwargs["headers"] = headers
     kwargs["stream"] = True
 
-    if Config.PROXY_URL:
-        proxies['https'] = Config.PROXY_URL
-        proxies['http'] = Config.PROXY_URL
-        kwargs["proxies"] = proxies
+    if "proxies" not in kwargs and proxy_domain != "bypass":
+        resolved_proxies = None
+        if "conn_db" in globals():
+            try:
+                from app.services.proxy_service import resolve_requests_proxies
+                resolved_proxies = resolve_requests_proxies(url, domain=proxy_domain)
+            except Exception:
+                if Config.PROXY_URL:
+                    resolved_proxies = {'https': Config.PROXY_URL, 'http': Config.PROXY_URL}
+        elif Config.PROXY_URL:
+            resolved_proxies = {'https': Config.PROXY_URL, 'http': Config.PROXY_URL}
+        if resolved_proxies:
+            kwargs["proxies"] = resolved_proxies
 
     with StatelessSession() as session:
         # 必须清空自带的默认 Adapter 避免未关闭造成潜在的内存泄漏

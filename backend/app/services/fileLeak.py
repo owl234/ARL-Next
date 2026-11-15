@@ -77,7 +77,7 @@ class HTTPReq():
 
     def req(self):
         content = b''
-        conn = utils.http_req(self.url.url, 'get', timeout=(3, 6), stream=True, verify=False)
+        conn = utils.http_req(self.url.url, 'get', timeout=(3, 6), stream=True, verify=False, proxy_domain="scan")
         self.conn = conn
         start_time = time.time()
         for data in conn.iter_content(chunk_size=512):

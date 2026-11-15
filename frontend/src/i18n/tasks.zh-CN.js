@@ -766,5 +766,11 @@ export default {
   "hostDiscoveryOptionTag": "存活探测: {mode}",
   "hostDiscoverySkipShort": "强制 -Pn",
   "hostDiscoveryProbeShort": "强制 -PE -PS",
-  "hostDiscoveryAutoHint": "默认按 IP 数 × 端口数自动决定：≤60 端口直扫 -Pn；61~2000 端口超过 16 个 IP 或 >2000/全端口超过 2 个 IP 时先探活"
+  "hostDiscoveryAutoHint": "默认按 IP 数 × 端口数自动决定：≤60 端口直扫 -Pn；61~2000 端口超过 16 个 IP 或 >2000/全端口超过 2 个 IP 时先探活",
+  "proxyExitDirectTag": "OSINT 出口: 直连",
+  "proxyExitBackupTag": "OSINT 备用出口: {name}",
+  "proxyExitProxiedTag": "OSINT 代理出口: {name}",
+  "proxyExitBlockedTag": "出口冷却中 ({sec}s)",
+  "proxyExitUnavailableTag": "代理出口不可用",
+  "proxyConfigureEgressLink": "配置分流策略"
 };

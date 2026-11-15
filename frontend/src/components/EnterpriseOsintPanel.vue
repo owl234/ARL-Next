@@ -8,6 +8,14 @@
           <a-tag v-if="taskTarget && taskTarget.startsWith('TYC_')" color="cyan">{{ taskTarget }}</a-tag>
           <a-tag v-if="taskTypeLabel" color="blue">{{ taskTypeLabel }}</a-tag>
           <a-tag v-if="taskStatusLabel" :color="taskStatusColor">{{ taskStatusLabel }}</a-tag>
+          <a-tag
+            v-if="osintProxyTagText"
+            :color="osintProxyTagColor"
+            style="cursor: pointer; margin: 0;"
+            @click="goToProxySettings"
+          >
+            {{ osintProxyTagText }}
+          </a-tag>
           <a-badge v-if="hasIncrement" :count="assetText('tasks.newAssets')" class="asset-increment-badge" />
         </div>
         <div style="display: flex; gap: 8px; align-items: center;">
@@ -508,6 +516,7 @@
 <script setup>
 import { useI18n } from 'vue-i18n';
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { message, notification } from 'ant-design-vue';
 import {
   SearchOutlined,
@@ -535,6 +544,57 @@ import SyncToScopeModal from './SyncToScopeModal.vue';
 import RawDataDrawer from './RawDataDrawer.vue';
 
 const { t: assetText, locale: assetLocale } = useI18n({ useScope: 'global' });
+const router = useRouter();
+
+const osintProxyStatus = ref(null);
+let lastProxyStatusFetchAt = 0;
+
+const fetchOsintProxyStatus = async (force = false) => {
+  const now = Date.now();
+  if (!force && now - lastProxyStatusFetchAt < 5000) return;
+  lastProxyStatusFetchAt = now;
+  try {
+    const res = await request.get('/api/system_config/proxy');
+    if (res.code === 200 && res.data?.runtime) {
+      osintProxyStatus.value = res.data.runtime;
+    }
+  } catch (e) {
+    // 非阻塞态标识，读取失败静默降级
+  }
+};
+
+const osintProxyTagText = computed(() => {
+  const st = osintProxyStatus.value;
+  if (!st) return '';
+  if (st.state === 'backup_active') {
+    return assetText('tasks.proxyExitBackupTag', { name: st.active_node_name || st.active_exit_id || 'backup' });
+  }
+  if (st.state === 'proxy_active') {
+    return assetText('tasks.proxyExitProxiedTag', { name: st.active_node_name || st.active_exit_id || 'proxy' });
+  }
+  if (st.state === 'degraded_blocked') {
+    return assetText('tasks.proxyExitBlockedTag', { sec: st.cooldown_remaining_sec || 0 });
+  }
+  if (st.state === 'proxy_unavailable') {
+    return assetText('tasks.proxyExitUnavailableTag');
+  }
+  if (st.enabled_node_count > 0 || st.mode !== 'direct_only') {
+    return assetText('tasks.proxyExitDirectTag');
+  }
+  return '';
+});
+
+const osintProxyTagColor = computed(() => {
+  const st = osintProxyStatus.value?.state;
+  if (st === 'degraded_blocked' || st === 'proxy_unavailable') return 'error';
+  if (st === 'backup_active') return 'warning';
+  if (st === 'proxy_active') return 'processing';
+  return 'success';
+});
+
+const goToProxySettings = () => {
+  router.push({ path: '/systemSettings', query: { tab: 'proxy', focus: 'osint' } });
+};
 
 const props = defineProps({
   taskId: {
@@ -1151,6 +1211,7 @@ const fetchTaskDetail = async () => {
       if (task.status === 'done' || task.status === 'error') {
         stopLogPolling();
       }
+      fetchOsintProxyStatus();
 
       emit('taskLoaded', {
         task,

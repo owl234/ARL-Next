@@ -43,7 +43,15 @@ def fetch_favicon_response(url, *, allowed_ip, forbidden_domain, proxy_url=''):
         # Self-signed certificates are expected on scanned assets. Preserve SNI.
         pool_options.update(cert_reqs=ssl.CERT_NONE, assert_hostname=False, server_hostname=host)
     if proxy_url:
-        manager = urllib3.ProxyManager(proxy_url, **pool_options)
+        lower_proxy = str(proxy_url).strip().lower()
+        if lower_proxy.startswith('socks'):
+            try:
+                from urllib3.contrib.socks import SOCKSProxyManager
+                manager = SOCKSProxyManager(proxy_url, **pool_options)
+            except Exception:
+                manager = urllib3.PoolManager(**pool_options)
+        else:
+            manager = urllib3.ProxyManager(proxy_url, **pool_options)
     else:
         manager = urllib3.PoolManager(**pool_options)
     response = None

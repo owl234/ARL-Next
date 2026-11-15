@@ -146,7 +146,7 @@ def github_client(url, params=None, cnt=0):
     time.sleep(2.5)
     
     try:
-        conn = http_req(url, params=params, headers=headers, timeout=(20.1, 30.1))
+        conn = http_req(url, params=params, headers=headers, timeout=(20.1, 30.1), proxy_domain="intel")
     except Exception as e:
         if cnt < 3:
             cnt += 1

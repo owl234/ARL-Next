@@ -361,3 +361,24 @@ Unreachable workers, missing control acknowledgements or a stop timeout abort re
 - Restoration checks that broker consumer counts reach zero and the original pool children exit, in addition to Celery acknowledgements. Backup and restore share an operation lock in their persistent directory.
 - `force` must be a JSON boolean; the string `"false"` is rejected. Unfinished enterprise recon cannot be terminated through Celery and blocks restoration.
 - Use a maintenance window with external database writers, new submissions and schedulers paused. This workflow does not isolate external writers or promise distributed consistency across node restarts or network partitions.
+
+## 8. System Proxy Pool & Traffic Domain Routing
+
+The proxy node pool, three traffic-domain policies (`osint` / `scan` / `intel`), and bypass rules are persisted in `system_config` (`_id: "proxy_config"`), while exit switching and WAF cooldown state live in `_id: "proxy_runtime_status"`. All proxy management endpoints require the administrator `Token` header.
+
+| Method | Endpoint | Purpose |
+| :--- | :--- | :--- |
+| `GET` | `/api/system_config/proxy` | Fetch pool configuration (`password` cleared, with `has_password` and masked `display_url`), `osint` runtime status, and server capabilities (`pysocks_installed`, `protocols`, `presets`) |
+| `POST` | `/api/system_config/proxy/nodes` | Create a proxy node (`protocol`: `http`, `https`, `socks5`, `socks5h`; `port`: `1–65535`) |
+| `PUT` | `/api/system_config/proxy/nodes/<node_id>` | Update a node; omitting password preserves the existing credential, while `clear_password: true` clears it |
+| `DELETE` | `/api/system_config/proxy/nodes/<node_id>` | Delete a node and detach it from domain policies; domains left without usable exits fall back to `direct_only` |
+| `PUT` | `/api/system_config/proxy/policies` | Incrementally update `policies` (`osint`, `scan`, `intel`) and `bypass` (`bypass_private_cidr`, `bypass_domestic_webhooks`, `custom_no_proxy`) |
+| `POST` | `/api/system_config/proxy/probe` | Probe connectivity using fixed allowlisted presets only (arbitrary custom URLs are rejected to prevent SSRF) |
+| `POST` | `/api/system_config/proxy/cooldown/reset` | Reset `osint` cooldown state manually and notify `osint-service`, returning `osint_notified` and updated `runtime` |
+
+- **Routing Modes & Domain Options**: Modes include `direct_only`, `failover`, `round_robin`, and `fixed_proxy`. `osint.cooldown_sec` accepts `30–3600` seconds (default `300`), and `scan` additionally exposes `apply_to_nuclei`, `apply_to_npoc`, and `apply_to_puppeteer`.
+- **Probe Presets**: `POST /api/system_config/proxy/probe` restricts `preset` to `egress_ip`, `miit`, `tianyancha`, and `github`. For `miit`, an HTTP `521` challenge without WAF block signatures is treated as reachable (not blocked).
+- **Runtime Fields & Compatibility**:
+  - `GET /api/dashboard/sysinfo` (`data.proxy`) and `GET /api/icp/tyc_check` (`data.proxy_status`) expose the same runtime model (`state`: `direct_ok`, `backup_active`, `proxy_active`, `degraded_blocked`, or `proxy_unavailable`).
+  - When `scan.apply_to_puppeteer` is enabled with credentialed nodes, Puppeteer falls back to direct egress (Chromium `--proxy-server` does not natively support proxy authentication) and reports the notice in `runtime.puppeteer_compat_warning`.
+  - Legacy `proxy_url` updates via `POST /api/system_config/general` remain synchronized to the `legacy-default` node.

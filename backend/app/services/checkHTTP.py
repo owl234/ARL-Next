@@ -35,7 +35,7 @@ class CheckHTTP(BaseThread):
         parsed = urllib.parse.urlsplit(url)
         is_https = (parsed.scheme.lower() == "https") or url.startswith("https://")
         try:
-            conn = utils.http_req(url, method="get", timeout=self.timeout, verify=False, resilient_ssl=resilient)
+            conn = utils.http_req(url, method="get", timeout=self.timeout, verify=False, resilient_ssl=resilient, proxy_domain="scan")
         except (requests.exceptions.SSLError, requests.exceptions.ConnectionError, ssl.SSLError) as e:
             if not resilient and is_https:
                 return self.check(url, resilient=True)

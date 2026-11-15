@@ -363,3 +363,24 @@ Worker 不可达、控制指令没有完整确认或停止超时，均中止恢�
 - 恢复前除 Celery 确认外，还核对 broker 消费者为零、原任务子进程已退出；无法确认时不执行数据库覆盖。备份与恢复共用持久目录内的跨进程操作锁。
 - `force` 必须为 JSON 布尔值，字符串 `"false"` 不被接受；未结束的企业测绘任务不能由 Celery 强制恢复中断，必须先结束这些任务。
 - 恢复须在维护窗口暂停外部数据库写入、任务提交和计划调度。本流程不代替对外部写入者的维护隔离，也不保证在节点重启或网络分区下的分布式一致性。
+
+## 8. 系统代理池与三域分流治理
+
+代理节点池、三域流量策略（`osint` / `scan` / `intel`）与旁路白名单统一持久化在 `system_config`（`_id: "proxy_config"`）中，运行态切换与冷却状态由 `_id: "proxy_runtime_status"` 维护；所有代理治理接口均需携带管理员 `Token` 请求头。
+
+| 方法 | 路径 | 用途 |
+| :--- | :--- | :--- |
+| `GET` | `/api/system_config/proxy` | 读取节点池配置（`password` 置空、`has_password` + 掩码 `display_url`）、`osint` 运行态及能力清单（`pysocks_installed`、`protocols`、`presets`） |
+| `POST` | `/api/system_config/proxy/nodes` | 新增代理节点（`protocol` 支持 `http` / `https` / `socks5` / `socks5h`，端口 `1–65535`） |
+| `PUT` | `/api/system_config/proxy/nodes/<node_id>` | 更新节点信息；未传入新密码时保留原密码，传入 `clear_password: true` 可清除密码 |
+| `DELETE` | `/api/system_config/proxy/nodes/<node_id>` | 删除节点并从三域绑定中自动摘除；失去可用节点且无直连兜底的域将平滑回退为 `direct_only` |
+| `PUT` | `/api/system_config/proxy/policies` | 增量更新 `policies`（`osint` / `scan` / `intel`）与 `bypass`（`bypass_private_cidr`、`bypass_domestic_webhooks`、`custom_no_proxy`） |
+| `POST` | `/api/system_config/proxy/probe` | 基于固定安全白名单预设探测节点连通性（禁止自定义外部 URL 以防 SSRF） |
+| `POST` | `/api/system_config/proxy/cooldown/reset` | 手动重置 `osint` 出口冷却状态并通知 `osint-service`，返回 `osint_notified` 与最新 `runtime` |
+
+- **分流模式与域级开关**：支持 `direct_only`、`failover`、`round_robin`、`fixed_proxy`。其中 `osint.cooldown_sec` 取值范围限制为 `30–3600` 秒（默认 `300`）；`scan` 域另提供 `apply_to_nuclei`、`apply_to_npoc`、`apply_to_puppeteer` 开关。
+- **探针预设枚举**：`POST /api/system_config/proxy/probe` 的 `preset` 仅接受 `egress_ip`、`miit`、`tianyancha`、`github`；其中 `miit` 预设将无创宇盾 WAF 拦截特征的 HTTP `521` 挑战视为连通可用（未阻断）。
+- **关联状态与兼容约束**：
+  - `GET /api/dashboard/sysinfo`（`data.proxy`）与 `GET /api/icp/tyc_check`（`data.proxy_status`）均复用同一 `runtime` 运行态势模型，核心 `state` 枚举为 `direct_ok`、`backup_active`、`proxy_active`、`degraded_blocked`、`proxy_unavailable`。
+  - 当 `scan` 域启用 `apply_to_puppeteer` 且绑定了含账号密码的代理节点时，由于 Chromium `--proxy-server` 原生不支持带鉴权代理，Puppeteer 会自动降级直连并在 `runtime.puppeteer_compat_warning` 中返回提示。
+  - 旧版 `POST /api/system_config/general` 传入 `proxy_url` 时仍会兼容同步至 `legacy-default` 节点。

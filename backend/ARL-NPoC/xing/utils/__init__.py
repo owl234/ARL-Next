@@ -137,13 +137,20 @@ def http_req(url, method='get', **kwargs):
 
     kwargs["headers"] = headers
 
-    proxies = {
-        'https': Conf.PROXY_URL,
-        'http': Conf.PROXY_URL
-    }
+    proxy_url = Conf.PROXY_URL
+    bypass_check = getattr(Conf, "PROXY_BYPASS_CHECK", None)
+    if proxy_url and callable(bypass_check):
+        try:
+            if bypass_check(url):
+                proxy_url = None
+        except Exception:
+            pass
 
-    if Conf.PROXY_URL:
-        kwargs["proxies"] = proxies
+    if proxy_url:
+        kwargs["proxies"] = {
+            'https': proxy_url,
+            'http': proxy_url
+        }
 
     conn = getattr(requests, method)(url, **kwargs)
 
@@ -190,11 +197,19 @@ def req_disable_normal(url, method='get', **kwargs):
     prep.url = url
 
     proxies = {}
+    proxy_url = Conf.PROXY_URL
+    bypass_check = getattr(Conf, "PROXY_BYPASS_CHECK", None)
+    if proxy_url and callable(bypass_check):
+        try:
+            if bypass_check(url):
+                proxy_url = None
+        except Exception:
+            pass
 
-    if Conf.PROXY_URL:
+    if proxy_url:
         proxies = {
-            'http': Conf.PROXY_URL,
-            'https': Conf.PROXY_URL
+            'http': proxy_url,
+            'https': proxy_url
         }
 
     if "#" in url:

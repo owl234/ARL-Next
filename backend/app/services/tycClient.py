@@ -35,7 +35,14 @@ class TycClient:
         self.page_size = 100
 
     @staticmethod
-    def _get_proxies():
+    def _get_proxies(target_url=None):
+        try:
+            from app.services.proxy_service import resolve_requests_proxies
+            proxies = resolve_requests_proxies(target_url=target_url, domain="osint")
+            if proxies:
+                return proxies
+        except Exception:
+            pass
         proxy_url = str(getattr(Config, "PROXY_URL", "") or "").strip()
         if not proxy_url:
             return None
@@ -48,49 +55,95 @@ class TycClient:
             raise TycException("未配置天眼查 ID 或 Token，请在系统设置 -> 三方API配置中完善信息。")
 
         url = urljoin(self.base_url, path)
-        proxies = self._get_proxies()
         try:
-            if method.upper() == 'POST':
-                res = requests.post(url, headers=self.headers, json=json_data, timeout=15, proxies=proxies)
-            else:
-                res = requests.get(url, headers=self.headers, params=params, timeout=15, proxies=proxies)
-        except requests.exceptions.Timeout:
-            raise TycException("天眼查 API 请求超时")
-        except requests.exceptions.RequestException as e:
-            raise TycException(f"网络异常: {e}")
-
-        body_text = res.text or ""
-        if res.status_code == 401:
-            raise TycTokenExpiredException("TYC Token 已失效，请在系统设置中更新。")
-        elif res.status_code == 419 or "bannedLocation" in body_text or "301000" in body_text:
-            raise TycBannedLocationException(
-                "当前服务器出口 IP 非中国大陆地区，已被天眼查地域围栏拦截 (bannedLocation)，"
-                "请在「系统设置 -> 扫描与并发 -> 高级扫描 -> 系统代理地址」中配置中国大陆境内代理。"
+            from app.services.proxy_service import (
+                mask_proxy_url_secret,
+                record_osint_exit_event,
+                resolve_proxy_candidates,
             )
-        elif res.status_code in [403, 429]:
-            raise TycRiskControlException("触发天眼查风控拦截或限流，请更换 Token 或稍后再试。")
-        elif res.status_code != 200:
-            raise TycException(f"天眼查 API 请求失败, HTTP {res.status_code}, {body_text[:100]}")
+            candidates = resolve_proxy_candidates(domain="osint", target_url=url)
+        except Exception:
+            mask_proxy_url_secret = None
+            record_osint_exit_event = None
+            fallback = self._get_proxies(url)
+            candidates = [fallback.get("https") if isinstance(fallback, dict) else None]
 
-        try:
-            data = res.json()
-        except ValueError:
-            raise TycException("天眼查 API 返回非预期的数据格式（非 JSON）")
+        if not candidates:
+            candidates = [None]
 
-        if isinstance(data, dict) and (
-            str(data.get("message", "")) == "bannedLocation" or str(data.get("errorCode", "")) == "301000"
-        ):
-            raise TycBannedLocationException(
-                "当前服务器出口 IP 非中国大陆地区，已被天眼查地域围栏拦截 (bannedLocation)，"
-                "请在「系统设置 -> 扫描与并发 -> 高级扫描 -> 系统代理地址」中配置中国大陆境内代理。"
+        for idx, candidate_proxy in enumerate(candidates):
+            has_next = idx + 1 < len(candidates)
+            proxies = {"http": candidate_proxy, "https": candidate_proxy} if candidate_proxy else None
+            exit_label = (
+                mask_proxy_url_secret(candidate_proxy)
+                if (candidate_proxy and mask_proxy_url_secret)
+                else ("DIRECT" if not candidate_proxy else candidate_proxy)
             )
+            try:
+                if method.upper() == 'POST':
+                    res = requests.post(url, headers=self.headers, json=json_data, timeout=15, proxies=proxies)
+                else:
+                    res = requests.get(url, headers=self.headers, params=params, timeout=15, proxies=proxies)
+            except requests.exceptions.Timeout:
+                if record_osint_exit_event:
+                    record_osint_exit_event(candidate_proxy, blocked=True, cooldown_sec=60, reason="天眼查 API 请求超时")
+                if has_next:
+                    logger.warning("TycClient exit [%s] timeout, failing over to next exit", exit_label)
+                    continue
+                raise TycException("天眼查 API 请求超时")
+            except requests.exceptions.RequestException as e:
+                if record_osint_exit_event:
+                    record_osint_exit_event(candidate_proxy, blocked=True, cooldown_sec=60, reason=f"网络异常: {type(e).__name__}")
+                if has_next:
+                    logger.warning("TycClient exit [%s] request error (%s), failing over to next exit", exit_label, type(e).__name__)
+                    continue
+                raise TycException(f"网络异常: {e}")
 
-        # 判断天眼查的业务状态码（通常在 data 外部有个 state 字段，但依赖实际返回，暂时仅使用 200 判断）
-        if 'data' not in data:
-             # 如果接口没有 data，说明无数据或错误
-             return None
+            body_text = res.text or ""
+            if res.status_code == 401:
+                raise TycTokenExpiredException("TYC Token 已失效，请在系统设置中更新。")
+            elif res.status_code == 419 or "bannedLocation" in body_text or "301000" in body_text:
+                if record_osint_exit_event:
+                    record_osint_exit_event(candidate_proxy, blocked=True, cooldown_sec=300, reason="天眼查地域围栏拦截 (419 bannedLocation)")
+                if has_next:
+                    logger.warning("TycClient exit [%s] hit bannedLocation, failing over to next exit", exit_label)
+                    continue
+                raise TycBannedLocationException(
+                    "当前服务器出口 IP 非中国大陆地区，已被天眼查地域围栏拦截 (bannedLocation)，"
+                    "请在「系统设置 -> 代理与出口策略」中配置中国大陆境内代理。"
+                )
+            elif res.status_code in [403, 429]:
+                raise TycRiskControlException("触发天眼查风控拦截或限流，请更换 Token 或稍后再试。")
+            elif res.status_code != 200:
+                raise TycException(f"天眼查 API 请求失败, HTTP {res.status_code}, {body_text[:100]}")
 
-        return data.get('data')
+            try:
+                data = res.json()
+            except ValueError:
+                raise TycException("天眼查 API 返回非预期的数据格式（非 JSON）")
+
+            if isinstance(data, dict) and (
+                str(data.get("message", "")) == "bannedLocation" or str(data.get("errorCode", "")) == "301000"
+            ):
+                if record_osint_exit_event:
+                    record_osint_exit_event(candidate_proxy, blocked=True, cooldown_sec=300, reason="天眼查地域围栏拦截 (bannedLocation)")
+                if has_next:
+                    logger.warning("TycClient exit [%s] JSON bannedLocation, failing over to next exit", exit_label)
+                    continue
+                raise TycBannedLocationException(
+                    "当前服务器出口 IP 非中国大陆地区，已被天眼查地域围栏拦截 (bannedLocation)，"
+                    "请在「系统设置 -> 代理与出口策略」中配置中国大陆境内代理。"
+                )
+
+            if record_osint_exit_event:
+                record_osint_exit_event(candidate_proxy, blocked=False)
+
+            if 'data' not in data:
+                return None
+
+            return data.get('data')
+
+        raise TycException("天眼查 API 所有候选出口均请求失败")
 
     def fetch_all_pages(self, method, path, total_key, list_key, gid_field="gid", gid_val=None, extra_payload=None, delay=1.5):
         """

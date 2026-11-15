@@ -25,13 +25,18 @@ from .api_probe import ApiProbe, ApiProbeSession
 
 logger = logging.getLogger("arlv2.wih")
 
-def _get_proxy():
+def _get_proxy(target_url=None):
     try:
-        from app.config import Config
-        proxy = getattr(Config, "PROXY_URL", None)
+        from app.services.proxy_service import resolve_proxy_url
+        proxy = resolve_proxy_url(domain="scan", target_url=target_url)
         return proxy if proxy else None
     except Exception:
-        return None
+        try:
+            from app.config import Config
+            proxy = getattr(Config, "PROXY_URL", None)
+            return proxy if proxy else None
+        except Exception:
+            return None
 
 # Safety Limits to prevent OOM, infinite loops, and WAF blocks
 MAX_JS_SIZE = 5 * 1024 * 1024       # 5 MB max per JS file
@@ -79,11 +84,11 @@ class PyInfoHunter:
     def _create_session(self) -> requests.Session:
         session = requests.Session()
         session.verify = False
+        session.trust_env = False
         session.headers.update(self.headers)
-        if self.proxy:
-            session.proxies = {"http": self.proxy, "https": self.proxy}
-        else:
-            session.trust_env = False
+        proxy = _get_proxy() or self.proxy
+        if proxy:
+            session.proxies = {"http": proxy, "https": proxy}
         # Mount standard retry adapter with connection pool
         adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=50, max_retries=1)
         session.mount("http://", adapter)
@@ -97,14 +102,23 @@ class PyInfoHunter:
         session.headers.update({
             "User-Agent": self.headers["User-Agent"], "Accept": "*/*", "Accept-Encoding": "identity",
         })
-        if self.proxy:
-            session.proxies = {"http": self.proxy, "https": self.proxy}
+        proxy = _get_proxy() or self.proxy
+        if proxy:
+            session.proxies = {"http": proxy, "https": proxy}
         return session
 
     def _probe_api_records(self, site, records):
         if not self.api_probe_enabled:
             return
-        probe = ApiProbe(site, self._create_api_session)
+
+        def _make_site_api_session():
+            sess = self._create_api_session()
+            if isinstance(sess, requests.Session):
+                p = _get_proxy(target_url=site)
+                sess.proxies = {"http": p, "https": p} if p else {}
+            return sess
+
+        probe = ApiProbe(site, _make_site_api_session)
         try:
             candidates = [record for record in records if record.api_request is not None]
             for record in sorted(candidates, key=lambda r: (r.api_request["method"],
@@ -129,6 +143,9 @@ class PyInfoHunter:
         Stream GET with 5MB cutoff to prevent OOM and memory exhaustion.
         """
         try:
+            if isinstance(session, requests.Session):
+                per_url_proxy = _get_proxy(target_url=url)
+                session.proxies = {"http": per_url_proxy, "https": per_url_proxy} if per_url_proxy else {}
             with session.get(url, stream=True, timeout=DEFAULT_TIMEOUT, allow_redirects=True) as resp:
                 if resp.status_code >= 400:
                     return None

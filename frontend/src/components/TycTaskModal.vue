@@ -35,6 +35,12 @@
             {{ taskText('tasks.enterpriseIcpHint') }}
             <a @click="goToApiConfig" class="task-settings-link">{{ taskText('tasks.openSettings') }}</a>
           </span>
+          <div v-if="proxyStatus" style="margin-top: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <a-tag :color="proxyStatusTagColor" style="margin: 0; font-size: 11px;">
+              {{ proxyStatusText }}
+            </a-tag>
+            <a @click="goToProxyConfig" style="font-size: 12px;">{{ taskText('tasks.proxyConfigureEgressLink') }} →</a>
+          </div>
         </template>
       </a-alert>
 
@@ -216,6 +222,33 @@ const tycConfigValid = ref(false);
 const tycConfigured = ref(false);
 const tycErrorType = ref('');
 const tycErrorMsg = ref('');
+const proxyStatus = ref(null);
+
+const proxyStatusTagColor = computed(() => {
+  const st = proxyStatus.value?.state;
+  if (st === 'degraded_blocked' || st === 'proxy_unavailable') return 'error';
+  if (st === 'backup_active') return 'warning';
+  if (st === 'proxy_active') return 'processing';
+  return 'success';
+});
+
+const proxyStatusText = computed(() => {
+  const ps = proxyStatus.value;
+  if (!ps) return '';
+  if (ps.state === 'backup_active') {
+    return taskText('tasks.proxyExitBackupTag', { name: ps.active_node_name || ps.active_exit_id || 'backup' });
+  }
+  if (ps.state === 'proxy_active') {
+    return taskText('tasks.proxyExitProxiedTag', { name: ps.active_node_name || ps.active_exit_id || 'proxy' });
+  }
+  if (ps.state === 'degraded_blocked') {
+    return taskText('tasks.proxyExitBlockedTag', { sec: ps.cooldown_remaining_sec || 0 });
+  }
+  if (ps.state === 'proxy_unavailable') {
+    return taskText('tasks.proxyExitUnavailableTag');
+  }
+  return taskText('tasks.proxyExitDirectTag');
+});
 
 const formState = reactive({
   name: '',
@@ -268,11 +301,13 @@ const checkTycConfig = async () => {
       tycConfigured.value = !!res.data.configured;
       tycErrorType.value = res.data.error_type || '';
       tycErrorMsg.value = res.data.message || '';
+      proxyStatus.value = res.data.proxy_status || null;
     } else {
       tycConfigValid.value = false;
       tycConfigured.value = false;
       tycErrorType.value = '';
       tycErrorMsg.value = '';
+      proxyStatus.value = null;
     }
   } catch (error) {
     console.error('检测天眼查配置异常:', error);
@@ -280,6 +315,7 @@ const checkTycConfig = async () => {
     tycConfigured.value = false;
     tycErrorType.value = '';
     tycErrorMsg.value = '';
+    proxyStatus.value = null;
   } finally {
     configChecking.value = false;
   }
@@ -298,7 +334,7 @@ const goToApiConfig = () => {
 const goToProxyConfig = () => {
   pendingDraft = { rawTarget: formState.rawTarget, name: formState.name };
   emit('update:open', false);
-  router.push({ path: '/systemSettings', query: { tab: 'system_general', focus: 'proxy' } });
+  router.push({ path: '/systemSettings', query: { tab: 'proxy', focus: 'osint' } });
 };
 
 watch(() => props.open, (val) => {

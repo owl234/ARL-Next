@@ -301,6 +301,19 @@
               </div>
               <RightOutlined class="ribbon-arrow" />
             </div>
+
+            <div class="ribbon-divider"></div>
+
+            <!-- OSINT 出口代理状态 -->
+            <div class="ribbon-item cursor-pointer ribbon-proxy-item" @click="router.push({ path: '/systemSettings', query: { tab: 'proxy', focus: 'osint' } })">
+              <span class="ribbon-icon proxy-color"><GlobalOutlined /></span>
+              <span class="ribbon-name">{{ pageText('pages.proxyRibbonExitTitle') }}</span>
+              <span class="proxy-ribbon-pill" :class="proxyRibbonClass">
+                <span v-if="proxyRibbonPulse" class="pulse-beacon inline-pulse" :class="proxyRibbonPulse"></span>
+                {{ proxyRibbonText }}
+              </span>
+              <RightOutlined class="ribbon-arrow" />
+            </div>
           </div>
         </a-skeleton>
       </div>
@@ -646,7 +659,8 @@ import {
   DashboardOutlined,
   HddOutlined,
   DownOutlined,
-  UpOutlined
+  UpOutlined,
+  GlobalOutlined
 } from '@ant-design/icons-vue';
 import { Empty } from 'ant-design-vue';
 import * as echarts from 'echarts/core';
@@ -718,10 +732,46 @@ const sysInfo = ref({
   swap_percent: 0,
   swap_total_gb: 0,
   disk_percent: 0,
-  tasks: { running: 0, waiting: 0, task_waiting: 0, icp_waiting: 0, task_running: 0, icp_running: 0 },
+  tasks: { running: 0, waiting: 0, task_waiting: 0, icp_waiting: 0, task_running: 0, task_running_old: 0, icp_running: 0 },
   github_today: { leaks: 0, intel: 0 },
   github_today_breakdown: { cves: 0, hackers: 0, general: 0 },
-  github_totals: { cves: 0, tools: 0, hackers: 0 }
+  github_totals: { cves: 0, tools: 0, hackers: 0 },
+  proxy: { state: 'direct_ok', active_node_name: '', cooldown_remaining_sec: 0, enabled_node_count: 0, bound_node_count: 0 }
+});
+
+const proxyRibbonText = computed(() => {
+  const px = sysInfo.value?.proxy || {};
+  const st = px.state || 'direct_ok';
+  if (st === 'backup_active') {
+    const name = px.active_node_name || pageText('pages.proxyRibbonBackup');
+    return `${pageText('pages.proxyRibbonBackup')} · ${name}`;
+  }
+  if (st === 'proxy_active') {
+    const name = px.active_node_name || pageText('pages.proxyRibbonProxy');
+    return `${pageText('pages.proxyRibbonProxy')} · ${name}`;
+  }
+  if (st === 'degraded_blocked') {
+    return pageText('pages.proxyRibbonCooldown', { sec: px.cooldown_remaining_sec || 0 });
+  }
+  if (st === 'proxy_unavailable') {
+    return pageText('pages.proxyRibbonUnavailable');
+  }
+  return pageText('pages.proxyRibbonDirect');
+});
+
+const proxyRibbonClass = computed(() => {
+  const st = sysInfo.value?.proxy?.state || 'direct_ok';
+  if (st === 'degraded_blocked' || st === 'proxy_unavailable') return 'is-danger';
+  if (st === 'backup_active') return 'is-warning';
+  if (st === 'proxy_active') return 'is-info';
+  return 'is-ok';
+});
+
+const proxyRibbonPulse = computed(() => {
+  const st = sysInfo.value?.proxy?.state || 'direct_ok';
+  if (st === 'degraded_blocked' || st === 'proxy_unavailable') return 'red';
+  if (st === 'backup_active') return 'orange';
+  return '';
 });
 
 const handleRunningBadgeClick = () => {
@@ -1919,6 +1969,27 @@ onUnmounted(() => {
 .ribbon-icon.mem-color { color: #fa8c16; }
 .ribbon-icon.disk-color { color: #52c41a; }
 .ribbon-icon.celery-color { color: #722ed1; }
+.ribbon-icon.proxy-color { color: #1677ff; }
+
+.pulse-beacon.orange {
+  background: #fa8c16;
+  box-shadow: 0 0 0 rgba(250, 140, 22, 0.6);
+  animation: beacon-pulse 2s infinite cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.proxy-ribbon-pill {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.proxy-ribbon-pill.is-ok { color: #52c41a; background: rgba(82, 196, 26, 0.1); }
+.proxy-ribbon-pill.is-warning { color: #fa8c16; background: rgba(250, 140, 22, 0.12); }
+.proxy-ribbon-pill.is-info { color: #1677ff; background: rgba(22, 119, 255, 0.1); }
+.proxy-ribbon-pill.is-danger { color: #ff4d4f; background: rgba(255, 77, 79, 0.12); }
 
 .ribbon-name {
   color: var(--arl-text-color);

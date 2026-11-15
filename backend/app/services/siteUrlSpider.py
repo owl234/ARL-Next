@@ -134,7 +134,7 @@ class SiteURLSpider(object):
             if utils.url_ext(entry_url) in self.ignore_ext:
                 return URLSimilarList()
 
-            conn = utils.http_req(entry_url, verify=False)
+            conn = utils.http_req(entry_url, verify=False, proxy_domain="scan")
             if conn.status_code in [301, 302, 307]:
                 _url = urljoin(entry_url, conn.headers.get("Location", "")).strip()
                 _url = utils.normal_url(_url)
@@ -145,7 +145,7 @@ class SiteURLSpider(object):
                 if utils.same_netloc(entry_url, _url) and (url_info not in self.done_url_list):
                     entry_url = _url
                     logger.info("[{}] req 302 = > {}".format(len(self.done_url_list), entry_url))
-                    conn = utils.http_req(_url, verify=False)
+                    conn = utils.http_req(_url, verify=False, proxy_domain="scan")
                     self.done_url_list.add(url_info)
                     self.all_url_list.add(url_info)
 

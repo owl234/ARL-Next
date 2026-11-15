@@ -2757,7 +2757,7 @@ const startWizardRecon = async () => {
             cancelText: assetText('tasks.stayOnThisPage'),
             onOk() {
               addModalVisible.value = false;
-              router.push({ path: '/systemSettings', query: { tab: 'system_general', focus: 'proxy' } });
+              router.push({ path: '/systemSettings', query: { tab: 'proxy', focus: 'osint' } });
             }
           });
           return;

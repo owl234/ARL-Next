@@ -416,7 +416,7 @@ def dingding_send(msg, access_token, secret, msgtype="text", title="灯塔消息
         }
     }
     # 钉钉请求携带 access_token 与加签 secret，必须校验服务端证书。
-    conn = http_req(ding_url, method='post', json=send_json, verify=True)
+    conn = http_req(ding_url, method='post', json=send_json, verify=True, proxy_domain="intel")
     return conn.json()
 
 
@@ -498,7 +498,7 @@ def feishu_send(msg, webhook_url, secret, title="灯塔消息推送"):
         }
     }
     # 飞书请求携带 webhook 签名密钥，必须校验服务端证书。
-    conn = http_req(webhook_url, method='post', json=send_data, verify=True)
+    conn = http_req(webhook_url, method='post', json=send_data, verify=True, proxy_domain="intel")
     return conn.json()
 
 
@@ -510,7 +510,7 @@ def wx_work_send(msg, webhook_url):
         }
     }
     # 企业微信 webhook 携带敏感凭据，必须校验服务端证书。
-    conn = http_req(webhook_url, method='post', json=send_data, verify=True)
+    conn = http_req(webhook_url, method='post', json=send_data, verify=True, proxy_domain="intel")
     return conn.json()
 
 
@@ -522,7 +522,7 @@ def telegram_send(msg, bot_token, chat_id):
     }
     try:
         # Telegram 请求携带 Bot Token，必须校验服务端证书。
-        conn = http_req(url, method='post', json=payload, timeout=10, verify=True)
+        conn = http_req(url, method='post', json=payload, timeout=10, verify=True, proxy_domain="intel")
         return conn.json()
     except Exception as e:
         logger.warning(f"telegram_send error: {e}")

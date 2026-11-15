@@ -238,7 +238,41 @@ class NucleiScan(object):
                 command.insert(2, f"-t {comm_dir}")
             command.insert(2, f"-t {self.custom_templates_path}")
 
-        logger.info(" ".join(command))
+        nuclei_proxy = ""
+        masked_proxy = ""
+        try:
+            from app.services.proxy_service import (
+                load_proxy_config,
+                mask_proxy_url_secret,
+                resolve_proxy_url,
+                should_bypass_url,
+            )
+            proxy_cfg = load_proxy_config()
+            scan_pol = (proxy_cfg.get("policies") or {}).get("scan") or {}
+            if scan_pol.get("apply_to_nuclei", True):
+                non_bypassed = [
+                    t for t in (self.targets or [])
+                    if not should_bypass_url(str(t), proxy_cfg.get("bypass"), domain="scan")
+                ]
+                if non_bypassed or not self.targets:
+                    raw_proxy = resolve_proxy_url(domain="scan")
+                    if raw_proxy:
+                        # Go/Nuclei dialer expects socks5:// rather than socks5h://
+                        if raw_proxy.lower().startswith("socks5h://"):
+                            nuclei_proxy = "socks5://" + raw_proxy[len("socks5h://"):]
+                        else:
+                            nuclei_proxy = raw_proxy
+                        masked_proxy = mask_proxy_url_secret(nuclei_proxy)
+        except Exception as exc:
+            logger.debug(f"resolve nuclei proxy failed: {exc}")
+
+        if nuclei_proxy:
+            command.append(f"-proxy {shlex.quote(nuclei_proxy)}")
+
+        log_cmd = " ".join(command)
+        if nuclei_proxy and masked_proxy:
+            log_cmd = log_cmd.replace(shlex.quote(nuclei_proxy), shlex.quote(masked_proxy)).replace(nuclei_proxy, masked_proxy)
+        logger.info(log_cmd)
         completed = utils.exec_system(command, timeout=15 * 24 * 60 * 60)
         if completed.returncode != 0:
             raise subprocess.CalledProcessError(completed.returncode, command)

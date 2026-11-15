@@ -766,5 +766,11 @@ export default {
   "hostDiscoveryOptionTag": "Обнаружение хостов: {mode}",
   "hostDiscoverySkipShort": "Принудительно -Pn",
   "hostDiscoveryProbeShort": "Принудительно -PE -PS",
-  "hostDiscoveryAutoHint": "Автоматически (IP x порты): <=60 портов всегда -Pn; 61-2000 портов при >16 IP; >2000 или все порты при >2 IP - сначала -PE -PS"
+  "hostDiscoveryAutoHint": "Автоматически (IP x порты): <=60 портов всегда -Pn; 61-2000 портов при >16 IP; >2000 или все порты при >2 IP - сначала -PE -PS",
+  "proxyExitDirectTag": "Выход: Прямой",
+  "proxyExitBackupTag": "Резервный выход: {name}",
+  "proxyExitProxiedTag": "Прокси-выход: {name}",
+  "proxyExitBlockedTag": "Блокировка выхода ({sec}s)",
+  "proxyExitUnavailableTag": "Прокси недоступен",
+  "proxyConfigureEgressLink": "Настройки прокси"
 };

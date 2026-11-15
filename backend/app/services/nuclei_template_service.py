@@ -433,6 +433,17 @@ def run_community_sync_worker(mode: str = "online", offline_zip_path: str = None
                 "https://ghfast.top/",
                 "https://ghproxy.net/"
             ]
+            try:
+                from app.services.proxy_service import resolve_proxy_url, resolve_requests_proxies, mask_proxy_url_secret
+                intel_proxy = resolve_proxy_url(domain="intel", target_url="https://github.com/")
+            except Exception:
+                resolve_requests_proxies = None
+                mask_proxy_url_secret = None
+                intel_proxy = ""
+            if intel_proxy:
+                mirrors = [""] + mirrors
+                masked_proxy = mask_proxy_url_secret(intel_proxy) if mask_proxy_url_secret else intel_proxy
+                _append_log(f"🌐 检测到 intel 域系统代理 [{masked_proxy}]，优先直连 GitHub 官方源（支持回退国内镜像）")
             latest_tag = ver_info.get('latest_version') or 'v10.5.0'
             candidate_raw_urls = [
                 f"https://github.com/projectdiscovery/nuclei-templates/archive/refs/tags/{latest_tag}.zip",
@@ -447,15 +458,18 @@ def run_community_sync_worker(mode: str = "online", offline_zip_path: str = None
                     break
                 for mirror in mirrors:
                     target_url = f"{mirror}{raw_url}"
-                    _append_log(f"🔗 尝试从镜像源 [{mirror}] 下载: {os.path.basename(raw_url)}...")
+                    source_label = "GitHub 官方直连(经代理)" if not mirror else f"镜像源 [{mirror}]"
+                    _append_log(f"🔗 尝试从 {source_label} 下载: {os.path.basename(raw_url)}...")
                     try:
                         t0 = time.time()
+                        req_proxies = resolve_requests_proxies(target_url=target_url, domain="intel") if resolve_requests_proxies else None
                         resp = requests.get(
                             target_url,
                             stream=True,
                             timeout=60,
                             verify=False,
                             allow_redirects=True,
+                            proxies=req_proxies,
                             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
                         )
                         if resp.status_code == 200:
@@ -467,13 +481,13 @@ def run_community_sync_worker(mode: str = "online", offline_zip_path: str = None
                                         total_bytes += len(chunk)
                             cost = round(time.time() - t0, 2)
                             size_mb = round(total_bytes / (1024 * 1024), 2)
-                            _append_log(f"✅ 镜像源 [{mirror}] 下载成功！包体积: {size_mb} MB，耗时: {cost}s")
+                            _append_log(f"✅ {source_label} 下载成功！包体积: {size_mb} MB，耗时: {cost}s")
                             downloaded = True
                             break
                         else:
-                            _append_log(f"⚠️ 镜像源 [{mirror}] 返回非 200 响应: HTTP {resp.status_code}，切换下一个...")
+                            _append_log(f"⚠️ {source_label} 返回非 200 响应: HTTP {resp.status_code}，切换下一个...")
                     except Exception as ex:
-                        _append_log(f"⚠️ 镜像源 [{mirror}] 连接异常: {ex}，切换下一个...")
+                        _append_log(f"⚠️ {source_label} 连接异常: {ex}，切换下一个...")
 
             if downloaded and os.path.exists(tmp_download):
                 _append_log(f"📂 正在解压覆盖到官方模板目录: {c_dir}")
@@ -485,10 +499,15 @@ def run_community_sync_worker(mode: str = "online", offline_zip_path: str = None
                 except Exception:
                     pass
             else:
-                _append_log("⚠️ 镜像下载通道受阻，尝试执行 nuclei 原生 CLI 更新指令作为兜底...")
+                _append_log("⚠️ 下载通道受阻，尝试执行 nuclei 原生 CLI 更新指令作为兜底...")
                 cmd = ["nuclei", "-ut", "-ud", c_dir, "-duc=false"]
+                cmd_env = os.environ.copy()
+                if intel_proxy:
+                    cmd_env["HTTP_PROXY"] = intel_proxy
+                    cmd_env["HTTPS_PROXY"] = intel_proxy
+                    cmd_env["ALL_PROXY"] = intel_proxy
                 _append_log(f"执行命令: {' '.join(cmd)}")
-                proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+                proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120, env=cmd_env)
                 combined_output = (proc.stdout or "") + "\n" + (proc.stderr or "")
                 _append_log(f"CLI 输出:\n{combined_output.strip()}")
 

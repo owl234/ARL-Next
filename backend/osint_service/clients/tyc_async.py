@@ -3,16 +3,29 @@ import asyncio
 import logging
 from urllib.parse import urljoin
 
+from proxy_router import (
+    DIRECT_EXIT_ID,
+    ExitCandidate,
+    OsintProxyRouter,
+    build_aiohttp_connector,
+    extract_proxy_ip,
+    mask_proxy_url_secret,
+    normalize_proxy_url,
+)
+
 logger = logging.getLogger(__name__)
+
 
 class AsyncTycException(Exception):
     pass
 
+
 class AsyncTycClient:
-    def __init__(self, gid, token, proxy=None):
+    def __init__(self, gid, token, proxy=None, proxy_router=None):
         self.gid = gid
         self.token = token
         self.proxy = self._normalize_proxy(proxy)
+        self.proxy_router = proxy_router or OsintProxyRouter(legacy_proxy=self.proxy)
         self.base_url = "https://capi.tianyancha.com"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0",
@@ -27,14 +40,26 @@ class AsyncTycClient:
 
     @staticmethod
     def _normalize_proxy(proxy):
-        if not proxy or not isinstance(proxy, str):
-            return None
-        p = proxy.strip()
-        if not p:
-            return None
-        if "://" not in p:
-            p = f"http://{p}"
-        return p
+        return normalize_proxy_url(proxy)
+
+    def _get_candidates(self):
+        if self.proxy_router and self.proxy_router.has_structured_policy:
+            cands = self.proxy_router.get_candidates()
+            if cands:
+                return cands
+            # 若天眼查出口全部短期标记冷却，兜底保留主直连+绑定备机让调用方做最后一次尝试并吐出明确提示
+            allowed = self.proxy_router._all_allowed_exits()
+            if allowed:
+                return allowed
+        if self.proxy:
+            ip = extract_proxy_ip(self.proxy) or self.proxy
+            return [ExitCandidate(
+                exit_id=f"explicit:{ip}",
+                name=mask_proxy_url_secret(self.proxy),
+                proxy_url=self.proxy,
+                ip=ip,
+            )]
+        return [ExitCandidate(exit_id=DIRECT_EXIT_ID, name="主服务器直连", proxy_url=None, ip="")]
 
     async def _request(self, method, path, json_data=None, params=None, max_retries=3):
         import random
@@ -43,78 +68,145 @@ class AsyncTycClient:
             raise AsyncTycException("未配置天眼查 ID 或 Token。")
 
         url = urljoin(self.base_url, path)
-        async with aiohttp.ClientSession() as session:
-            for attempt in range(max_retries):
-                try:
-                    if method.upper() == 'POST':
-                        async with session.post(url, headers=self.headers, json=json_data, timeout=15, proxy=self.proxy) as res:
-                            status = res.status
-                            text = await res.text()
-                            data = await res.json() if "application/json" in res.headers.get("Content-Type", "") else None
-                    else:
-                        async with session.get(url, headers=self.headers, params=params, timeout=15, proxy=self.proxy) as res:
-                            status = res.status
-                            text = await res.text()
-                            data = await res.json() if "application/json" in res.headers.get("Content-Type", "") else None
-                except asyncio.TimeoutError:
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(5 * (attempt + 1))
-                        continue
-                    raise AsyncTycException("天眼查 API 请求超时")
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(5 * (attempt + 1))
-                        continue
-                    raise AsyncTycException(f"网络异常: {e}")
+        candidates = self._get_candidates()
 
-                body_text = text or ""
-                if status == 401:
-                    raise AsyncTycException("TYC Token 已失效。")
-                elif status == 419 or "bannedLocation" in body_text or "301000" in body_text:
-                    raise AsyncTycException(
-                        "当前服务器出口 IP 非中国大陆地区，已被天眼查地域围栏拦截 (bannedLocation)，"
-                        "请在「系统设置 -> 扫描与并发 -> 高级扫描 -> 系统代理地址」中配置中国大陆境内代理。"
-                    )
-                elif status in [403, 429]:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"触发限流(HTTP {status})，挂起 {15 * (attempt + 1)} 秒后重试 (Attempt {attempt+1}/{max_retries})...")
-                        await asyncio.sleep(15 * (attempt + 1))
-                        continue
-                    raise AsyncTycException("触发天眼查风控拦截或限流。")
-                elif status != 200:
-                    raise AsyncTycException(f"天眼查 API 请求失败, HTTP {status}, {body_text[:100]}")
+        for cand_idx, cand in enumerate(candidates):
+            has_next_cand = cand_idx + 1 < len(candidates)
+            next_cand = candidates[cand_idx + 1] if has_next_cand else None
+            connector, req_proxy = build_aiohttp_connector(cand.proxy_url, connector_config={"ssl": False})
+            try:
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    for attempt in range(max_retries):
+                        try:
+                            if method.upper() == 'POST':
+                                async with session.post(url, headers=self.headers, json=json_data, timeout=15, proxy=req_proxy) as res:
+                                    status = res.status
+                                    text = await res.text()
+                                    data = await res.json() if "application/json" in res.headers.get("Content-Type", "") else None
+                            else:
+                                async with session.get(url, headers=self.headers, params=params, timeout=15, proxy=req_proxy) as res:
+                                    status = res.status
+                                    text = await res.text()
+                                    data = await res.json() if "application/json" in res.headers.get("Content-Type", "") else None
+                        except asyncio.TimeoutError:
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(5 * (attempt + 1))
+                                continue
+                            if has_next_cand and self.proxy_router:
+                                self.proxy_router.mark_exit_blocked(cand.exit_id, reason="天眼查 API 请求超时", ip=cand.ip, cooldown_sec=60)
+                                await self.proxy_router.persist_runtime_status()
+                                await self.proxy_router.emit_syslog(
+                                    "warning", "天眼查出口切换",
+                                    f"出口 [{cand.name}] 请求天眼查超时，已隔离 60s 并切换至 [{next_cand.name}] 重试"
+                                )
+                                break
+                            raise AsyncTycException("天眼查 API 请求超时")
+                        except Exception as e:
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(5 * (attempt + 1))
+                                continue
+                            if has_next_cand and self.proxy_router:
+                                self.proxy_router.mark_exit_blocked(cand.exit_id, reason=f"天眼查连接异常 ({type(e).__name__})", ip=cand.ip, cooldown_sec=60)
+                                await self.proxy_router.persist_runtime_status()
+                                await self.proxy_router.emit_syslog(
+                                    "warning", "天眼查出口切换",
+                                    f"出口 [{cand.name}] 连接天眼查异常 ({type(e).__name__})，已切换至 [{next_cand.name}] 重试"
+                                )
+                                break
+                            raise AsyncTycException(f"网络异常: {e}")
 
-                if not data:
-                    return None
+                        body_text = text or ""
+                        if status == 401:
+                            raise AsyncTycException("TYC Token 已失效。")
+                        elif status == 419 or "bannedLocation" in body_text or "301000" in body_text:
+                            if self.proxy_router:
+                                self.proxy_router.mark_exit_blocked(
+                                    cand.exit_id,
+                                    reason="天眼查地域围栏拦截 (419 bannedLocation)",
+                                    ip=cand.ip,
+                                    cooldown_sec=300,
+                                )
+                                await self.proxy_router.persist_runtime_status()
+                            if has_next_cand:
+                                if self.proxy_router:
+                                    await self.proxy_router.emit_syslog(
+                                        "warning", "天眼查出口切换",
+                                        f"出口 [{cand.name}] 触发天眼查地域围栏 (419 bannedLocation)，已切换至 [{next_cand.name}] 重试"
+                                    )
+                                break
+                            raise AsyncTycException(
+                                "当前服务器出口 IP 非中国大陆地区，已被天眼查地域围栏拦截 (bannedLocation)，"
+                                "请在「系统设置 -> 代理与出口策略」中配置中国大陆境内代理。"
+                            )
+                        elif status in [403, 429]:
+                            if attempt < max_retries - 1:
+                                logger.warning(f"触发限流(HTTP {status})，挂起 {15 * (attempt + 1)} 秒后重试 (Attempt {attempt+1}/{max_retries})...")
+                                await asyncio.sleep(15 * (attempt + 1))
+                                continue
+                            raise AsyncTycException("触发天眼查风控拦截或限流。")
+                        elif status != 200:
+                            raise AsyncTycException(f"天眼查 API 请求失败, HTTP {status}, {body_text[:100]}")
 
-                state = str(data.get("state", "")).lower()
-                message = str(data.get("message", ""))
-                error_code = str(data.get("errorCode", ""))
-                if message == "bannedLocation" or error_code == "301000":
-                    raise AsyncTycException(
-                        "当前服务器出口 IP 非中国大陆地区，已被天眼查地域围栏拦截 (bannedLocation)，"
-                        "请在「系统设置 -> 扫描与并发 -> 高级扫描 -> 系统代理地址」中配置中国大陆境内代理。"
-                    )
-                
-                # 1. 过滤正常的无数据场景
-                if "无数据" in message or "未找到" in message or "为空" in message:
-                    return None
-                    
-                # 2. 精准识别风控拦截与业务异常
-                if state != "ok":
-                    if any(kw in message for kw in ["频繁", "验证码", "登录", "异常", "机器人", "操作过快", "校验"]):
-                        if attempt < max_retries - 1:
-                            logger.warning(f"触发风控 ({message})，挂起 {15 * (attempt + 1)} 秒后重试 (Attempt {attempt+1}/{max_retries})...")
-                            await asyncio.sleep(15 * (attempt + 1))
-                            continue
-                        raise AsyncTycException(f"触发天眼查风控拦截: {message}")
-                    else:
-                        raise AsyncTycException(f"天眼查业务异常: state={state}, message={message}")
+                        if not data:
+                            if self.proxy_router:
+                                self.proxy_router.mark_exit_active(cand.exit_id)
+                            return None
 
-                if 'data' not in data:
-                    return None
+                        state = str(data.get("state", "")).lower()
+                        message = str(data.get("message", ""))
+                        error_code = str(data.get("errorCode", ""))
+                        if message == "bannedLocation" or error_code == "301000":
+                            if self.proxy_router:
+                                self.proxy_router.mark_exit_blocked(
+                                    cand.exit_id,
+                                    reason="天眼查地域围栏拦截 (bannedLocation)",
+                                    ip=cand.ip,
+                                    cooldown_sec=300,
+                                )
+                                await self.proxy_router.persist_runtime_status()
+                            if has_next_cand:
+                                if self.proxy_router:
+                                    await self.proxy_router.emit_syslog(
+                                        "warning", "天眼查出口切换",
+                                        f"出口 [{cand.name}] 触发天眼查地域围栏 (bannedLocation)，已切换至 [{next_cand.name}] 重试"
+                                    )
+                                break
+                            raise AsyncTycException(
+                                "当前服务器出口 IP 非中国大陆地区，已被天眼查地域围栏拦截 (bannedLocation)，"
+                                "请在「系统设置 -> 代理与出口策略」中配置中国大陆境内代理。"
+                            )
 
-                return data.get('data')
+                        # 1. 过滤正常的无数据场景
+                        if "无数据" in message or "未找到" in message or "为空" in message:
+                            if self.proxy_router:
+                                self.proxy_router.mark_exit_active(cand.exit_id)
+                            return None
+
+                        # 2. 精准识别风控拦截与业务异常
+                        if state != "ok":
+                            if any(kw in message for kw in ["频繁", "验证码", "登录", "异常", "机器人", "操作过快", "校验"]):
+                                if attempt < max_retries - 1:
+                                    logger.warning(f"触发风控 ({message})，挂起 {15 * (attempt + 1)} 秒后重试 (Attempt {attempt+1}/{max_retries})...")
+                                    await asyncio.sleep(15 * (attempt + 1))
+                                    continue
+                                raise AsyncTycException(f"触发天眼查风控拦截: {message}")
+                            else:
+                                raise AsyncTycException(f"天眼查业务异常: state={state}, message={message}")
+
+                        if self.proxy_router:
+                            prev = self.proxy_router.active_exit_id
+                            self.proxy_router.mark_exit_active(cand.exit_id)
+                            if prev != cand.exit_id:
+                                await self.proxy_router.persist_runtime_status()
+
+                        if 'data' not in data:
+                            return None
+
+                        return data.get('data')
+            finally:
+                await connector.close()
+
+        raise AsyncTycException("天眼查 API 所有候选出口均请求失败")
 
     async def fetch_all_pages(self, method, path, total_key, list_key, gid_field="gid", gid_val=None, extra_payload=None, delay=1.5):
         results = []

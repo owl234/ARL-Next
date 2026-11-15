@@ -194,7 +194,14 @@ def _is_zh_locale(lang: str) -> bool:
 
 
 def _github_proxies():
-    """读取系统配置中的出站代理地址，与 http_req 保持一致。"""
+    """读取系统配置中的 intel 域出站代理地址（兼容旧 Config.PROXY_URL 测试替身）。"""
+    try:
+        from app.services.proxy_service import resolve_requests_proxies
+        proxies = resolve_requests_proxies(target_url=_GITHUB_API_BASE, domain="intel")
+        if proxies:
+            return proxies
+    except Exception:
+        pass
     try:
         from app.config import Config
         proxy_url = str(getattr(Config, "PROXY_URL", "") or "").strip()

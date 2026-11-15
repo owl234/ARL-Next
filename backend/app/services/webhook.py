@@ -99,7 +99,8 @@ class DomainAssetWebHook(BaseAssetWebHook):
             utils.http_req(self.web_hook_url,
                            method="post",
                            json=self.build_data(),
-                           headers=headers)
+                           headers=headers,
+                           proxy_domain="intel")
 
 
 class IPAssetWebHook(BaseAssetWebHook):
@@ -137,7 +138,8 @@ class IPAssetWebHook(BaseAssetWebHook):
             utils.http_req(self.web_hook_url,
                            method="post",
                            json=self.build_data(),
-                           headers=headers)
+                           headers=headers,
+                           proxy_domain="intel")
 
 
 class SiteAssetWebHook(BaseAssetWebHook):
@@ -173,7 +175,8 @@ class SiteAssetWebHook(BaseAssetWebHook):
             utils.http_req(self.web_hook_url,
                            method="post",
                            json=self.build_data(),
-                           headers=headers)
+                           headers=headers,
+                           proxy_domain="intel")
 
 
 def domain_asset_web_hook(task_id: str, scope_id: str):

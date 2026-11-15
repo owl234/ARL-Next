@@ -768,6 +768,13 @@ class GeneralConfig(ARLResource):
             upsert=True
         )
 
+        if "proxy_url" in doc:
+            try:
+                from app.services.proxy_service import sync_legacy_proxy_url
+                sync_legacy_proxy_url(doc["proxy_url"])
+            except Exception:
+                pass
+
         # 清除本进程缓存，并递增跨进程版本号让其他 gunicorn worker 的缓存同步作废，
         # 否则用户保存后立即刷新可能仍看到旧值（多 worker 各自持有进程内缓存）。
         clear_system_config_cache()
@@ -852,6 +859,206 @@ class RunningTaskCount(ARLResource):
         non_running = [TaskStatus.DONE, TaskStatus.WAITING, TaskStatus.ERROR, TaskStatus.STOP]
         count = conn_db('task').count_documents({"status": {"$nin": non_running}})
         return {"code": 200, "message": "success", "data": {"running_count": count}}
+
+
+@ns.route('/proxy')
+class ProxyConfigResource(ARLResource):
+    @auth
+    def get(self):
+        """获取系统代理节点池、三域分流策略及运行时状态（凭证已脱敏）"""
+        from app.services.proxy_service import (
+            get_proxy_capabilities,
+            get_proxy_runtime_summary,
+            load_proxy_config,
+            mask_proxy_config_for_api,
+        )
+        cfg = load_proxy_config(use_cache=False)
+        return {
+            "code": 200,
+            "message": "success",
+            "data": {
+                "config": mask_proxy_config_for_api(cfg),
+                "runtime": get_proxy_runtime_summary("osint"),
+                "capabilities": get_proxy_capabilities(),
+            },
+        }
+
+
+@ns.route('/proxy/policies')
+class ProxyPoliciesResource(ARLResource):
+    @auth
+    def put(self):
+        """更新三域分流策略（osint / scan / intel）及旁路白名单"""
+        from app.services.proxy_service import (
+            get_proxy_runtime_summary,
+            mask_proxy_config_for_api,
+            update_proxy_policies,
+        )
+        payload = flask_req.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return {"code": 400, "message": "请求体必须是合法 JSON 对象"}, 400
+        try:
+            saved = update_proxy_policies(payload)
+            return {
+                "code": 200,
+                "message": "代理分流策略已更新",
+                "data": {
+                    "config": mask_proxy_config_for_api(saved),
+                    "runtime": get_proxy_runtime_summary("osint"),
+                },
+            }
+        except ValueError as exc:
+            return {"code": 400, "message": str(exc)}, 400
+        except Exception as exc:
+            return {"code": 500, "message": f"更新代理策略失败: {exc}"}, 500
+
+
+@ns.route('/proxy/nodes')
+class ProxyNodesResource(ARLResource):
+    @auth
+    def post(self):
+        """新增代理节点"""
+        from app.services.proxy_service import (
+            get_proxy_runtime_summary,
+            mask_proxy_config_for_api,
+            upsert_proxy_node,
+        )
+        payload = flask_req.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return {"code": 400, "message": "请求体必须是合法 JSON 对象"}, 400
+        try:
+            saved, node = upsert_proxy_node(payload)
+            masked_cfg = mask_proxy_config_for_api(saved)
+            masked_node = next((n for n in masked_cfg["nodes"] if n["id"] == node["id"]), node)
+            return {
+                "code": 200,
+                "message": "代理节点已创建",
+                "data": {
+                    "config": masked_cfg,
+                    "node": masked_node,
+                    "runtime": get_proxy_runtime_summary("osint"),
+                },
+            }
+        except ValueError as exc:
+            return {"code": 400, "message": str(exc)}, 400
+        except Exception as exc:
+            return {"code": 500, "message": f"创建代理节点失败: {exc}"}, 500
+
+
+@ns.route('/proxy/nodes/<string:node_id>')
+class ProxyNodeDetailResource(ARLResource):
+    @auth
+    def put(self, node_id):
+        """更新指定代理节点（密码留空则保留原密文）"""
+        from app.services.proxy_service import (
+            get_proxy_runtime_summary,
+            mask_proxy_config_for_api,
+            upsert_proxy_node,
+        )
+        payload = flask_req.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return {"code": 400, "message": "请求体必须是合法 JSON 对象"}, 400
+        try:
+            saved, node = upsert_proxy_node(payload, node_id=node_id)
+            masked_cfg = mask_proxy_config_for_api(saved)
+            masked_node = next((n for n in masked_cfg["nodes"] if n["id"] == node["id"]), node)
+            return {
+                "code": 200,
+                "message": "代理节点已更新",
+                "data": {
+                    "config": masked_cfg,
+                    "node": masked_node,
+                    "runtime": get_proxy_runtime_summary("osint"),
+                },
+            }
+        except KeyError as exc:
+            return {"code": 404, "message": str(exc)}, 404
+        except ValueError as exc:
+            return {"code": 400, "message": str(exc)}, 400
+        except Exception as exc:
+            return {"code": 500, "message": f"更新代理节点失败: {exc}"}, 500
+
+    @auth
+    def delete(self, node_id):
+        """删除指定代理节点，并自动从三域引用中平滑摘除"""
+        from app.services.proxy_service import (
+            get_proxy_runtime_summary,
+            mask_proxy_config_for_api,
+            delete_proxy_node,
+        )
+        try:
+            saved, removed = delete_proxy_node(node_id)
+            return {
+                "code": 200,
+                "message": "代理节点已删除",
+                "data": {
+                    "config": mask_proxy_config_for_api(saved),
+                    "removed_id": removed.get("id"),
+                    "runtime": get_proxy_runtime_summary("osint"),
+                },
+            }
+        except KeyError as exc:
+            return {"code": 404, "message": str(exc)}, 404
+        except Exception as exc:
+            return {"code": 500, "message": f"删除代理节点失败: {exc}"}, 500
+
+
+@ns.route('/proxy/probe')
+class ProxyProbeResource(ARLResource):
+    @auth
+    def post(self):
+        """基于固定安全白名单探针探测代理节点连通性（禁止自定义 URL 以防 SSRF）"""
+        from app.services.proxy_service import (
+            get_proxy_runtime_summary,
+            load_proxy_config,
+            mask_proxy_config_for_api,
+            probe_proxy_node,
+        )
+        payload = flask_req.get_json(silent=True) or {}
+        node_id = payload.get("node_id")
+        draft = payload.get("draft")
+        preset = str(payload.get("preset") or "egress_ip").strip()
+        save_result = bool(payload.get("save_result", True)) and bool(node_id)
+        try:
+            result = probe_proxy_node(
+                node_id=node_id,
+                draft_payload=draft if isinstance(draft, dict) else None,
+                preset=preset,
+                save_result=save_result,
+            )
+            cfg = load_proxy_config(use_cache=False)
+            return {
+                "code": 200,
+                "message": "probe completed",
+                "data": {
+                    "result": result,
+                    "config": mask_proxy_config_for_api(cfg),
+                    "runtime": get_proxy_runtime_summary("osint"),
+                },
+            }
+        except KeyError as exc:
+            return {"code": 404, "message": str(exc)}, 404
+        except ValueError as exc:
+            return {"code": 400, "message": str(exc)}, 400
+        except Exception as exc:
+            return {"code": 500, "message": f"节点探测异常: {exc}"}, 500
+
+
+@ns.route('/proxy/cooldown/reset')
+class ProxyCooldownResetResource(ARLResource):
+    @auth
+    def post(self):
+        """手动解除 OSINT 出口冷却状态并同步通知 osint-service"""
+        from app.services.proxy_service import reset_osint_cooldown
+        try:
+            res = reset_osint_cooldown()
+            return {
+                "code": 200,
+                "message": "OSINT 出口冷却状态已重置",
+                "data": res,
+            }
+        except Exception as exc:
+            return {"code": 500, "message": f"重置冷却失败: {exc}"}, 500
 
 
 

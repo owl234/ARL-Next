@@ -11,6 +11,20 @@ from app.config import Config
 logger = utils.get_logger()
 
 
+def _resolve_npoc_proxy_context():
+    """读取 scan 域代理策略与旁路判定器（apply_to_npoc 关闭时禁用代理）。"""
+    try:
+        from app.services.proxy_service import load_proxy_config, resolve_proxy_url, should_bypass_url
+        cfg = load_proxy_config()
+        scan_pol = (cfg.get("policies") or {}).get("scan") or {}
+        if not scan_pol.get("apply_to_npoc", True):
+            return None, None
+        proxy_url = resolve_proxy_url(domain="scan") or None
+        return proxy_url, (lambda target_url: should_bypass_url(target_url, domain="scan"))
+    except Exception:
+        return getattr(Config, "PROXY_URL", None) or None, None
+
+
 class NPoC(object):
     """docstring for ClassName"""
 
@@ -191,7 +205,16 @@ class NPoC(object):
 
         runner = PluginRunner.PluginRunner(plugins=plugins, targets=targets, concurrency=self.concurrency)
         self.runner = runner
-        runner.run()
+        prev_proxy = getattr(npoc_conf, "PROXY_URL", None)
+        prev_bypass = getattr(npoc_conf, "PROXY_BYPASS_CHECK", None)
+        proxy_url, bypass_fn = _resolve_npoc_proxy_context()
+        npoc_conf.PROXY_URL = proxy_url
+        npoc_conf.PROXY_BYPASS_CHECK = bypass_fn
+        try:
+            runner.run()
+        finally:
+            npoc_conf.PROXY_URL = prev_proxy
+            npoc_conf.PROXY_BYPASS_CHECK = prev_bypass
 
         if not os.path.exists(random_file):
             return self.result

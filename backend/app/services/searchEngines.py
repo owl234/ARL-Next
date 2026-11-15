@@ -36,7 +36,7 @@ class SoSearch(object):
                     logger.info("url {} is invalid".format(href))
                     continue
                 
-                resp = utils.http_req(href, "get", headers=self.headers, timeout=(5.1, 5.1))
+                resp = utils.http_req(href, "get", headers=self.headers, timeout=(5.1, 5.1), proxy_domain="intel")
                 match = re.search(r'URL=[\'"]?([^\'">]+)[\'"]?', resp.text, re.I)
                 if not match:
                     match = re.search(r'window\.location\.replace\([\'"]([^\'"]+)[\'"]\)', resp.text)
@@ -56,7 +56,7 @@ class SoSearch(object):
                 if page > 1:
                     time.sleep(self.default_interval)
                 url = self.search_url.format(page=page, keyword=quote(self.keyword))
-                resp = utils.http_req(url, headers=self.headers)
+                resp = utils.http_req(url, headers=self.headers, proxy_domain="intel")
                 
                 if resp.status_code != 200:
                     logger.warning("360 search page {} failed with status {}".format(page, resp.status_code))
@@ -93,7 +93,7 @@ class BingSearch(object):
 
     def result_num(self):
         url = self.search_url.format(page=1, keyword=quote(self.keyword))
-        html = utils.http_req(url, headers=self.headers).text
+        html = utils.http_req(url, headers=self.headers, proxy_domain="intel").text
         self.first_html = html
         result = re.findall(self.num_pattern, html)
 
@@ -153,7 +153,7 @@ class BingSearch(object):
                 else:
                     time.sleep(self.default_interval)
                     url = self.search_url.format(page=(page - 1) * 10, keyword=quote(self.keyword))
-                    html = utils.http_req(url, headers=self.headers).text
+                    html = utils.http_req(url, headers=self.headers, proxy_domain="intel").text
                     _urls = self.match_urls(html)
                     logger.info("bing search url {}, result {}".format(url, len(_urls)))
                     if not _urls:

@@ -823,8 +823,11 @@
                   </a-alert>
                   <a-row :gutter="24">
                     <a-col :xs="24" :md="12">
-                      <a-form-item data-setting-anchor="proxy" :label="pageText('pages.systemProxyProxyHttpUrl')">
-                        <a-input v-model:value="generalForm.proxy_url" :placeholder="pageText('pages.eGHttp1270018080')" />
+                      <a-form-item :label="pageText('pages.systemProxy')">
+                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; border: 1px dashed var(--arl-border-color); border-radius: 6px; background: var(--arl-bg-light);">
+                          <span style="font-size: 12px; color: var(--arl-text-color); opacity: 0.72;">{{ pageText('pages.proxyManageRedirectHint') }}</span>
+                          <a @click="activeKey = 'proxy'" style="font-size: 12px; white-space: nowrap;">{{ pageText('pages.proxyOpenDedicatedTab') }}</a>
+                        </div>
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="12">
@@ -1066,6 +1069,9 @@
           </a-spin>
         </div>
       </a-tab-pane>
+      <a-tab-pane key="proxy" :tab="tabTitle(pageText('pages.proxyTab'), !!proxyPanelRef?.hasUnsavedChanges?.())">
+        <ProxyManagePanel ref="proxyPanelRef" />
+      </a-tab-pane>
       <a-tab-pane key="system_backup" :tab="tabTitle(pageText('pages.backupTab'), false)">
         <BackupRestorePanel ref="backupPanelRef" />
       </a-tab-pane>
@@ -1082,18 +1088,20 @@ defineOptions({ name: 'SystemSettings' });
 import {
   InfoCircleOutlined, ExclamationCircleOutlined
 } from '@ant-design/icons-vue';
-import { ref, reactive, onMounted, onUnmounted, onDeactivated, computed, nextTick, createVNode } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, onDeactivated, computed, nextTick, watch, createVNode } from 'vue';
 import { message, Modal } from 'ant-design-vue';
 import request from '@/utils/request';
 import { copyText } from '@/utils/clipboard';
 import { useRoute, onBeforeRouteLeave } from 'vue-router';
 import CdnRulePanel from '@/components/settings/CdnRulePanel.vue';
+import ProxyManagePanel from '@/components/settings/ProxyManagePanel.vue';
 import BackupRestorePanel from '@/components/settings/BackupRestorePanel.vue';
 import SystemUpdatePanel from '@/components/settings/SystemUpdatePanel.vue';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 
 const cdnPanelRef = ref(null);
+const proxyPanelRef = ref(null);
 const backupPanelRef = ref(null);
 const updatePanelRef = ref(null);
 
@@ -1473,7 +1481,7 @@ const GENERAL_FIELD_GROUPS = {
                'tyc_id', 'tyc_token', 'so_search_cookie', 'bing_search_cookie', 'query_plugin_config'],
   message_push: ['push_options', 'dingding', 'feishu', 'wxwork', 'telegram', 'email',
                  'webhook_url', 'webhook_token'],
-  system_general: ['proxy_url', 'port_top_10', 'domain_brute_concurrent', 'alt_dns_concurrent',
+  system_general: ['port_top_10', 'domain_brute_concurrent', 'alt_dns_concurrent',
                    'auth', 'api_key'],
 };
 
@@ -1544,13 +1552,14 @@ const isPerformanceDirty = computed(() => (
   || performanceForm.value.osint_concurrency !== performanceBaseline.value.osint_concurrency
   || performanceForm.value.github_concurrency !== performanceBaseline.value.github_concurrency));
 
-// 全局是否存在未保存改动（含安全策略与性能配置两个独立接口）
+// 全局是否存在未保存改动（含安全策略、性能配置与代理分流策略）
 const hasUnsavedChanges = computed(() => {
   if (typeof isConfigInitialized !== 'undefined' && !isConfigInitialized.value) return false;
   return (
     Object.keys(changedFields.value).length > 0
     || isSecurityDirty.value
     || isPerformanceDirty.value
+    || !!proxyPanelRef.value?.hasUnsavedChanges?.()
   );
 });
 
@@ -1560,7 +1569,8 @@ const unsavedCount = computed(() => {
   const detail = Object.keys(changedFields.value).length;
   return detail
     + (isSecurityDirty.value ? 1 : 0)
-    + (isPerformanceDirty.value ? 1 : 0);
+    + (isPerformanceDirty.value ? 1 : 0)
+    + (proxyPanelRef.value?.hasUnsavedChanges?.() ? 1 : 0);
 });
 
 // ======================= 设置项索引与搜索 (P2) =======================
@@ -1595,8 +1605,8 @@ const SETTINGS_INDEX = [
     get desc() { return pageText('pages.ipRangesExcludedFromScanningIncludingSystemDefaults'); }, keywords: ['黑名单', 'blacklist', 'ip', 'cidr', '禁止', '安全策略', "扫描与并发 · 安全策略 / 安全策略：IP 黑名单 / 禁止扫描的 IP 段（含系统默认值）"] },
   { tab: 'security', get tabLabel() { return pageText('pages.scanningAndConcurrencySecurityPolicy'); }, get label() { return pageText('pages.securityPolicyExcludedDomains'); }, anchor: 'security',
     get desc() { return pageText('pages.domainSuffixesExcludedFromScanningEGGovCn'); }, keywords: ['禁止域名', '域名', '禁扫', '安全策略', 'gov.cn', "扫描与并发 · 安全策略 / 安全策略：禁止扫描域名 / 按后缀匹配的禁扫域名（如 gov.cn）"] },
-  { tab: 'system_general', get tabLabel() { return pageText('pages.scanningAndConcurrencyAdvancedScanning'); }, get label() { return pageText('pages.systemProxy'); }, anchor: 'proxy',
-    get desc() { return pageText('pages.proxyUrlOutboundProxyForScanningTraffic'); }, keywords: ['代理', 'proxy', '出口', 'http_url', "扫描与并发 · 高级扫描 / 系统代理地址 / PROXY_URL，扫描流量出口代理"] },
+  { tab: 'proxy', get tabLabel() { return pageText('pages.proxyTab'); }, get label() { return pageText('pages.systemProxy'); }, anchor: 'proxy',
+    get desc() { return pageText('pages.proxyConfigDesc'); }, keywords: ['代理', 'proxy', '出口', 'socks5', 'socks5h', 'failover', '分流', 'osint', 'bypass', '旁路'] },
   { tab: 'system_general', get tabLabel() { return pageText('pages.scanningAndConcurrencyAdvancedScanning'); }, get label() { return pageText('pages.dnsQueryConcurrencyWithinATask'); }, anchor: 'brute_concurrent',
     get desc() { return pageText('pages.massdnsQueryConcurrencyForRegularAndMutationDiscoveryThis'); },
     keywords: ['线程', '爆破', '并发', '并发度', 'dns', '域名', 'altdns', 'massdns', '发包', "扫描与并发 · 高级扫描 / DNS 发包并发度（单任务内） / 常规爆破与 DNS 智能生成的 massdns 发包并发度，非进程数"] },
@@ -1649,6 +1659,13 @@ const scrollAndFlashAnchor = (selector, retries = 3) => {
 
 // 点击搜索结果：切到目标 Tab（含嵌套子 Tab），并把锚点元素滚动进视野 + 短暂高亮
 const jumpToSetting = (item) => {
+  if (item.tab === 'proxy') {
+    activeKey.value = 'proxy';
+    settingsKeyword.value = '';
+    highlightedAnchor.value = item.anchor;
+    proxyPanelRef.value?.focusSection?.(item.anchor);
+    return;
+  }
   // 三组 Tab 均使用嵌套子结构：需同时切换外层 activeKey 与内层子 Tab
   if (item.tab === 'dictionary') {
     activeKey.value = 'dictionary';
@@ -1698,6 +1715,9 @@ const firstDirtyTabKey = computed(() => {
   if (isSecurityDirty.value || isPerformanceDirty.value || Object.keys(pendingByGroup.value.system_general || {}).length > 0) {
     return 'performance';
   }
+  if (proxyPanelRef.value?.hasUnsavedChanges?.()) {
+    return 'proxy';
+  }
   const order = ['api_config', 'message_push'];
   for (const group of order) {
     if (Object.keys(pendingByGroup.value[group] || {}).length > 0) return group;
@@ -1719,6 +1739,10 @@ const goToFirstDirty = () => {
   if (Object.keys(pendingByGroup.value.system_general || {}).length > 0) {
     activeKey.value = 'performance';
     scanSubTab.value = 'system_general';
+    return;
+  }
+  if (proxyPanelRef.value?.hasUnsavedChanges?.()) {
+    activeKey.value = 'proxy';
     return;
   }
   if (Object.keys(pendingByGroup.value.api_config || {}).length > 0) {
@@ -1809,7 +1833,7 @@ const fetchMergedConfig = async () => {
       mergedConfig.value = res.data;
       credentialStatus.value = res.data.credentials || {};
       // 只读字段以生效值为准回显（如 FOFA URL、线程数），让用户看到真实生效状态
-      ['fofa_url', 'fofa_max_page', 'fofa_page_size', 'proxy_url', 'port_top_10',
+      ['fofa_url', 'fofa_max_page', 'fofa_page_size', 'port_top_10',
        'domain_brute_concurrent', 'alt_dns_concurrent', 'auth'].forEach((key) => {
         if (res.data[key] !== undefined && res.data[key] !== null && res.data[key] !== '') {
           generalForm.value[key] = res.data[key];
@@ -1865,8 +1889,7 @@ const generalForm = ref({
   tyc_token: '',
   so_search_cookie: '',
   bing_search_cookie: '',
-  
-  proxy_url: '',
+
   port_top_10: '',
   domain_brute_concurrent: 300,
   alt_dns_concurrent: 1500,
@@ -2662,30 +2685,56 @@ const probeActiveBackupTask = async () => {
   }
 };
 
-onMounted(async () => {
-  probeActiveBackupTask();
-
-  if (route.query.tab) {
-    if (route.query.tab === 'cdn') {
+const applyRouteDeepLink = (query) => {
+  if (!query) return;
+  if (query.tab === 'system_general' && query.focus === 'proxy') {
+    activeKey.value = 'proxy';
+    proxyPanelRef.value?.focusSection?.('proxy');
+    return;
+  }
+  if (query.tab) {
+    if (query.tab === 'cdn') {
       activeKey.value = 'dictionary';
       dictSubTab.value = 'cdn';
-    } else if (route.query.tab === 'security' || route.query.tab === 'system_general') {
+    } else if (query.tab === 'security' || query.tab === 'system_general') {
       // security / system_general 已收敛为「扫描与并发」的子 Tab，深链需同时切换内外两层
       activeKey.value = 'performance';
-      scanSubTab.value = route.query.tab;
+      scanSubTab.value = query.tab;
     } else {
-      activeKey.value = route.query.tab;
+      activeKey.value = query.tab;
     }
   }
   // 支持 ?focus=<anchor> 深链：业务页可直接把用户送到具体设置项并高亮
-  if (route.query.focus) {
-    const target = SETTINGS_INDEX.find((i) => i.anchor === route.query.focus);
+  if (query.focus) {
+    if (activeKey.value === 'proxy') {
+      proxyPanelRef.value?.focusSection?.(query.focus);
+      return;
+    }
+    const target = SETTINGS_INDEX.find((i) => i.anchor === query.focus);
     if (target) {
-      jumpToSetting({ ...target, tab: route.query.tab || target.tab });
+      jumpToSetting({ ...target, tab: query.tab || target.tab });
     } else {
-      scrollAndFlashAnchor(`[data-setting-anchor="${route.query.focus}"]`);
+      scrollAndFlashAnchor(`[data-setting-anchor="${query.focus}"]`);
     }
   }
+};
+
+watch(
+  () => [route.query.tab, route.query.focus],
+  ([tab, focus]) => {
+    if (tab || focus) {
+      applyRouteDeepLink(route.query);
+      if (activeKey.value === 'proxy') {
+        proxyPanelRef.value?.fetchProxyConfig?.(false);
+      }
+    }
+  }
+);
+
+onMounted(async () => {
+  probeActiveBackupTask();
+
+  applyRouteDeepLink(route.query);
   window.addEventListener('beforeunload', handleBeforeUnload);
   fetchCapacityProbe();
   fetchDictList();
@@ -2710,6 +2759,7 @@ onDeactivated(() => {
   appendDrawerVisible.value = false;
   searchDrawerVisible.value = false;
   cdnPanelRef.value?.closeDrawer?.();
+  proxyPanelRef.value?.closeModals?.();
   updatePanelRef.value?.closeModals?.();
   backupPanelRef.value?.closeModals?.();
   clearAllDictPollTimers();
@@ -2717,6 +2767,7 @@ onDeactivated(() => {
 
 onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload);
+  proxyPanelRef.value?.stopTimers?.();
   updatePanelRef.value?.stopUpdateTimers?.();
   clearAllDictPollTimers();
   backupPanelRef.value?.stopProgressTracking?.();

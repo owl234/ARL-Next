@@ -8,6 +8,16 @@ logger = utils.get_logger()
 # PUPPETEER_URL needs to point to the new docker service 'arl-puppeteer' on port 5005
 PUPPETEER_URL = os.environ.get("PUPPETEER_URL", "http://arl-puppeteer:5005")
 
+
+def _get_puppeteer_proxy(site):
+    try:
+        from app.services.proxy_service import resolve_puppeteer_proxy
+        proxy_url, _ = resolve_puppeteer_proxy(target_url=site)
+        return proxy_url or ""
+    except Exception:
+        return ""
+
+
 class WebAnalyze(BaseThread):
     def __init__(self, sites, concurrency=3):
         super().__init__(sites, concurrency = concurrency)
@@ -16,10 +26,14 @@ class WebAnalyze(BaseThread):
     def work(self, site):
         logger.debug("WebAnalyze HTTP => {}".format(site))
         max_retries = 3
+        proxy_server = _get_puppeteer_proxy(site)
         for attempt in range(max_retries):
             try:
                 # Send HTTP POST request to the Puppeteer service
-                res = requests.post(PUPPETEER_URL, json={"url": site}, timeout=35)
+                payload = {"url": site}
+                if proxy_server:
+                    payload["proxy_server"] = proxy_server
+                res = requests.post(PUPPETEER_URL, json=payload, timeout=35)
                 if res.status_code == 200:
                     data = res.json()
                     self.analyze_map[site] = data.get("applications", [])

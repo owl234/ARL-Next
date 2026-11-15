@@ -18,6 +18,7 @@ class Conf(object):
 
     """代理地址"""
     PROXY_URL = None
+    PROXY_BYPASS_CHECK = None
 
     """TXT格式保存文件名"""
     SAVE_TEXT_RESULT_FILENAME = "npoc_result_txt.txt"

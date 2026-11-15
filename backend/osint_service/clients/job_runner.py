@@ -55,12 +55,19 @@ async def _wait_waf_cooldown_once(myicp, task_id, scene, insert_syslog=None):
     等待期间任务被手动停止，由调用方循环头状态检查负责退出。
     返回 True=已等待可继续查询，False=无需等待或无需重试直接跳过。
     """
-    block_ts = getattr(myicp, "_waf_block_ts", 0.0) or 0.0
-    cooldown = getattr(myicp, "waf_cooldown", WAF_WAIT_MAX_SECONDS) or WAF_WAIT_MAX_SECONDS
-    try:
-        wait = float(block_ts) + float(cooldown) - time.time()
-    except (TypeError, ValueError):
-        return False
+    delay_fn = getattr(myicp, "get_earliest_unblock_delay", None)
+    if callable(delay_fn):
+        try:
+            wait = float(delay_fn())
+        except (TypeError, ValueError):
+            wait = 0.0
+    else:
+        block_ts = getattr(myicp, "_waf_block_ts", 0.0) or 0.0
+        cooldown = getattr(myicp, "waf_cooldown", WAF_WAIT_MAX_SECONDS) or WAF_WAIT_MAX_SECONDS
+        try:
+            wait = float(block_ts) + float(cooldown) - time.time()
+        except (TypeError, ValueError):
+            return False
     if wait <= 0:
         return True
     if wait > WAF_WAIT_MAX_SECONDS:
@@ -82,6 +89,19 @@ async def _claim_recon_task(task_id):
         {"$set": {"status": "running", "start_time": curr_date()}}
     )
     return result.matched_count == 1
+
+
+async def _build_osint_proxy_router(options=None, syslog_cb=None):
+    """初始化任务级 OSINT 多节点路由器，兼容 proxy_bundle 与 MongoDB 兜底同步。"""
+    import os
+    import sys
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from proxy_router import OsintProxyRouter
+    bundle = options.get("proxy_bundle") if isinstance(options, dict) else None
+    legacy_proxy = options.get("proxy_url") if isinstance(options, dict) else None
+    router = OsintProxyRouter(bundle=bundle, db=db, legacy_proxy=legacy_proxy, syslog_cb=syslog_cb)
+    await router.sync_from_db(db)
+    return router
 
 
 async def _task_is_running(task_id):
@@ -247,6 +267,14 @@ async def run_icp_job(options):
         }}})
 
     sys_proxy = await _resolve_system_proxy(options)
+    proxy_router = await _build_osint_proxy_router(options, syslog_cb=insert_syslog)
+    if hasattr(myicp, "attach_proxy_router"):
+        myicp.attach_proxy_router(proxy_router)
+    if proxy_router.has_structured_policy and proxy_router.get_mode() != "direct_only":
+        await insert_syslog(
+            "info", "出口策略",
+            f"OSINT 出口策略模式: {proxy_router.get_mode()}，已绑定备用代理节点 {len(proxy_router.nodes)} 个"
+        )
     await insert_syslog("info", "ICP查询", f"任务开始运行，目标: {target}，类型: {query_types}")
 
     for idx, qt in enumerate(query_types):
@@ -745,7 +773,15 @@ async def run_tyc_job(options):
             root_company_name = task_doc.get("company_name").strip()
 
     sys_proxy = await _resolve_system_proxy(options)
-    client = AsyncTycClient(gid=tyc_id, token=tyc_token, proxy=sys_proxy)
+    proxy_router = await _build_osint_proxy_router(options, syslog_cb=insert_syslog)
+    client = AsyncTycClient(gid=tyc_id, token=tyc_token, proxy=sys_proxy, proxy_router=proxy_router)
+    if myicp and hasattr(myicp, "attach_proxy_router"):
+        myicp.attach_proxy_router(proxy_router)
+    if proxy_router.has_structured_policy and proxy_router.get_mode() != "direct_only":
+        await insert_syslog(
+            "info", "出口策略",
+            f"企业测绘出口策略模式: {proxy_router.get_mode()}，已绑定备用代理节点 {len(proxy_router.nodes)} 个"
+        )
 
     # 若尚未获取官方全称，直接调用接口定向解析根企业全称
     if not root_company_name:

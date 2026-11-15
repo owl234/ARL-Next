@@ -59,7 +59,7 @@ class FofaClient:
             params.update(self.base_params)
 
         url = self.base_url + path
-        conn = utils.http_req(url, 'get', params=params)
+        conn = utils.http_req(url, 'get', params=params, proxy_domain="intel")
         if conn.status_code != 200:
             raise Exception("{} http status code: {}".format(url, conn.status_code))
 

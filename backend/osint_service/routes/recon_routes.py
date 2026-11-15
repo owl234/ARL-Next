@@ -270,9 +270,53 @@ async def reconcile_orphan_tasks(app):
         logger.error(f"Failed to reconcile orphan tasks: {e}", exc_info=True)
 
 
+async def proxy_status(request):
+    try:
+        from clients.job_runner import db
+        from proxy_router import OsintProxyRouter
+        router = OsintProxyRouter(db=db)
+        await router.sync_from_db(db)
+        return web.json_response({
+            "code": 200,
+            "data": {
+                "mode": router.get_mode(),
+                "active_exit_id": router.active_exit_id,
+                "blocked_exits": router.blocked_exits,
+                "earliest_unblock_delay": round(router.earliest_unblock_delay(), 2),
+                "node_count": len(router.nodes),
+            },
+        })
+    except Exception as e:
+        return web.json_response({"code": 500, "msg": str(e)}, status=500)
+
+
+async def proxy_reset_cooldown(request):
+    try:
+        from clients.job_runner import db
+        from proxy_router import DIRECT_EXIT_ID, PROXY_RUNTIME_DOC_ID, bump_global_reset_epoch
+        import time as _time
+        bump_global_reset_epoch()
+        await db["system_config"].update_one(
+            {"_id": PROXY_RUNTIME_DOC_ID},
+            {"$set": {
+                "blocked_exits": {},
+                "active_exit_id": DIRECT_EXIT_ID,
+                "last_switch_reason": "管理员手动重置冷却状态",
+                "last_switch_at": int(_time.time()),
+                "updated_at": int(_time.time()),
+            }},
+            upsert=True,
+        )
+        return web.json_response({"code": 200, "msg": "Cooldown reset"})
+    except Exception as e:
+        return web.json_response({"code": 500, "msg": str(e)}, status=500)
+
+
 def setup_recon_routes(app):
     app.router.add_post("/api/v1/recon/start", start_recon)
     app.router.add_post("/api/v1/recon/stop", stop_recon)
+    app.router.add_get("/api/v1/recon/proxy_status", proxy_status)
+    app.router.add_post("/api/v1/recon/proxy_reset_cooldown", proxy_reset_cooldown)
 
     async def start_watchdog(app):
         app["watchdog_task"] = asyncio.create_task(watchdog_task(app))

@@ -13,13 +13,21 @@ logger = get_logger()
 def _request_recon(action, options):
     """只有微服务确认接收或停止后，调用方才报告成功。"""
     import requests
-    try:
-        from app.config import Config
-        proxy = str(getattr(Config, "PROXY_URL", "") or "").strip()
-    except Exception:
-        proxy = ""
     if action == "start" and isinstance(options, dict):
-        options.setdefault("proxy_url", proxy)
+        try:
+            from app.services.proxy_service import get_osint_proxy_bundle
+            bundle = get_osint_proxy_bundle()
+            options.setdefault("proxy_bundle", bundle)
+            legacy_proxy = bundle.get("legacy_proxy_url") or ""
+        except Exception:
+            legacy_proxy = ""
+        if not legacy_proxy:
+            try:
+                from app.config import Config
+                legacy_proxy = str(getattr(Config, "PROXY_URL", "") or "").strip()
+            except Exception:
+                legacy_proxy = ""
+        options.setdefault("proxy_url", legacy_proxy)
     response = requests.post(f"http://osint-service:16181/api/v1/recon/{action}", json=options, timeout=5)
     response.raise_for_status()
     result = response.json()
@@ -319,6 +327,11 @@ class TycCheck(ARLResource):
         """
         from app.services.tycClient import TycClient
         try:
+            from app.services.proxy_service import get_proxy_runtime_summary
+            proxy_status = get_proxy_runtime_summary("osint")
+        except Exception:
+            proxy_status = None
+        try:
             client = TycClient()
             configured = bool(client.gid and client.token)
             success, msg, error_type = client.check_token_detail()
@@ -326,14 +339,16 @@ class TycCheck(ARLResource):
                 "valid": success,
                 "configured": configured,
                 "error_type": error_type,
-                "message": msg
+                "message": msg,
+                "proxy_status": proxy_status,
             })
         except Exception as e:
             return build_ret(ErrorMsg.Success, {
                 "valid": False,
                 "configured": False,
                 "error_type": "api_error",
-                "message": f"校验异常: {e}"
+                "message": f"校验异常: {e}",
+                "proxy_status": proxy_status,
             })
 
 

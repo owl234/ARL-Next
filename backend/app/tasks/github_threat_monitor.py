@@ -41,7 +41,7 @@ class GithubCveMonitorTask:
     def fetch_mitre_cve_desc(self, cve_id, default_desc=""):
         try:
             url = f"https://cve.mitre.org/cgi-bin/cvename.cgi?name={cve_id}"
-            res = utils.http_req(url, timeout=(3, 5))
+            res = utils.http_req(url, timeout=(3, 5), proxy_domain="intel")
             if res and res.text:
                 html = etree.HTML(res.text)
                 if html is not None:
@@ -61,7 +61,7 @@ class GithubCveMonitorTask:
         api = f"https://api.github.com/search/repositories?q=CVE-{year}&sort=updated&per_page=100"
         
         try:
-            res = utils.http_req(api, headers=get_github_headers(), timeout=(10, 10))
+            res = utils.http_req(api, headers=get_github_headers(), timeout=(10, 10), proxy_domain="intel")
             if not res:
                 logger.error("Failed to fetch Github repos for CVE: network error or empty response.")
                 return
@@ -151,7 +151,7 @@ class GithubToolsMonitorTask:
                 
             try:
                 api_releases = f"{repo_url}/releases"
-                res = utils.http_req(api_releases, headers=get_github_headers(), timeout=(5, 10))
+                res = utils.http_req(api_releases, headers=get_github_headers(), timeout=(5, 10), proxy_domain="intel")
 
                 if not res:
                     continue
@@ -213,7 +213,7 @@ class GithubHackersMonitorTask:
                 
             try:
                 api = f"https://api.github.com/users/{github_id}/repos?sort=created&direction=desc"
-                res = utils.http_req(api, headers=get_github_headers(), timeout=(5, 10))
+                res = utils.http_req(api, headers=get_github_headers(), timeout=(5, 10), proxy_domain="intel")
 
                 if not res:
                     continue

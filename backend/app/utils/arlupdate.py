@@ -1427,6 +1427,12 @@ def ensure_packet_lease_schema():
         log.warning(f"ensure_packet_lease_schema lease_col failed: {e}")
 
 
+def ensure_proxy_config_schema():
+    """初始化并平滑迁移系统代理配置（兼容旧版 general_config.proxy_url）。"""
+    from app.services.proxy_service import ensure_proxy_config_schema as _ensure_proxy
+    _ensure_proxy()
+
+
 def arl_update():
     if is_run_flask_routes():
         return
@@ -1503,6 +1509,7 @@ def arl_update():
         _run_step("migrate_icp_auto_group_intent", migrate_icp_auto_group_intent)
         _run_step("ensure_mcp_governance_schema", ensure_mcp_governance_schema)
         _run_step("ensure_packet_lease_schema", ensure_packet_lease_schema)
+        _run_step("ensure_proxy_config_schema", ensure_proxy_config_schema)
         db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
     except Exception as e:
         import logging

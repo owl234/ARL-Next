@@ -23,6 +23,14 @@ from contextlib import asynccontextmanager
 import threading
 from load_config import config
 from cachetools import TTLCache
+from proxy_router import (
+    DIRECT_EXIT_ID,
+    ExitCandidate,
+    OsintProxyRouter,
+    build_aiohttp_connector,
+    mask_proxy_url_secret,
+    normalize_proxy_url,
+)
 
 
 
@@ -91,6 +99,16 @@ def get_local_ipv6_addresses():
         return []
     # 去重
     return list(dict.fromkeys(addresses))
+
+class _ExitAttemptError(Exception):
+    """内部控制流异常：标识单次请求出口命中 WAF/限流/网络故障，供上层按策略故障切换。"""
+    def __init__(self, kind, reason, blocked_ip=None, cooldown_sec=None):
+        super().__init__(reason)
+        self.kind = kind
+        self.reason = reason
+        self.blocked_ip = blocked_ip
+        self.cooldown_sec = cooldown_sec
+
 
 class beian:
     def __init__(self):
@@ -166,6 +184,11 @@ class beian:
         self._rate_lock = None
         self._last_req_ts = 0.0
         self._cached_jsluid = None
+        self.proxy_router = OsintProxyRouter()
+
+    def attach_proxy_router(self, router):
+        if router is not None:
+            self.proxy_router = router
 
     @property
     def rate_lock(self):
@@ -174,19 +197,11 @@ class beian:
             self._rate_lock = asyncio.Lock()
         return self._rate_lock
 
-    async def _acquire_rate_slot(self, is_proxied=False):
-        """自适应物理流控消峰：单 IP 直连强制安全间隔 2.6s~3.2s，多代理轻量抖动 0.4s~0.8s"""
-        async with self.rate_lock:
-            now = time.time()
-            elapsed = now - self._last_req_ts
-            if is_proxied:
-                min_interval = random.uniform(0.4, 0.8)
-            else:
-                # 实测 8.5s 内 8 次触发 WAF，单 IP 物理间隔必须 >= 2.6s
-                min_interval = random.uniform(2.6, 3.2)
-            if elapsed < min_interval:
-                await asyncio.sleep(min_interval - elapsed)
-            self._last_req_ts = time.time()
+    async def _acquire_rate_slot(self, is_proxied=False, exit_id=None):
+        """按物理出口 IP 隔离限流槽：无论直连还是单个备机，同一物理出口均强制 2.6s~3.2s 安全间隔。"""
+        eff_exit = exit_id or ("__legacy_proxy__" if is_proxied else DIRECT_EXIT_ID)
+        await self.proxy_router.acquire_rate_slot(eff_exit, interval_range=(2.6, 3.2))
+        self._last_req_ts = time.time()
 
     def _detail_waf_open(self):
         """详情熔断是否处于开启态（冷却期内跳过详情补全）"""
@@ -224,25 +239,27 @@ class beian:
     def _resolve_proxy(self, proxy=None):
         """
         统一解析出口代理：
-        1. 显式指定的非空代理优先；
-        2. 其次读取隧道代理配置 (config.proxy.tunnel.url)；
-        3. 再次从 API 代理池缓存 (pool_cache) 中轮询未被拦截的可用代理；
-        4. 兜底返回空（直连模式）。
+        1. 若挂接了多域结构化策略且开启代理模式，优先从健康候选中选取首个出口（直连时返回 None）；
+        2. 显式指定的非空代理优先；
+        3. 其次读取隧道代理配置 (config.proxy.tunnel.url)；
+        4. 再次从 API 代理池缓存 (pool_cache) 中轮询未被拦截的可用代理；
+        5. 兜底返回空（直连模式）。
         """
         if proxy and isinstance(proxy, str) and proxy.strip():
-            p = proxy.strip()
-            if not p.startswith("http://") and not p.startswith("https://"):
-                p = f"http://{p}"
+            p = normalize_proxy_url(proxy)
             pip = self._extract_proxy_ip(p)
             if not self._is_ip_blocked(pip):
                 return p
 
+        if getattr(self, "proxy_router", None) is not None and self.proxy_router.has_structured_policy:
+            cands = self.proxy_router.get_candidates()
+            if cands:
+                return cands[0].proxy_url
+
         # 尝试隧道代理
         tunnel_url = getattr(getattr(getattr(config, "proxy", object()), "tunnel", object()), "url", None)
         if tunnel_url and isinstance(tunnel_url, str) and tunnel_url.strip():
-            t_url = tunnel_url.strip()
-            if not t_url.startswith("http://") and not t_url.startswith("https://"):
-                t_url = f"http://{t_url}"
+            t_url = normalize_proxy_url(tunnel_url)
             tip = self._extract_proxy_ip(t_url)
             if not self._is_ip_blocked(tip):
                 return t_url
@@ -252,9 +269,7 @@ class beian:
             from proxy_pool import pool_cache
             candidates = [p for p in pool_cache.keys() if not self._is_ip_blocked(self._extract_proxy_ip(p))]
             if candidates:
-                chosen = random.choice(candidates)
-                if not chosen.startswith("http://") and not chosen.startswith("https://"):
-                    chosen = f"http://{chosen}"
+                chosen = normalize_proxy_url(random.choice(candidates))
                 return chosen
         except Exception:
             pass
@@ -263,12 +278,31 @@ class beian:
 
     def _has_healthy_proxy(self):
         """检查当前是否有健康的代理节点可用"""
+        if getattr(self, "proxy_router", None) is not None and self.proxy_router.has_structured_policy:
+            if self.proxy_router.has_healthy_backup_proxy():
+                return True
         resolved = self._resolve_proxy(None)
         return bool(resolved)
 
     def _is_global_waf_blocked(self):
-        """仅当发生 WAF 封禁且当前无任何健康代理可用时，判定为全局熔断"""
+        """仅当发生 WAF 封禁且当前无任何健康出口可用时，判定为全局熔断"""
+        if getattr(self, "proxy_router", None) is not None and self.proxy_router.has_structured_policy:
+            if self.proxy_router.get_mode() != "direct_only":
+                return self.proxy_router.is_all_exits_blocked()
+            return self.proxy_router.is_exit_blocked(DIRECT_EXIT_ID) or (
+                self._waf_open() and not self._has_healthy_proxy()
+            )
         return self._waf_open() and not self._has_healthy_proxy()
+
+    def get_earliest_unblock_delay(self):
+        """计算全局冷却期下最近一个允许出口的剩余冷却秒数"""
+        if getattr(self, "proxy_router", None) is not None and self.proxy_router.has_structured_policy:
+            delay = self.proxy_router.earliest_unblock_delay()
+            if delay > 0:
+                return delay
+        if self._waf_open() and not self._has_healthy_proxy():
+            return max(0.0, float(self._waf_block_ts) + float(self.waf_cooldown) - time.time())
+        return 0.0
 
     def _get_jsluid_cookie(self, proxy=None):
         """获取有效的加速乐/创宇盾 Cookie 标识"""
@@ -384,35 +418,114 @@ class beian:
         return connector
 
     @asynccontextmanager
-    async def get_session(self, proxy=""):
-        resolved_proxy = self._resolve_proxy(proxy)
+    async def get_session(self, proxy="", direct_override=False):
+        resolved_proxy = None if direct_override else self._resolve_proxy(proxy)
         local_ipv6 = None
         if not resolved_proxy and self.local_ipv6_addresses:
             local_ipv6 = self._get_next_ipv6()
             if local_ipv6:
                 logger.info(f"使用本地IPv6地址: {local_ipv6}")
-        
-        # 为每个session创建独立的连接器
-        connector = await self._get_connector(local_ipv6)
-        # 标记本会话真实出口地址或代理标识，供 WAF 拦截时精确归因（跨 aiohttp 版本稳定）
-        connector._arl_local_ip = local_ipv6 or self._extract_proxy_ip(resolved_proxy)
-        
+
+        connector, req_proxy = build_aiohttp_connector(
+            resolved_proxy,
+            local_ipv6=local_ipv6,
+            connector_config=self.connector_config,
+        )
         session = aiohttp.ClientSession(
             timeout=self.timeout,
             connector=connector,
             headers={'Connection': 'keep-alive'}
         )
-        session._arl_proxy = resolved_proxy
-        
+        # aiohttp HTTP/HTTPS 代理通过 session.request(proxy=...) 走通道；SOCKS5 由 ProxyConnector 托管故置 None
+        session._arl_proxy = req_proxy
+        session._arl_proxy_url = resolved_proxy
+
         try:
             yield session
         finally:
-            # 确保session和connector都被正确关闭
             await session.close()
             await connector.close()
 
-    async def get_token(self, proxy="", force=False):
-        resolved_proxy = self._resolve_proxy(proxy)
+    def _iter_attempt_exits(self, explicit_proxy=""):
+        """返回本次请求可按序尝试的出口候选列表。"""
+        if getattr(self, "proxy_router", None) is not None and self.proxy_router.has_structured_policy:
+            cands = self.proxy_router.get_candidates()
+            if cands:
+                return cands
+            return []
+        resolved = self._resolve_proxy(explicit_proxy)
+        if resolved:
+            ip_val = self._extract_proxy_ip(resolved) or resolved
+            return [ExitCandidate(
+                exit_id=f"explicit:{ip_val}",
+                name=mask_proxy_url_secret(resolved),
+                proxy_url=resolved,
+                ip=ip_val,
+            )]
+        return [ExitCandidate(exit_id=DIRECT_EXIT_ID, name="主服务器直连", proxy_url=None, ip="")]
+
+    async def _handle_exit_failure(self, cand, *, blocked_ip=None, reason="", cooldown_sec=None, next_cand=None, scene="MIIT查询"):
+        eff_cd = cooldown_sec or (self.proxy_router.get_cooldown_sec() if getattr(self, "proxy_router", None) else self.waf_cooldown)
+        if getattr(self, "proxy_router", None) is not None:
+            self.proxy_router.mark_exit_blocked(
+                cand.exit_id,
+                reason=reason,
+                ip=blocked_ip or cand.ip or "",
+                cooldown_sec=eff_cd,
+            )
+            await self.proxy_router.persist_runtime_status()
+        if cand.proxy_url:
+            if blocked_ip:
+                self._add_blocked_ip(blocked_ip)
+            elif cand.ip:
+                self._add_blocked_ip(cand.ip)
+        elif blocked_ip:
+            self._add_blocked_ip(blocked_ip)
+
+        # 切换物理出口后需重置绑定 IP 的 Token / Cookie 上下文
+        self.token = ""
+        self.token_expire = 0
+        self._cached_jsluid = None
+
+        if next_cand is not None:
+            msg = f"出口 [{cand.name}] 在{scene}时{reason}，已隔离 {eff_cd}s 并立即切换至 [{next_cand.name}] 重试"
+            logger.warning(msg)
+            await self.proxy_router.emit_syslog("warning", "出口故障切换", msg)
+        else:
+            msg = f"出口 [{cand.name}] 在{scene}时{reason}，已冷却 {eff_cd}s（当前暂无其他健康备用出口）"
+            logger.warning(msg)
+            await self.proxy_router.emit_syslog("warning", "出口熔断", msg)
+
+    async def _handle_exit_success(self, cand, *, switched_from_primary=False):
+        if getattr(self, "proxy_router", None) is None:
+            return
+        prev = self.proxy_router.active_exit_id
+        recover_msg = (
+            "主服务器直连冷却结束，自动回切主服务器直连"
+            if (prev != DIRECT_EXIT_ID and cand.exit_id == DIRECT_EXIT_ID)
+            else f"切换至出口 [{cand.name}]"
+        )
+        self.proxy_router.mark_exit_active(cand.exit_id, reason=recover_msg)
+        if prev != cand.exit_id:
+            await self.proxy_router.persist_runtime_status()
+            if prev != DIRECT_EXIT_ID and cand.exit_id == DIRECT_EXIT_ID:
+                await self.proxy_router.emit_syslog("info", "出口自动回切", "主服务器直连冷却恢复，已自动回切为主出口执行查询")
+            elif switched_from_primary and cand.exit_id != DIRECT_EXIT_ID:
+                await self.proxy_router.emit_syslog("info", "备用节点接管", f"已使用备用代理节点 [{cand.name}] 成功完成本轮请求")
+
+    def _open_candidate_session(self, cand):
+        return self.get_session(
+            proxy=(cand.proxy_url or ""),
+            direct_override=(cand.proxy_url is None),
+        )
+
+    async def get_token(self, proxy="", force=False, exit_candidate=None, _raise_on_exit_err=False):
+        if exit_candidate is not None:
+            cand = exit_candidate
+        else:
+            cands = self._iter_attempt_exits(proxy)
+            cand = cands[0] if cands else ExitCandidate(exit_id=DIRECT_EXIT_ID, name="主服务器直连", proxy_url=None, ip="")
+
         base_header = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
@@ -425,9 +538,9 @@ class beian:
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
-            "Cookie": f"__jsluid_s={self._get_jsluid_cookie(resolved_proxy)}",
+            "Cookie": f"__jsluid_s={self._get_jsluid_cookie(cand.proxy_url)}",
         }
-        
+
         now_ms = int(time.time() * 1000)
         if not force and (self.token_expire - now_ms > 60000):
             return True, self.token, base_header
@@ -444,32 +557,39 @@ class beian:
             authSecret = "testtest" + str(timeStamp)
             authKey = hashlib.md5(authSecret.encode(encoding="UTF-8")).hexdigest()
             auth_data = {"authKey": authKey, "timeStamp": timeStamp}
-            
+
             try:
-                async with self.get_session(resolved_proxy) as session:
-                    actual_proxy = getattr(session, "_arl_proxy", resolved_proxy)
-                    await self._acquire_rate_slot(is_proxied=bool(actual_proxy))
+                async with self._open_candidate_session(cand) as session:
+                    actual_proxy = getattr(session, "_arl_proxy", None)
+                    await self._acquire_rate_slot(is_proxied=bool(cand.proxy_url), exit_id=cand.exit_id)
                     current_ip = self._session_local_ip(session)
                     async with session.post(self.url, data=auth_data, headers=base_header, proxy=actual_proxy) as req:
                         req_text = await req.text()
+                        req_status = req.status
+            except Exception as e:
+                logger.warning(f"get_token Faile : {e}")
+                if _raise_on_exit_err:
+                    raise _ExitAttemptError("transport_error", f"连接/网络异常 ({type(e).__name__})", cooldown_sec=60) from e
+                return False, str(e), ""
 
-                if "当前访问疑似黑客攻击" in req_text or "已被创宇盾拦截" in req_text or req.status == 403 or (isinstance(req_text, str) and "error_403_type" in req_text):
-                    blocked_ip = self._extract_waf_blocked_ip(req_text) or current_ip or self._extract_proxy_ip(actual_proxy)
-                    if blocked_ip:
-                        self._add_blocked_ip(blocked_ip)
-                    self._waf_trip("Token获取")
-                    return False, "当前访问已被创宇盾拦截", ""
+            if "当前访问疑似黑客攻击" in req_text or "已被创宇盾拦截" in req_text or req_status == 403 or (isinstance(req_text, str) and "error_403_type" in req_text):
+                blocked_ip = self._extract_waf_blocked_ip(req_text) or current_ip or self._extract_proxy_ip(cand.proxy_url)
+                if _raise_on_exit_err:
+                    raise _ExitAttemptError("waf_blocked", "触发创宇盾拦截 (HTTP 403)", blocked_ip=blocked_ip)
+                if blocked_ip:
+                    self._add_blocked_ip(blocked_ip)
+                self._waf_trip("Token获取")
+                return False, "当前访问已被创宇盾拦截", ""
 
+            try:
                 t = ujson.loads(req_text)
                 token = t["params"]["bussiness"]
                 expire = int(time.time() * 1000) + t["params"]["expire"]
-
                 self.token = token
                 self.token_expire = expire
-
                 return True, token, base_header
             except Exception as e:
-                logger.warning(f"get_token Faile : {e}")
+                logger.warning(f"get_token parse failed: {e}")
                 return False, str(e), ""
 
     async def get_cookie(self, proxy=""):
@@ -568,9 +688,19 @@ class beian:
         logger.info(f"缺口定位: x={offset_x}, 滑块={sw}x{sh}")
         return True, offset_x
 
-    async def check_img(self, proxy=""):
-        resolved_proxy = self._resolve_proxy(proxy)
-        success, token, base_header = await self.get_token(resolved_proxy)
+    async def check_img(self, proxy="", exit_candidate=None, force_token=False, _raise_on_exit_err=False):
+        if exit_candidate is not None:
+            cand = exit_candidate
+        else:
+            cands = self._iter_attempt_exits(proxy)
+            cand = cands[0] if cands else ExitCandidate(exit_id=DIRECT_EXIT_ID, name="主服务器直连", proxy_url=None, ip="")
+
+        success, token, base_header = await self.get_token(
+            proxy,
+            force=force_token,
+            exit_candidate=cand,
+            _raise_on_exit_err=_raise_on_exit_err,
+        )
         if not success:
             logger.info(f"获取token失败：{token}")
             return False, token, '', '', ''
@@ -580,21 +710,27 @@ class beian:
             base_header.update({"Content-Length": length, "token": token})
             base_header["Content-Type"] = "application/json"
             try:
-                async with self.get_session(resolved_proxy) as session:
-                    actual_proxy = getattr(session, "_arl_proxy", resolved_proxy)
-                    await self._acquire_rate_slot(is_proxied=bool(actual_proxy))
+                async with self._open_candidate_session(cand) as session:
+                    actual_proxy = getattr(session, "_arl_proxy", None)
+                    await self._acquire_rate_slot(is_proxied=bool(cand.proxy_url), exit_id=cand.exit_id)
                     current_ip = self._session_local_ip(session)
                     async with session.post(self.getCheckImage, data=data, headers=base_header, proxy=actual_proxy) as req:
                         res_text = await req.text()
                         if "当前访问疑似黑客攻击" in res_text or "已被创宇盾拦截" in res_text or req.status == 403 or (isinstance(res_text, str) and "error_403_type" in res_text):
-                            blocked_ip = self._extract_waf_blocked_ip(res_text) or current_ip or self._extract_proxy_ip(actual_proxy)
+                            blocked_ip = self._extract_waf_blocked_ip(res_text) or current_ip or self._extract_proxy_ip(cand.proxy_url)
+                            if _raise_on_exit_err:
+                                raise _ExitAttemptError("waf_blocked", "验证码获取触发创宇盾拦截 (HTTP 403)", blocked_ip=blocked_ip)
                             if blocked_ip:
                                 self._add_blocked_ip(blocked_ip)
                             self._waf_trip("验证码获取")
                             return False, "当前访问已被创宇盾拦截", '', '', ''
                         res = ujson.loads(res_text)
+            except _ExitAttemptError:
+                raise
             except Exception as e:
                 logger.info(f"请求验证码时失败：{e}")
+                if _raise_on_exit_err:
+                    raise _ExitAttemptError("transport_error", f"验证码连接异常 ({type(e).__name__})", cooldown_sec=60) from e
                 return False, f"请求验证码时失败：{e}", '', '', ''
 
             p_uuid = res["params"]["uuid"]
@@ -612,15 +748,23 @@ class beian:
             logger.info(f"checkImage 请求体: {check_data}")
             length = str(len(check_data.encode("utf-8")))
             base_header.update({"Content-Length": length})
-            async with self.get_session(resolved_proxy) as session:
-                actual_proxy = getattr(session, "_arl_proxy", resolved_proxy)
-                await self._acquire_rate_slot(is_proxied=bool(actual_proxy))
-                current_ip = self._session_local_ip(session)
-                async with session.post(self.checkImage, data=check_data, headers=base_header, proxy=actual_proxy) as req:
-                    res = await req.text()
+            try:
+                async with self._open_candidate_session(cand) as session:
+                    actual_proxy = getattr(session, "_arl_proxy", None)
+                    await self._acquire_rate_slot(is_proxied=bool(cand.proxy_url), exit_id=cand.exit_id)
+                    current_ip = self._session_local_ip(session)
+                    async with session.post(self.checkImage, data=check_data, headers=base_header, proxy=actual_proxy) as req:
+                        res = await req.text()
+                        req_status = req.status
+            except Exception as e:
+                if _raise_on_exit_err:
+                    raise _ExitAttemptError("transport_error", f"验证码校验网络异常 ({type(e).__name__})", cooldown_sec=60) from e
+                raise
 
-            if "当前访问疑似黑客攻击" in res or "已被创宇盾拦截" in res or req.status == 403 or (isinstance(res, str) and "error_403_type" in res):
-                blocked_ip = self._extract_waf_blocked_ip(res) or current_ip or self._extract_proxy_ip(actual_proxy)
+            if "当前访问疑似黑客攻击" in res or "已被创宇盾拦截" in res or req_status == 403 or (isinstance(res, str) and "error_403_type" in res):
+                blocked_ip = self._extract_waf_blocked_ip(res) or current_ip or self._extract_proxy_ip(cand.proxy_url)
+                if _raise_on_exit_err:
+                    raise _ExitAttemptError("waf_blocked", "验证码提交触发创宇盾拦截 (HTTP 403)", blocked_ip=blocked_ip)
                 if blocked_ip:
                     self._add_blocked_ip(blocked_ip)
                 self._waf_trip("验证码提交")
@@ -645,30 +789,33 @@ class beian:
                 sign = data["params"]
                 return True, p_uuid, token, sign, base_header
 
+        except _ExitAttemptError:
+            raise
         except Exception as e:
             logger.warning(f"check_image Faile : {e}")
             return False, str(e), '', '', ''
 
     async def getAppAndMiniDetail(self, dataId, serviceType, p_uuid, token, sign, base_header, proxy="", session=None):
-        """优化的详情获取，支持代理与物理消峰"""
-        resolved_proxy = self._resolve_proxy(proxy)
+        """优化的详情获取，支持多协议代理、每出口控频与故障切换"""
         info = {"dataId": dataId, "serviceType": serviceType}
         length = str(len(str(ujson.dumps(info, ensure_ascii=False)).encode("utf-8")))
+        captcha_enabled = bool(getattr(getattr(config, 'captcha', object()), 'enable', False))
 
-        detail_header = base_header.copy()
-        detail_header.update({"Content-Length": length, "uuid": p_uuid, "token": token, "sign": sign})
+        def _make_detail_headers(cur_token, cur_header):
+            dh = dict(cur_header)
+            dh.update({"Content-Length": length, "uuid": p_uuid, "token": cur_token, "sign": sign})
+            if not captcha_enabled:
+                dh.pop("uuid", None)
+                dh.pop("Content-Length", None)
+            return dh
 
-        if not getattr(getattr(config, 'captcha', object()), 'enable', False):
-            detail_header.pop("uuid", None)
-            detail_header.pop("Content-Length", None)
-
-        current_ip = None
-        actual_proxy = None
         if session:
+            detail_header = _make_detail_headers(token, base_header)
             current_ip = self._session_local_ip(session)
-            actual_proxy = getattr(session, "_arl_proxy", resolved_proxy)
-            await self._acquire_rate_slot(is_proxied=bool(actual_proxy))
-            if getattr(getattr(config, 'captcha', object()), 'enable', False):
+            actual_proxy = getattr(session, "_arl_proxy", None)
+            proxy_url_used = getattr(session, "_arl_proxy_url", actual_proxy)
+            await self._acquire_rate_slot(is_proxied=bool(proxy_url_used))
+            if captcha_enabled:
                 async with session.post(self.queryDetailByAppAndMiniId,
                                         data=ujson.dumps(info, ensure_ascii=False),
                                         headers=detail_header,
@@ -680,43 +827,107 @@ class beian:
                                         headers=detail_header,
                                         proxy=actual_proxy) as req:
                     res = await req.text()
-        else:
-            async with self.get_session(resolved_proxy) as session:
-                current_ip = self._session_local_ip(session)
-                actual_proxy = getattr(session, "_arl_proxy", resolved_proxy)
-                await self._acquire_rate_slot(is_proxied=bool(actual_proxy))
-                if getattr(getattr(config, 'captcha', object()), 'enable', False):
-                    async with session.post(self.queryDetailByAppAndMiniId,
-                                            data=ujson.dumps(info, ensure_ascii=False),
-                                            headers=detail_header,
-                                            proxy=actual_proxy) as req:
-                        res = await req.text()
-                else:
-                    async with session.post(f"{self.queryDetailByAppAndMiniId}",
-                                            json=info,
-                                            headers=detail_header,
-                                            proxy=actual_proxy) as req:
-                        res = await req.text()
+            if "当前访问疑似黑客攻击" in res or "已被创宇盾拦截" in res or (isinstance(res, str) and "error_403_type" in res):
+                blocked_ip = self._extract_waf_blocked_ip(res) or current_ip or self._extract_proxy_ip(proxy_url_used)
+                if blocked_ip:
+                    self._add_blocked_ip(blocked_ip)
+                self._detail_waf_trip("详情获取")
+                return False, {"code": 403, "msg": "当前访问已被创宇盾拦截", "success": False}
+            try:
+                parsed_res = ujson.loads(res)
+                _msg = str(parsed_res.get("msg") or parsed_res.get("message") or "")
+                if self._is_rate_limited(_msg):
+                    self._detail_waf_trip("详情获取(业务限流)")
+                    return False, {"code": 429, "msg": f"业务限流: {_msg}", "success": False}
+                return True, parsed_res
+            except Exception as e:
+                return False, {"code": 500, "msg": f"解析异常: {e}", "success": False}
 
-        if "当前访问疑似黑客攻击" in res or "已被创宇盾拦截" in res or (isinstance(res, str) and "error_403_type" in res):
-            logger.warning("详情获取触发创宇盾拦截，记录黑名单IP并进入详情降级")
-            blocked_ip = self._extract_waf_blocked_ip(res) or current_ip or self._extract_proxy_ip(actual_proxy)
-            if blocked_ip:
-                self._add_blocked_ip(blocked_ip)
+        candidates = self._iter_attempt_exits(proxy)
+        if not candidates:
             self._detail_waf_trip("详情获取")
-            return False, {"code": 403, "msg": "当前访问已被创宇盾拦截", "success": False}
+            return False, {"code": 403, "msg": "当前所有出口均处于冷却状态", "success": False}
 
-        try:
-            parsed_res = ujson.loads(res)
-            _msg = str(parsed_res.get("msg") or parsed_res.get("message") or "")
-            if self._is_rate_limited(_msg):
-                logger.warning(f"详情获取触发业务限流: {_msg}")
-                self._detail_waf_trip("详情获取(业务限流)")
-                return False, {"code": 429, "msg": f"业务限流: {_msg}", "success": False}
-            return True, parsed_res
-        except Exception as e:
-            logger.warning(f"解析详情响应失败: {e}, 响应文本截断: {res[:100]}")
-            return False, {"code": 500, "msg": f"解析异常: {e}", "success": False}
+        cur_token = token
+        cur_header = base_header
+        last_err = {"code": 500, "msg": "详情获取失败", "success": False}
+        for idx, cand in enumerate(candidates):
+            next_cand = candidates[idx + 1] if (idx + 1 < len(candidates)) else None
+            if idx > 0 and not captcha_enabled:
+                tok_ok, new_tok, new_hdr = await self.get_token(proxy, force=True, exit_candidate=cand)
+                if tok_ok:
+                    cur_token = new_tok
+                    cur_header = new_hdr
+            detail_header = _make_detail_headers(cur_token, cur_header)
+            try:
+                async with self._open_candidate_session(cand) as sess:
+                    actual_proxy = getattr(sess, "_arl_proxy", None)
+                    await self._acquire_rate_slot(is_proxied=bool(cand.proxy_url), exit_id=cand.exit_id)
+                    current_ip = self._session_local_ip(sess)
+                    if captcha_enabled:
+                        async with sess.post(self.queryDetailByAppAndMiniId,
+                                             data=ujson.dumps(info, ensure_ascii=False),
+                                             headers=detail_header,
+                                             proxy=actual_proxy) as req:
+                            res = await req.text()
+                            req_status = req.status
+                    else:
+                        async with sess.post(f"{self.queryDetailByAppAndMiniId}",
+                                             json=info,
+                                             headers=detail_header,
+                                             proxy=actual_proxy) as req:
+                            res = await req.text()
+                            req_status = req.status
+            except Exception as exc:
+                await self._handle_exit_failure(
+                    cand,
+                    reason=f"详情网络异常 ({type(exc).__name__})",
+                    cooldown_sec=60,
+                    next_cand=next_cand,
+                    scene="详情补全",
+                )
+                last_err = {"code": 500, "msg": f"详情请求异常: {exc}", "success": False}
+                if next_cand is not None:
+                    continue
+                return False, last_err
+
+            if "当前访问疑似黑客攻击" in res or "已被创宇盾拦截" in res or req_status == 403 or (isinstance(res, str) and "error_403_type" in res):
+                blocked_ip = self._extract_waf_blocked_ip(res) or current_ip or self._extract_proxy_ip(cand.proxy_url)
+                await self._handle_exit_failure(
+                    cand,
+                    blocked_ip=blocked_ip,
+                    reason="触发创宇盾拦截 (HTTP 403)",
+                    next_cand=next_cand,
+                    scene="详情补全",
+                )
+                last_err = {"code": 403, "msg": "当前访问已被创宇盾拦截", "success": False}
+                if next_cand is not None:
+                    continue
+                self._detail_waf_trip("详情获取")
+                return False, last_err
+
+            try:
+                parsed_res = ujson.loads(res)
+                _msg = str(parsed_res.get("msg") or parsed_res.get("message") or "")
+                if self._is_rate_limited(_msg):
+                    await self._handle_exit_failure(
+                        cand,
+                        reason=f"触发业务限流 ({_msg[:60]})",
+                        next_cand=next_cand,
+                        scene="详情补全",
+                    )
+                    last_err = {"code": 429, "msg": f"业务限流: {_msg}", "success": False}
+                    if next_cand is not None:
+                        continue
+                    self._detail_waf_trip("详情获取(业务限流)")
+                    return False, last_err
+                await self._handle_exit_success(cand, switched_from_primary=(idx > 0))
+                return True, parsed_res
+            except Exception as e:
+                logger.warning(f"解析详情响应失败: {e}, 响应文本截断: {res[:100]}")
+                return False, {"code": 500, "msg": f"解析异常: {e}", "success": False}
+
+        return False, last_err
 
     def _is_auto_pagination(self, pageNum, pageSize):
         """未显式传分页参数时，默认拉取全部页。"""
@@ -738,62 +949,71 @@ class beian:
         except (TypeError, ValueError):
             return 1
 
-    async def _query_beian_page(self, name, sp, pageNum, pageSize, proxy=""):
-        resolved_proxy = self._resolve_proxy(proxy)
-        # 全局 WAF 熔断检查：单 IP 直连且处于封禁期时短路，多代理模式不停机
-        if self._is_global_waf_blocked():
-            return False, "当前访问已被创宇盾拦截", None
-
+    async def _query_beian_page_once(self, name, sp, pageNum, pageSize, cand, force_token=False):
         info = ujson.loads(self.typj.get(sp))
         info["pageNum"] = pageNum
         info["pageSize"] = pageSize
         info["unitName"] = name
         current_ip = None
-        actual_proxy = None
-        
+
         if getattr(getattr(config, 'captcha', object()), 'enable', False):
-            success, p_uuid, token, sign, base_header = await self.check_img(resolved_proxy)
+            success, p_uuid, token, sign, base_header = await self.check_img(
+                cand.proxy_url or "",
+                exit_candidate=cand,
+                force_token=force_token,
+                _raise_on_exit_err=True,
+            )
             if not success:
                 logger.info(f"打码失败：{p_uuid}")
                 return False, p_uuid, None
 
             length = str(len(str(ujson.dumps(info, ensure_ascii=False)).encode("utf-8")))
             base_header.update({"Content-Length": length, "uuid": p_uuid, "token": token, "sign": sign})
-            
-            async with self.get_session(resolved_proxy) as session:
-                actual_proxy = getattr(session, "_arl_proxy", resolved_proxy)
-                await self._acquire_rate_slot(is_proxied=bool(actual_proxy))
-                current_ip = self._session_local_ip(session)
-                async with session.post(self.queryByCondition,
-                                        data=ujson.dumps(info, ensure_ascii=False),
-                                        headers=base_header,
-                                        proxy=actual_proxy) as req:
-                    res = await req.text()
+
+            try:
+                async with self._open_candidate_session(cand) as session:
+                    actual_proxy = getattr(session, "_arl_proxy", None)
+                    await self._acquire_rate_slot(is_proxied=bool(cand.proxy_url), exit_id=cand.exit_id)
+                    current_ip = self._session_local_ip(session)
+                    async with session.post(self.queryByCondition,
+                                            data=ujson.dumps(info, ensure_ascii=False),
+                                            headers=base_header,
+                                            proxy=actual_proxy) as req:
+                        res = await req.text()
+                        req_status = req.status
+            except Exception as e:
+                raise _ExitAttemptError("transport_error", f"列表连接异常 ({type(e).__name__})", cooldown_sec=60) from e
         else:
-            success, token, base_header = await self.get_token(resolved_proxy)
+            success, token, base_header = await self.get_token(
+                cand.proxy_url or "",
+                force=force_token,
+                exit_candidate=cand,
+                _raise_on_exit_err=True,
+            )
             sign = ""
             p_uuid = ""
             if not success:
-                logger.info(f"获取token失败")
+                logger.info("获取token失败")
                 return False, None, None
             base_header.update({"token": token, "sign": self.sign})
 
-            async with self.get_session(resolved_proxy) as session:
-                actual_proxy = getattr(session, "_arl_proxy", resolved_proxy)
-                await self._acquire_rate_slot(is_proxied=bool(actual_proxy))
-                current_ip = self._session_local_ip(session)
-                async with session.post(f"{self.queryByCondition}/",
-                                        json=info,
-                                        headers=base_header,
-                                        proxy=actual_proxy) as req:
-                    res = await req.text()
+            try:
+                async with self._open_candidate_session(cand) as session:
+                    actual_proxy = getattr(session, "_arl_proxy", None)
+                    await self._acquire_rate_slot(is_proxied=bool(cand.proxy_url), exit_id=cand.exit_id)
+                    current_ip = self._session_local_ip(session)
+                    async with session.post(f"{self.queryByCondition}/",
+                                            json=info,
+                                            headers=base_header,
+                                            proxy=actual_proxy) as req:
+                        res = await req.text()
+                        req_status = req.status
+            except Exception as e:
+                raise _ExitAttemptError("transport_error", f"列表连接异常 ({type(e).__name__})", cooldown_sec=60) from e
 
-        if "当前访问疑似黑客攻击" in res or "已被创宇盾拦截" in res or (isinstance(res, str) and "error_403_type" in res):
-            self._waf_trip("列表查询")
-            blocked_ip = self._extract_waf_blocked_ip(res) or current_ip or self._extract_proxy_ip(actual_proxy)
-            if blocked_ip:
-                self._add_blocked_ip(blocked_ip)
-            return False, "当前访问已被创宇盾拦截", None
+        if "当前访问疑似黑客攻击" in res or "已被创宇盾拦截" in res or req_status == 403 or (isinstance(res, str) and "error_403_type" in res):
+            blocked_ip = self._extract_waf_blocked_ip(res) or current_ip or self._extract_proxy_ip(cand.proxy_url)
+            raise _ExitAttemptError("waf_blocked", "触发创宇盾拦截 (HTTP 403)", blocked_ip=blocked_ip)
 
         try:
             result = ujson.loads(res)
@@ -806,8 +1026,7 @@ class beian:
         if isinstance(result, dict):
             _msg = str(result.get("msg") or result.get("message") or "")
         if self._is_rate_limited(_msg):
-            self._waf_trip("列表查询(业务限流)")
-            return False, f"MIIT业务限流：{_msg[:120]}", None
+            raise _ExitAttemptError("rate_limited", f"MIIT业务限流 ({_msg[:80]})")
 
         detail_context = {
             "p_uuid": p_uuid,
@@ -816,6 +1035,44 @@ class beian:
             "base_header": base_header,
         }
         return True, result, detail_context
+
+    async def _query_beian_page(self, name, sp, pageNum, pageSize, proxy=""):
+        # 全局 WAF 熔断检查：当所有允许出口均处于冷却时直接短路返回，交由外层执行单次等待
+        if self._is_global_waf_blocked():
+            return False, "当前访问已被创宇盾拦截", None
+
+        candidates = self._iter_attempt_exits(proxy)
+        if not candidates:
+            return False, "当前所有出口均处于冷却状态", None
+
+        last_err = "当前访问已被创宇盾拦截"
+        for idx, cand in enumerate(candidates):
+            next_cand = candidates[idx + 1] if (idx + 1 < len(candidates)) else None
+            try:
+                ok, payload, detail_ctx = await self._query_beian_page_once(
+                    name, sp, pageNum, pageSize, cand, force_token=(idx > 0)
+                )
+                if ok:
+                    await self._handle_exit_success(cand, switched_from_primary=(idx > 0))
+                    return True, payload, detail_ctx
+                return False, payload, detail_ctx
+            except _ExitAttemptError as err:
+                await self._handle_exit_failure(
+                    cand,
+                    blocked_ip=err.blocked_ip,
+                    reason=err.reason,
+                    cooldown_sec=err.cooldown_sec,
+                    next_cand=next_cand,
+                    scene="列表查询",
+                )
+                last_err = "当前访问已被创宇盾拦截" if err.kind == "waf_blocked" else err.reason
+                if next_cand is not None:
+                    continue
+                if err.kind in ("waf_blocked", "rate_limited") and self._is_global_waf_blocked():
+                    self._waf_trip("列表查询")
+                return False, last_err, None
+
+        return False, last_err, None
 
     async def _enrich_app_details(self, result, sp, detail_context, proxy):
         """为APP/小程序/快应用结果补充详情（支持详情级软降级与受控控频）"""
@@ -973,11 +1230,7 @@ class beian:
         result = await self._enrich_app_details(result, sp, detail_context, proxy)
         return True, result
 
-    async def getblackbeian(self, name, sp, proxy=""):
-        resolved_proxy = self._resolve_proxy(proxy)
-        if self._is_global_waf_blocked():
-            return False, "当前访问已被创宇盾拦截"
-
+    async def _getblackbeian_once(self, name, sp, cand, force_token=False):
         info = ujson.loads(self.btypj.get(sp))
         if sp == 0:
             info["domainName"] = name
@@ -985,51 +1238,97 @@ class beian:
             info["serviceName"] = name
 
         current_ip = None
-        actual_proxy = None
         if getattr(getattr(config, 'captcha', object()), 'enable', False):
-            success, p_uuid, token, sign, base_header = await self.check_img(resolved_proxy)
+            success, p_uuid, token, sign, base_header = await self.check_img(
+                cand.proxy_url or "",
+                exit_candidate=cand,
+                force_token=force_token,
+                _raise_on_exit_err=True,
+            )
             if not success:
                 return False, p_uuid
-            
+
             length = str(len(str(ujson.dumps(info, ensure_ascii=False)).encode("utf-8")))
             base_header.update(
                 {"Content-Length": length, "uuid": p_uuid, "token": token, "sign": sign}
             )
-            async with self.get_session(resolved_proxy) as session:
-                actual_proxy = getattr(session, "_arl_proxy", resolved_proxy)
-                await self._acquire_rate_slot(is_proxied=bool(actual_proxy))
-                current_ip = self._session_local_ip(session)
-                async with session.post((self.blackqueryByCondition if sp == 0 else self.blackappAndMiniByCondition),
-                                         data=ujson.dumps(info, ensure_ascii=False),
-                                         headers=base_header, proxy=actual_proxy) as req:
-                    res = await req.text()
-            
+            try:
+                async with self._open_candidate_session(cand) as session:
+                    actual_proxy = getattr(session, "_arl_proxy", None)
+                    await self._acquire_rate_slot(is_proxied=bool(cand.proxy_url), exit_id=cand.exit_id)
+                    current_ip = self._session_local_ip(session)
+                    async with session.post((self.blackqueryByCondition if sp == 0 else self.blackappAndMiniByCondition),
+                                            data=ujson.dumps(info, ensure_ascii=False),
+                                            headers=base_header, proxy=actual_proxy) as req:
+                        res = await req.text()
+                        req_status = req.status
+            except Exception as e:
+                raise _ExitAttemptError("transport_error", f"黑名单查询网络异常 ({type(e).__name__})", cooldown_sec=60) from e
+
         else:
-            success, token, base_header = await self.get_token(resolved_proxy)
-            sign = ""
-            p_uuid = ""
+            success, token, base_header = await self.get_token(
+                cand.proxy_url or "",
+                force=force_token,
+                exit_candidate=cand,
+                _raise_on_exit_err=True,
+            )
             if not success:
-                logger.info(f"获取token失败")
+                logger.info("获取token失败")
                 return False, None
             base_header.update({"token": token, "sign": self.sign})
 
-            async with self.get_session(resolved_proxy) as session:
-                actual_proxy = getattr(session, "_arl_proxy", resolved_proxy)
-                await self._acquire_rate_slot(is_proxied=bool(actual_proxy))
-                current_ip = self._session_local_ip(session)
-                async with session.post((f"{self.blackqueryByCondition}/" if sp == 0 else f"{self.blackappAndMiniByCondition}/"),
-                                            json=info, 
+            try:
+                async with self._open_candidate_session(cand) as session:
+                    actual_proxy = getattr(session, "_arl_proxy", None)
+                    await self._acquire_rate_slot(is_proxied=bool(cand.proxy_url), exit_id=cand.exit_id)
+                    current_ip = self._session_local_ip(session)
+                    async with session.post((f"{self.blackqueryByCondition}/" if sp == 0 else f"{self.blackappAndMiniByCondition}/"),
+                                            json=info,
                                             headers=base_header, proxy=actual_proxy) as req:
-                    res = await req.text()
+                        res = await req.text()
+                        req_status = req.status
+            except Exception as e:
+                raise _ExitAttemptError("transport_error", f"黑名单查询网络异常 ({type(e).__name__})", cooldown_sec=60) from e
 
-        if "当前访问疑似黑客攻击" in res or "已被创宇盾拦截" in res or (isinstance(res, str) and "error_403_type" in res):
-            self._waf_trip("黑名单查询")
-            blocked_ip = self._extract_waf_blocked_ip(res) or current_ip or self._extract_proxy_ip(actual_proxy)
-            if blocked_ip:
-                self._add_blocked_ip(blocked_ip)
-            return False, "当前访问已被创宇盾拦截"
+        if "当前访问疑似黑客攻击" in res or "已被创宇盾拦截" in res or req_status == 403 or (isinstance(res, str) and "error_403_type" in res):
+            blocked_ip = self._extract_waf_blocked_ip(res) or current_ip or self._extract_proxy_ip(cand.proxy_url)
+            raise _ExitAttemptError("waf_blocked", "触发创宇盾拦截 (HTTP 403)", blocked_ip=blocked_ip)
 
         return True, ujson.loads(res)
+
+    async def getblackbeian(self, name, sp, proxy=""):
+        if self._is_global_waf_blocked():
+            return False, "当前访问已被创宇盾拦截"
+
+        candidates = self._iter_attempt_exits(proxy)
+        if not candidates:
+            return False, "当前所有出口均处于冷却状态"
+
+        last_err = "当前访问已被创宇盾拦截"
+        for idx, cand in enumerate(candidates):
+            next_cand = candidates[idx + 1] if (idx + 1 < len(candidates)) else None
+            try:
+                ok, data = await self._getblackbeian_once(name, sp, cand, force_token=(idx > 0))
+                if ok:
+                    await self._handle_exit_success(cand, switched_from_primary=(idx > 0))
+                return ok, data
+            except _ExitAttemptError as err:
+                await self._handle_exit_failure(
+                    cand,
+                    blocked_ip=err.blocked_ip,
+                    reason=err.reason,
+                    cooldown_sec=err.cooldown_sec,
+                    next_cand=next_cand,
+                    scene="黑名单查询",
+                )
+                last_err = "当前访问已被创宇盾拦截" if err.kind == "waf_blocked" else err.reason
+                if next_cand is not None:
+                    continue
+                if err.kind in ("waf_blocked", "rate_limited") and self._is_global_waf_blocked():
+                    self._waf_trip("黑名单查询")
+                return False, last_err
+
+        return False, last_err
 
     async def autoget(self, name, sp, pageNum="", pageSize="", proxy="", b=1):
         try:

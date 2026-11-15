@@ -79,11 +79,11 @@ class FetchSite(BaseThread):
         # 核心：发起 HTTP 请求 (支持对 SSL 握手异常目标的容错重试)
         conn = None
         try:
-            conn = utils.http_req(site, timeout=self.http_timeout, verify=False)
+            conn = utils.http_req(site, timeout=self.http_timeout, verify=False, proxy_domain="scan")
         except (requests.exceptions.SSLError, requests.exceptions.ConnectionError):
             if is_https:
                 try:
-                    conn = utils.http_req(site, timeout=self.http_timeout, verify=False, resilient_ssl=True)
+                    conn = utils.http_req(site, timeout=self.http_timeout, verify=False, resilient_ssl=True, proxy_domain="scan")
                 except Exception:
                     pass
         except Exception:
@@ -103,11 +103,11 @@ class FetchSite(BaseThread):
             for gpath in GATEWAY_PATHS:
                 probe_url = base_url + gpath
                 try:
-                    fb_conn = utils.http_req(probe_url, timeout=self.http_timeout, verify=False)
+                    fb_conn = utils.http_req(probe_url, timeout=self.http_timeout, verify=False, proxy_domain="scan")
                 except (requests.exceptions.SSLError, requests.exceptions.ConnectionError):
                     if is_https:
                         try:
-                            fb_conn = utils.http_req(probe_url, timeout=self.http_timeout, verify=False, resilient_ssl=True)
+                            fb_conn = utils.http_req(probe_url, timeout=self.http_timeout, verify=False, resilient_ssl=True, proxy_domain="scan")
                         except Exception:
                             fb_conn = None
                     else:
@@ -306,9 +306,11 @@ class FetchFavicon(object):
     def get_favicon_data(self, favicon_url):
         if favicon_url.startswith("data:"):
             return None
+        from app.services.proxy_service import resolve_proxy_url
+        proxy_url = resolve_proxy_url(domain="scan", target_url=favicon_url)
         conn = fetch_favicon_response(
             favicon_url, allowed_ip=utils.not_in_black_ips,
-            forbidden_domain=utils.is_forbidden_domain, proxy_url=Config.PROXY_URL,
+            forbidden_domain=utils.is_forbidden_domain, proxy_url=proxy_url,
         )
         if conn.status_code != 200:
             return
@@ -341,9 +343,11 @@ class FetchFavicon(object):
     def find_icon_url_from_html(self, html_content=None):
         """用 pyquery (类似 jQuery 的操作语法) 提取 HTML 中的图标链接"""
         if not html_content:
+            from app.services.proxy_service import resolve_proxy_url
+            proxy_url = resolve_proxy_url(domain="scan", target_url=self.url)
             conn = fetch_favicon_response(
                 self.url, allowed_ip=utils.not_in_black_ips,
-                forbidden_domain=utils.is_forbidden_domain, proxy_url=Config.PROXY_URL,
+                forbidden_domain=utils.is_forbidden_domain, proxy_url=proxy_url,
             )
             html_content = conn.content
             
