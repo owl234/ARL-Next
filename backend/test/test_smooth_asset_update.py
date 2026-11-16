@@ -658,6 +658,52 @@ class TestSmoothAssetUpdate(unittest.TestCase):
             self.assertNotIn("updating_icp_task_id", mock_scope_col.find_one({"_id": scope_id}))
             self.assertIsNone(mock_task_col.find_one({"_id": utid_del}))
 
+    def test_icp_batch_stop_clears_updating_pointers_and_skips_terminal_tasks(self):
+        """测试批量停止仅中止活跃任务并释放关联资产组 updating_icp_task_id，终态任务保持原状"""
+        from app.routes.icp import IcpTaskBatchStop
+
+        scope_run = ObjectId()
+        scope_fail = ObjectId()
+        utid_run = ObjectId()
+        utid_wait = ObjectId()
+        utid_done = ObjectId()
+        utid_fail = ObjectId()
+
+        mock_scope_col = MockCollection([
+            {"_id": scope_run, "synced_icp_task_id": "snap_1", "updating_icp_task_id": str(utid_run)},
+            {"_id": scope_fail, "synced_icp_task_id": "snap_2", "updating_icp_task_id": str(utid_fail)},
+        ])
+        mock_task_col = MockCollection([
+            {"_id": utid_run, "status": "running", "target": "测试A"},
+            {"_id": utid_wait, "status": "waiting", "target": "测试B"},
+            {"_id": utid_done, "status": "done", "end_time": "2026-11-16 08:00:00", "target": "测试C"},
+            {"_id": utid_fail, "status": "running", "target": "测试D"},
+        ])
+        tables = {'asset_scope': mock_scope_col, 'icp_task': mock_task_col}
+
+        def fake_recon(action, payload):
+            if payload.get("task_id") == str(utid_fail):
+                raise RuntimeError("osint timeout")
+            return {"code": 200, "task_id": payload.get("task_id")}
+
+        req_payload = {"task_ids": [str(utid_run), str(utid_wait), str(utid_done), str(utid_fail), "bad-id"]}
+        with patch('app.routes.icp.conn_db', side_effect=lambda t: tables.setdefault(t, MockCollection())), \
+             patch('app.routes.icp._request_recon', side_effect=fake_recon), \
+             patch('flask.request', types.SimpleNamespace(get_json=lambda silent=False: req_payload)):
+            res = IcpTaskBatchStop().post()
+
+        self.assertEqual(res.get("code"), 200)
+        data = res.get("data", {})
+        self.assertEqual(data.get("stopped_count"), 2)
+        self.assertEqual(data.get("skipped_count"), 1)
+        self.assertEqual(data.get("failed_count"), 2)
+        self.assertEqual(data.get("stopped_ids"), [str(utid_run), str(utid_wait)])
+        self.assertEqual(data.get("skipped_ids"), [str(utid_done)])
+        self.assertEqual(data.get("failed_ids"), [str(utid_fail), "bad-id"])
+        self.assertNotIn("updating_icp_task_id", mock_scope_col.find_one({"_id": scope_run}))
+        self.assertEqual(mock_scope_col.find_one({"_id": scope_fail}).get("updating_icp_task_id"), str(utid_fail))
+        self.assertEqual(mock_task_col.find_one({"_id": utid_done}).get("status"), "done")
+
 
 if __name__ == '__main__':
     unittest.main()

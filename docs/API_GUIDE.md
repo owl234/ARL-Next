@@ -78,6 +78,8 @@
 | **查询企业任务统计** | `GET /api/icp/task/statistics` | 无 | 仅返回企业工商/ICP 任务的全局状态统计 |
 | **停止单个任务** | `GET /api/task/stop/<task_id>` | URL 路径参数：`task_id` (24位十六进制) | ⚠️ **注意：此接口使用 GET 方法执行状态变更**（终止任务执行），切勿误认为只读接口，亦不要使用 `POST` 或 `DELETE` |
 | **批量停止任务** | `POST /api/task/batch_stop/` | JSON：接口文档所示请求体 | 批量停止指定任务列表 |
+| **停止单个企业任务** | `GET /api/icp/stop/<task_id>` | URL 路径参数：`task_id` (24位十六进制) | ⚠️ **注意：此接口使用 GET 方法执行状态变更**；终止 `osint-service` 测绘协程并释放关联资产组更新锁；已结束任务返回错误码 `105` |
+| **批量停止企业任务** | `POST /api/icp/batch_stop/` | JSON：`{"task_ids": ["<task_id>"]}`（兼容 `task_id` 字段） | 逐项终止活跃企业测绘任务并释放关联资产组更新锁，自动跳过已结束任务，返回 `stopped_ids` / `skipped_ids` / `failed_ids` 明细 |
 | **删除任务** | `POST /api/task/delete/` | JSON：`{"task_id": ["<task_id>"], "del_task_data": false}` | ⚠️ **前置条件约束**：仅允许删除处于 `done`、`stop` 或 `error` 结束态的任务；运行中任务将返回错误码 `104`（“任务运行中”） |
 | **重启任务** | `POST /api/task/restart/` | JSON：`{"task_id": ["<task_id>"]}` | 仅允许重启已结束的任务 |
 

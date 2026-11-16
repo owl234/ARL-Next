@@ -86,6 +86,11 @@ add_tyc_task_fields = ns.model('AddTycTask', {
     'group_id': fields.String(required=False, default="", description="建组时关联的所属集团ID")
 })
 
+batch_stop_icp_fields = ns.model('BatchStopIcpTask', {
+    'task_ids': fields.List(fields.String(required=True, description="任务ID列表"), required=False),
+    'task_id': fields.List(fields.String(required=True, description="任务ID列表(兼容字段)"), required=False),
+})
+
 def build_auto_group_intent(args):
     """
     从请求参数中提取「自动纳管建组」意图字段。
@@ -610,29 +615,166 @@ class IcpAsset(ARLResource):
         return data
 
 
+def _stop_single_icp_task(task_id: str):
+    """
+    底层核心逻辑：停止单个 ICP / TYC 任务并释放资产组更新锁。
+
+    返回: (status_flag: str, data: dict)
+      - "stopped": 成功停止并获微服务确认
+      - "skipped": 任务已处于终态 (done / stop / error)，不覆写原状态
+      - "not_found": 任务 ID 无效或记录不存在
+      - "failed": 微服务未确认停止或异常
+    """
+    if not task_id or not isinstance(task_id, str):
+        return "not_found", {"task_id": str(task_id) if task_id is not None else "", "error": "无效的任务 ID"}
+
+    is_valid = getattr(bson.ObjectId, "is_valid", None)
+    if callable(is_valid) and not is_valid(task_id):
+        return "not_found", {"task_id": task_id, "error": "无效的任务 ID 格式"}
+
+    try:
+        obj_id = bson.ObjectId(task_id)
+    except Exception:
+        return "not_found", {"task_id": task_id, "error": "无效的任务 ID 格式"}
+
+    task = conn_db('icp_task').find_one({"_id": obj_id}, {"_id": 1, "status": 1})
+    if not task:
+        return "not_found", {"task_id": task_id, "error": "任务不存在"}
+
+    terminal_statuses = ("done", "stop", "error", TaskStatus.STOP)
+    if task.get("status") in terminal_statuses:
+        return "skipped", {"task_id": task_id, "status": task.get("status")}
+
+    # 仅对未结束任务落库 stop，避免与已完成任务的并发写回冲突
+    res = conn_db('icp_task').update_one(
+        {"_id": obj_id, "status": {"$in": [TaskStatus.WAITING, TaskStatus.RUNNING, "waiting", "running"]}},
+        {"$set": {"status": TaskStatus.STOP, "end_time": curr_date()}}
+    )
+    if getattr(res, "matched_count", 1) == 0:
+        latest = conn_db('icp_task').find_one({"_id": obj_id}, {"_id": 1, "status": 1})
+        if not latest:
+            return "not_found", {"task_id": task_id, "error": "任务不存在"}
+        if latest.get("status") in terminal_statuses:
+            return "skipped", {"task_id": task_id, "status": latest.get("status")}
+
+    # 及时通知微服务终止正在执行或等待的协程任务释放锁
+    try:
+        _request_recon("stop", {"task_id": task_id})
+    except Exception as e:
+        logger.error(f"Failed to stop osint-service task {task_id}: {e}")
+        return "failed", {"task_id": task_id, "error": "微服务未确认停止，请稍后重试停止操作"}
+
+    conn_db('asset_scope').update_many(
+        {"updating_icp_task_id": str(task_id)},
+        {"$unset": {"updating_icp_task_id": ""}}
+    )
+    return "stopped", {"task_id": task_id}
+
+
 @ns.route('/stop/<string:task_id>')
 class IcpTaskStop(ARLResource):
     @auth
     def get(self, task_id):
         """停止 ICP 任务 (单任务)"""
         try:
-            query = {"_id": bson.ObjectId(task_id)}
-            update = {"$set": {"status": TaskStatus.STOP, "end_time": curr_date()}}
-            conn_db('icp_task').update_one(query, update)
-            
-            # 及时通知微服务终止正在执行或等待的协程任务释放锁
-            try:
-                _request_recon("stop", {"task_id": task_id})
-            except Exception as e:
-                logger.error(f"Failed to stop osint-service task {task_id}: {e}")
-                return build_ret(ErrorMsg.Error, {"task_id": task_id, "error": "微服务未确认停止，请稍后重试停止操作"})
+            status_flag, data = _stop_single_icp_task(task_id)
+            if status_flag == "stopped":
+                return build_ret(ErrorMsg.Success, data)
+            if status_flag == "skipped":
+                return build_ret(getattr(ErrorMsg, "TaskIsDone", ErrorMsg.Success), data)
+            if status_flag == "not_found":
+                return build_ret(ErrorMsg.NotFoundTask, data)
+            return build_ret(ErrorMsg.Error, data)
+        except Exception as e:
+            return build_ret(ErrorMsg.Error, {"error": str(e)})
 
-            conn_db('asset_scope').update_many(
-                {"updating_icp_task_id": str(task_id)},
-                {"$unset": {"updating_icp_task_id": ""}}
-            )
 
-            return build_ret(ErrorMsg.Success, {"task_id": task_id})
+@ns.route('/batch_stop/')
+class IcpTaskBatchStop(ARLResource):
+    @auth
+    @ns.expect(batch_stop_icp_fields)
+    def post(self):
+        """批量停止 ICP / TYC 任务"""
+        try:
+            from flask import request as flask_request
+            args = flask_request.get_json(silent=True)
+            if args is None:
+                args = {}
+            if not isinstance(args, dict):
+                return build_ret(
+                    {"code": 400, "message": "request body must be a JSON object"},
+                    {"error": "request body must be a JSON object"}
+                )
+
+            if 'task_ids' in args:
+                raw_task_ids = args.get('task_ids')
+            elif 'task_id' in args:
+                raw_task_ids = args.get('task_id')
+            else:
+                return build_ret(
+                    {"code": 400, "message": "task_ids must be a list"},
+                    {"error": "task_ids must be a list"}
+                )
+
+            if isinstance(raw_task_ids, str):
+                raw_task_ids = [raw_task_ids]
+            if not isinstance(raw_task_ids, list):
+                return build_ret(
+                    {"code": 400, "message": "task_ids must be a list"},
+                    {"error": "task_ids must be a list"}
+                )
+
+            seen_ids = set()
+            unique_inputs = []
+            for raw_tid in raw_task_ids:
+                if isinstance(raw_tid, str):
+                    tid = raw_tid.strip()
+                    if tid in seen_ids:
+                        continue
+                    seen_ids.add(tid)
+                    unique_inputs.append(tid)
+                else:
+                    unique_inputs.append(raw_tid)
+
+            stopped_ids = []
+            skipped_ids = []
+            failed_ids = []
+            failed_tasks = []
+
+            for raw_tid in unique_inputs:
+                if not isinstance(raw_tid, str) or not raw_tid:
+                    tid_str = str(raw_tid) if raw_tid is not None else ""
+                    failed_ids.append(tid_str)
+                    failed_tasks.append({"task_id": tid_str, "reason": "not_found", "error": "无效的任务 ID"})
+                    continue
+                try:
+                    status_flag, data = _stop_single_icp_task(raw_tid)
+                    if status_flag == "stopped":
+                        stopped_ids.append(raw_tid)
+                    elif status_flag == "skipped":
+                        skipped_ids.append(raw_tid)
+                    else:
+                        failed_ids.append(raw_tid)
+                        failed_tasks.append({
+                            "task_id": raw_tid,
+                            "reason": status_flag,
+                            "error": data.get("error", "停止失败")
+                        })
+                except Exception as item_err:
+                    logger.error(f"Batch stop icp_task {raw_tid} error: {item_err}")
+                    failed_ids.append(raw_tid)
+                    failed_tasks.append({"task_id": raw_tid, "reason": "error", "error": str(item_err)})
+
+            return build_ret(ErrorMsg.Success, {
+                "total": len(unique_inputs),
+                "stopped_count": len(stopped_ids),
+                "skipped_count": len(skipped_ids),
+                "failed_count": len(failed_ids),
+                "stopped_ids": stopped_ids,
+                "skipped_ids": skipped_ids,
+                "failed_ids": failed_ids,
+                "failed_tasks": failed_tasks,
+            })
         except Exception as e:
             return build_ret(ErrorMsg.Error, {"error": str(e)})
 

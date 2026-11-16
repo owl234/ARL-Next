@@ -457,6 +457,16 @@
       <div class="batch-right">
         <!-- 企业测绘批量操作 -->
         <template v-if="activeMainTab === 'enterprise'">
+          <a-button
+            size="small"
+            :loading="enterpriseBatchStopping"
+            :disabled="enterpriseBatchStopping"
+            @click="handleBatchStopEnterprise"
+          >
+            <template #icon><stop-outlined /></template>
+            {{ taskText('tasks.stopSelected') }}
+          </a-button>
+
           <a-popconfirm
             :title="taskText('tasks.restartTheSelectedTasks')"
             :ok-text="taskText('tasks.confirm')"
@@ -1356,6 +1366,7 @@ const reconSearchForm = reactive({
 
 const enterpriseTaskList = ref([]);
 const enterpriseLoading = ref(false);
+const enterpriseBatchStopping = ref(false);
 const enterpriseBatchDeleting = ref(false);
 const enterpriseTaskCache = new Map();
 const globalPageSize = useGlobalPageSize(10);
@@ -1630,6 +1641,130 @@ const handleBatchDeleteEnterprise = async () => {
     message.error({ content: taskText('tasks.networkErrorFailedToDeleteSelectedTasks'), key: 'batchDelete', duration: 2 });
   } finally {
     enterpriseBatchDeleting.value = false;
+  }
+};
+
+const handleBatchStopEnterprise = () => {
+  if (!enterpriseSelectedRowKeys.value.length || enterpriseBatchStopping.value) return;
+
+  const validKeys = enterpriseSelectedRowKeys.value.filter(key => key != null);
+  if (validKeys.length === 0) return;
+
+  const visibleIds = new Set((enterpriseTaskList.value || []).map(t => t && t._id).filter(Boolean));
+  const activeItems = [];
+  const finishedItems = [];
+  const unknownIds = [];
+
+  for (const id of validKeys) {
+    const item = enterpriseTaskCache.get(id) || (enterpriseTaskList.value || []).find(t => t._id === id);
+    if (!item) {
+      unknownIds.push(id);
+      continue;
+    }
+    if (['done', 'stop', 'error'].includes(item.status)) {
+      finishedItems.push(item);
+    } else {
+      activeItems.push(item);
+    }
+  }
+
+  if (activeItems.length === 0 && unknownIds.length === 0) {
+    message.warning(taskText('tasks.selectedEnterpriseTasksAlreadyFinished'));
+    return;
+  }
+
+  const activeLabels = activeItems.map(item => item.name || item.target || item._id).filter(Boolean);
+  const crossPageActiveCount = activeItems.filter(item => !visibleIds.has(item._id)).length;
+  const summaryText = finishedItems.length > 0
+    ? taskText('tasks.ofTotalSelectedEnterpriseTasksActiveAndFinished', {
+        total: validKeys.length,
+        active: activeItems.length + unknownIds.length,
+        finished: finishedItems.length
+      })
+    : taskText('tasks.stopTheSelectedEnterpriseTasksCount', { count: validKeys.length });
+
+  Modal.confirm({
+    title: taskText('tasks.stopEnterpriseTasks'),
+    icon: createVNode(ExclamationCircleOutlined),
+    content: createVNode('div', { style: 'margin-top: 8px;' }, [
+      createVNode('div', { style: 'margin-bottom: 10px; color: var(--arl-text-color);' }, summaryText),
+      createVNode('div', { style: 'margin-bottom: 12px; font-size: 12px; color: var(--arl-text-secondary);' }, taskText('tasks.stopEnterpriseTasksSideEffectNote')),
+      (activeLabels.length > 0 || unknownIds.length > 0) ? createVNode('div', {
+        style: 'max-height: 140px; overflow-y: auto; background: var(--arl-bg-light); padding: 6px 8px; border-radius: 4px; font-size: 12px; color: var(--arl-text-color); opacity: 0.9; line-height: 1.6;'
+      }, [
+        createVNode('div', { style: 'font-weight: 500; margin-bottom: 4px;' }, taskText('tasks.theFollowingEnterpriseTasksWillBeStopped')),
+        ...activeLabels.map(label => createVNode('div', null, `· ${label}`)),
+        crossPageActiveCount > 0
+          ? createVNode('div', { style: 'margin-top: 4px; color: #faad14;' }, taskText('tasks.includesCountSelectionsRetainedFromOtherPages', { count: crossPageActiveCount }))
+          : null,
+        unknownIds.length > 0
+          ? createVNode('div', { style: 'margin-top: 4px; color: #faad14;' }, taskText('tasks.includesUncachedSelectionsCount', { count: unknownIds.length }))
+          : null
+      ]) : null
+    ]),
+    okText: taskText('tasks.confirmStop'),
+    okButtonProps: { danger: true },
+    cancelText: taskText('tasks.cancel'),
+    onOk: () => executeBatchStopEnterprise(validKeys)
+  });
+};
+
+const executeBatchStopEnterprise = async (targetTaskIds) => {
+  const validKeys = Array.isArray(targetTaskIds) ? targetTaskIds.filter(key => key != null) : [];
+  if (!validKeys.length || enterpriseBatchStopping.value) return;
+
+  enterpriseBatchStopping.value = true;
+  try {
+    message.loading({ content: taskText('tasks.stoppingSelectedTasks'), key: 'batchStop', duration: 0 });
+    const res = await request.post('/icp/batch_stop/', { task_ids: validKeys });
+    if (res.code === 200) {
+      const data = res.data || {};
+      const stoppedCount = Number(data.stopped_count || 0);
+      const skippedCount = Number(data.skipped_count || 0);
+      const failedCount = Number(data.failed_count || 0);
+      const stoppedIds = Array.isArray(data.stopped_ids) ? data.stopped_ids : [];
+      const failedIds = Array.isArray(data.failed_ids) ? data.failed_ids : [];
+
+      stoppedIds.forEach(id => {
+        const cached = enterpriseTaskCache.get(id);
+        if (cached) cached.status = 'stop';
+      });
+
+      if (failedCount > 0 && stoppedCount === 0) {
+        message.error({ content: taskText('tasks.batchStopEnterpriseFailed', { failed: failedCount }), key: 'batchStop', duration: 3 });
+        const failedSet = new Set(failedIds);
+        enterpriseSelectedRowKeys.value = enterpriseSelectedRowKeys.value.filter(id => failedSet.has(id));
+      } else if (failedCount > 0) {
+        message.warning({
+          content: taskText('tasks.batchStopEnterprisePartialResult', { stopped: stoppedCount, skipped: skippedCount, failed: failedCount }),
+          key: 'batchStop',
+          duration: 3
+        });
+        const failedSet = new Set(failedIds);
+        enterpriseSelectedRowKeys.value = enterpriseSelectedRowKeys.value.filter(id => failedSet.has(id));
+      } else if (stoppedCount > 0 && skippedCount > 0) {
+        message.success({
+          content: taskText('tasks.batchStopEnterpriseSuccessWithSkipped', { stopped: stoppedCount, skipped: skippedCount }),
+          key: 'batchStop',
+          duration: 2
+        });
+        enterpriseSelectedRowKeys.value = [];
+      } else if (stoppedCount > 0) {
+        message.success({ content: taskText('tasks.batchStopEnterpriseSuccess', { stopped: stoppedCount }), key: 'batchStop', duration: 2 });
+        enterpriseSelectedRowKeys.value = [];
+      } else {
+        message.info({ content: taskText('tasks.batchStopEnterpriseNoActive'), key: 'batchStop', duration: 2 });
+        enterpriseSelectedRowKeys.value = [];
+      }
+
+      await fetchEnterpriseTasks(enterprisePagination.current, enterprisePagination.pageSize);
+    } else {
+      message.error({ content: res.message || taskText('tasks.failedToStopTaskLabel'), key: 'batchStop', duration: 3 });
+    }
+  } catch (error) {
+    message.error({ content: taskText('tasks.networkErrorFailedToStopSelectedTasks'), key: 'batchStop', duration: 2 });
+  } finally {
+    enterpriseBatchStopping.value = false;
   }
 };
 

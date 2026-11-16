@@ -78,6 +78,8 @@ For isolated regression checks, install the backend dependencies plus `pytest` a
 | **Enterprise Task Statistics** | `GET /api/icp/task/statistics` | None | Returns status statistics for enterprise OSINT / ICP tasks |
 | **Stop Single Task** | `GET /api/task/stop/<task_id>` | URL path param: `task_id` (24-char hex) | ⚠️ **Note: Uses GET to perform state mutation** (terminates the task). Do not use `POST` or `DELETE` |
 | **Batch Stop Tasks** | `POST /api/task/batch_stop/` | JSON: see OpenAPI schema | Stops multiple tasks simultaneously |
+| **Stop Single Enterprise Task** | `GET /api/icp/stop/<task_id>` | URL path param: `task_id` (24-char hex) | ⚠️ **Note: Uses GET to perform state mutation**; cancels the `osint-service` task and clears any asset group update lock; returns code `105` if already finished |
+| **Batch Stop Enterprise Tasks** | `POST /api/icp/batch_stop/` | JSON: `{"task_ids": ["<task_id>"]}` (`task_id` alias also accepted) | Stops active enterprise OSINT tasks, clears group update locks, skips finished tasks, and returns `stopped_ids`, `skipped_ids`, and `failed_ids` |
 | **Delete Task** | `POST /api/task/delete/` | JSON: `{"task_id": ["<task_id>"], "del_task_data": false}` | ⚠️ **State Constraint**: Only tasks in terminal states (`done`, `stop`, `error`) can be deleted. Running tasks return error code `104` ("Task is running") |
 | **Restart Task** | `POST /api/task/restart/` | JSON: `{"task_id": ["<task_id>"]}` | Only stopped/finished tasks can be restarted |
 

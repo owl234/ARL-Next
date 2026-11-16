@@ -88,12 +88,12 @@ def runner(db):
 
 def route(db, cls, method):
     statuses = types.SimpleNamespace(WAITING='waiting', RUNNING='running', STOP='stop')
-    errors = types.SimpleNamespace(Success={'code': 200}, Error={'code': 500}, NotFoundTask={'code': 404})
+    errors = types.SimpleNamespace(Success={'code': 200}, Error={'code': 500}, NotFoundTask={'code': 404}, TaskIsDone={'code': 105})
     env = {'conn_db': db.__getitem__, 'bson': types.SimpleNamespace(ObjectId=lambda x: x),
            'TaskStatus': statuses, 'ErrorMsg': errors, 'build_ret': lambda msg, data: dict(msg, data=data),
            'curr_date': lambda: '2026-10-12 12:00:00', 'logger': LOG, 'add_icp_task_fields': None}
-    # build_auto_group_intent 被 IcpTask.post 调用，属同一源码模块的依赖，需一并注入。
-    extract('app/routes/icp.py', ['_request_recon', 'build_auto_group_intent'], env)
+    # build_auto_group_intent 与 _stop_single_icp_task 被路由类方法调用，属同一源码模块的依赖，需一并注入。
+    extract('app/routes/icp.py', ['_request_recon', 'build_auto_group_intent', '_stop_single_icp_task'], env)
     return extract('app/routes/icp.py', [method], env, cls)
 
 
@@ -245,6 +245,82 @@ class APIContractTests(unittest.TestCase):
         env['_request_recon'] = lambda *args: (_ for _ in ()).throw(RuntimeError('fixture'))
         self.assertEqual(env['get'](None, TID)['code'], 500)
         self.assertEqual(db['icp_task'].docs[0]['status'], 'stop')
+
+    def test_single_stop_skips_terminal_tasks_without_overwriting(self):
+        for status in ('done', 'stop', 'error'):
+            with self.subTest(status=status):
+                db = database(status)
+                db['icp_task'].docs[0]['end_time'] = '2026-10-11 08:00:00'
+                env = route(db, 'IcpTaskStop', 'get')
+                called = []
+                env['_request_recon'] = lambda *args: called.append(args) or {'code': 200, 'task_id': TID}
+                res = env['get'](None, TID)
+                self.assertEqual(res['code'], 105)
+                self.assertEqual(db['icp_task'].docs[0]['status'], status)
+                self.assertEqual(db['icp_task'].docs[0]['end_time'], '2026-10-11 08:00:00')
+                self.assertEqual(called, [])
+
+    def test_batch_stop_handles_mixed_statuses_dedup_and_partial_failures(self):
+        tid_run = '1' * 24
+        tid_wait = '2' * 24
+        tid_done = '3' * 24
+        tid_fail = '4' * 24
+        tid_missing = '5' * 24
+        db = {
+            'icp_task': Collection([
+                {'_id': tid_run, 'status': 'running'},
+                {'_id': tid_wait, 'status': 'waiting'},
+                {'_id': tid_done, 'status': 'done', 'end_time': '2026-10-11 09:00:00'},
+                {'_id': tid_fail, 'status': 'running'},
+            ]),
+            'icp_asset': Collection(),
+            'syslog': Collection(),
+            'asset_scope': Collection(),
+            'system_config': Collection(),
+        }
+        env = route(db, 'IcpTaskBatchStop', 'post')
+        stop_calls = []
+
+        def fake_recon(action, payload):
+            stop_calls.append((action, payload['task_id']))
+            if payload['task_id'] == tid_fail:
+                raise RuntimeError('osint timeout')
+            return {'code': 200, 'task_id': payload['task_id']}
+
+        env['_request_recon'] = fake_recon
+        payload = {'task_ids': [tid_run, tid_run, tid_wait, tid_done, tid_fail, tid_missing]}
+        fake_req = types.SimpleNamespace(get_json=lambda silent=False: payload)
+        with patch.dict(sys.modules, {'flask': types.SimpleNamespace(request=fake_req)}):
+            res = env['post'](None)
+
+        self.assertEqual(res['code'], 200)
+        data = res['data']
+        self.assertEqual(data['total'], 5)
+        self.assertEqual(data['stopped_ids'], [tid_run, tid_wait])
+        self.assertEqual(data['skipped_ids'], [tid_done])
+        self.assertEqual(data['failed_ids'], [tid_fail, tid_missing])
+        self.assertEqual(data['stopped_count'], 2)
+        self.assertEqual(data['skipped_count'], 1)
+        self.assertEqual(data['failed_count'], 2)
+        self.assertEqual(stop_calls, [('stop', tid_run), ('stop', tid_wait), ('stop', tid_fail)])
+        self.assertEqual(db['icp_task'].find_one({'_id': tid_done})['status'], 'done')
+        self.assertEqual(db['icp_task'].find_one({'_id': tid_done})['end_time'], '2026-10-11 09:00:00')
+
+    def test_batch_stop_validates_payload_and_supports_legacy_task_id_key(self):
+        db = database('waiting')
+        env = route(db, 'IcpTaskBatchStop', 'post')
+        env['_request_recon'] = lambda action, payload: {'code': 200, 'task_id': payload['task_id']}
+
+        for bad_payload in ({}, {'task_ids': 123}):
+            fake_req = types.SimpleNamespace(get_json=lambda silent=False, p=bad_payload: p)
+            with patch.dict(sys.modules, {'flask': types.SimpleNamespace(request=fake_req)}):
+                self.assertEqual(env['post'](None)['code'], 400)
+
+        fake_req = types.SimpleNamespace(get_json=lambda silent=False: {'task_id': [TID]})
+        with patch.dict(sys.modules, {'flask': types.SimpleNamespace(request=fake_req)}):
+            res = env['post'](None)
+        self.assertEqual(res['code'], 200)
+        self.assertEqual(res['data']['stopped_ids'], [TID])
 
     def test_auto_matched_tyc_dispatch_uses_acknowledgement_and_status_guard(self):
         for accepted_before_timeout in (False, True):
