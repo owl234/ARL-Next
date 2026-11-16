@@ -325,30 +325,113 @@ async def run_icp_job(options):
                     if not await _task_is_running(task_id):
                         return
                 await insert_syslog("info", f"{qt}查询", f"开始获取 {qt} 资产数据...")
-                res = await handlers[qt](target, "", "", proxy=sys_proxy)
+                dim_state = {"page_persisted": False, "count": 0}
+                dataid_to_docid = {}
+                if hasattr(myicp, "attach_task_hooks"):
+                    async def _icp_progress_cb(_sp, _stage, message, _qt=qt):
+                        await insert_syslog("info", f"{_qt}查询", message)
+
+                    async def _icp_page_cb(_sp, items_batch, _page_num, _total_pages, _qt=qt, _state=dim_state, _id_map=dataid_to_docid):
+                        nonlocal total_assets
+                        if not await _task_is_running(task_id):
+                            return
+                        docs = []
+                        for asset in items_batch:
+                            doc = dict(asset)
+                            doc.pop('_id', None)
+                            doc_id = ObjectId()
+                            doc['_id'] = doc_id
+                            doc['task_id'] = task_id
+                            doc['query_type'] = _qt
+                            if doc.get('dataId') is not None:
+                                _id_map[str(doc['dataId'])] = doc_id
+                            docs.append(doc)
+                        if not docs:
+                            return
+                        _state["page_persisted"] = True
+                        await db['icp_asset'].insert_many(docs, ordered=False)
+                        _state["count"] += len(docs)
+                        total_assets += len(docs)
+                        counts[_qt] += len(docs)
+                        await update_stats()
+
+                    async def _icp_detail_cb(_sp, enriched_items, _qt=qt, _id_map=dataid_to_docid):
+                        if not await _task_is_running(task_id):
+                            return
+                        for item in enriched_items:
+                            did = str(item.get("dataId") or "").strip()
+                            fields = {
+                                k: v for k, v in item.items()
+                                if k not in ("_id", "task_id", "query_type") and v not in (None, "")
+                            }
+                            if not fields:
+                                continue
+                            if did and did in _id_map:
+                                await db['icp_asset'].update_one({"_id": _id_map[did]}, {"$set": fields})
+                            elif did:
+                                await db['icp_asset'].update_one(
+                                    {"task_id": task_id, "query_type": _qt, "dataId": item.get("dataId")},
+                                    {"$set": fields},
+                                )
+
+                    async def _icp_should_stop_cb():
+                        return not await _task_is_running(task_id)
+
+                    myicp.attach_task_hooks(
+                        progress_cb=_icp_progress_cb,
+                        page_cb=_icp_page_cb,
+                        detail_cb=_icp_detail_cb,
+                        should_stop_cb=_icp_should_stop_cb,
+                    )
+
+                try:
+                    res = await handlers[qt](target, "", "", proxy=sys_proxy)
+                finally:
+                    if hasattr(myicp, "attach_task_hooks"):
+                        myicp.attach_task_hooks()
+
                 if not await _task_is_running(task_id):
                     return
                 if res.get("code") == 200 and res.get("params"):
+                    if res["params"].get("_stopped"):
+                        return
                     assets = res["params"].get("list", [])
-                    if assets:
-                        for asset in assets:
-                            asset.pop('_id', None)
-                            asset['task_id'] = task_id
-                            asset['query_type'] = qt
-                        await db['icp_asset'].insert_many(assets, ordered=False)
-                    total_assets += len(assets)
-                    counts[qt] += len(assets)
-                    await update_stats()
-                    await insert_syslog("info", f"{qt}查询", f"获取完成，共计 {len(assets)} 条资产")
+                    if not dim_state["page_persisted"]:
+                        if assets:
+                            for asset in assets:
+                                asset.pop('_id', None)
+                                asset['task_id'] = task_id
+                                asset['query_type'] = qt
+                            await db['icp_asset'].insert_many(assets, ordered=False)
+                        total_assets += len(assets)
+                        counts[qt] += len(assets)
+                        await update_stats()
+                        assets_count = len(assets)
+                    else:
+                        assets_count = dim_state["count"]
 
-                    # 详情降级可观测：上游在 params 上回传缺口量，避免"任务成功但列大面积空白"
+                    await insert_syslog("info", f"{qt}查询", f"获取完成，共计 {assets_count} 条资产")
+
+                    # 详情降级/上限截断可观测：上游在 params 上回传缺口与跳过统计，避免"任务成功但列大面积空白"
                     missing = res["params"].get("_detail_missing") or 0
-                    if missing:
-                        reason = "触发创宇盾风控熔断" if res["params"].get("_detail_waf") else "详情接口未返回有效数据"
-                        error_msg.append(f"{qt}: {reason}，{missing} 条详情缺失")
+                    skipped_cap = res["params"].get("_detail_skipped_cap") or 0
+                    circuit_break = bool(res["params"].get("_detail_circuit_break") or res["params"].get("_detail_waf"))
+                    if missing or skipped_cap or circuit_break:
+                        reasons = []
+                        if res["params"].get("_detail_waf"):
+                            reasons.append("触发创宇盾风控熔断")
+                        elif circuit_break:
+                            reasons.append("详情接口连续失败触发保护熔断")
+                        if skipped_cap > 0:
+                            reasons.append(f"受单批详情上限控制跳过 {skipped_cap} 条详情查询")
+                        if not reasons:
+                            reasons.append("详情接口未返回有效数据")
+                        reason_text = "；".join(reasons)
+                        if missing and not (skipped_cap > 0 and not circuit_break and missing == skipped_cap):
+                            error_msg.append(f"{qt}: {reason_text}，{missing} 条详情缺失")
                         await insert_syslog(
                             "warning", f"{qt}查询",
-                            f"数据已入库但详情不完整：{missing} 条缺失（{reason}），可稍后重跑本任务补全"
+                            f"数据已入库（基础备案号已保留），部分详情未补全：共 {missing} 条无详情（{reason_text}）"
                         )
                 elif res.get("code") != 200:
                     err_text = res.get('msg') or res.get('message') or 'error'
@@ -618,7 +701,7 @@ async def _upsert_task_asset(task_id, query_type, asset, company_name, task_asse
         return True
 
 
-async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_index, counts, total_assets_holder, insert_syslog, update_stats, proxy=None):
+async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_index, counts, total_assets_holder, insert_syslog, update_stats, proxy=None, known_named_lics=None):
     """
     针对指定企业主体发起工信部官方备案双轨查重与补全
     """
@@ -660,35 +743,181 @@ async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_
                 return
 
         await asyncio.sleep(random.uniform(8.0, 15.0))
-        try:
-            res = await handler(company_name, "", "", proxy=proxy)
-            if res.get("code") == 200 and res.get("params"):
-                assets = res["params"].get("list", [])
-                new_count = 0
-                merged_count = 0
-                if assets:
-                    for asset in assets:
-                        asset.pop('_id', None)
-                        is_new = await _upsert_task_asset(
+
+        dim_state = {"page_persisted": False, "new_count": 0, "merged_count": 0}
+        if hasattr(myicp, "attach_task_hooks"):
+            async def _enrich_progress_cb(_sp, _stage, message, _label=label):
+                await insert_syslog("info", f"工信部查重·{_label}", message)
+
+            async def _enrich_should_stop_cb():
+                return not await _task_is_running(task_id)
+
+            def _enrich_skip_detail_fn(_sp, item, _qt=qt):
+                if known_named_lics is None:
+                    return False
+                lic = (item.get("serviceLicence") or item.get("serviceFilingNumber") or item.get("liscense") or "").strip().lower()
+                return bool(lic and lic in known_named_lics.get(_qt, ()))
+
+            async def _enrich_page_cb(_sp, items_batch, _page_num, _total_pages, _qt=qt, _state=dim_state):
+                if not await _task_is_running(task_id):
+                    return
+                _state["page_persisted"] = True
+                batch_new = 0
+                for asset in items_batch:
+                    doc = dict(asset)
+                    doc.pop('_id', None)
+                    is_new = await _upsert_task_asset(
+                        task_id=task_id,
+                        query_type=_qt,
+                        asset=doc,
+                        company_name=company_name,
+                        task_assets_index=task_assets_index,
+                        source="icp"
+                    )
+                    if is_new:
+                        batch_new += 1
+                        _state["new_count"] += 1
+                    else:
+                        _state["merged_count"] += 1
+                    if known_named_lics is not None and _qt in known_named_lics:
+                        sn = (doc.get("serviceName") or doc.get("name") or doc.get("appName") or "").strip()
+                        lic_v = (doc.get("serviceLicence") or doc.get("serviceFilingNumber") or doc.get("liscense") or "").strip().lower()
+                        if sn and lic_v:
+                            known_named_lics[_qt].add(lic_v)
+                if batch_new > 0:
+                    counts[_qt] = counts.get(_qt, 0) + batch_new
+                    total_assets_holder[0] += batch_new
+                    await update_stats()
+
+            async def _enrich_detail_cb(_sp, enriched_items, _qt=qt, _state=dim_state):
+                if not await _task_is_running(task_id):
+                    return
+                index_dict = task_assets_index.setdefault(_qt, {})
+                stat_changed = False
+                for item in enriched_items:
+                    raw_name = (item.get("serviceName") or item.get("name") or item.get("appName") or "").strip()
+                    lic = (item.get("serviceLicence") or item.get("serviceFilingNumber") or item.get("liscense") or "").strip()
+                    name_key = raw_name.lower() if raw_name else ""
+                    lic_key = lic.lower() if lic else ""
+                    if known_named_lics is not None and _qt in known_named_lics and raw_name and lic_key:
+                        known_named_lics[_qt].add(lic_key)
+
+                    name_doc_id = index_dict.get(name_key) if name_key else None
+                    lic_doc_id = index_dict.get(lic_key) if lic_key else None
+                    doc_copy = dict(item)
+                    doc_copy.pop('_id', None)
+                    extra_fields = {
+                        k: v for k, v in doc_copy.items()
+                        if k not in ("_id", "task_id", "query_type") and v not in (None, "")
+                    }
+
+                    if name_doc_id and lic_doc_id and name_doc_id != lic_doc_id:
+                        await _upsert_task_asset(
                             task_id=task_id,
-                            query_type=qt,
-                            asset=asset,
+                            query_type=_qt,
+                            asset=doc_copy,
                             company_name=company_name,
                             task_assets_index=task_assets_index,
                             source="icp"
                         )
+                        if extra_fields:
+                            await db['icp_asset'].update_one({"_id": name_doc_id}, {"$set": extra_fields})
+                        await db['icp_asset'].delete_one({"_id": lic_doc_id})
+                        index_dict[lic_key] = name_doc_id
+                        if counts.get(_qt, 0) > 0:
+                            counts[_qt] -= 1
+                        if total_assets_holder[0] > 0:
+                            total_assets_holder[0] -= 1
+                        if _state["new_count"] > 0:
+                            _state["new_count"] -= 1
+                        _state["merged_count"] += 1
+                        stat_changed = True
+                    else:
+                        target_id = lic_doc_id or name_doc_id
+                        is_new = await _upsert_task_asset(
+                            task_id=task_id,
+                            query_type=_qt,
+                            asset=doc_copy,
+                            company_name=company_name,
+                            task_assets_index=task_assets_index,
+                            source="icp"
+                        )
+                        resolved_id = target_id or index_dict.get(name_key) or index_dict.get(lic_key)
+                        if resolved_id and extra_fields:
+                            await db['icp_asset'].update_one({"_id": resolved_id}, {"$set": extra_fields})
                         if is_new:
-                            new_count += 1
-                        else:
-                            merged_count += 1
-
-                if new_count > 0:
-                    counts[qt] = counts.get(qt, 0) + new_count
-                    total_assets_holder[0] += new_count
+                            _state["new_count"] += 1
+                            counts[_qt] = counts.get(_qt, 0) + 1
+                            total_assets_holder[0] += 1
+                            stat_changed = True
+                if stat_changed:
                     await update_stats()
 
+            myicp.attach_task_hooks(
+                progress_cb=_enrich_progress_cb,
+                page_cb=_enrich_page_cb,
+                detail_cb=_enrich_detail_cb,
+                should_stop_cb=_enrich_should_stop_cb,
+                skip_detail_fn=_enrich_skip_detail_fn,
+            )
+
+        try:
+            try:
+                res = await handler(company_name, "", "", proxy=proxy)
+            finally:
+                if hasattr(myicp, "attach_task_hooks"):
+                    myicp.attach_task_hooks()
+
+            if not await _task_is_running(task_id):
+                logger.info(f"Task {task_id} manually stopped during ICP enrichment.")
+                return
+            if res.get("code") == 200 and res.get("params") and res["params"].get("_stopped"):
+                logger.info(f"Task {task_id} stopped cleanly during MIIT pagination/detail.")
+                return
+
+            if res.get("code") == 200 and res.get("params"):
+                assets = res["params"].get("list", [])
+                if not dim_state["page_persisted"]:
+                    batch_new = 0
+                    if assets:
+                        for asset in assets:
+                            asset.pop('_id', None)
+                            is_new = await _upsert_task_asset(
+                                task_id=task_id,
+                                query_type=qt,
+                                asset=asset,
+                                company_name=company_name,
+                                task_assets_index=task_assets_index,
+                                source="icp"
+                            )
+                            if is_new:
+                                batch_new += 1
+                                dim_state["new_count"] += 1
+                            else:
+                                dim_state["merged_count"] += 1
+
+                    if batch_new > 0:
+                        counts[qt] = counts.get(qt, 0) + batch_new
+                        total_assets_holder[0] += batch_new
+                        await update_stats()
+
+                new_count = dim_state["new_count"]
+                merged_count = dim_state["merged_count"]
                 if new_count > 0 or merged_count > 0:
-                    await insert_syslog("info", "工信部查重", f"主体【{company_name}】工信部 {label} 查重完成：智能补全强化 {merged_count} 条，新增漏网资产 {new_count} 条")
+                    msg = f"主体【{company_name}】工信部 {label} 查重完成：智能补全强化 {merged_count} 条，新增漏网资产 {new_count} 条"
+                    notes = []
+                    skipped_cap = res["params"].get("_detail_skipped_cap") or 0
+                    circuit_break = bool(res["params"].get("_detail_circuit_break") or res["params"].get("_detail_waf"))
+                    missing = res["params"].get("_detail_missing") or 0
+                    if skipped_cap > 0:
+                        notes.append(f"受单批详情上限控制跳过 {skipped_cap} 条详情查询（已保留基础备案号）")
+                    if circuit_break:
+                        notes.append("详情接口触发保护熔断")
+                    elif missing > 0 and skipped_cap == 0:
+                        notes.append(f"{missing} 条未获取到详情")
+                    if notes:
+                        msg += f"；{'，'.join(notes)}"
+                    await insert_syslog("info", "工信部查重", msg)
                 else:
                     await insert_syslog("info", "工信部查重", f"主体【{company_name}】工信部 {label} 查重完成：官方暂无收录该主体资产")
             elif res.get("code") != 200:
@@ -786,6 +1015,7 @@ async def run_tyc_job(options):
         "invest": {}
     }
     gid_to_name = {}
+    known_named_lics = {"app": set(), "mapp": set(), "kapp": set()}
     root_company_name = ""
     # 优先从 task 传参或数据库读取已解析好的官方 company_name
     if options.get("company_name"):
@@ -798,6 +1028,17 @@ async def run_tyc_job(options):
     sys_proxy = await _resolve_system_proxy(options)
     proxy_router = await _build_osint_proxy_router(options, syslog_cb=insert_syslog)
     client = AsyncTycClient(gid=tyc_id, token=tyc_token, proxy=sys_proxy, proxy_router=proxy_router)
+    if hasattr(client, "attach_task_hooks"):
+        async def _tyc_progress_cb(scene_label, msg):
+            await insert_syslog("info", f"TYC·{scene_label}", msg)
+
+        async def _tyc_should_stop_cb():
+            return not await _task_is_running(task_id)
+
+        client.attach_task_hooks(
+            progress_cb=_tyc_progress_cb,
+            should_stop_cb=_tyc_should_stop_cb,
+        )
     if myicp and hasattr(myicp, "attach_proxy_router"):
         myicp.attach_proxy_router(proxy_router)
     if proxy_router.has_structured_policy and proxy_router.get_mode() != "direct_only":
@@ -1013,6 +1254,10 @@ async def run_tyc_job(options):
                             merged_app_count = 0
                             for item in app_list:
                                 item = _normalize_tyc_asset(item, 'app', company_name=current_company_name)
+                                sn_val = (item.get("serviceName") or item.get("name") or item.get("appName") or "").strip()
+                                lic_val = (item.get("serviceLicence") or item.get("serviceFilingNumber") or item.get("liscense") or "").strip().lower()
+                                if sn_val and lic_val:
+                                    known_named_lics["app"].add(lic_val)
                                 is_new = await _upsert_task_asset(task_id, 'app', item, current_company_name, task_assets_index, source="tyc")
                                 if is_new:
                                     new_app_count += 1
@@ -1100,6 +1345,10 @@ async def run_tyc_job(options):
                             merged_mapp_count = 0
                             for item in mapp_list:
                                 item = _normalize_tyc_asset(item, 'mapp', company_name=current_company_name)
+                                sn_val = (item.get("serviceName") or item.get("name") or "").strip()
+                                lic_val = (item.get("serviceLicence") or item.get("serviceFilingNumber") or "").strip().lower()
+                                if sn_val and lic_val:
+                                    known_named_lics["mapp"].add(lic_val)
                                 is_new = await _upsert_task_asset(task_id, 'mapp', item, current_company_name, task_assets_index, source="tyc")
                                 if is_new:
                                     new_mapp_count += 1
@@ -1130,8 +1379,11 @@ async def run_tyc_job(options):
                             total_assets_holder=total_assets_holder,
                             insert_syslog=insert_syslog,
                             update_stats=update_stats,
-                            proxy=sys_proxy
+                            proxy=sys_proxy,
+                            known_named_lics=known_named_lics
                         )
+                        if not await _task_is_running(task_id):
+                            return
                     else:
                         await insert_syslog("warning", "工信部查重", f"企业 GID {current_gid} 未能获取到官方全称，跳过工信部二次查重")
 

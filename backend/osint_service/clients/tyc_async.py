@@ -1,17 +1,33 @@
 import aiohttp
 import asyncio
+import inspect
 import logging
+import math
+import time
 from urllib.parse import urljoin
 
-from proxy_router import (
-    DIRECT_EXIT_ID,
-    ExitCandidate,
-    OsintProxyRouter,
-    build_aiohttp_connector,
-    extract_proxy_ip,
-    mask_proxy_url_secret,
-    normalize_proxy_url,
-)
+try:
+    from load_config import config
+    from proxy_router import (
+        DIRECT_EXIT_ID,
+        ExitCandidate,
+        OsintProxyRouter,
+        build_aiohttp_connector,
+        extract_proxy_ip,
+        mask_proxy_url_secret,
+        normalize_proxy_url,
+    )
+except ImportError:
+    from ..load_config import config
+    from ..proxy_router import (
+        DIRECT_EXIT_ID,
+        ExitCandidate,
+        OsintProxyRouter,
+        build_aiohttp_connector,
+        extract_proxy_ip,
+        mask_proxy_url_secret,
+        normalize_proxy_url,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +53,44 @@ class AsyncTycClient:
             "Referer": "https://www.tianyancha.com/"
         }
         self.page_size = 100
+        self._progress_cb = None
+        self._should_stop_cb = None
+
+    def attach_task_hooks(self, *, progress_cb=None, should_stop_cb=None):
+        """挂载 TYC 分页进度日志与协同终止回调"""
+        self._progress_cb = progress_cb
+        self._should_stop_cb = should_stop_cb
+
+    def _get_system_int_config(self, key, default):
+        val = getattr(getattr(config, "system", object()), key, None)
+        if val is None or val == "":
+            return default
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return default
+
+    async def _emit_progress(self, scene_label, message):
+        if self._progress_cb is None:
+            return
+        try:
+            res = self._progress_cb(scene_label, message)
+            if inspect.isawaitable(res):
+                await res
+        except Exception as e:
+            logger.warning(f"TYC 进度回调执行异常: {e}")
+
+    async def _check_should_stop(self):
+        if self._should_stop_cb is None:
+            return False
+        try:
+            res = self._should_stop_cb()
+            if inspect.isawaitable(res):
+                return bool(await res)
+            return bool(res)
+        except Exception as e:
+            logger.warning(f"TYC 停止检查回调异常: {e}")
+            return False
 
     @staticmethod
     def _normalize_proxy(proxy):
@@ -208,10 +262,18 @@ class AsyncTycClient:
 
         raise AsyncTycException("天眼查 API 所有候选出口均请求失败")
 
-    async def fetch_all_pages(self, method, path, total_key, list_key, gid_field="gid", gid_val=None, extra_payload=None, delay=1.5):
+    async def fetch_all_pages(self, method, path, total_key, list_key, gid_field="gid", gid_val=None, extra_payload=None, delay=1.5, scene_label=""):
         results = []
         page_num = 1
+        page_step = max(1, self._get_system_int_config("progress_log_page_step", 5))
+        interval_sec = max(1, self._get_system_int_config("progress_log_interval_sec", 30))
+        label = scene_label or "资产"
+        last_log_ts = time.monotonic()
+
         while True:
+            if await self._check_should_stop():
+                logger.info(f"TYC {label}分页检测到任务停止，提前退出（已完成 {len(results)} 条）")
+                break
             params = None
             json_data = None
             payload = {"pageSize": self.page_size, "pageNum": page_num}
@@ -233,34 +295,57 @@ class AsyncTycClient:
             if not items:
                 break
             results.extend(items)
-            total = data.get(total_key, 0)
-            if len(results) >= total:
+            total = data.get(total_key, 0) or 0
+            total_pages = max(1, math.ceil(total / self.page_size)) if total and self.page_size else page_num
+            done = len(results) >= total
+
+            now_ts = time.monotonic()
+            if page_num == 1 and total_pages > page_step and not done:
+                await self._emit_progress(
+                    label,
+                    f"正在拉取目标 {gid_val} TYC {label}：共 {total} 条（约 {total_pages} 页），第 1/{total_pages} 页，累计 {len(results)} 条",
+                )
+                last_log_ts = now_ts
+            elif page_num > 1 and (
+                (total_pages > page_step and (page_num % page_step == 0 or done))
+                or (now_ts - last_log_ts >= interval_sec)
+            ):
+                await self._emit_progress(
+                    label,
+                    f"正在拉取目标 {gid_val} TYC {label}：第 {page_num}/{total_pages} 页，累计 {len(results)}/{total or len(results)} 条",
+                )
+                last_log_ts = now_ts
+
+            if done:
                 break
             page_num += 1
+            if await self._check_should_stop():
+                logger.info(f"TYC {label}分页检测到任务停止，提前退出（已完成 {len(results)} 条）")
+                break
             await asyncio.sleep(delay)
         return results
 
     async def get_invest_list(self, gid):
         extra = {"benefitSharesType": 1, "percentLevel": "-100", "registation": "-100", "province": "-100", "category": "-100", "fullSearchText": ""}
-        return await self.fetch_all_pages("POST", "/cloud-company-background/company/investListV2", "total", "result", "gid", gid, extra)
+        return await self.fetch_all_pages("POST", "/cloud-company-background/company/investListV2", "total", "result", "gid", gid, extra, scene_label="对外投资")
 
     async def get_icp_record_list(self, gid):
-        return await self.fetch_all_pages("GET", "/cloud-intellectual-property/intellectualProperty/icpRecordList", "itemTotal", "item", "id", gid)
+        return await self.fetch_all_pages("GET", "/cloud-intellectual-property/intellectualProperty/icpRecordList", "itemTotal", "item", "id", gid, scene_label="网站备案")
 
     async def get_mini_program_list(self, gid):
-        return await self.fetch_all_pages("GET", "/cloud-intellectual-property/intellectualProperty/miniProgramIcpRecordList", "itemTotal", "miniProgramIcpRecordList", "gid", gid)
+        return await self.fetch_all_pages("GET", "/cloud-intellectual-property/intellectualProperty/miniProgramIcpRecordList", "itemTotal", "miniProgramIcpRecordList", "gid", gid, scene_label="小程序")
 
     async def get_app_list(self, gid):
-        return await self.fetch_all_pages("GET", "/cloud-business-state/v3/ar/appbkinfo", "count", "items", "id", gid)
+        return await self.fetch_all_pages("GET", "/cloud-business-state/v3/ar/appbkinfo", "count", "items", "id", gid, scene_label="APP")
 
     async def get_app_icp_record_list(self, gid):
-        return await self.fetch_all_pages("GET", "/cloud-intellectual-property/intellectualProperty/appIcpRecordList", "itemTotal", "appIcpRecordList", "gid", gid)
+        return await self.fetch_all_pages("GET", "/cloud-intellectual-property/intellectualProperty/appIcpRecordList", "itemTotal", "appIcpRecordList", "gid", gid, scene_label="APP备案")
 
     async def get_wechat_list(self, gid):
-        return await self.fetch_all_pages("GET", "/cloud-business-state/wechat/list", "count", "resultList", "graphId", gid)
+        return await self.fetch_all_pages("GET", "/cloud-business-state/wechat/list", "count", "resultList", "graphId", gid, scene_label="微信公众号")
 
     async def get_weibo_list(self, gid):
-        return await self.fetch_all_pages("GET", "/cloud-business-state/weibo/list", "total", "result", "graphId", gid)
+        return await self.fetch_all_pages("GET", "/cloud-business-state/weibo/list", "total", "result", "graphId", gid, scene_label="微博")
 
     async def get_company_name(self, gid):
         """

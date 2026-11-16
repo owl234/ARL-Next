@@ -7,6 +7,7 @@ import re
 import base64
 import os
 import io
+import inspect
 import numpy as np
 from PIL import Image
 import ujson
@@ -185,10 +186,76 @@ class beian:
         self._last_req_ts = 0.0
         self._cached_jsluid = None
         self.proxy_router = OsintProxyRouter()
+        self._progress_cb = None
+        self._page_cb = None
+        self._detail_cb = None
+        self._should_stop_cb = None
+        self._skip_detail_fn = None
 
     def attach_proxy_router(self, router):
         if router is not None:
             self.proxy_router = router
+
+    def attach_task_hooks(
+        self,
+        *,
+        progress_cb=None,
+        page_cb=None,
+        detail_cb=None,
+        should_stop_cb=None,
+        skip_detail_fn=None,
+    ):
+        """挂载任务级进度日志、增量落库、详情回写与协同终止回调"""
+        self._progress_cb = progress_cb
+        self._page_cb = page_cb
+        self._detail_cb = detail_cb
+        self._should_stop_cb = should_stop_cb
+        self._skip_detail_fn = skip_detail_fn
+
+    def _get_system_int_config(self, key, default):
+        val = getattr(getattr(config, "system", object()), key, None)
+        if val is None or val == "":
+            return default
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return default
+
+    async def _emit_progress(self, sp, stage, message):
+        if self._progress_cb is None:
+            return
+        try:
+            res = self._progress_cb(sp, stage, message)
+            if inspect.isawaitable(res):
+                await res
+        except Exception as e:
+            logger.warning(f"进度回调执行异常: {e}")
+
+    async def _emit_page(self, sp, items, page_num, total_pages):
+        if self._page_cb is None or not items:
+            return
+        res = self._page_cb(sp, items, page_num, total_pages)
+        if inspect.isawaitable(res):
+            await res
+
+    async def _emit_detail(self, sp, items):
+        if self._detail_cb is None or not items:
+            return
+        res = self._detail_cb(sp, items)
+        if inspect.isawaitable(res):
+            await res
+
+    async def _check_should_stop(self):
+        if self._should_stop_cb is None:
+            return False
+        try:
+            res = self._should_stop_cb()
+            if inspect.isawaitable(res):
+                return bool(await res)
+            return bool(res)
+        except Exception as e:
+            logger.warning(f"停止检查回调异常: {e}")
+            return False
 
     @property
     def rate_lock(self):
@@ -1074,36 +1141,81 @@ class beian:
 
         return False, last_err, None
 
-    async def _enrich_app_details(self, result, sp, detail_context, proxy):
-        """为APP/小程序/快应用结果补充详情（支持详情级软降级与受控控频）"""
+    async def _enrich_app_details(self, result, sp, detail_context, proxy, target_name=""):
+        """为APP/小程序/快应用结果补充详情（支持跳过已知、上限截断、令牌单次自愈与连续失败熔断）"""
         if (sp in (1, 2, 3)
             and result.get("success")
             and result.get("params", {}).get("list")):
-            
+
             items = result["params"]["list"]
             if not items:
                 return result
 
+            detail_context = detail_context or {}
+
+            # 先筛除无 dataId、已自带名称、或调用方判定已命中的条目
+            candidate_indices = []
+            skipped_known = 0
+            for idx, item in enumerate(items):
+                if not item.get("dataId"):
+                    continue
+                if str(item.get("serviceName") or "").strip():
+                    skipped_known += 1
+                    continue
+                if self._skip_detail_fn is not None:
+                    try:
+                        if self._skip_detail_fn(sp, item):
+                            skipped_known += 1
+                            continue
+                    except Exception as e:
+                        logger.warning(f"跳过已知详情判定异常: {e}")
+                candidate_indices.append(idx)
+
+            max_items = self._get_system_int_config("detail_max_items", 100)
+            if max_items > 0 and len(candidate_indices) > max_items:
+                skipped_cap = len(candidate_indices) - max_items
+                target_indices = candidate_indices[:max_items]
+            else:
+                skipped_cap = 0
+                target_indices = candidate_indices
+
+            result["params"]["_detail_skipped_known"] = skipped_known
+            result["params"]["_detail_skipped_cap"] = skipped_cap
+            result["params"]["_detail_target_count"] = len(target_indices)
+
+            if not target_indices:
+                if skipped_known or skipped_cap:
+                    logger.info(
+                        f"详情补全无需发起远程查询 (跳过已知: {skipped_known}, 上限截断: {skipped_cap})"
+                    )
+                return result
+
             # 详情熔断检查：若处于详情冷却中，直接返回基础列表资产，不阻塞整体流程
             if self._detail_waf_open():
-                result["params"]["_detail_missing"] = len(items)
+                result["params"]["_detail_missing"] = len(candidate_indices)
                 result["params"]["_detail_waf"] = True
-                logger.info(f"当前处于详情熔断冷却期，跳过 {len(items)} 条条目详情补全，保留基础列表数据")
+                result["params"]["_detail_circuit_break"] = True
+                logger.info(f"当前处于详情熔断冷却期，跳过 {len(target_indices)} 条条目详情补全，保留基础列表数据")
                 return result
-                
-            # detail_concurrency 收敛为 1~2，避免瞬时并发打爆 WAF
+
             max_concurrency = min(
-                getattr(getattr(config, "system", object()), "detail_concurrency", 2),
-                len(items),
-                2
+                self._get_system_int_config("detail_concurrency", 2),
+                len(target_indices),
+                2,
             )
             max_concurrency = max(1, max_concurrency)
             sem = asyncio.Semaphore(max_concurrency)
+            context_lock = asyncio.Lock()
+            captcha_enabled = bool(getattr(getattr(config, 'captcha', object()), 'enable', False))
             stats = {"enriched": 0}
-            pending_cnt = sum(1 for it in items if "dataId" in it)
+            state = {
+                "consecutive_failures": 0,
+                "refresh_used_in_streak": False,
+                "circuit_broken": False,
+            }
 
             async def ensure_token_valid():
-                if getattr(getattr(config, 'captcha', object()), 'enable', False):
+                if captcha_enabled:
                     return
                 now_ms = int(time.time() * 1000)
                 if self.token_expire - now_ms >= 60000:
@@ -1122,71 +1234,198 @@ class beian:
                     except Exception as e:
                         logger.warning(f"刷新 Token 异常: {e}")
 
+            def _is_waf_failure(d_data):
+                return self._detail_waf_open() or (
+                    isinstance(d_data, dict)
+                    and (d_data.get("code") in (403, 429) or "已被创宇盾拦截" in str(d_data))
+                )
+
+            def _is_detail_ok(d_success, d_data):
+                return bool(
+                    d_success
+                    and isinstance(d_data, dict)
+                    and d_data.get("success")
+                    and d_data.get("params")
+                )
+
+            async def _request_detail_once(item, serviceType):
+                async with sem:
+                    if self._detail_waf_open() or state["circuit_broken"]:
+                        return False, {"code": 403, "msg": "详情熔断中", "success": False}
+                    await ensure_token_valid()
+                    return await self.getAppAndMiniDetail(
+                        item["dataId"],
+                        serviceType,
+                        detail_context.get("p_uuid", ""),
+                        detail_context.get("token", ""),
+                        detail_context.get("sign", ""),
+                        detail_context.get("base_header", {}),
+                        proxy,
+                    )
+
             async def fetch_detail(item):
-                if self._detail_waf_open() or "dataId" not in item:
-                    return item
+                if self._detail_waf_open() or self._waf_open() or state["circuit_broken"] or "dataId" not in item:
+                    return item, False
 
                 serviceType = 6 if sp == 1 else (7 if sp == 2 else 8)
                 try:
-                    async with sem:
-                        if self._detail_waf_open():
-                            return item
-                        await ensure_token_valid()
-                        d_success, d_data = await self.getAppAndMiniDetail(
-                            item["dataId"], serviceType, detail_context["p_uuid"],
-                            detail_context["token"], detail_context["sign"],
-                            detail_context["base_header"], proxy
-                        )
+                    used_p_uuid = detail_context.get("p_uuid", "")
+                    used_sign = detail_context.get("sign", "")
+                    d_success, d_data = await _request_detail_once(item, serviceType)
 
-                    if d_success and isinstance(d_data, dict) and d_data.get("success") and d_data.get("params"):
+                    if _is_detail_ok(d_success, d_data):
+                        async with context_lock:
+                            state["consecutive_failures"] = 0
+                            state["refresh_used_in_streak"] = False
                         merged_item = item.copy()
                         merged_item.update(d_data["params"])
                         stats["enriched"] += 1
-                        return merged_item
-                    else:
-                        if isinstance(d_data, dict) and (d_data.get("code") in (403, 429) or "已被创宇盾拦截" in str(d_data)):
+                        return merged_item, True
+
+                    if _is_waf_failure(d_data):
+                        if not self._detail_waf_open():
                             self._detail_waf_trip("详情获取")
-                        return item
+                        return item, False
+
+                    # 非 WAF 业务失败：打码模式下至多单次锁定刷新 (p_uuid, sign) 并重试一次
+                    should_retry = False
+                    if captcha_enabled and not await self._check_should_stop():
+                        async with context_lock:
+                            if detail_context.get("p_uuid", "") != used_p_uuid or detail_context.get("sign", "") != used_sign:
+                                should_retry = True
+                            elif not state["refresh_used_in_streak"]:
+                                state["refresh_used_in_streak"] = True
+                                ok, new_uuid, new_tok, new_sign, new_hdr = await self.check_img(proxy, force_token=True)
+                                if ok:
+                                    detail_context["p_uuid"] = new_uuid
+                                    detail_context["token"] = new_tok
+                                    detail_context["sign"] = new_sign
+                                    detail_context["base_header"] = new_hdr
+                                    should_retry = True
+
+                    if should_retry and not self._detail_waf_open() and not self._waf_open() and not state["circuit_broken"]:
+                        d_success, d_data = await _request_detail_once(item, serviceType)
+                        if _is_detail_ok(d_success, d_data):
+                            async with context_lock:
+                                state["consecutive_failures"] = 0
+                                state["refresh_used_in_streak"] = False
+                            merged_item = item.copy()
+                            merged_item.update(d_data["params"])
+                            stats["enriched"] += 1
+                            return merged_item, True
+                        if _is_waf_failure(d_data):
+                            if not self._detail_waf_open():
+                                self._detail_waf_trip("详情获取")
+                            return item, False
+
+                    async with context_lock:
+                        if not self._detail_waf_open():
+                            state["consecutive_failures"] += 1
+                            if state["consecutive_failures"] >= 5:
+                                state["circuit_broken"] = True
+                                self._detail_waf_trip("详情连续失败")
+                    return item, False
                 except Exception as e:
                     logger.error(f"详情获取异常 dataId={item.get('dataId')} err={e}")
-                    return item
+                    async with context_lock:
+                        if not self._detail_waf_open():
+                            state["consecutive_failures"] += 1
+                            if state["consecutive_failures"] >= 5:
+                                state["circuit_broken"] = True
+                                self._detail_waf_trip("详情连续异常")
+                    return item, False
 
-            # 采用受控小批次执行，批次间留有平稳间隔
+            sp_labels = {1: "移动APP", 2: "小程序", 3: "快应用"}
+            sp_label = sp_labels.get(sp, "备案资产")
+            target_prefix = f"主体【{target_name}】" if target_name else ""
+            interval_sec = max(1, self._get_system_int_config("progress_log_interval_sec", 30))
+
+            if len(target_indices) > 5:
+                skip_notes = []
+                if skipped_known > 0:
+                    skip_notes.append(f"跳过已知名称 {skipped_known} 条")
+                if skipped_cap > 0:
+                    skip_notes.append(f"受单批上限截断跳过 {skipped_cap} 条")
+                note_suffix = f"（{'，'.join(skip_notes)}）" if skip_notes else ""
+                await self._emit_progress(
+                    sp,
+                    "detail",
+                    f"正在补全{target_prefix}{sp_label}详情：待查询 {len(target_indices)} 条{note_suffix}",
+                )
+
+            detailed_list = list(items)
             batch_size = max_concurrency
-            detailed_list = []
+            last_log_ts = time.monotonic()
+            processed = 0
 
-            for i in range(0, len(items), batch_size):
-                if self._detail_waf_open():
-                    # 遭遇详情限流/拦截，平滑降级，将剩余未请求的原始条目直接填充并终止详情请求
-                    detailed_list.extend(items[i:])
+            for i in range(0, len(target_indices), batch_size):
+                if await self._check_should_stop():
+                    result["params"]["_stopped"] = True
+                    logger.info(f"任务已中止，停止{sp_label}详情补全（已处理 {processed}/{len(target_indices)} 条）")
                     break
 
-                batch = items[i:i + batch_size]
-                tasks = [fetch_detail(item) for item in batch]
+                if self._detail_waf_open() or self._waf_open() or state["circuit_broken"]:
+                    state["circuit_broken"] = True
+                    break
+
+                batch_indices = target_indices[i:i + batch_size]
+                tasks = [fetch_detail(items[idx]) for idx in batch_indices]
                 batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
+                batch_enriched = []
                 for j, res in enumerate(batch_results):
+                    orig_idx = batch_indices[j]
                     if isinstance(res, Exception):
                         logger.error(f"批次任务异常: {res}")
-                        detailed_list.append(batch[j])
                     else:
-                        detailed_list.append(res)
+                        updated_item, enriched_ok = res
+                        detailed_list[orig_idx] = updated_item
+                        if enriched_ok:
+                            batch_enriched.append(updated_item)
 
-                if i + batch_size < len(items) and not self._detail_waf_open():
+                if batch_enriched:
+                    await self._emit_detail(sp, batch_enriched)
+
+                processed += len(batch_indices)
+                now_ts = time.monotonic()
+                if (len(target_indices) > 5 and processed >= len(target_indices)) or (now_ts - last_log_ts >= interval_sec):
+                    await self._emit_progress(
+                        sp,
+                        "detail",
+                        f"正在补全{target_prefix}{sp_label}详情：已完成 {processed}/{len(target_indices)} 条（成功 {stats['enriched']} 条）",
+                    )
+                    last_log_ts = now_ts
+
+                if i + batch_size < len(target_indices) and not (self._detail_waf_open() or self._waf_open() or state["circuit_broken"]):
+                    if await self._check_should_stop():
+                        result["params"]["_stopped"] = True
+                        break
                     await asyncio.sleep(random.uniform(0.8, 1.6))
 
             result["params"]["list"] = detailed_list
-            missing = max(pending_cnt - stats["enriched"], 0)
+            missing = max(len(candidate_indices) - stats["enriched"], 0)
+            circuit_broken = bool(state["circuit_broken"] or self._detail_waf_open())
             if missing:
                 result["params"]["_detail_missing"] = missing
                 result["params"]["_detail_waf"] = self._detail_waf_open()
+            if circuit_broken:
+                result["params"]["_detail_circuit_break"] = True
+                if len(target_indices) > 5 or processed < len(target_indices):
+                    await self._emit_progress(
+                        sp,
+                        "detail",
+                        f"{target_prefix}{sp_label}详情补全触发保护熔断：已完成 {processed}/{len(target_indices)} 条（成功 {stats['enriched']} 条），其余保留基础备案号入库",
+                    )
             logger.info(
-                f"并发详情获取完成，总计 {len(detailed_list)} 条 (详情缺失: {missing}, 详情降级: {self._detail_waf_open()})"
+                f"并发详情获取完成，总计 {len(detailed_list)} 条 (目标 {len(target_indices)} 条, 跳过已知 {skipped_known} 条, 上限跳过 {skipped_cap} 条, 详情缺失 {missing} 条, 详情熔断 {circuit_broken})"
             )
-            
+
         return result
 
     async def getbeian(self, name, sp, pageNum, pageSize, proxy=""):
+        if await self._check_should_stop():
+            return True, {"code": 200, "success": True, "params": {"list": [], "_stopped": True}}
+
         auto_pagination = self._is_auto_pagination(pageNum, pageSize)
         if auto_pagination:
             first_page = 1
@@ -1202,32 +1441,86 @@ class beian:
             return False, result
 
         if not auto_pagination:
-            result = await self._enrich_app_details(result, sp, detail_context, proxy)
+            result = await self._enrich_app_details(result, sp, detail_context, proxy, target_name=name)
             return True, result
 
         params = result.get("params", {})
-        all_items = list(params.get("list") or [])
+        first_items = list(params.get("list") or [])
+        all_items = list(first_items)
         total_pages = self._get_total_pages(result, page_size)
+        total_records = int(params.get("total") or len(all_items) or 0)
 
+        await self._emit_page(sp, first_items, first_page, total_pages)
+
+        page_step = max(1, self._get_system_int_config("progress_log_page_step", 5))
+        interval_sec = max(1, self._get_system_int_config("progress_log_interval_sec", 30))
+        sp_labels = {0: "网站备案", 1: "移动APP", 2: "小程序", 3: "快应用"}
+        sp_label = sp_labels.get(sp, "备案资产")
+
+        last_log_ts = time.monotonic()
+        if total_pages > page_step:
+            await self._emit_progress(
+                sp,
+                "list",
+                f"正在拉取主体【{name}】工信部 {sp_label} 列表：共 {total_records} 条（约 {total_pages} 页），第 1/{total_pages} 页，累计 {len(all_items)} 条",
+            )
+
+        stopped = False
         for current_page in range(2, total_pages + 1):
+            if await self._check_should_stop():
+                stopped = True
+                logger.info(f"任务已中止，停止工信部 {sp_label} 后续分页抓取（已完成第 {current_page - 1}/{total_pages} 页）")
+                break
+
             await asyncio.sleep(2.0)  # 防止请求过快触发 MIIT 403 防火墙
+            if await self._check_should_stop():
+                stopped = True
+                logger.info(f"任务已中止，停止工信部 {sp_label} 后续分页抓取（已完成第 {current_page - 1}/{total_pages} 页）")
+                break
+
             success, page_result, page_detail_context = await self._query_beian_page(
                 name, sp, current_page, page_size, proxy
             )
             if not success:
                 logger.warning(f"分页获取失败，已抓取至第 {current_page-1} 页，停止继续翻页")
-                break # 不直接抛出错误，而是保留已获取的前几页数据
+                await self._emit_progress(
+                    sp,
+                    "list",
+                    f"主体【{name}】工信部 {sp_label} 列表分页在第 {current_page}/{total_pages} 页提前停止（累计 {len(all_items)} 条，原因: {page_result}）",
+                )
+                break  # 不直接抛出错误，而是保留已获取的前几页数据
 
             page_params = page_result.get("params", {})
-            all_items.extend(page_params.get("list") or [])
+            page_items = list(page_params.get("list") or [])
+            all_items.extend(page_items)
             detail_context = page_detail_context or detail_context
+
+            await self._emit_page(sp, page_items, current_page, total_pages)
+
+            now_ts = time.monotonic()
+            need_heartbeat = (
+                (total_pages > page_step and (current_page % page_step == 0 or current_page == total_pages))
+                or (now_ts - last_log_ts >= interval_sec)
+            )
+            if need_heartbeat:
+                await self._emit_progress(
+                    sp,
+                    "list",
+                    f"正在拉取主体【{name}】工信部 {sp_label} 列表：第 {current_page}/{total_pages} 页，累计 {len(all_items)}/{total_records or len(all_items)} 条",
+                )
+                last_log_ts = now_ts
 
         params["list"] = all_items
         params["pageNum"] = 1
         params["pageSize"] = len(all_items)
+        if stopped:
+            params["_stopped"] = True
         result["params"] = params
 
-        result = await self._enrich_app_details(result, sp, detail_context, proxy)
+        if stopped:
+            return True, result
+
+        result = await self._enrich_app_details(result, sp, detail_context, proxy, target_name=name)
         return True, result
 
     async def _getblackbeian_once(self, name, sp, cand, force_token=False):

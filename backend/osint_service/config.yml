@@ -4,6 +4,9 @@ system:
   http_client_timeout: 30
   web_ui: true
   detail_concurrency: 2
+  detail_max_items: 100
+  progress_log_interval_sec: 30
+  progress_log_page_step: 5
   # [注意] 任务并发数(task_concurrency) 已剥离。
   # 请前往 ARL-Next 前端界面的【系统设置 -> 性能与并发配置】页面中进行动态调整。
 captcha:
