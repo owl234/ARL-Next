@@ -1,6 +1,6 @@
 <template>
-  <div class="arl-page-container" :class="{ 'page-wide-text': pageLocale !== 'zh-CN' }">
-    <!-- 未保存改动常驻提示：让"改过但没存"成为可见状态，而非点保存时才发现 -->
+  <div class="arl-page-container arl-settings-page" :class="{ 'page-wide-text': pageLocale !== 'zh-CN' }">
+    <!-- 全局未保存配置中枢：展示待保存分区清单，支持直接跳转、一键重置或一键全量保存 -->
     <a-alert
       v-if="hasUnsavedChanges"
       type="warning"
@@ -9,9 +9,41 @@
       style="margin-bottom: 12px; border-radius: 6px;"
     >
       <template #message>
-        <strong>{{ pageText('pages.unsavedSettingsCount', { count: unsavedCount }) }}</strong>
-        <a @click="goToFirstDirty">{{ pageText('pages.goToUnsavedSettings') }}</a>
-        {{ pageText('pages.saveEachChangeBeforeLeavingThisPage') }}
+        <div class="arl-dirty-banner-row">
+          <div class="arl-dirty-banner-info">
+            <strong>{{ pageText('pages.unsavedSectionsCount', { count: unsavedCount }) }}</strong>
+            <a-tag
+              v-for="sec in dirtySections"
+              :key="sec.key"
+              color="warning"
+              class="arl-dirty-section-tag"
+              @click="navigateToSection(sec)"
+            >
+              {{ sec.label }}
+            </a-tag>
+          </div>
+          <div class="arl-dirty-banner-actions">
+            <a-popconfirm
+              :title="pageText('pages.confirmResetAllChanges', { count: unsavedCount })"
+              :ok-text="pageText('pages.confirmResetBtn')"
+              :cancel-text="pageText('pages.cancel')"
+              ok-type="danger"
+              @confirm="resetAllDirtySections"
+            >
+              <a-button size="small" :disabled="batchSaving">
+                {{ pageText('pages.resetAllChanges') }}
+              </a-button>
+            </a-popconfirm>
+            <a-button
+              type="primary"
+              size="small"
+              :loading="batchSaving"
+              @click="saveAllDirtySections"
+            >
+              {{ pageText('pages.saveAllChanges') }}
+            </a-button>
+          </div>
+        </div>
       </template>
     </a-alert>
     <!-- 设置项搜索：输入关键词直接定位到目标 Tab 并高亮，避免在 7 个 Tab 间盲翻 -->
@@ -53,25 +85,15 @@
       <!-- 统一字典与规则库 Tab -->
       <a-tab-pane key="api_config" :tab="tabTitle(pageText('pages.assetDiscoveryAndIntelligence'), Object.keys(pendingByGroup.api_config).length > 0)">
         <div style="max-width: 1000px; padding-bottom: 40px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <span style="color: var(--arl-text-color); opacity: 0.45;">
-              {{ pageText('pages.manageApiCredentialsForExternalIntelligenceAndSearchServices') }}
-            </span>
-            <a-button
-              type="primary"
-              :class="{ 'arl-dirty-btn': Object.keys(pendingByGroup.api_config).length > 0 }"
-              @click="saveGeneralConfig('api_config', pageText('pages.apiConfigurationSaved'))"
-              :loading="generalSaveLoading"
-            >
-              {{ pageText('pages.saveApiConfiguration') }}
-              <a-badge
-                v-if="Object.keys(pendingByGroup.api_config).length > 0"
-                :count="Object.keys(pendingByGroup.api_config).length"
-                :offset="[8, -8]"
-                color="#faad14"
-              />
-            </a-button>
-          </div>
+          <SettingsActionBar
+            anchor="api_config_save"
+            :description="pageText('pages.manageApiCredentialsForExternalIntelligenceAndSearchServices')"
+            :save-label="pageText('pages.saveApiConfiguration')"
+            :dirty="Object.keys(pendingByGroup.api_config).length > 0"
+            :saving="generalSaveLoading"
+            @save="() => saveGeneralConfig('api_config', pageText('pages.apiConfigurationSaved'))"
+            @reset="() => resetGeneralGroup('api_config')"
+          />
           
           <a-spin :spinning="generalLoading">
             <a-form :label-wrap="true" layout="vertical">
@@ -186,7 +208,7 @@
           </a-spin>
         </div>
       </a-tab-pane>
-      <a-tab-pane key="dictionary" :tab="tabTitle(pageText('pages.dictionariesAndRules'), false)">
+      <a-tab-pane key="dictionary" :tab="tabTitle(pageText('pages.dictionariesAndRules'), !!cdnPanelRef?.hasUnsavedChanges?.())">
         <a-tabs v-model:activeKey="dictSubTab" type="card" class="dict-sub-tabs" style="margin-bottom: 16px;">
           <a-tab-pane key="dict" :tab="pageText('pages.textDictionaries')">
             <a-spin :spinning="loading || bruteLoading">
@@ -507,7 +529,7 @@
         </a-drawer>
       </a-tab-pane>
 
-      <a-tab-pane key="cdn" :tab="pageText('pages.cdnFingerprintsAndRules')">
+      <a-tab-pane key="cdn" :tab="tabTitle(pageText('pages.cdnFingerprintsAndRules'), !!cdnPanelRef?.hasUnsavedChanges?.())">
         <CdnRulePanel ref="cdnPanelRef" />
       </a-tab-pane>
         </a-tabs>
@@ -516,24 +538,21 @@
         <a-tabs v-model:activeKey="scanSubTab" type="card" class="dict-sub-tabs" style="margin-bottom: 16px;">
           <a-tab-pane key="performance" :tab="tabTitle(pageText('pages.taskQueueConcurrency'), isPerformanceDirty)">
             <div style="max-width: 1000px; padding-bottom: 40px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <span style="color: var(--arl-text-color); opacity: 0.45;">
-                  {{ pageText('pages.setTheNumberOfWorkerProcessesInEachTask') }}
-                </span>
-                <div>
-                  <a-button @click="fetchPerformanceConfig" :loading="performanceLoading" style="margin-right: 8px;">
+              <SettingsActionBar
+                anchor="performance_save"
+                :description="pageText('pages.setTheNumberOfWorkerProcessesInEachTask')"
+                :save-label="pageText('pages.savePerformanceSettings')"
+                :dirty="isPerformanceDirty"
+                :saving="performanceSaveLoading"
+                @save="() => savePerformanceConfig()"
+                @reset="() => resetPerformanceForm()"
+              >
+                <template #extra-actions>
+                  <a-button @click="fetchPerformanceConfig" :loading="performanceLoading">
                     {{ pageText('pages.refreshStatus') }}
                   </a-button>
-                  <a-button
-                    type="primary"
-                    @click="savePerformanceConfig"
-                    :loading="performanceSaveLoading"
-                    :disabled="!isPerformanceDirty"
-                  >
-                    {{ isPerformanceDirty ? pageText('pages.savePerformanceSettings') : pageText('pages.noPerformanceChanges') }}
-                  </a-button>
-                </div>
-              </div>
+                </template>
+              </SettingsActionBar>
               <a-spin :spinning="performanceLoading">
                 <a-form :label-wrap="true" layout="vertical">
                   <!-- 语义分区说明：本页是「进程级队列并发」，与「高级扫描与环境」页的
@@ -729,19 +748,15 @@
           </a-tab-pane>
           <a-tab-pane key="security" :tab="tabTitle(pageText('pages.securityPolicyIpDomainScanExclusions'), isSecurityDirty)">
             <div style="max-width: 1000px; padding-bottom: 40px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <span style="color: var(--arl-text-color); opacity: 0.45;">
-                  {{ pageText('pages.preventScanningSpecifiedIpsOrDomainsGloballySavedChanges') }}
-                </span>
-                <a-button
-                  type="primary"
-                  @click="saveSecurityPolicy"
-                  :loading="securitySaveLoading"
-                  :disabled="!isSecurityDirty"
-                >
-                  {{ isSecurityDirty ? pageText('pages.saveSecurityPolicy') : pageText('pages.noSecurityPolicyChanges') }}
-                </a-button>
-              </div>
+              <SettingsActionBar
+                anchor="security_save"
+                :description="pageText('pages.preventScanningSpecifiedIpsOrDomainsGloballySavedChanges')"
+                :save-label="pageText('pages.saveSecurityPolicy')"
+                :dirty="isSecurityDirty"
+                :saving="securitySaveLoading"
+                @save="() => saveSecurityPolicy()"
+                @reset="() => resetSecurityForm()"
+              />
               <a-spin :spinning="securityLoading">
                 <a-form :label-wrap="true" layout="vertical">
                   <a-form-item data-setting-anchor="security" :label="pageText('pages.ipBlocklistSupportsCidrEG12700')">
@@ -757,25 +772,15 @@
           </a-tab-pane>
           <a-tab-pane key="system_general" :tab="tabTitle(pageText('pages.advancedScanningAndEnvironment'), Object.keys(pendingByGroup.system_general || {}).length > 0)">
             <div style="max-width: 1000px; padding-bottom: 40px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <span style="color: var(--arl-text-color); opacity: 0.45;">
-                  {{ pageText('pages.configurePerTaskExecutionSettingsOutboundProxyDefaultPorts') }}
-                </span>
-                <a-button
-                  type="primary"
-                  :class="{ 'arl-dirty-btn': Object.keys(pendingByGroup.system_general).length > 0 }"
-                  @click="saveGeneralConfig('system_general', pageText('pages.advancedConfigurationSaved'))"
-                  :loading="generalSaveLoading"
-                >
-                  {{ pageText('pages.saveAdvancedConfiguration') }}
-                  <a-badge
-                    v-if="Object.keys(pendingByGroup.system_general).length > 0"
-                    :count="Object.keys(pendingByGroup.system_general).length"
-                    :offset="[8, -8]"
-                    color="#faad14"
-                  />
-                </a-button>
-              </div>
+              <SettingsActionBar
+                anchor="system_general_save"
+                :description="pageText('pages.configurePerTaskExecutionSettingsOutboundProxyDefaultPorts')"
+                :save-label="pageText('pages.saveAdvancedConfiguration')"
+                :dirty="Object.keys(pendingByGroup.system_general || {}).length > 0"
+                :saving="generalSaveLoading"
+                @save="() => saveGeneralConfig('system_general', pageText('pages.advancedConfigurationSaved'))"
+                @reset="() => resetGeneralGroup('system_general')"
+              />
               <a-spin :spinning="generalLoading">
                 <a-form :label-wrap="true" layout="vertical">
                   <!-- 语义分区说明：本页的爆破并发度属于「单任务内」，与「任务队列并发」页的
@@ -868,25 +873,15 @@
       </a-tab-pane>
       <a-tab-pane key="message_push" :tab="tabTitle(pageText('pages.notificationsAndCallbacks'), Object.keys(pendingByGroup.message_push).length > 0)">
         <div style="max-width: 1100px; padding-bottom: 40px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <span style="color: var(--arl-text-color); opacity: 0.45;">
-              {{ pageText('pages.configureNotificationsAfterMonitoringTasksFinishAndAutomatedWebhook') }}
-            </span>
-            <a-button
-              type="primary"
-              :class="{ 'arl-dirty-btn': Object.keys(pendingByGroup.message_push).length > 0 }"
-              @click="saveGeneralConfig('message_push', pageText('pages.notificationConfigurationSaved'))"
-              :loading="generalSaveLoading"
-            >
-              {{ pageText('pages.saveNotificationConfiguration') }}
-              <a-badge
-                v-if="Object.keys(pendingByGroup.message_push).length > 0"
-                :count="Object.keys(pendingByGroup.message_push).length"
-                :offset="[8, -8]"
-                color="#faad14"
-              />
-            </a-button>
-          </div>
+          <SettingsActionBar
+            anchor="message_push_save"
+            :description="pageText('pages.configureNotificationsAfterMonitoringTasksFinishAndAutomatedWebhook')"
+            :save-label="pageText('pages.saveNotificationConfiguration')"
+            :dirty="Object.keys(pendingByGroup.message_push || {}).length > 0"
+            :saving="generalSaveLoading"
+            @save="() => saveGeneralConfig('message_push', pageText('pages.notificationConfigurationSaved'))"
+            @reset="() => resetGeneralGroup('message_push')"
+          />
 
           <a-spin :spinning="generalLoading">
             <a-form :label-wrap="true" layout="vertical">
@@ -1045,6 +1040,81 @@
         <SystemUpdatePanel ref="updatePanelRef" />
       </a-tab-pane>
     </a-tabs>
+
+    <!-- 统一底部悬浮操作条：在任意长配置页滚动编辑时无需回滚即可一键保存/重置 -->
+    <transition name="floating-slide">
+      <div v-if="activeSectionDirty" class="arl-floating-action-bar">
+        <div class="floating-info">
+          <span class="arl-floating-dirty-dot"></span>
+          <span>{{ activeEditableSection.label }} · {{ pageText('pages.unsavedChanges') }}</span>
+        </div>
+        <div class="floating-actions">
+          <a-popconfirm
+            :title="pageText('pages.confirmResetSectionChanges')"
+            :ok-text="pageText('pages.confirmResetBtn')"
+            :cancel-text="pageText('pages.cancel')"
+            ok-type="danger"
+            @confirm="() => activeEditableSection.reset()"
+          >
+            <a-button size="small" :disabled="batchSaving || activeSectionSaving">
+              {{ pageText('pages.reset') }}
+            </a-button>
+          </a-popconfirm>
+          <a-button
+            type="primary"
+            size="small"
+            :loading="activeSectionSaving"
+            :disabled="batchSaving"
+            @click="() => activeEditableSection.save()"
+          >
+            {{ pageText('pages.saveCurrentSection') }}
+          </a-button>
+          <a-button
+            v-if="unsavedCount > 1"
+            size="small"
+            :loading="batchSaving"
+            @click="saveAllDirtySections"
+          >
+            {{ pageText('pages.saveAllCount', { count: unsavedCount }) }}
+          </a-button>
+        </div>
+      </div>
+    </transition>
+
+    <!-- 离开系统设置三选一防护弹窗：留在当前页 / 放弃改动并离开 / 保存全部并离开 -->
+    <a-modal
+      v-model:open="leaveConfirmVisible"
+      :title="pageText('pages.unsavedConfigurationChangesLabel2')"
+      wrapClassName="arl-theme-modal"
+      rootClassName="arl-theme-modal"
+      :maskClosable="false"
+      @cancel="() => resolveLeaveGuard(false)"
+    >
+      <div class="arl-leave-modal-body">
+        <ExclamationCircleOutlined class="arl-leave-modal-icon" />
+        <div class="arl-leave-modal-content">
+          <p style="margin-bottom: 8px;">
+            {{ pageText('pages.thereAreCountUnsavedConfigurationChangesLeavingThisPage', { count: unsavedCount }) }}
+          </p>
+          <div class="arl-leave-section-tags">
+            <a-tag v-for="sec in dirtySections" :key="sec.key" color="warning" style="margin: 0;">
+              {{ sec.label }}
+            </a-tag>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <a-button :disabled="batchSaving" @click="() => resolveLeaveGuard(false)">
+          {{ pageText('tasks.stayOnThisPage') }}
+        </a-button>
+        <a-button danger :disabled="batchSaving" @click="() => resolveLeaveGuard(true)">
+          {{ pageText('pages.discardChangesAndLeave') }}
+        </a-button>
+        <a-button type="primary" :loading="batchSaving" @click="handleLeaveSaveAndGo">
+          {{ pageText('pages.saveAllAndLeave') }}
+        </a-button>
+      </template>
+    </a-modal>
   </div>
 </template>
 
@@ -1063,6 +1133,7 @@ import CdnRulePanel from '@/components/settings/CdnRulePanel.vue';
 import ProxyManagePanel from '@/components/settings/ProxyManagePanel.vue';
 import BackupRestorePanel from '@/components/settings/BackupRestorePanel.vue';
 import SystemUpdatePanel from '@/components/settings/SystemUpdatePanel.vue';
+import SettingsActionBar from '@/components/settings/SettingsActionBar.vue';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 
@@ -1515,26 +1586,123 @@ const isPerformanceDirty = computed(() => (
   || performanceForm.value.osint_concurrency !== performanceBaseline.value.osint_concurrency
   || performanceForm.value.github_concurrency !== performanceBaseline.value.github_concurrency));
 
-// 全局是否存在未保存改动（含安全策略、性能配置与代理分流策略）
-const hasUnsavedChanges = computed(() => {
-  if (typeof isConfigInitialized !== 'undefined' && !isConfigInitialized.value) return false;
-  return (
-    Object.keys(changedFields.value).length > 0
-    || isSecurityDirty.value
-    || isPerformanceDirty.value
-    || !!proxyPanelRef.value?.hasUnsavedChanges?.()
-  );
+const batchSaving = ref(false);
+const leaveConfirmVisible = ref(false);
+let pendingLeaveResolver = null;
+let allowDirtyDeactivateOnce = false;
+
+const isSectionRefDirty = (panelRef) => (
+  typeof panelRef !== 'undefined' && !!panelRef.value?.hasUnsavedChanges?.()
+);
+
+// 统一可编辑配置分区注册表：唯一事实源（驱动计数、横幅清单、悬浮条、批量保存/重置与跳转定位）
+const SECTION_SPECS = [
+  {
+    key: 'performance',
+    tab: 'performance',
+    subTab: 'performance',
+    anchor: 'performance_save',
+    get label() { return pageText('pages.taskQueueConcurrency'); },
+    isDirty: () => isPerformanceDirty.value,
+    isSaving: () => performanceSaveLoading.value,
+    save: (opts) => savePerformanceConfig(opts),
+    reset: (opts) => resetPerformanceForm(opts),
+  },
+  {
+    key: 'security',
+    tab: 'performance',
+    subTab: 'security',
+    anchor: 'security_save',
+    get label() { return pageText('pages.securityPolicyIpDomainScanExclusions'); },
+    isDirty: () => isSecurityDirty.value,
+    isSaving: () => securitySaveLoading.value,
+    save: (opts) => saveSecurityPolicy(opts),
+    reset: (opts) => resetSecurityForm(opts),
+  },
+  {
+    key: 'system_general',
+    tab: 'performance',
+    subTab: 'system_general',
+    anchor: 'system_general_save',
+    get label() { return pageText('pages.advancedScanningAndEnvironment'); },
+    isDirty: () => Object.keys(pendingByGroup.value.system_general || {}).length > 0,
+    isSaving: () => generalSaveLoading.value,
+    save: (opts) => saveGeneralConfig('system_general', pageText('pages.advancedConfigurationSaved'), opts),
+    reset: (opts) => resetGeneralGroup('system_general', opts),
+  },
+  {
+    key: 'proxy',
+    tab: 'proxy',
+    anchor: 'proxy_save',
+    get label() { return pageText('pages.proxyTab'); },
+    isDirty: () => isSectionRefDirty(typeof proxyPanelRef !== 'undefined' ? proxyPanelRef : undefined),
+    isSaving: () => (typeof proxyPanelRef !== 'undefined' && !!proxyPanelRef.value?.isSaving?.()),
+    save: (opts) => (typeof proxyPanelRef !== 'undefined' ? proxyPanelRef.value?.saveChanges?.(opts) : Promise.resolve(false)),
+    reset: (opts) => (typeof proxyPanelRef !== 'undefined' ? proxyPanelRef.value?.resetChanges?.(opts) : undefined),
+  },
+  {
+    key: 'cdn',
+    tab: 'dictionary',
+    subTab: 'cdn',
+    anchor: 'cdn_save',
+    get label() { return pageText('pages.cdnFingerprintsAndRules'); },
+    isDirty: () => isSectionRefDirty(typeof cdnPanelRef !== 'undefined' ? cdnPanelRef : undefined),
+    isSaving: () => (typeof cdnPanelRef !== 'undefined' && !!cdnPanelRef.value?.isSaving?.()),
+    save: (opts) => (typeof cdnPanelRef !== 'undefined' ? cdnPanelRef.value?.saveChanges?.(opts) : Promise.resolve(false)),
+    reset: (opts) => (typeof cdnPanelRef !== 'undefined' ? cdnPanelRef.value?.resetChanges?.(opts) : undefined),
+  },
+  {
+    key: 'api_config',
+    tab: 'api_config',
+    anchor: 'api_config_save',
+    get label() { return pageText('pages.assetDiscoveryAndIntelligence'); },
+    isDirty: () => Object.keys(pendingByGroup.value.api_config || {}).length > 0,
+    isSaving: () => generalSaveLoading.value,
+    save: (opts) => saveGeneralConfig('api_config', pageText('pages.apiConfigurationSaved'), opts),
+    reset: (opts) => resetGeneralGroup('api_config', opts),
+  },
+  {
+    key: 'message_push',
+    tab: 'message_push',
+    anchor: 'message_push_save',
+    get label() { return pageText('pages.notificationsAndCallbacks'); },
+    isDirty: () => Object.keys(pendingByGroup.value.message_push || {}).length > 0,
+    isSaving: () => generalSaveLoading.value,
+    save: (opts) => saveGeneralConfig('message_push', pageText('pages.notificationConfigurationSaved'), opts),
+    reset: (opts) => resetGeneralGroup('message_push', opts),
+  },
+];
+
+const dirtySections = computed(() => {
+  if (typeof isConfigInitialized !== 'undefined' && !isConfigInitialized.value) return [];
+  return SECTION_SPECS.filter((sec) => sec.isDirty());
 });
 
-// 未保存改动总数，用于页头常驻提示
-const unsavedCount = computed(() => {
-  if (typeof isConfigInitialized !== 'undefined' && !isConfigInitialized.value) return 0;
-  const detail = Object.keys(changedFields.value).length;
-  return detail
-    + (isSecurityDirty.value ? 1 : 0)
-    + (isPerformanceDirty.value ? 1 : 0)
-    + (proxyPanelRef.value?.hasUnsavedChanges?.() ? 1 : 0);
+// 全局是否存在未保存改动（统一按分区注册表判定）
+const hasUnsavedChanges = computed(() => dirtySections.value.length > 0);
+
+// 未保存改动分区数，用于页头横幅与离开拦截
+const unsavedCount = computed(() => dirtySections.value.length);
+
+const activeEditableSection = computed(() => {
+  const curTab = activeKey.value;
+  if (curTab === 'performance') {
+    return SECTION_SPECS.find((sec) => sec.tab === 'performance' && sec.subTab === scanSubTab.value) || null;
+  }
+  if (curTab === 'dictionary') {
+    return dictSubTab.value === 'cdn'
+      ? SECTION_SPECS.find((sec) => sec.key === 'cdn') || null
+      : null;
+  }
+  return SECTION_SPECS.find((sec) => sec.tab === curTab) || null;
 });
+
+const activeSectionDirty = computed(() => {
+  if (typeof isConfigInitialized !== 'undefined' && !isConfigInitialized.value) return false;
+  return !!activeEditableSection.value?.isDirty();
+});
+
+const activeSectionSaving = computed(() => !!activeEditableSection.value?.isSaving());
 
 // ======================= 设置项索引与搜索 (P2) =======================
 // 每条索引把「用户会搜的词」映射到「Tab + 锚点」，keywords 覆盖中英文与别名，
@@ -1658,47 +1826,30 @@ const goToQueueConcurrency = () => {
   scrollAndFlashAnchor('[data-setting-anchor="performance"]');
 };
 
-// 定位第一个存在未保存改动的 Tab，供提示条一键跳转
-const firstDirtyTabKey = computed(() => {
-  if (isSecurityDirty.value || isPerformanceDirty.value || Object.keys(pendingByGroup.value.system_general || {}).length > 0) {
-    return 'performance';
+const navigateToSection = (sec) => {
+  if (!sec) return;
+  activeKey.value = sec.tab;
+  if (sec.tab === 'performance' && sec.subTab) {
+    scanSubTab.value = sec.subTab;
+  } else if (sec.tab === 'dictionary' && sec.subTab) {
+    dictSubTab.value = sec.subTab;
   }
-  if (proxyPanelRef.value?.hasUnsavedChanges?.()) {
-    return 'proxy';
+  if (sec.key === 'proxy') {
+    if (typeof proxyPanelRef !== 'undefined') proxyPanelRef.value?.focusSection?.(sec.anchor);
+  } else if (sec.key === 'cdn') {
+    if (typeof cdnPanelRef !== 'undefined') cdnPanelRef.value?.focusSection?.(sec.anchor);
+  } else if (sec.anchor && typeof scrollAndFlashAnchor === 'function') {
+    scrollAndFlashAnchor(`[data-setting-anchor="${sec.anchor}"]`);
   }
-  const order = ['api_config', 'message_push'];
-  for (const group of order) {
-    if (Object.keys(pendingByGroup.value[group] || {}).length > 0) return group;
-  }
-  return 'api_config';
-});
+};
+
+// 定位第一个存在未保存改动的 Tab，供提示条与测试契约使用
+const firstDirtyTabKey = computed(() => dirtySections.value[0]?.tab || 'api_config');
 
 const goToFirstDirty = () => {
-  if (isPerformanceDirty.value) {
-    activeKey.value = 'performance';
-    scanSubTab.value = 'performance';
-    return;
-  }
-  if (isSecurityDirty.value) {
-    activeKey.value = 'performance';
-    scanSubTab.value = 'security';
-    return;
-  }
-  if (Object.keys(pendingByGroup.value.system_general || {}).length > 0) {
-    activeKey.value = 'performance';
-    scanSubTab.value = 'system_general';
-    return;
-  }
-  if (proxyPanelRef.value?.hasUnsavedChanges?.()) {
-    activeKey.value = 'proxy';
-    return;
-  }
-  if (Object.keys(pendingByGroup.value.api_config || {}).length > 0) {
-    activeKey.value = 'api_config';
-    return;
-  }
-  if (Object.keys(pendingByGroup.value.message_push || {}).length > 0) {
-    activeKey.value = 'message_push';
+  const target = dirtySections.value[0];
+  if (target) {
+    navigateToSection(target);
     return;
   }
   activeKey.value = 'api_config';
@@ -1715,17 +1866,18 @@ const handleBeforeUnload = (e) => {
 const tabTitle = (base, dirty) => (dirty ? `${base} ·` : base);
 
 // 分组保存：只提交本组变更字段
-const saveGeneralGroup = async (group, loadingRef, successText) => {
+const saveGeneralGroup = async (group, loadingRef, successText, { silentSuccess = false } = {}) => {
   const payload = pendingByGroup.value[group] || {};
   if (Object.keys(payload).length === 0) {
-    message.info(pageText('pages.noUnsavedChangesInThisGroup'));
-    return false;
+    return true;
   }
   loadingRef.value = true;
   try {
     const res = await request.post('/api/system_config/general', payload);
     if (res.code === 200) {
-      message.success(successText || pageText('pages.changesSavedCount', { count: Object.keys(payload).length }));
+      if (!silentSuccess) {
+        message.success(successText || pageText('pages.changesSavedCount', { count: Object.keys(payload).length }));
+      }
       // 仅把本组已提交的字段写回基线，其他分组的未保存改动继续保持脏状态
       Object.keys(payload).forEach((key) => {
         generalBaseline.value[key] = cloneDeep(payload[key]);
@@ -1741,6 +1893,51 @@ const saveGeneralGroup = async (group, loadingRef, successText) => {
   } finally {
     loadingRef.value = false;
   }
+};
+
+const resetGeneralGroup = (group, { silent = false } = {}) => {
+  const keys = GENERAL_FIELD_GROUPS[group] || [];
+  keys.forEach((key) => {
+    generalForm.value[key] = cloneDeep(generalBaseline.value[key]);
+  });
+  if (!silent) {
+    message.info(pageText('pages.sectionChangesReset'));
+  }
+};
+
+const saveAllDirtySections = async () => {
+  const targets = [...dirtySections.value];
+  if (targets.length === 0) return true;
+  batchSaving.value = true;
+  const failed = [];
+  let savedCount = 0;
+  try {
+    for (const sec of targets) {
+      const ok = await sec.save({ silentSuccess: true });
+      if (ok) {
+        savedCount += 1;
+      } else {
+        failed.push(sec);
+      }
+    }
+    if (failed.length === 0) {
+      message.success(pageText('pages.savedAllSectionsCount', { count: savedCount }));
+      return true;
+    }
+    navigateToSection(failed[0]);
+    if (savedCount > 0) {
+      message.warning(pageText('pages.saveAllPartialFailed'));
+    }
+    return false;
+  } finally {
+    batchSaving.value = false;
+  }
+};
+
+const resetAllDirtySections = () => {
+  const targets = [...dirtySections.value];
+  targets.forEach((sec) => sec.reset({ silent: true }));
+  message.info(pageText('pages.allChangesReset'));
 };
 
 const fetchCapacityProbe = async () => {
@@ -1843,8 +2040,8 @@ const fetchGeneralConfig = async () => {
 };
 
 // 三个 Tab 共用同一个提交入口，但只提交各自分组内的变更字段
-const saveGeneralConfig = async (group = 'api_config', successText = '') =>
-  saveGeneralGroup(group, generalSaveLoading, successText);
+const saveGeneralConfig = async (group = 'api_config', successText = '', opts = {}) =>
+  saveGeneralGroup(group, generalSaveLoading, successText, opts);
 
 const dictList = ref([]);
 const selectedDict = ref(null);
@@ -2424,7 +2621,14 @@ const fetchSecurityPolicy = async () => {
   }
 };
 
-const saveSecurityPolicy = async () => {
+const resetSecurityForm = ({ silent = false } = {}) => {
+  securityForm.value = cloneDeep(securityBaseline.value);
+  if (!silent) {
+    message.info(pageText('pages.sectionChangesReset'));
+  }
+};
+
+const saveSecurityPolicy = async ({ silentSuccess = false } = {}) => {
   securitySaveLoading.value = true;
   try {
     const black_ips = securityForm.value.blackIpsText.split('\n').map(s => s.trim()).filter(s => s);
@@ -2436,15 +2640,20 @@ const saveSecurityPolicy = async () => {
     });
     
     if (res.code === 200) {
-      message.success(pageText('pages.securityPolicyUpdated'));
       securityBaseline.value = cloneDeep(securityForm.value);
+      if (!silentSuccess) {
+        message.success(pageText('pages.securityPolicyUpdated'));
+      }
       fetchSecurityPolicy(); // 重新拉取确认
+      return true;
     } else {
       message.error(res.message || pageText('pages.failedToSaveLabel2'));
+      return false;
     }
   } catch (error) {
     message.error(pageText('pages.failedToSaveSecurityPolicy'));
     console.error(error);
+    return false;
   } finally {
     securitySaveLoading.value = false;
   }
@@ -2515,7 +2724,14 @@ const fetchPerformanceConfig = async () => {
   }
 };
 
-const savePerformanceConfig = async () => {
+const resetPerformanceForm = ({ silent = false } = {}) => {
+  performanceForm.value = cloneDeep(performanceBaseline.value);
+  if (!silent) {
+    message.info(pageText('pages.sectionChangesReset'));
+  }
+};
+
+const savePerformanceConfig = async ({ silentSuccess = false } = {}) => {
   performanceSaveLoading.value = true;
   try {
     const res = await request.post('/api/system_config/performance', {
@@ -2530,20 +2746,27 @@ const savePerformanceConfig = async () => {
       if (isPending) {
         pendingConvergence.value = true;
         pendingNodes.value = res.pending_nodes || res.data?.pending_nodes || [];
-        message.warning(res.message || pageText('pages.performanceSettingsUpdated'), 6);
+        if (!silentSuccess) {
+          message.warning(res.message || pageText('pages.performanceSettingsUpdated'), 6);
+        }
       } else {
         pendingConvergence.value = false;
         pendingNodes.value = [];
-        message.success(res.message || pageText('pages.performanceSettingsUpdated'), 5);
+        if (!silentSuccess) {
+          message.success(res.message || pageText('pages.performanceSettingsUpdated'), 5);
+        }
       }
       performanceBaseline.value = cloneDeep(performanceForm.value);
       fetchPerformanceConfig();
+      return true;
     } else {
       message.error(res.message || pageText('pages.failedToSaveLabel2'));
+      return false;
     }
   } catch (error) {
     message.error(pageText('pages.failedToSavePerformanceSettings'));
     console.error(error);
+    return false;
   } finally {
     performanceSaveLoading.value = false;
   }
@@ -2645,11 +2868,29 @@ onMounted(async () => {
   }
 });
 
+const resolveLeaveGuard = (allowLeave) => {
+  if (allowLeave) {
+    allowDirtyDeactivateOnce = true;
+  }
+  leaveConfirmVisible.value = false;
+  if (pendingLeaveResolver) {
+    const resolve = pendingLeaveResolver;
+    pendingLeaveResolver = null;
+    resolve(allowLeave);
+  }
+};
+
+const handleLeaveSaveAndGo = async () => {
+  const ok = await saveAllDirtySections();
+  resolveLeaveGuard(ok);
+};
+
 onDeactivated(() => {
-  // 组件被 keep-alive 缓存，切走时改动仍在内存中，这里只做显式提醒不做阻断
-  if (hasUnsavedChanges.value) {
+  // 组件被 keep-alive 缓存，切走时改动仍在内存中；若已明确放行放弃则不再重复提醒
+  if (hasUnsavedChanges.value && !allowDirtyDeactivateOnce) {
     message.warning(pageText('pages.thereAreCountUnsavedConfigurationChangesSaveThemBefore', { count: unsavedCount.value }), 5);
   }
+  allowDirtyDeactivateOnce = false;
   createDictDrawerVisible.value = false;
   appendDrawerVisible.value = false;
   searchDrawerVisible.value = false;
@@ -2661,6 +2902,7 @@ onDeactivated(() => {
 });
 
 onUnmounted(() => {
+  resolveLeaveGuard(false);
   window.removeEventListener('beforeunload', handleBeforeUnload);
   proxyPanelRef.value?.stopTimers?.();
   updatePanelRef.value?.stopUpdateTimers?.();
@@ -2668,21 +2910,13 @@ onUnmounted(() => {
   backupPanelRef.value?.stopProgressTracking?.();
 });
 
-// 路由级离开拦截：组件被 keep-alive 缓存时 onDeactivated 只提示不阻断，
-// 真正的拦停放在路由守卫，避免用户携带未保存改动跳转到其他页面。
+// 路由级离开拦截：三选一防护弹窗（留在当前页 / 放弃改动并离开 / 保存全部并离开）
 onBeforeRouteLeave(() => {
+  allowDirtyDeactivateOnce = false;
   if (!hasUnsavedChanges.value) return true;
   return new Promise((resolve) => {
-    Modal.confirm({
-      title: pageText('pages.unsavedConfigurationChangesLabel2'),
-      icon: createVNode(ExclamationCircleOutlined),
-      content: pageText('pages.thereAreCountUnsavedConfigurationChangesLeavingThisPage', { count: unsavedCount.value }),
-      okText: pageText('pages.discardChangesAndLeave'),
-      okType: 'danger',
-      cancelText: pageText('tasks.stayOnThisPage'),
-      onOk: () => resolve(true),
-      onCancel: () => resolve(false),
-    });
+    pendingLeaveResolver = resolve;
+    leaveConfirmVisible.value = true;
   });
 });
 </script>
@@ -2775,23 +3009,7 @@ onBeforeRouteLeave(() => {
   border-radius: 3px;
 }
 
-/* 跳转后短暂高亮目标设置项 */
-.arl-anchor-flash {
-  animation: arl-anchor-flash 2.2s ease-out;
-}
-
-@keyframes arl-anchor-flash {
-  0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--arl-theme-color) 45%, transparent); }
-  60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--arl-theme-color) 25%, transparent); }
-  100% { box-shadow: 0 0 0 0 transparent; }
-}
-
 /* ================== 未保存改动与推荐值提示样式 ================== */
-/* 有脏字段的保存按钮：呼吸边框，与 CDN Tab 已有的 breathing-btn 范式保持一致 */
-.arl-dirty-btn {
-  box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.35);
-}
-
 .arl-recommend-row {
   display: flex;
   justify-content: space-between;
@@ -3220,4 +3438,67 @@ onBeforeRouteLeave(() => {
 .page-wide-text .page-config-card-fixed-tall { height: auto; min-height: 190px; }
 .page-wide-text :deep(.ant-card-head-title) { white-space: normal; line-height: 1.5; padding: 12px 0; }
 .performance-pending-alert { margin-bottom: 16px; border-radius: 6px; }
+
+.arl-settings-page {
+  padding-bottom: 72px;
+}
+
+.arl-dirty-banner-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.arl-dirty-banner-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.arl-dirty-section-tag {
+  cursor: pointer;
+  margin: 0;
+}
+
+.arl-dirty-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.arl-floating-dirty-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #faad14;
+  flex-shrink: 0;
+}
+
+.arl-leave-modal-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.arl-leave-modal-icon {
+  font-size: 20px;
+  color: #faad14;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.arl-leave-modal-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.arl-leave-section-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 </style>

@@ -630,6 +630,7 @@ import {
 import request from '../utils/request';
 import { copyText } from '../utils/clipboard';
 import { formatTaskStatus, formatTaskStatusColor } from '../constants/taskStatus';
+import { formatProxyEgressLabel, formatProxyTagColor } from '../constants/proxyStatus';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import SyncToScopeModal from './SyncToScopeModal.vue';
 import RawDataDrawer from './RawDataDrawer.vue';
@@ -657,31 +658,13 @@ const fetchOsintProxyStatus = async (force = false) => {
 const osintProxyTagText = computed(() => {
   const st = osintProxyStatus.value;
   if (!st) return '';
-  if (st.state === 'backup_active') {
-    return assetText('tasks.proxyExitBackupTag', { name: st.active_node_name || st.active_exit_id || 'backup' });
+  if (st.state === 'direct_ok' && !st.enabled_node_count && st.mode === 'direct_only') {
+    return '';
   }
-  if (st.state === 'proxy_active') {
-    return assetText('tasks.proxyExitProxiedTag', { name: st.active_node_name || st.active_exit_id || 'proxy' });
-  }
-  if (st.state === 'degraded_blocked') {
-    return assetText('tasks.proxyExitBlockedTag', { sec: st.cooldown_remaining_sec || 0 });
-  }
-  if (st.state === 'proxy_unavailable') {
-    return assetText('tasks.proxyExitUnavailableTag');
-  }
-  if (st.enabled_node_count > 0 || st.mode !== 'direct_only') {
-    return assetText('tasks.proxyExitDirectTag');
-  }
-  return '';
+  return formatProxyEgressLabel(st, { withPrefix: true });
 });
 
-const osintProxyTagColor = computed(() => {
-  const st = osintProxyStatus.value?.state;
-  if (st === 'degraded_blocked' || st === 'proxy_unavailable') return 'error';
-  if (st === 'backup_active') return 'warning';
-  if (st === 'proxy_active') return 'processing';
-  return 'success';
-});
+const osintProxyTagColor = computed(() => formatProxyTagColor(osintProxyStatus.value?.state));
 
 const goToProxySettings = () => {
   router.push({ path: '/systemSettings', query: { tab: 'proxy', focus: 'osint' } });

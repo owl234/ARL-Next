@@ -1,24 +1,22 @@
 <template>
   <div>
     <a-spin :spinning="cdnLoading">
-      <div style="display: flex; gap: 0; height: calc(100vh - 180px); min-height: 580px; border-radius: 12px; overflow: hidden; box-shadow: 0 12px 48px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04); border: 1px solid rgba(0,0,0,0.05); background: var(--arl-bg-white);"> 
+      <SettingsActionBar
+        anchor="cdn_save"
+        :description="pageText('pages.cdnPanelActionDesc')"
+        :save-label="pageText('pages.saveCdnRulesBtn')"
+        :dirty="isCdnDirty"
+        :saving="cdnSaveLoading"
+        @save="() => saveCdnData()"
+        @reset="() => resetCdnChanges()"
+      />
+      <div style="display: flex; gap: 0; height: calc(100vh - 230px); min-height: 540px; border-radius: 12px; overflow: hidden; box-shadow: 0 12px 48px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04); border: 1px solid rgba(0,0,0,0.05); background: var(--arl-bg-white);">
         
         <!-- 左侧：CDN 列表 -->
         <div style="width: 256px; flex-shrink: 0; border-right: 1px solid var(--arl-border-color); background: var(--arl-bg-white); display: flex; flex-direction: column;">
           <div style="padding: 16px; border-bottom: 1px solid var(--arl-border-color); min-height: 64px; box-sizing: border-box;">
             <div style="display: flex; gap: 8px;">
               <a-input-search v-model:value="cdnSearchText" :placeholder="pageText('pages.searchCdns')" class="page-search-field" />
-              <a-button 
-                v-if="isCdnDirty" 
-                type="primary" 
-                class="breathing-btn" 
-                @click="saveCdnData" 
-                :loading="cdnSaveLoading" 
-                style="padding: 0 8px; background-color: #52c41a; border-color: #52c41a;" 
-                :title="pageText('pages.unsavedChanges')"
-              >
-                <template #icon><span style="margin-right:0px;">💾</span></template>
-              </a-button>
               <a-button type="primary" @click="openCdnDrawer" class="page-icon-padding" :title="pageText('pages.addCdnFingerprint')">
                 <template #icon><span style="margin-right:0px;">➕</span></template>
               </a-button>
@@ -92,16 +90,6 @@
                  <div class="page-secondary-help">{{ pageText('pages.cdnRuleCounts', { cnames: (selectedCdn.cname_domain || []).length, ips: (selectedCdn.ip_cidr || []).length }) }}</div>
                </div>
                <div style="display: flex; gap: 8px; align-items: center;">
-                  <a-button 
-                    v-if="isCdnDirty" 
-                    type="primary" 
-                    @click="saveCdnData" 
-                    :loading="cdnSaveLoading"
-                    class="breathing-btn"
-                    style="background-color: #52c41a; border-color: #52c41a;"
-                  >
-                    <template #icon><span class="page-icon-gap">💾</span></template> {{ pageText('pages.saveChanges') }}
-                  </a-button>
                   <a-popconfirm :title="pageText('pages.deleteThisCdnTheDeletionTakesEffectAfterSaving')" placement="bottomRight" @confirm="deleteSelectedCdn">
                     <a-button danger><template #icon><span class="page-icon-gap">🗑️</span></template> {{ pageText('pages.deleteFingerprint') }}</a-button>
                   </a-popconfirm>
@@ -192,11 +180,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, reactive, computed, nextTick, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { message } from 'ant-design-vue';
 import request from '@/utils/request';
 import { copyText } from '@/utils/clipboard';
+import SettingsActionBar from './SettingsActionBar.vue';
 
 const { t: pageText } = useI18n({ useScope: 'global' });
 
@@ -354,22 +343,37 @@ const fetchCdnList = async () => {
   }
 };
 
-const saveCdnData = async () => {
+const resetCdnChanges = ({ silent = false } = {}) => {
+  cdnList.value = JSON.parse(JSON.stringify(originalCdnList.value));
+  if (selectedCdnName.value && !cdnList.value.some((c) => c.name === selectedCdnName.value)) {
+    selectedCdnName.value = '';
+  }
+  if (!silent) {
+    message.info(pageText('pages.sectionChangesReset'));
+  }
+};
+
+const saveCdnData = async ({ silentSuccess = false } = {}) => {
   cdnSaveLoading.value = true;
   try {
     const res = await request.post('/api/cdn_dict/save', {
       data: cdnList.value
     });
     if (res.code === 200) {
-      message.success(pageText('pages.allChangesSaved'));
       originalCdnList.value = JSON.parse(JSON.stringify(cdnList.value));
+      if (!silentSuccess) {
+        message.success(pageText('pages.allChangesSaved'));
+      }
       fetchCdnList();
+      return true;
     } else {
       message.error(res.message || pageText('pages.failedToSaveLabel2'));
+      return false;
     }
   } catch (error) {
     message.error(pageText('pages.saveRequestFailed'));
     console.error(error);
+    return false;
   } finally {
     cdnSaveLoading.value = false;
   }
@@ -379,13 +383,32 @@ const closeDrawer = () => {
   cdnDrawerVisible.value = false;
 };
 
+const focusSection = (anchor = 'cdn_save', retries = 3) => {
+  if (!anchor) return;
+  nextTick(() => {
+    const el = document.querySelector(`[data-setting-anchor="${anchor}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('arl-anchor-flash');
+      setTimeout(() => el.classList.remove('arl-anchor-flash'), 2200);
+    } else if (retries > 0) {
+      setTimeout(() => focusSection(anchor, retries - 1), 60);
+    }
+  });
+};
+
 onMounted(() => {
   fetchCdnList();
 });
 
 defineExpose({
   fetchCdnList,
-  closeDrawer
+  closeDrawer,
+  hasUnsavedChanges: () => isCdnDirty.value,
+  saveChanges: saveCdnData,
+  resetChanges: resetCdnChanges,
+  isSaving: () => cdnSaveLoading.value,
+  focusSection,
 });
 </script>
 
@@ -612,14 +635,5 @@ defineExpose({
   font-style: italic;
   padding-top: 20px;
   text-align: center;
-}
-
-@keyframes btn-breathing {
-  0% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.4); }
-  70% { box-shadow: 0 0 0 6px rgba(82, 196, 26, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0); }
-}
-.breathing-btn {
-  animation: btn-breathing 2s infinite;
 }
 </style>

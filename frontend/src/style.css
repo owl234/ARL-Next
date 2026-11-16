@@ -574,4 +574,17 @@ body.dark-mode .ant-table-tbody > tr.ant-table-row-selected > td.ant-table-cell-
     gap: 8px;
 }
 
+/* 13. 设置定位高亮与未保存按钮提示 (.arl-anchor-flash / .arl-dirty-btn) */
+.arl-anchor-flash {
+    animation: arl-anchor-flash 2.2s ease-out;
+}
+@keyframes arl-anchor-flash {
+    0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--arl-theme-color) 45%, transparent); }
+    60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--arl-theme-color) 25%, transparent); }
+    100% { box-shadow: 0 0 0 0 transparent; }
+}
+.arl-dirty-btn {
+    box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.35);
+}
+
 

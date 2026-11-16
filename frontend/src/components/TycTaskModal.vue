@@ -202,6 +202,7 @@ import {
   QuestionCircleOutlined
 } from '@ant-design/icons-vue';
 import request from '../utils/request';
+import { formatProxyEgressLabel, formatProxyTagColor } from '../constants/proxyStatus';
 
 const { t: taskText, locale: taskLocale } = useI18n({ useScope: 'global' });
 
@@ -224,31 +225,11 @@ const tycErrorType = ref('');
 const tycErrorMsg = ref('');
 const proxyStatus = ref(null);
 
-const proxyStatusTagColor = computed(() => {
-  const st = proxyStatus.value?.state;
-  if (st === 'degraded_blocked' || st === 'proxy_unavailable') return 'error';
-  if (st === 'backup_active') return 'warning';
-  if (st === 'proxy_active') return 'processing';
-  return 'success';
-});
+const proxyStatusTagColor = computed(() => formatProxyTagColor(proxyStatus.value?.state));
 
-const proxyStatusText = computed(() => {
-  const ps = proxyStatus.value;
-  if (!ps) return '';
-  if (ps.state === 'backup_active') {
-    return taskText('tasks.proxyExitBackupTag', { name: ps.active_node_name || ps.active_exit_id || 'backup' });
-  }
-  if (ps.state === 'proxy_active') {
-    return taskText('tasks.proxyExitProxiedTag', { name: ps.active_node_name || ps.active_exit_id || 'proxy' });
-  }
-  if (ps.state === 'degraded_blocked') {
-    return taskText('tasks.proxyExitBlockedTag', { sec: ps.cooldown_remaining_sec || 0 });
-  }
-  if (ps.state === 'proxy_unavailable') {
-    return taskText('tasks.proxyExitUnavailableTag');
-  }
-  return taskText('tasks.proxyExitDirectTag');
-});
+const proxyStatusText = computed(() => (
+  proxyStatus.value ? formatProxyEgressLabel(proxyStatus.value, { withPrefix: true }) : ''
+));
 
 const formState = reactive({
   name: '',

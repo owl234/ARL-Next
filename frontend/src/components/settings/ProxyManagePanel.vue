@@ -1,59 +1,15 @@
 <template>
   <div class="proxy-panel-root" :class="{ 'page-wide-text': pageLocale !== 'zh-CN' }">
     <a-spin :spinning="initialLoading">
-      <!-- 1. OSINT 出口运行时态势条 -->
-      <div class="proxy-runtime-card" :class="runtimeCardClass">
-        <div class="runtime-header">
-          <div class="runtime-title-row">
-            <span class="runtime-status-dot" :class="runtimeCardClass"></span>
-            <span class="runtime-heading">{{ pageText('pages.proxyRuntimeTitle') }}</span>
-            <a-tag :color="runtimeTagColor" class="runtime-state-tag">{{ runtimeStateLabel }}</a-tag>
-            <a-tag v-if="runtime.active_node_name" color="processing">
-              {{ pageText('pages.proxyActiveExitLabel') }}: {{ runtime.active_node_name }}
-            </a-tag>
-            <a-tag v-if="displayCooldownSec > 0" color="error">
-              {{ pageText('pages.proxyCooldownRemaining', { sec: displayCooldownSec }) }}
-            </a-tag>
-          </div>
-          <div class="runtime-actions">
-            <a-button
-              size="small"
-              :loading="resetLoading"
-              :disabled="blockedExitsList.length === 0 && displayCooldownSec <= 0"
-              @click="handleResetCooldown"
-            >
-              {{ pageText('pages.proxyResetCooldownBtn') }}
-            </a-button>
-            <a-button size="small" :loading="refreshLoading" @click="fetchProxyConfig(false)">
-              {{ pageText('pages.refreshStatus') }}
-            </a-button>
-          </div>
-        </div>
-
-        <div class="runtime-meta-row">
-          <span>
-            {{ pageText('pages.proxyNodeStatsLabel', { enabled: runtime.enabled_node_count || 0, total: runtime.total_node_count || 0, bound: runtime.bound_node_count || 0 }) }}
-          </span>
-          <span v-if="runtime.last_switch_reason">
-            · {{ pageText('pages.proxyLastSwitchLabel') }}: {{ runtime.last_switch_reason }}
-            <template v-if="runtime.last_switch_at">({{ formatTimestamp(runtime.last_switch_at) }})</template>
-          </span>
-        </div>
-
-        <div v-if="blockedExitsList.length > 0" class="blocked-exits-row">
-          <span class="blocked-label">{{ pageText('pages.proxyBlockedExitsLabel') }}:</span>
-          <a-tag
-            v-for="item in blockedExitsList"
-            :key="item.exit_id"
-            color="warning"
-            style="margin: 0;"
-          >
-            {{ item.label || item.exit_id }} · {{ item.reason || 'blocked' }}
-            <template v-if="item.ip">({{ item.ip }})</template>
-            · {{ item.remaining_sec }}s
-          </a-tag>
-        </div>
-      </div>
+      <SettingsActionBar
+        anchor="proxy_save"
+        :description="pageText('pages.proxyConfigDesc')"
+        :save-label="pageText('pages.proxySavePoliciesBtn')"
+        :dirty="isPolicyDirty"
+        :saving="policySaving"
+        @save="() => handleSavePolicies()"
+        @reset="() => resetPolicyEdits()"
+      />
 
       <a-alert
         v-if="capabilitiesLoaded && !capabilities.pysocks_installed"
@@ -72,12 +28,6 @@
               <span class="section-subtitle">{{ pageText('pages.proxyPoolSubtitle') }}</span>
             </div>
             <div class="card-header-actions">
-              <a-select
-                v-model:value="batchProbePreset"
-                size="small"
-                style="width: 210px;"
-                :options="probePresetOptions"
-              />
               <a-button type="primary" size="small" @click="openNodeModal(null)">
                 + {{ pageText('pages.proxyAddNodeBtn') }}
               </a-button>
@@ -91,7 +41,7 @@
           :pagination="false"
           row-key="id"
           size="small"
-          :scroll="{ x: 860 }"
+          :scroll="{ x: 940 }"
         >
           <template #emptyText>
             <a-empty :description="pageText('pages.proxyNoNodesEmpty')" />
@@ -129,6 +79,9 @@
             <template v-else-if="column.key === 'last_probe'">
               <div v-if="record.last_probe" class="probe-result-cell">
                 <div class="probe-tags">
+                  <a-tag v-if="record.last_probe.preset" color="default" style="margin: 0;">
+                    {{ probePresetShortLabel(record.last_probe.preset) }}
+                  </a-tag>
                   <a-tag :color="record.last_probe.ok ? (record.last_probe.waf_blocked ? 'warning' : 'success') : 'error'" style="margin: 0;">
                     {{ record.last_probe.ok ? (record.last_probe.waf_blocked ? pageText('pages.proxyProbeWafBlocked') : pageText('pages.proxyProbeOk')) : pageText('pages.proxyProbeFail') }}
                   </a-tag>
@@ -144,13 +97,24 @@
 
             <template v-else-if="column.key === 'actions'">
               <a-space size="small">
-                <a-button
+                <a-dropdown-button
                   size="small"
+                  :trigger="['click']"
                   :loading="probingNodeId === record.id"
                   @click="handleProbeExistingNode(record)"
                 >
                   {{ pageText('pages.proxyProbeBtn') }}
-                </a-button>
+                  <template #icon>
+                    <DownOutlined />
+                  </template>
+                  <template #overlay>
+                    <a-menu @click="({ key }) => handleProbeExistingNode(record, key)">
+                      <a-menu-item v-for="preset in probePresetOptions" :key="preset.value">
+                        {{ preset.label }}
+                      </a-menu-item>
+                    </a-menu>
+                  </template>
+                </a-dropdown-button>
                 <a-button size="small" @click="openNodeModal(record)">
                   {{ pageText('pages.edit') }}
                 </a-button>
@@ -179,23 +143,6 @@
               <span class="section-title">{{ pageText('pages.proxyPoliciesTitle') }}</span>
               <span class="section-subtitle">{{ pageText('pages.proxyPoliciesSubtitle') }}</span>
             </div>
-            <div class="card-header-actions">
-              <a-tag v-if="isPolicyDirty" color="warning" style="margin: 0;">
-                {{ pageText('pages.unsavedChanges') }}
-              </a-tag>
-              <a-button v-if="isPolicyDirty" size="small" @click="resetPolicyEdits">
-                {{ pageText('pages.reset') }}
-              </a-button>
-              <a-button
-                type="primary"
-                size="small"
-                :loading="policySaving"
-                :class="{ 'arl-dirty-btn': isPolicyDirty }"
-                @click="handleSavePolicies"
-              >
-                {{ pageText('pages.proxySavePoliciesBtn') }}
-              </a-button>
-            </div>
           </div>
         </template>
 
@@ -206,6 +153,13 @@
               <div class="domain-header">
                 <span class="domain-badge osint">OSINT</span>
                 <span class="domain-title">{{ pageText('pages.proxyDomainOsintTitle') }}</span>
+                <a-tag
+                  v-if="showOsintHeaderStatus"
+                  :color="osintStatusTagColor"
+                  class="domain-status-tag"
+                >
+                  {{ osintStatusTagText }}
+                </a-tag>
               </div>
               <p class="domain-desc">{{ pageText('pages.proxyDomainOsintDesc') }}</p>
 
@@ -246,6 +200,42 @@
                   />
                 </a-form-item>
               </a-form>
+
+              <div
+                v-if="showOsintCooldownAlert"
+                class="osint-cooldown-box"
+                :class="osintCooldownBoxClass"
+              >
+                <div class="osint-cooldown-header">
+                  <span class="osint-cooldown-title">
+                    <span class="osint-status-dot" :class="osintCooldownBoxClass"></span>
+                    {{ pageText('pages.proxyBlockedExitsLabel') }}
+                  </span>
+                  <a-button
+                    size="small"
+                    :loading="resetLoading"
+                    :disabled="blockedExitsList.length === 0 && displayCooldownSec <= 0"
+                    @click="handleResetCooldown"
+                  >
+                    {{ pageText('pages.proxyResetCooldownBtn') }}
+                  </a-button>
+                </div>
+
+                <div v-if="blockedExitsList.length > 0" class="osint-blocked-list">
+                  <div
+                    v-for="item in blockedExitsList"
+                    :key="item.exit_id"
+                    class="osint-blocked-item"
+                  >
+                    <a-tag color="warning" style="margin: 0; flex-shrink: 0;">
+                      {{ item.label || item.exit_id }} · {{ item.remaining_sec }}s
+                    </a-tag>
+                    <span v-if="item.reason || item.ip" class="osint-blocked-reason" :title="item.reason">
+                      {{ item.reason }}<template v-if="item.ip"> ({{ item.ip }})</template>
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </a-col>
 
@@ -500,7 +490,10 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { message } from 'ant-design-vue';
+import { DownOutlined } from '@ant-design/icons-vue';
 import request from '@/utils/request';
+import { formatProxyEgressLabel, formatProxyLevelClass, formatProxyTagColor } from '@/constants/proxyStatus';
+import SettingsActionBar from './SettingsActionBar.vue';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 
@@ -541,13 +534,7 @@ const runtime = reactive({
   active_node_name: '',
   cooldown_remaining_sec: 0,
   blocked_exits: [],
-  enabled_node_count: 0,
-  total_node_count: 0,
-  bound_node_count: 0,
-  last_switch_at: 0,
-  last_switch_reason: '',
   puppeteer_compat_warning: false,
-  updated_at: 0,
 });
 
 const policyForm = reactive({
@@ -563,7 +550,6 @@ const bypassForm = reactive({
 const customNoProxyText = ref('');
 const baselineSnapshot = ref('');
 
-const batchProbePreset = ref('egress_ip');
 const cooldownTickOffset = ref(0);
 let tickTimer = null;
 
@@ -648,24 +634,37 @@ const nodeSelectOptions = computed(() => (config.nodes || []).map((n) => ({
   label: `${n.name} (${String(n.protocol || '').toUpperCase()} · ${n.host}:${n.port})${n.enabled ? '' : ` [${pageText('pages.disabledLabel')}]`}`,
 })));
 
+const PROBE_PRESET_I18N_MAP = {
+  egress_ip: { labelKey: 'pages.proxyPresetEgressIp', shortKey: 'pages.proxyPresetEgressIpShort' },
+  miit: { labelKey: 'pages.proxyPresetMiit', shortKey: 'pages.proxyPresetMiitShort' },
+  tianyancha: { labelKey: 'pages.proxyPresetTianyancha', shortKey: 'pages.proxyPresetTianyanchaShort' },
+  github: { labelKey: 'pages.proxyPresetGithub', shortKey: 'pages.proxyPresetGithubShort' },
+};
+
+const probePresetShortLabel = (preset) => {
+  const entry = PROBE_PRESET_I18N_MAP[preset];
+  return entry ? pageText(entry.shortKey) : String(preset || '');
+};
+
 const probePresetOptions = computed(() => {
-  if (capabilities.presets && capabilities.presets.length > 0) {
-    return capabilities.presets.map((p) => ({ value: p.key, label: p.label }));
-  }
-  return [
-    { value: 'egress_ip', label: pageText('pages.proxyPresetEgressIp') },
-    { value: 'miit', label: pageText('pages.proxyPresetMiit') },
-    { value: 'tianyancha', label: pageText('pages.proxyPresetTianyancha') },
-    { value: 'github', label: pageText('pages.proxyPresetGithub') },
-  ];
+  const backendPresets = capabilities.presets && capabilities.presets.length > 0
+    ? capabilities.presets
+    : Object.keys(PROBE_PRESET_I18N_MAP).map((key) => ({ key, label: '' }));
+  return backendPresets.map((p) => {
+    const entry = PROBE_PRESET_I18N_MAP[p.key];
+    return {
+      value: p.key,
+      label: entry ? pageText(entry.labelKey) : p.label,
+    };
+  });
 });
 
 const nodeColumns = computed(() => ([
   { title: pageText('pages.proxyColName'), key: 'name', width: 200 },
   { title: pageText('pages.proxyColEndpoint'), key: 'endpoint', width: 250 },
   { title: pageText('pages.status'), key: 'enabled', width: 90, align: 'center' },
-  { title: pageText('pages.proxyColProbe'), key: 'last_probe', width: 230 },
-  { title: pageText('pages.action'), key: 'actions', width: 210, align: 'right' },
+  { title: pageText('pages.proxyColProbe'), key: 'last_probe', width: 260 },
+  { title: pageText('pages.action'), key: 'actions', width: 240, align: 'right' },
 ]));
 
 const blockedExitsList = computed(() => (runtime.blocked_exits || [])
@@ -681,34 +680,25 @@ const displayCooldownSec = computed(() => {
   return Math.max(0, raw - cooldownTickOffset.value);
 });
 
-const runtimeCardClass = computed(() => {
-  if (runtime.state === 'degraded_blocked' || runtime.state === 'proxy_unavailable') return 'is-danger';
-  if (runtime.state === 'backup_active') return 'is-warning';
-  if (runtime.state === 'proxy_active') return 'is-info';
-  return 'is-ok';
-});
+const showOsintHeaderStatus = computed(() => (
+  runtime.state !== 'direct_ok'
+  || blockedExitsList.value.length > 0
+  || displayCooldownSec.value > 0
+));
 
-const runtimeTagColor = computed(() => {
-  if (runtime.state === 'degraded_blocked' || runtime.state === 'proxy_unavailable') return 'error';
-  if (runtime.state === 'backup_active') return 'warning';
-  if (runtime.state === 'proxy_active') return 'processing';
-  return 'success';
-});
+const showOsintCooldownAlert = computed(() => (
+  blockedExitsList.value.length > 0
+  || displayCooldownSec.value > 0
+  || runtime.state === 'degraded_blocked'
+));
 
-const runtimeStateLabel = computed(() => {
-  switch (runtime.state) {
-    case 'backup_active':
-      return pageText('pages.proxyStateBackupActive');
-    case 'proxy_active':
-      return pageText('pages.proxyStateProxyActive');
-    case 'degraded_blocked':
-      return pageText('pages.proxyStateDegradedBlocked');
-    case 'proxy_unavailable':
-      return pageText('pages.proxyStateUnavailable');
-    default:
-      return pageText('pages.proxyStateDirectOk');
-  }
-});
+const osintCooldownBoxClass = computed(() => formatProxyLevelClass(runtime.state));
+
+const osintStatusTagColor = computed(() => formatProxyTagColor(runtime.state));
+
+const osintStatusTagText = computed(() => formatProxyEgressLabel(runtime, {
+  cooldownSecOverride: displayCooldownSec.value,
+}));
 
 const showPuppeteerAuthWarning = computed(() => {
   if (runtime.puppeteer_compat_warning) return true;
@@ -737,13 +727,6 @@ const protocolTagColor = (proto) => {
   if (p.startsWith('socks')) return 'purple';
   if (p === 'https') return 'cyan';
   return 'blue';
-};
-
-const formatTimestamp = (ts) => {
-  if (!ts) return '';
-  const d = new Date(Number(ts) * 1000);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString([], { hour12: false });
 };
 
 const syncPolicyFormFromConfig = (cfg, { resetDirty = false } = {}) => {
@@ -964,12 +947,12 @@ const handleDeleteNode = async (record) => {
   }
 };
 
-const handleProbeExistingNode = async (record) => {
+const handleProbeExistingNode = async (record, preset = 'egress_ip') => {
   probingNodeId.value = record.id;
   try {
     const res = await request.post('/api/system_config/proxy/probe', {
       node_id: record.id,
-      preset: batchProbePreset.value,
+      preset: preset || 'egress_ip',
       save_result: true,
     });
     if (res.code === 200 && res.data) {
@@ -1013,15 +996,18 @@ const handleProbeDraft = async () => {
   }
 };
 
-const resetPolicyEdits = () => {
+const resetPolicyEdits = ({ silent = false } = {}) => {
   syncPolicyFormFromConfig(config, { resetDirty: true });
+  if (!silent) {
+    message.info(pageText('pages.sectionChangesReset'));
+  }
 };
 
-const handleSavePolicies = async () => {
+const handleSavePolicies = async ({ silentSuccess = false } = {}) => {
   for (const dom of ['osint', 'scan', 'intel']) {
     if (policyForm[dom].mode === 'fixed_proxy' && (!policyForm[dom].node_ids || policyForm[dom].node_ids.length === 0)) {
       message.warning(pageText('pages.proxyFixedModeRequiresNodeWarn', { domain: dom.toUpperCase() }));
-      return;
+      return false;
     }
   }
   policySaving.value = true;
@@ -1030,13 +1016,18 @@ const handleSavePolicies = async () => {
     const res = await request.put('/api/system_config/proxy/policies', payload);
     if (res.code === 200 && res.data) {
       applyServerPayload(res.data, { resetDirty: true });
-      message.success(res.message || pageText('pages.saveSuccess'));
+      if (!silentSuccess) {
+        message.success(res.message || pageText('pages.saveSuccess'));
+      }
+      return true;
     } else if (res.message) {
       message.error(res.message);
     }
+    return false;
   } catch (err) {
     const msg = err?.response?.data?.message;
     if (msg) message.error(msg);
+    return false;
   } finally {
     policySaving.value = false;
   }
@@ -1086,7 +1077,7 @@ const closeModals = () => {
   nodeModalOpen.value = false;
 };
 
-const focusSection = (anchor) => {
+const focusSection = (anchor, retries = 3) => {
   if (!anchor) return;
   nextTick(() => {
     const el = document.querySelector(`[data-setting-anchor="${anchor}"]`);
@@ -1094,6 +1085,8 @@ const focusSection = (anchor) => {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       el.classList.add('arl-anchor-flash');
       setTimeout(() => el.classList.remove('arl-anchor-flash'), 2200);
+    } else if (retries > 0) {
+      setTimeout(() => focusSection(anchor, retries - 1), 60);
     }
   });
 };
@@ -1110,6 +1103,9 @@ onUnmounted(() => {
 defineExpose({
   fetchProxyConfig,
   hasUnsavedChanges,
+  saveChanges: handleSavePolicies,
+  resetChanges: resetPolicyEdits,
+  isSaving: () => policySaving.value,
   stopTimers,
   closeModals,
   focusSection,
@@ -1119,89 +1115,20 @@ defineExpose({
 <style scoped>
 .proxy-panel-root {
   max-width: 1180px;
-  padding-bottom: 36px;
+  padding-bottom: 72px;
 }
 
-.proxy-runtime-card {
-  border: 1px solid var(--arl-border-color);
-  border-radius: 10px;
-  padding: 14px 16px;
-  margin-bottom: 16px;
-  background: var(--arl-bg-white);
-  transition: border-color 0.2s ease, background 0.2s ease;
-}
-.proxy-runtime-card.is-ok {
-  border-left: 4px solid #52c41a;
-}
-.proxy-runtime-card.is-warning {
-  border-left: 4px solid #faad14;
-}
-.proxy-runtime-card.is-info {
-  border-left: 4px solid #1677ff;
-}
-.proxy-runtime-card.is-danger {
-  border-left: 4px solid #ff4d4f;
-}
-
-.runtime-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.runtime-title-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.runtime-status-dot {
-  width: 8px;
-  height: 8px;
+.osint-status-dot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: #52c41a;
+  background: #faad14;
+  flex-shrink: 0;
 }
-.runtime-status-dot.is-warning { background: #faad14; }
-.runtime-status-dot.is-info { background: #1677ff; }
-.runtime-status-dot.is-danger { background: #ff4d4f; }
-
-.runtime-heading {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--arl-text-color);
-}
-
-.runtime-state-tag {
-  margin: 0;
-}
-
-.runtime-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.runtime-meta-row {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--arl-text-color);
-  opacity: 0.72;
-}
-
-.blocked-exits-row {
-  margin-top: 10px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.blocked-label {
-  font-size: 12px;
-  color: var(--arl-text-color);
-  opacity: 0.75;
-}
+.osint-status-dot.is-danger { background: #ff4d4f; }
+.osint-status-dot.is-warning { background: #faad14; }
+.osint-status-dot.is-info { background: #1677ff; }
+.osint-status-dot.is-ok { background: #52c41a; }
 
 .proxy-section-card {
   border-radius: 10px;
@@ -1318,8 +1245,55 @@ defineExpose({
 .domain-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 6px;
+}
+.domain-status-tag {
+  margin: 0 0 0 auto;
+}
+.osint-cooldown-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--arl-border-color);
+  border-left: 3px solid #faad14;
+  border-radius: 6px;
+  background: var(--arl-bg-white);
+}
+.osint-cooldown-box.is-danger {
+  border-left-color: #ff4d4f;
+}
+.osint-cooldown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.osint-cooldown-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--arl-text-color);
+}
+.osint-blocked-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.osint-blocked-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+}
+.osint-blocked-reason {
+  color: var(--arl-text-color);
+  opacity: 0.75;
+  word-break: break-word;
 }
 .domain-badge {
   font-size: 11px;

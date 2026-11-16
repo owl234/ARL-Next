@@ -16,6 +16,7 @@ const stops = [];
 afterEach(() => { stops.splice(0).forEach(stop => stop()); i18n.global.locale.value = 'zh-CN'; });
 const files = ['views/Dashboard.vue', 'views/GithubManage.vue', 'views/PocList.vue', 'components/NucleiManage.vue',
   'views/Fingerprint.vue', 'views/Policy.vue', 'views/PolicyDetail.vue', 'views/SystemSettings.vue',
+  'components/settings/SettingsActionBar.vue', 'components/settings/CdnRulePanel.vue', 'components/settings/ProxyManagePanel.vue',
   'components/settings/BackupRestorePanel.vue', 'components/settings/SystemUpdatePanel.vue',
   'views/McpCenter.vue', 'views/Layout.vue', 'components/SupportAuthorPopover.vue'];
 const sources = new Map();

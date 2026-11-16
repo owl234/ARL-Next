@@ -644,6 +644,7 @@ defineOptions({
 
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { formatProxyEgressLabel, formatProxyLevelClass, formatProxyPulse } from '@/constants/proxyStatus';
 import { 
   DatabaseOutlined, 
   SyncOutlined, 
@@ -739,40 +740,11 @@ const sysInfo = ref({
   proxy: { state: 'direct_ok', active_node_name: '', cooldown_remaining_sec: 0, enabled_node_count: 0, bound_node_count: 0 }
 });
 
-const proxyRibbonText = computed(() => {
-  const px = sysInfo.value?.proxy || {};
-  const st = px.state || 'direct_ok';
-  if (st === 'backup_active') {
-    const name = px.active_node_name || pageText('pages.proxyRibbonBackup');
-    return `${pageText('pages.proxyRibbonBackup')} · ${name}`;
-  }
-  if (st === 'proxy_active') {
-    const name = px.active_node_name || pageText('pages.proxyRibbonProxy');
-    return `${pageText('pages.proxyRibbonProxy')} · ${name}`;
-  }
-  if (st === 'degraded_blocked') {
-    return pageText('pages.proxyRibbonCooldown', { sec: px.cooldown_remaining_sec || 0 });
-  }
-  if (st === 'proxy_unavailable') {
-    return pageText('pages.proxyRibbonUnavailable');
-  }
-  return pageText('pages.proxyRibbonDirect');
-});
+const proxyRibbonText = computed(() => formatProxyEgressLabel(sysInfo.value?.proxy));
 
-const proxyRibbonClass = computed(() => {
-  const st = sysInfo.value?.proxy?.state || 'direct_ok';
-  if (st === 'degraded_blocked' || st === 'proxy_unavailable') return 'is-danger';
-  if (st === 'backup_active') return 'is-warning';
-  if (st === 'proxy_active') return 'is-info';
-  return 'is-ok';
-});
+const proxyRibbonClass = computed(() => formatProxyLevelClass(sysInfo.value?.proxy?.state));
 
-const proxyRibbonPulse = computed(() => {
-  const st = sysInfo.value?.proxy?.state || 'direct_ok';
-  if (st === 'degraded_blocked' || st === 'proxy_unavailable') return 'red';
-  if (st === 'backup_active') return 'orange';
-  return '';
-});
+const proxyRibbonPulse = computed(() => formatProxyPulse(sysInfo.value?.proxy?.state));
 
 const handleRunningBadgeClick = () => {
   const icpRun = sysInfo.value?.tasks?.icp_running || 0;

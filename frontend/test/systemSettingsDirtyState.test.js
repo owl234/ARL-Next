@@ -41,6 +41,7 @@ function loadSystemSettings() {
     route: { query: {} },
     router: { push() {} },
     proxyPanelRef: ref(null),
+    cdnPanelRef: ref(null),
   });
 
   const read = (name) => {
@@ -73,6 +74,9 @@ test('SystemSettings: 性能与安全初始基线完全对齐，未初始化时�
   read('performanceBaseline');
   read('isPerformanceDirty');
 
+  read('isSectionRefDirty');
+  read('SECTION_SPECS');
+  read('dirtySections');
   read('hasUnsavedChanges');
   read('unsavedCount');
 
@@ -172,10 +176,17 @@ test('SystemSettings: firstDirtyTabKey 与 goToFirstDirty 正确支持外层 Tab
   read('isPerformanceDirty');
 
   context.activeKey = ref('api_config');
+  context.dictSubTab = ref('dict');
   context.scanSubTab = ref('performance');
 
+  read('isSectionRefDirty');
+  read('SECTION_SPECS');
+  read('dirtySections');
+  read('navigateToSection');
   read('firstDirtyTabKey');
   read('goToFirstDirty');
+
+  context.isConfigInitialized.value = true;
 
   // 1. 当 performanceDirty 时
   context.performanceForm.value.celery_heavy_concurrency = 3;
@@ -208,17 +219,123 @@ test('SystemSettings: firstDirtyTabKey 与 goToFirstDirty 正确支持外层 Tab
   context.generalForm.value.port_top_10 = '';
 
   // 4. 当 proxy 面板有脏字段时
-  context.proxyPanelRef.value = { hasUnsavedChanges: () => true };
+  const focusedAnchors = [];
+  context.proxyPanelRef.value = {
+    hasUnsavedChanges: () => true,
+    focusSection: (anchor) => focusedAnchors.push(anchor),
+  };
   assert.equal(context.firstDirtyTabKey.value, 'proxy');
   context.goToFirstDirty();
   assert.equal(context.activeKey.value, 'proxy');
+  assert.deepEqual(focusedAnchors, ['proxy_save']);
   context.proxyPanelRef.value = null;
 
-  // 5. 当 api_config 有脏字段时
+  // 5. 当 cdn 面板有脏字段时
+  const cdnFocused = [];
+  context.cdnPanelRef.value = {
+    hasUnsavedChanges: () => true,
+    focusSection: (anchor) => cdnFocused.push(anchor),
+  };
+  assert.equal(context.firstDirtyTabKey.value, 'dictionary');
+  context.goToFirstDirty();
+  assert.equal(context.activeKey.value, 'dictionary');
+  assert.equal(context.dictSubTab.value, 'cdn');
+  assert.deepEqual(cdnFocused, ['cdn_save']);
+  context.cdnPanelRef.value = null;
+
+  // 6. 当 api_config 有脏字段时
   context.generalForm.value.fofa_key = 'test_key';
   assert.equal(context.firstDirtyTabKey.value, 'api_config');
   context.goToFirstDirty();
   assert.equal(context.activeKey.value, 'api_config');
+});
+
+test('SystemSettings: 统一分区计数、批量保存部分失败回写成功项与全部重置闭环', async () => {
+  const { read, context, notices } = loadSystemSettings();
+
+  read('isConfigInitialized');
+  read('GENERAL_FIELD_GROUPS');
+  read('cloneDeep');
+  read('generalForm');
+  read('generalBaseline');
+  read('captureBaseline');
+  context.captureBaseline();
+  read('changedFields');
+  read('pendingByGroup');
+  read('securityForm');
+  read('securityBaseline');
+  read('isSecurityDirty');
+  read('performanceForm');
+  read('performanceBaseline');
+  read('isPerformanceDirty');
+  read('generalSaveLoading');
+  read('securitySaveLoading');
+  read('performanceSaveLoading');
+  read('batchSaving');
+  read('saveGeneralGroup');
+  read('saveGeneralConfig');
+  read('resetGeneralGroup');
+  read('resetSecurityForm');
+  read('resetPerformanceForm');
+
+  context.request = {
+    post: async (url, payload) => ({ code: 200, data: payload }),
+  };
+  context.activeKey = ref('api_config');
+  context.dictSubTab = ref('dict');
+  context.scanSubTab = ref('performance');
+
+  read('isSectionRefDirty');
+  read('SECTION_SPECS');
+  read('dirtySections');
+  read('hasUnsavedChanges');
+  read('unsavedCount');
+  read('navigateToSection');
+  read('saveAllDirtySections');
+  read('resetAllDirtySections');
+
+  context.isConfigInitialized.value = true;
+
+  // 在 api_config 修改 2 个字段，统一按分区计数仍为 1 个分区
+  context.generalForm.value.fofa_key = 'new_key';
+  context.generalForm.value.fofa_url = 'https://fofa.example';
+  assert.equal(context.unsavedCount.value, 1);
+
+  // 同时修改 proxy 与 cdn（proxy 模拟校验失败返回 false，cdn 模拟成功）
+  let proxyDirty = true;
+  let cdnDirty = true;
+  const focused = [];
+  context.proxyPanelRef.value = {
+    hasUnsavedChanges: () => proxyDirty,
+    saveChanges: async () => false,
+    resetChanges: () => { proxyDirty = false; },
+    focusSection: (anchor) => focused.push(anchor),
+  };
+  context.cdnPanelRef.value = {
+    hasUnsavedChanges: () => cdnDirty,
+    saveChanges: async () => { cdnDirty = false; return true; },
+    resetChanges: () => { cdnDirty = false; },
+    focusSection: () => {},
+  };
+
+  assert.equal(context.unsavedCount.value, 3);
+
+  // 批量保存：api_config 与 cdn 提交成功且基线回写；proxy 失败后停留 proxy 并定位到 proxy_save
+  const okPartial = await context.saveAllDirtySections();
+  assert.equal(okPartial, false);
+  assert.equal(context.activeKey.value, 'proxy');
+  assert.deepEqual(focused, ['proxy_save']);
+  assert.deepEqual(plain(context.pendingByGroup.value.api_config), {});
+  assert.equal(context.unsavedCount.value, 1);
+  assert.equal(notices.at(-1).type, 'warning');
+
+  // 再次使 api_config 脏，并验证 resetAllDirtySections 全部清零
+  context.generalForm.value.github_token = 'ghp_test';
+  assert.equal(context.unsavedCount.value, 2);
+  context.resetAllDirtySections();
+  assert.equal(context.unsavedCount.value, 0);
+  assert.equal(context.hasUnsavedChanges.value, false);
+  assert.equal(context.generalForm.value.github_token, '');
 });
 
 test('SystemSettings: 刷新失败时仅在未初始化阶段兜底对齐，已初始化时不破坏用户已编辑内容', async () => {
