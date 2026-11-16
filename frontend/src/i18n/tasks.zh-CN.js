@@ -591,7 +591,7 @@ export default {
   "configureSystemProxy": "前往配置代理",
   "openProxySettings": "配置系统代理 >",
   "tianyanchaLocationRestrictedTitle": "天眼查接口受服务器地域限制 (bannedLocation)",
-  "tianyanchaLocationRestrictedContent": "系统已配置天眼查商业凭据，但当前服务器出口 IP 非中国大陆地区，被天眼查地域围栏拦截 (HTTP 419 bannedLocation)。请前往「系统设置 -> 扫描与并发 -> 高级扫描 -> 系统代理地址」配置中国大陆境内代理后再试。",
+  "tianyanchaLocationRestrictedContent": "系统已配置天眼查商业凭据，但当前服务器出口 IP 非中国大陆地区，被天眼查地域围栏拦截 (HTTP 419 bannedLocation)。请前往「系统设置 -> 代理与出口策略」配置中国大陆境内代理后再试。",
   "tianyanchaCredentialCheckFailedTitle": "天眼查凭据校验未通过",
   "enterpriseBannedLocationHint": "已配置天眼查凭据，但当前服务器出口 IP 非中国大陆地区，被天眼查地域围栏拦截 (bannedLocation)。请配置境内系统代理以启用天眼查穿透。",
   "investmentTraversalForATianyanchaGidRequiresCommercial": "当前输入的天眼查 GID 需要商业凭据才能执行股权穿透。您可以先去系统设置配置凭据，或改用企业工商全称通过工信部官方备案检索。",

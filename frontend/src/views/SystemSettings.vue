@@ -794,22 +794,6 @@
                   </a-alert>
                   <a-row :gutter="24">
                     <a-col :xs="24" :md="12">
-                      <a-form-item :label="pageText('pages.systemProxy')">
-                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; border: 1px dashed var(--arl-border-color); border-radius: 6px; background: var(--arl-bg-light);">
-                          <span style="font-size: 12px; color: var(--arl-text-color); opacity: 0.72;">{{ pageText('pages.proxyManageRedirectHint') }}</span>
-                          <a @click="activeKey = 'proxy'" style="font-size: 12px; white-space: nowrap;">{{ pageText('pages.proxyOpenDedicatedTab') }}</a>
-                        </div>
-                      </a-form-item>
-                    </a-col>
-                    <a-col :xs="24" :md="12">
-                      <a-form-item data-setting-anchor="port_top_10" :label="pageText('pages.top10WebPortsUsedByFrontendPortScan')">
-                        <a-input v-model:value="generalForm.port_top_10" :placeholder="pageText('pages.separateValuesWithCommas')" />
-                      </a-form-item>
-                    </a-col>
-                  </a-row>
-
-                  <a-row :gutter="24">
-                    <a-col :xs="24" :md="12">
                       <a-form-item data-setting-anchor="brute_concurrent" :label="pageText('pages.dnsQueryConcurrencyForRegularSubdomainDiscovery')">
                         <a-input-number v-model:value="generalForm.domain_brute_concurrent" :min="1" style="width: 100%" />
                         <div class="arl-field-hint">
@@ -826,6 +810,10 @@
                       </a-form-item>
                     </a-col>
                   </a-row>
+
+                  <a-form-item data-setting-anchor="port_top_10" :label="pageText('pages.top10WebPortsUsedByFrontendPortScan')">
+                    <a-input v-model:value="generalForm.port_top_10" :placeholder="pageText('pages.separateValuesWithCommas')" />
+                  </a-form-item>
 
 
                   <a-row :gutter="24">

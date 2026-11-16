@@ -589,7 +589,7 @@ export default {
   "configureSystemProxy": "Настроить прокси",
   "openProxySettings": "Настроить прокси >",
   "tianyanchaLocationRestrictedTitle": "API Tianyancha ограничен по региону сервера (bannedLocation)",
-  "tianyanchaLocationRestrictedContent": "Учётные данные Tianyancha настроены, но текущий исходящий IP сервера находится за пределами материкового Китая и заблокирован Tianyancha (HTTP 419 bannedLocation). Укажите прокси материкового Китая в разделе Системные настройки -> Сканирование и параллелизм -> Расширенное сканирование -> Системный прокси.",
+  "tianyanchaLocationRestrictedContent": "Учётные данные Tianyancha настроены, но текущий исходящий IP сервера находится за пределами материкового Китая и заблокирован Tianyancha (HTTP 419 bannedLocation). Укажите прокси материкового Китая в разделе Настройки системы -> Прокси и маршрутизация.",
   "tianyanchaCredentialCheckFailedTitle": "Проверка учётных данных Tianyancha не пройдена",
   "enterpriseBannedLocationHint": "Учётные данные Tianyancha настроены, но исходящий IP сервера находится за пределами материкового Китая и заблокирован гео-ограничением Tianyancha (bannedLocation). Настройте прокси материкового Китая для обхода инвестиций.",
   "investmentTraversalForATianyanchaGidRequiresCommercial": "Обход инвестиций по GID Tianyancha требует коммерческих учётных данных. Настройте их в системных настройках или используйте полное название компании для поиска официальных записей MIIT.",

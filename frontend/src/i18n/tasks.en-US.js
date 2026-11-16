@@ -591,7 +591,7 @@ export default {
   "configureSystemProxy": "Configure proxy",
   "openProxySettings": "Configure proxy >",
   "tianyanchaLocationRestrictedTitle": "Tianyancha API blocked by server region (bannedLocation)",
-  "tianyanchaLocationRestrictedContent": "Tianyancha credentials are configured, but the current server outbound IP is outside mainland China and blocked by Tianyancha (HTTP 419 bannedLocation). Configure a mainland China proxy under System Settings -> Scanning & Concurrency -> Advanced Scanning -> System Proxy.",
+  "tianyanchaLocationRestrictedContent": "Tianyancha credentials are configured, but the current server outbound IP is outside mainland China and blocked by Tianyancha (HTTP 419 bannedLocation). Configure a mainland China proxy under System settings -> Proxy & Egress.",
   "tianyanchaCredentialCheckFailedTitle": "Tianyancha credential check failed",
   "enterpriseBannedLocationHint": "Tianyancha credentials are configured, but the server outbound IP is outside mainland China and blocked by Tianyancha geo-restrictions (bannedLocation). Configure a mainland China system proxy to enable Tianyancha traversal.",
   "investmentTraversalForATianyanchaGidRequiresCommercial": "Investment traversal for a Tianyancha GID requires commercial credentials. Configure them in System settings or use the full company name to search official MIIT records.",
