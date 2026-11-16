@@ -1,6 +1,9 @@
 import aiohttp
 import asyncio
+import base64
+from datetime import datetime, timezone, timedelta
 import inspect
+import json
 import logging
 import math
 import time
@@ -36,6 +39,40 @@ class AsyncTycException(Exception):
     pass
 
 
+class TycAuthRequiredError(AsyncTycException):
+    """天眼查 Token 失效或命中强制登录拦截（不可通过短暂等待自愈）。"""
+    pass
+
+
+def inspect_tyc_token(token):
+    """解析 JWT 格式 tyc_token 的 exp 字段，返回轻量校验摘要（非 JWT 凭据视为不校验过期）。"""
+    raw = str(token or "").strip()
+    if not raw:
+        return {"is_jwt": False, "valid": False, "expired": False, "exp": None, "expired_at": ""}
+    parts = raw.split(".")
+    if len(parts) != 3:
+        return {"is_jwt": False, "valid": True, "expired": False, "exp": None, "expired_at": ""}
+    try:
+        payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64.encode("ascii")).decode("utf-8"))
+        exp = payload.get("exp")
+        if isinstance(exp, (int, float)):
+            exp_ts = float(exp)
+            tz = timezone(timedelta(hours=8))
+            expired_at = datetime.fromtimestamp(exp_ts, tz=tz).strftime("%Y-%m-%d %H:%M:%S")
+            now_ts = time.time()
+            return {
+                "is_jwt": True,
+                "valid": exp_ts > now_ts,
+                "expired": exp_ts <= now_ts,
+                "exp": exp_ts,
+                "expired_at": expired_at,
+            }
+    except Exception:
+        pass
+    return {"is_jwt": False, "valid": True, "expired": False, "exp": None, "expired_at": ""}
+
+
 class AsyncTycClient:
     def __init__(self, gid, token, proxy=None, proxy_router=None):
         self.gid = gid
@@ -55,11 +92,33 @@ class AsyncTycClient:
         self.page_size = 100
         self._progress_cb = None
         self._should_stop_cb = None
+        self._issue_cb = None
+        self._fetch_issues = []
 
-    def attach_task_hooks(self, *, progress_cb=None, should_stop_cb=None):
-        """挂载 TYC 分页进度日志与协同终止回调"""
+    def inspect_token_status(self):
+        return inspect_tyc_token(self.token)
+
+    def attach_task_hooks(self, *, progress_cb=None, should_stop_cb=None, issue_cb=None):
+        """挂载 TYC 分页进度日志、协同终止与异常截断回调"""
         self._progress_cb = progress_cb
         self._should_stop_cb = should_stop_cb
+        self._issue_cb = issue_cb
+
+    def consume_fetch_issues(self):
+        issues = list(self._fetch_issues)
+        self._fetch_issues.clear()
+        return issues
+
+    async def _emit_issue(self, scene_label, issue):
+        self._fetch_issues.append(issue)
+        if self._issue_cb is None:
+            return
+        try:
+            res = self._issue_cb(scene_label, issue)
+            if inspect.isawaitable(res):
+                await res
+        except Exception as e:
+            logger.warning(f"TYC 异常回调执行失败: {e}")
 
     def _get_system_int_config(self, key, default):
         val = getattr(getattr(config, "system", object()), key, None)
@@ -171,7 +230,7 @@ class AsyncTycClient:
 
                         body_text = text or ""
                         if status == 401:
-                            raise AsyncTycException("TYC Token 已失效。")
+                            raise TycAuthRequiredError("TYC Token 已失效 (HTTP 401)")
                         elif status == 419 or "bannedLocation" in body_text or "301000" in body_text:
                             if self.proxy_router:
                                 self.proxy_router.mark_exit_blocked(
@@ -236,9 +295,11 @@ class AsyncTycClient:
                                 self.proxy_router.mark_exit_active(cand.exit_id)
                             return None
 
-                        # 2. 精准识别风控拦截与业务异常
+                        # 2. 精准识别鉴权拦截与可重试风控异常
                         if state != "ok":
-                            if any(kw in message for kw in ["频繁", "验证码", "登录", "异常", "机器人", "操作过快", "校验"]):
+                            if any(kw in message for kw in ["请登录", "未登录", "登录失效", "登录已过期", "登录"]):
+                                raise TycAuthRequiredError(f"天眼查鉴权拦截: {message}")
+                            if any(kw in message for kw in ["频繁", "验证码", "异常", "机器人", "操作过快", "校验"]):
                                 if attempt < max_retries - 1:
                                     logger.warning(f"触发风控 ({message})，挂起 {15 * (attempt + 1)} 秒后重试 (Attempt {attempt+1}/{max_retries})...")
                                     await asyncio.sleep(15 * (attempt + 1))
@@ -262,9 +323,10 @@ class AsyncTycClient:
 
         raise AsyncTycException("天眼查 API 所有候选出口均请求失败")
 
-    async def fetch_all_pages(self, method, path, total_key, list_key, gid_field="gid", gid_val=None, extra_payload=None, delay=1.5, scene_label=""):
+    async def fetch_all_pages(self, method, path, total_key, list_key, gid_field="gid", gid_val=None, extra_payload=None, delay=1.5, scene_label="", record_issue=True):
         results = []
         page_num = 1
+        expected_total = 0
         page_step = max(1, self._get_system_int_config("progress_log_page_step", 5))
         interval_sec = max(1, self._get_system_int_config("progress_log_interval_sec", 30))
         label = scene_label or "资产"
@@ -288,6 +350,16 @@ class AsyncTycClient:
                 data = await self._request(method, path, json_data=json_data, params=params)
             except Exception as e:
                 logger.error(f"分页获取失败 (页码: {page_num}): {e}")
+                if record_issue:
+                    await self._emit_issue(label, {
+                        "scene": label,
+                        "gid": str(gid_val or ""),
+                        "page_num": page_num,
+                        "fetched": len(results),
+                        "expected_total": int(expected_total or 0),
+                        "reason": str(e),
+                        "auth_required": isinstance(e, TycAuthRequiredError),
+                    })
                 break
             if not data:
                 break
@@ -296,6 +368,8 @@ class AsyncTycClient:
                 break
             results.extend(items)
             total = data.get(total_key, 0) or 0
+            if total and not expected_total:
+                expected_total = total
             total_pages = max(1, math.ceil(total / self.page_size)) if total and self.page_size else page_num
             done = len(results) >= total
 
@@ -374,9 +448,18 @@ class AsyncTycClient:
         except Exception as e:
             logger.warning(f"Failed to fetch companyPhoneList for GID {gid}: {e}")
 
-        # 2. 兜底策略 1：从网站备案记录中提取主体全称
+        # 2. 兜底策略 1：从网站备案记录中提取主体全称（仅取首条探测，不记录分页截断告警）
         try:
-            web_records = await self.get_icp_record_list(gid)
+            web_records = await self.fetch_all_pages(
+                "GET",
+                "/cloud-intellectual-property/intellectualProperty/icpRecordList",
+                "itemTotal",
+                "item",
+                "id",
+                gid,
+                scene_label="网站备案",
+                record_issue=False,
+            )
             if web_records:
                 for item in web_records:
                     cn = item.get('companyName') or item.get('unitName')
@@ -387,7 +470,16 @@ class AsyncTycClient:
 
         # 3. 兜底策略 2：从小程序备案记录中提取主体全称
         try:
-            mapp_records = await self.get_mini_program_list(gid)
+            mapp_records = await self.fetch_all_pages(
+                "GET",
+                "/cloud-intellectual-property/intellectualProperty/miniProgramIcpRecordList",
+                "itemTotal",
+                "miniProgramIcpRecordList",
+                "gid",
+                gid,
+                scene_label="小程序",
+                record_issue=False,
+            )
             if mapp_records:
                 for item in mapp_records:
                     detail = item.get('miniProgramIcpRecordDetail') or {}

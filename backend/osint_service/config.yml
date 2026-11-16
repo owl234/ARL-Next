@@ -5,6 +5,7 @@ system:
   web_ui: true
   detail_concurrency: 2
   detail_max_items: 100
+  max_traverse_companies: 100
   progress_log_interval_sec: 30
   progress_log_page_step: 5
   # [注意] 任务并发数(task_concurrency) 已剥离。

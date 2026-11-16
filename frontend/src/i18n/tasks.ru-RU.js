@@ -786,5 +786,17 @@ export default {
   "proxyExitProxiedTag": "Прокси-выход: {name}",
   "proxyExitBlockedTag": "Блокировка выхода ({sec}s)",
   "proxyExitUnavailableTag": "Прокси недоступен",
-  "proxyConfigureEgressLink": "Настройки прокси"
+  "proxyConfigureEgressLink": "Настройки прокси",
+  "detailPendingBadge": "Ожидает",
+  "detailPendingHint": "Название отсутствует; используйте дозаполнение деталей выше",
+  "backfillDetailsBtn": "Дозаполнить детали",
+  "backfillDetailsCountBtn": "Дозаполнить детали ({count})",
+  "backfillDetailsConfirm": "Дозаполнить детали на месте для {count} записей без названия без создания новой задачи и перезаписи активов. Продолжить?",
+  "backfillDetailsStarted": "Дозаполнение деталей поставлено в очередь и выполняется в фоне",
+  "backfillDetailsRunning": "Дозаполнение...",
+  "backfillDetailsFailed": "Не удалось запустить дозаполнение деталей",
+  "resumeFromCheckpointBtn": "Продолжить с точки остановки",
+  "resumeFromCheckpointConfirm": "Продолжить сканирование оставшихся субъектов и измерений с сохранённой точки остановки, сохранив собранные активы. Продолжить?",
+  "resumeFromCheckpointStarted": "Задача поставлена в очередь для продолжения с точки остановки",
+  "resumeFromCheckpointFailed": "Не удалось продолжить с точки остановки"
 };

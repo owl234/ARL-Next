@@ -1,5 +1,6 @@
 from aiohttp import web
 import asyncio
+import inspect
 import logging
 import re
 
@@ -119,25 +120,65 @@ def _schedule_abort(task_id, message):
         logger.error(f"Failed to schedule abort for task {task_id}: {e}")
 
 
+def _validate_recon_start_payload(data):
+    task_id = data.get("task_id") if isinstance(data, dict) else None
+    if not isinstance(task_id, str) or not re.fullmatch(r"[0-9a-fA-F]{24}", task_id):
+        return None, web.json_response({"code": 400, "msg": "Invalid task_id"}, status=400)
+    task_type = data.get("type")
+    if task_type not in ("icp", "tyc"):
+        return None, web.json_response({"code": 400, "msg": "Invalid task type"}, status=400)
+    # ICP 任务以 target 为查询目标；TYC 任务改由 gid 指定主体，不带 target，
+    # 故校验必须按类型区分，否则会误拒全部 TYC 派发。
+    if task_type == "icp" and (not isinstance(data.get("target"), str) or not data["target"].strip()):
+        return None, web.json_response({"code": 400, "msg": "Invalid target"}, status=400)
+    if task_type == "tyc" and not str(data.get("gid") or "").strip():
+        return None, web.json_response({"code": 400, "msg": "Invalid gid"}, status=400)
+    return task_id, None
+
+
 async def start_recon(request):
+    try:
+        data = await request.json()
+        task_id, err_resp = _validate_recon_start_payload(data)
+        if err_resp is not None:
+            return err_resp
+
+        task_manager = request.app.get('task_manager')
+        submit_recon_job(task_manager, data)
+        return web.json_response({"code": 200, "msg": "Task accepted", "task_id": task_id})
+    except Exception as e:
+        return web.json_response({"code": 500, "msg": str(e)}, status=500)
+
+
+async def resume_recon(request):
+    try:
+        data = await request.json()
+        task_id, err_resp = _validate_recon_start_payload(data)
+        if err_resp is not None:
+            return err_resp
+
+        payload = dict(data)
+        payload["resume"] = True
+        payload["action"] = "resume"
+        task_manager = request.app.get('task_manager')
+        submit_recon_job(task_manager, payload)
+        return web.json_response({"code": 200, "msg": "Resume accepted", "task_id": task_id})
+    except Exception as e:
+        return web.json_response({"code": 500, "msg": str(e)}, status=500)
+
+
+async def backfill_details_recon(request):
     try:
         data = await request.json()
         task_id = data.get("task_id") if isinstance(data, dict) else None
         if not isinstance(task_id, str) or not re.fullmatch(r"[0-9a-fA-F]{24}", task_id):
             return web.json_response({"code": 400, "msg": "Invalid task_id"}, status=400)
-        task_type = data.get("type")
-        if task_type not in ("icp", "tyc"):
-            return web.json_response({"code": 400, "msg": "Invalid task type"}, status=400)
-        # ICP 任务以 target 为查询目标；TYC 任务改由 gid 指定主体，不带 target，
-        # 故校验必须按类型区分，否则会误拒全部 TYC 派发。
-        if task_type == "icp" and (not isinstance(data.get("target"), str) or not data["target"].strip()):
-            return web.json_response({"code": 400, "msg": "Invalid target"}, status=400)
-        if task_type == "tyc" and not str(data.get("gid") or "").strip():
-            return web.json_response({"code": 400, "msg": "Invalid gid"}, status=400)
 
+        payload = dict(data)
+        payload["action"] = "backfill_details"
         task_manager = request.app.get('task_manager')
-        submit_recon_job(task_manager, data)
-        return web.json_response({"code": 200, "msg": "Task accepted", "task_id": task_id})
+        submit_recon_job(task_manager, payload)
+        return web.json_response({"code": 200, "msg": "Backfill accepted", "task_id": task_id})
     except Exception as e:
         return web.json_response({"code": 500, "msg": str(e)}, status=500)
 
@@ -165,10 +206,13 @@ async def reconcile_orphan_tasks(app):
     await asyncio.sleep(1)
     task_manager = app.get('task_manager')
     try:
+        import sys
         from clients.job_runner import db, curr_date
+        job_runner_mod = sys.modules.get("clients.job_runner")
 
-        # 1. 处置服务异常重启前中断的 running 任务 -> 置为已停止 (stop)
+        # 1. 处置服务异常重启前中断的 running 任务 -> 置为已停止 (stop)，并同步清理资产组更新锁定指针
         interrupted_tasks = await db['icp_task'].find({"status": "running"}).to_list(length=200)
+        sync_scope_fn = getattr(job_runner_mod, "_sync_scope_after_task_completion", None)
         for it in interrupted_tasks:
             try:
                 it_id = str(it["_id"])
@@ -181,6 +225,8 @@ async def reconcile_orphan_tasks(app):
                         "error_msg": "服务异常重启中断，已自动置为已停止，可按需手动重启"
                     }}
                 )
+                if inspect.iscoroutinefunction(sync_scope_fn):
+                    await sync_scope_fn(it_id, "stop")
                 _schedule_syslog(
                     it_id, "warning", "任务中断",
                     "osint-service 异常重启导致本次测绘中断，任务已自动置为已停止，可按需手动重启。"
@@ -243,14 +289,16 @@ async def reconcile_orphan_tasks(app):
                         "name": wt.get("name", ""),
                         "type": "tyc",
                         "tyc_id": tyc_id,
-                        "tyc_token": tyc_token
+                        "tyc_token": tyc_token,
+                        "resume": bool(wt.get("is_resumed") and wt.get("recon_checkpoint")),
                     }
                 else:
                     options = {
                         "task_id": tid,
                         "target": wt.get("target"),
                         "query_type": query_type,
-                        "type": "icp"
+                        "type": "icp",
+                        "resume": bool(wt.get("is_resumed") and wt.get("recon_checkpoint")),
                     }
 
                 submit_recon_job(task_manager, options)
@@ -314,6 +362,8 @@ async def proxy_reset_cooldown(request):
 
 def setup_recon_routes(app):
     app.router.add_post("/api/v1/recon/start", start_recon)
+    app.router.add_post("/api/v1/recon/resume", resume_recon)
+    app.router.add_post("/api/v1/recon/backfill_details", backfill_details_recon)
     app.router.add_post("/api/v1/recon/stop", stop_recon)
     app.router.add_get("/api/v1/recon/proxy_status", proxy_status)
     app.router.add_post("/api/v1/recon/proxy_reset_cooldown", proxy_reset_cooldown)

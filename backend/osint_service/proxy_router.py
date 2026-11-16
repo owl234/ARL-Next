@@ -162,6 +162,8 @@ class OsintProxyRouter:
         self.last_switch_reason = ""
         self.last_switch_at = 0
         self._rr_index = 0
+        self._fail_streak = {}
+        self._sticky_backup_exit_id = None
         self._seen_reset_epoch = get_global_reset_epoch()
         self._lock = threading.Lock()
         self._rate_locks = {}
@@ -278,6 +280,8 @@ class OsintProxyRouter:
             with self._lock:
                 if cur != self._seen_reset_epoch:
                     self.blocked_exits.clear()
+                    self._fail_streak.clear()
+                    self._sticky_backup_exit_id = None
                     self.active_exit_id = DIRECT_EXIT_ID
                     self.last_switch_reason = "管理员手动重置冷却"
                     self.last_switch_at = int(time.time())
@@ -298,9 +302,16 @@ class OsintProxyRouter:
     def clear_all_cooldowns(self):
         with self._lock:
             self.blocked_exits.clear()
+            self._fail_streak.clear()
+            self._sticky_backup_exit_id = None
             self.active_exit_id = DIRECT_EXIT_ID
             self.last_switch_reason = "管理员手动重置冷却"
             self.last_switch_at = int(time.time())
+
+    def allow_primary_failback(self):
+        """在主体或阶段切换边界解除备机粘性锁定，允许主出口冷却恢复后平滑探测回切。"""
+        with self._lock:
+            self._sticky_backup_exit_id = None
 
     def get_mode(self):
         return str(self.policy.get("mode") or "direct_only")
@@ -335,10 +346,11 @@ class OsintProxyRouter:
             return node_cands or [direct]
         return [direct]
 
-    def get_candidates(self, explicit_proxy=None):
+    def get_candidates(self, explicit_proxy=None, sticky=False):
         """
         返回当前可尝试的有序候选出口列表。
-        - failover：主直连健康时排首位（到点自动回切）；主直连处于 300s 冷却时跳过直连并优先返回健康备机。
+        - failover：主直连健康时排首位（到点自动回切）；主直连处于冷却时跳过直连并优先返回健康备机。
+          当 sticky=True 且当前已切至健康备机时，在本阶段内保持粘性不中途强切回直连。
         - round_robin：在所有健康可用出口间轮转，且其余健康出口跟在后面供单次异常兜底。
         - fixed_proxy：仅返回健康的绑定代理节点。
         - direct_only：仅返回直连（若处于冷却则返回空，由上游等待单次冷却）。
@@ -356,7 +368,11 @@ class OsintProxyRouter:
             self._prune_expired_locked()
             healthy = [c for c in allowed if c.exit_id not in self.blocked_exits]
             mode = self.get_mode()
-            if mode == "round_robin" and len(healthy) > 1:
+            if sticky and mode == "failover" and self._sticky_backup_exit_id:
+                sticky_cand = next((c for c in healthy if c.exit_id == self._sticky_backup_exit_id), None)
+                if sticky_cand is not None:
+                    healthy = [sticky_cand] + [c for c in healthy if c.exit_id != self._sticky_backup_exit_id]
+            elif mode == "round_robin" and len(healthy) > 1:
                 idx = self._rr_index % len(healthy)
                 self._rr_index += 1
                 healthy = healthy[idx:] + healthy[:idx]
@@ -394,22 +410,35 @@ class OsintProxyRouter:
             return min(remaining) if remaining else 0.0
 
     def mark_exit_blocked(self, exit_id, *, reason="", ip="", cooldown_sec=None):
-        cd = max(10, int(cooldown_sec or self.get_cooldown_sec()))
         now = time.time()
         with self._lock:
+            streak = self._fail_streak.get(exit_id, 0) + 1
+            self._fail_streak[exit_id] = streak
+            if cooldown_sec is None:
+                base_cd = max(10, int(self.get_cooldown_sec()))
+                cd = min(1800, base_cd * (2 ** min(streak - 1, 3)))
+            else:
+                cd = max(10, int(cooldown_sec))
+            if self._sticky_backup_exit_id == exit_id:
+                self._sticky_backup_exit_id = None
             self.blocked_exits[exit_id] = {
                 "until_ts": now + cd,
                 "reason": str(reason or "触发风控限制")[:200],
                 "ip": str(ip or ""),
+                "streak": streak,
             }
             self.last_switch_at = int(now)
             self.last_switch_reason = f"{exit_id} 冷却 {cd}s: {str(reason or '风控限制')[:120]}"
+        return cd
 
     def mark_exit_active(self, exit_id, reason=""):
         with self._lock:
             prev = self.active_exit_id
             self.active_exit_id = exit_id
             self.blocked_exits.pop(exit_id, None)
+            self._fail_streak.pop(exit_id, None)
+            if self.get_mode() == "failover":
+                self._sticky_backup_exit_id = exit_id if exit_id != DIRECT_EXIT_ID else None
             if prev != exit_id:
                 self.last_switch_at = int(time.time())
                 self.last_switch_reason = reason or f"切换至出口 {exit_id}"

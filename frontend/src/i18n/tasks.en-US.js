@@ -786,5 +786,17 @@ export default {
   "proxyExitProxiedTag": "Proxy Egress: {name}",
   "proxyExitBlockedTag": "Egress Cooldown ({sec}s)",
   "proxyExitUnavailableTag": "Proxy Unavailable",
-  "proxyConfigureEgressLink": "Proxy Settings"
+  "proxyConfigureEgressLink": "Proxy Settings",
+  "detailPendingBadge": "Pending",
+  "detailPendingHint": "Name details missing; use Backfill Details above to fetch in place",
+  "backfillDetailsBtn": "Backfill Details",
+  "backfillDetailsCountBtn": "Backfill Details ({count})",
+  "backfillDetailsConfirm": "Fetch missing details in place for {count} unnamed app, mini-program, or quick-app records without creating a new task or overwriting existing assets. Continue?",
+  "backfillDetailsStarted": "In-place detail backfill entered queue and is running in background",
+  "backfillDetailsRunning": "Backfilling details...",
+  "backfillDetailsFailed": "Failed to trigger detail backfill",
+  "resumeFromCheckpointBtn": "Resume from Checkpoint",
+  "resumeFromCheckpointConfirm": "Resume remaining entities and dimensions from the last saved checkpoint while keeping already ingested assets. Continue?",
+  "resumeFromCheckpointStarted": "Task entered scheduling queue to resume from checkpoint",
+  "resumeFromCheckpointFailed": "Failed to trigger checkpoint resume"
 };

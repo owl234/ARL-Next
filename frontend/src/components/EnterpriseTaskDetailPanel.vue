@@ -39,7 +39,32 @@
           </a-tag>
         </div>
 
-        <div class="arl-hero-right">
+        <div class="arl-hero-right" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <a-popconfirm
+            v-if="['stop', 'error'].includes(taskStatus) && taskRecord.has_checkpoint"
+            :title="taskText('tasks.resumeFromCheckpointConfirm')"
+            :ok-text="taskText('tasks.resumeFromCheckpointBtn')"
+            :cancel-text="taskText('tasks.cancel')"
+            @confirm="handleResumeCheckpoint"
+          >
+            <a-button type="primary" ghost size="small" :loading="resumeLoading">
+              <template #icon><play-circle-outlined /></template>
+              {{ taskText('tasks.resumeFromCheckpointBtn') }}
+            </a-button>
+          </a-popconfirm>
+          <a-popconfirm
+            v-if="['done', 'stop', 'error'].includes(taskStatus) && (taskRecord.missing_detail_cnt > 0 || taskRecord.detail_backfill_running)"
+            :title="taskText('tasks.backfillDetailsConfirm', { count: taskRecord.missing_detail_cnt || 0 })"
+            :ok-text="taskText('tasks.backfillDetailsBtn')"
+            :cancel-text="taskText('tasks.cancel')"
+            :disabled="backfillLoading || !!taskRecord.detail_backfill_running"
+            @confirm="handleBackfillDetails"
+          >
+            <a-button size="small" :loading="backfillLoading || !!taskRecord.detail_backfill_running" :disabled="backfillLoading || !!taskRecord.detail_backfill_running">
+              <template #icon><sync-outlined :spin="backfillLoading || !!taskRecord.detail_backfill_running" /></template>
+              {{ taskRecord.detail_backfill_running ? taskText('tasks.backfillDetailsRunning') : taskText('tasks.backfillDetailsCountBtn', { count: taskRecord.missing_detail_cnt || 0 }) }}
+            </a-button>
+          </a-popconfirm>
           <a-tooltip v-if="taskStatus === 'done' && (taskRecord.statistic?.web_cnt === 0)" :title="taskText('tasks.thisTaskHasNoWebsiteAssetsToSync')">
             <a-button type="primary" size="small" disabled>
               <template #icon><cloud-sync-outlined /></template>
@@ -189,7 +214,11 @@
             </div>
           </template>
           <template v-else-if="column.key === 'serviceName' || column.key === 'name'">
-            {{ record.serviceName || record.name || '-' }}
+            <template v-if="record.serviceName || record.name">{{ record.serviceName || record.name }}</template>
+            <a-tooltip v-else-if="['app', 'mapp', 'kapp'].includes(activeTab) && record.dataId" :title="taskText('tasks.detailPendingHint')">
+              <a-tag color="warning" style="margin-inline-end: 0;">{{ taskText('tasks.detailPendingBadge') }}</a-tag>
+            </a-tooltip>
+            <span v-else>-</span>
           </template>
           <template v-else-if="column.key === 'serviceLicence' || column.key === 'serviceFilingNumber'">
             {{ record.serviceLicence || record.serviceFilingNumber || record.liscense || '-' }}
@@ -257,7 +286,7 @@ import { useI18n } from 'vue-i18n';
 
 import { ref, reactive, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ArrowLeftOutlined, FilterOutlined, UndoOutlined, SearchOutlined, DownloadOutlined, CloudSyncOutlined, ExportOutlined } from '@ant-design/icons-vue';
+import { ArrowLeftOutlined, FilterOutlined, UndoOutlined, SearchOutlined, DownloadOutlined, CloudSyncOutlined, ExportOutlined, PlayCircleOutlined, SyncOutlined } from '@ant-design/icons-vue';
 import SyncToScopeModal from './SyncToScopeModal.vue';
 import { message } from 'ant-design-vue';
 import request from '../utils/request';
@@ -278,6 +307,8 @@ const taskStatus = ref('');
 const taskRecord = ref({});
 
 const syncModalVisible = ref(false);
+const resumeLoading = ref(false);
+const backfillLoading = ref(false);
 const selectedWebRowKeys = ref([]);
 const selectedWebDomains = ref([]);
 
@@ -733,6 +764,59 @@ const onTabChange = (key) => {
 
 let taskTimer = null;
 let lastStatus = '';
+let wasBackfilling = false;
+
+const ensureDetailPolling = () => {
+  if (!taskTimer && taskId.value) {
+    taskTimer = setInterval(fetchTaskStatistic, 5000);
+  }
+  if (activeTab.value === 'log' && !syslogTimer) {
+    startSyslogTimer();
+  }
+};
+
+const handleResumeCheckpoint = async () => {
+  if (!taskId.value || resumeLoading.value) return;
+  resumeLoading.value = true;
+  try {
+    const res = await request.post(`/icp/resume/${taskId.value}`);
+    if (res && res.code === 200) {
+      message.success(taskText('tasks.resumeFromCheckpointStarted'));
+      taskStatus.value = 'waiting';
+      await fetchTaskStatistic();
+      ensureDetailPolling();
+    } else {
+      message.error(res?.data?.error || res?.message || taskText('tasks.resumeFromCheckpointFailed'));
+    }
+  } catch (err) {
+    message.error(taskText('tasks.networkRequestFailed'));
+  } finally {
+    resumeLoading.value = false;
+  }
+};
+
+const handleBackfillDetails = async () => {
+  if (!taskId.value || backfillLoading.value) return;
+  backfillLoading.value = true;
+  try {
+    const res = await request.post(`/icp/backfill_details/${taskId.value}`, {
+      query_types: ['app', 'mapp', 'kapp']
+    });
+    if (res && res.code === 200) {
+      message.success(taskText('tasks.backfillDetailsStarted'));
+      taskRecord.value = { ...taskRecord.value, detail_backfill_running: true };
+      wasBackfilling = true;
+      await fetchTaskStatistic();
+      ensureDetailPolling();
+    } else {
+      message.error(res?.data?.error || res?.message || taskText('tasks.backfillDetailsFailed'));
+    }
+  } catch (err) {
+    message.error(taskText('tasks.networkRequestFailed'));
+  } finally {
+    backfillLoading.value = false;
+  }
+};
 
 const fetchTaskStatistic = async () => {
   if (!taskId.value) return;
@@ -756,7 +840,8 @@ const fetchTaskStatistic = async () => {
       queryCounts.weibo = stat.weibo_cnt !== undefined ? stat.weibo_cnt : queryCounts.weibo;
 
       const currentStatus = taskData.status;
-      if (['done', 'error', 'stop'].includes(currentStatus)) {
+      const isBackfilling = !!taskData.detail_backfill_running;
+      if (['done', 'error', 'stop'].includes(currentStatus) && !isBackfilling) {
         if (taskTimer) {
           clearInterval(taskTimer);
           taskTimer = null;
@@ -764,11 +849,12 @@ const fetchTaskStatistic = async () => {
         stopSyslogTimer();
         if (activeTab.value === 'log') {
           fetchSyslog(true);
-        } else if (lastStatus && !['done', 'error', 'stop'].includes(lastStatus)) {
+        } else if ((lastStatus && !['done', 'error', 'stop'].includes(lastStatus)) || wasBackfilling) {
           fetchAssets(pagination.current, pagination.pageSize);
         }
       }
       lastStatus = currentStatus;
+      wasBackfilling = isBackfilling;
     }
   } catch (error) {
     console.error('获取任务统计失败:', error);

@@ -786,5 +786,17 @@ export default {
   "proxyExitProxiedTag": "OSINT 代理出口: {name}",
   "proxyExitBlockedTag": "出口冷却中 ({sec}s)",
   "proxyExitUnavailableTag": "代理出口不可用",
-  "proxyConfigureEgressLink": "配置分流策略"
+  "proxyConfigureEgressLink": "配置分流策略",
+  "detailPendingBadge": "待补全",
+  "detailPendingHint": "该记录暂缺详情名称，可通过「补全缺失详情」原位补抓",
+  "backfillDetailsBtn": "补全缺失详情",
+  "backfillDetailsCountBtn": "补全缺失详情 ({count})",
+  "backfillDetailsConfirm": "将仅针对当前任务内 {count} 条缺失名称的 APP/小程序/快应用原位补抓详情，不新建任务、不影响已有资产。确认继续？",
+  "backfillDetailsStarted": "缺失详情原位补全已入队，正在后台执行",
+  "backfillDetailsRunning": "详情补全中...",
+  "backfillDetailsFailed": "详情补全派发失败",
+  "resumeFromCheckpointBtn": "断点续跑",
+  "resumeFromCheckpointConfirm": "将从上次保存的断点继续执行剩余主体与维度测绘，保留已入库资产。确认继续？",
+  "resumeFromCheckpointStarted": "任务已从断点进入调度队列，正在恢复执行",
+  "resumeFromCheckpointFailed": "断点续跑派发失败"
 };

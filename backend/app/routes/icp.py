@@ -13,7 +13,7 @@ logger = get_logger()
 def _request_recon(action, options):
     """只有微服务确认接收或停止后，调用方才报告成功。"""
     import requests
-    if action == "start" and isinstance(options, dict):
+    if action in ("start", "resume", "backfill_details") and isinstance(options, dict):
         try:
             from app.services.proxy_service import get_osint_proxy_bundle
             bundle = get_osint_proxy_bundle()
@@ -159,6 +159,23 @@ class IcpTask(ARLResource):
         if items:
             from app.services.icp_sync_service import enrich_icp_tasks_with_scopes
             enrich_icp_tasks_with_scopes(items)
+            for item in items:
+                cp = item.pop('recon_checkpoint', None)
+                item['has_checkpoint'] = bool(isinstance(cp, dict) and not cp.get('completed') and (cp.get('visited_gids') or cp.get('completed_qts')))
+            if args.get('_id') and len(items) == 1:
+                try:
+                    tid_str = str(items[0].get('_id'))
+                    missing_cnt = conn_db('icp_asset').count_documents({
+                        "task_id": tid_str,
+                        "query_type": {"$in": ["app", "mapp", "kapp"]},
+                        "dataId": {"$exists": True, "$ne": None, "$ne": ""},
+                        "serviceName": {"$in": [None, ""]},
+                        "name": {"$in": [None, ""]},
+                        "appName": {"$in": [None, ""]},
+                    })
+                    items[0]['missing_detail_cnt'] = int(missing_cnt or 0)
+                except Exception:
+                    items[0]['missing_detail_cnt'] = 0
 
         if include_statistics:
             attach_task_statistics(data, conn_db('icp_task'), logger)
@@ -957,26 +974,25 @@ def _restart_single_icp_task(task_id: str):
                         "error": "该资产组已有主体资产更新任务正在执行中"
                     }
 
-        # 克隆旧任务数据
-        task.pop('_id', None)
-        task['status'] = TaskStatus.WAITING
-        task['start_time'] = curr_date()
-        task['end_time'] = "-"
-        task['statistic'] = {"asset_cnt": 0}
-        task['error_msg'] = ""
-        task['prev_task_id'] = str(task_id)
-        for auto_key in (
-            'auto_group', 'auto_group_scan', 'auto_group_claimed',
-            'auto_group_result', 'auto_group_domain_count',
-            'auto_group_scope_id', 'auto_group_time'
-        ):
-            task.pop(auto_key, None)
+        # 白名单构建克隆任务文档，杜绝旧任务 auto_group_* / synced_at / checkpoint 等运行时字段污染新任务
+        restart_whitelist = (
+            "name", "target", "task_type", "gid", "depth", "invest_ratio",
+            "query_type", "enable_icp", "company_name", "group_id",
+        )
+        new_task = {k: task[k] for k in restart_whitelist if k in task}
+        new_task['status'] = TaskStatus.WAITING
+        new_task['start_time'] = curr_date()
+        new_task['end_time'] = "-"
+        new_task['statistic'] = {"asset_cnt": 0}
+        new_task['error_msg'] = ""
+        new_task['prev_task_id'] = str(task_id)
         if synced_scope_id:
-            task['synced_scope_id'] = synced_scope_id
+            new_task['synced_scope_id'] = synced_scope_id
 
         # 插入新任务
-        result = conn_db('icp_task').insert_one(task)
+        result = conn_db('icp_task').insert_one(new_task)
         new_task_id = str(result.inserted_id)
+        task = new_task
 
         # 若原任务关联了资产组，记录 updating_icp_task_id，保持原有主指针 synced_icp_task_id 不变
         if synced_scope_id:
@@ -1120,6 +1136,153 @@ class IcpTaskBatchRestart(ARLResource):
                 "skipped_tasks": skipped_tasks,
                 "failed_tasks": failed_tasks
             })
+        except Exception as e:
+            return build_ret(ErrorMsg.Error, {"error": str(e)})
+
+
+def _build_task_recon_options(task_doc, task_id_str, *, resume=False):
+    query_type = task_doc.get("query_type") or ["web"]
+    if isinstance(query_type, str):
+        query_type = [q.strip() for q in query_type.split(',') if q.strip()]
+    if task_doc.get("task_type") == "tyc":
+        from app.services.tycClient import TycClient
+        client = TycClient()
+        options = {
+            "task_id": task_id_str,
+            "target": task_doc.get("target") or f"TYC_{task_doc.get('gid')}",
+            "gid": task_doc.get("gid"),
+            "depth": task_doc.get("depth", 1),
+            "invest_ratio": task_doc.get("invest_ratio", 0),
+            "query_type": query_type,
+            "enable_icp": task_doc.get("enable_icp", True),
+            "company_name": task_doc.get("company_name") or "",
+            "name": task_doc.get("name", ""),
+            "type": "tyc",
+            "tyc_id": client.gid,
+            "tyc_token": client.token,
+        }
+    else:
+        options = {
+            "task_id": task_id_str,
+            "target": task_doc.get("target"),
+            "query_type": query_type,
+            "type": "icp",
+        }
+    if resume:
+        options["resume"] = True
+        options["action"] = "resume"
+    return options
+
+
+@ns.route('/resume/<string:task_id>')
+class IcpTaskResume(ARLResource):
+    @auth
+    def post(self, task_id):
+        """从断点原位续跑已停止或失败的测绘任务"""
+        try:
+            try:
+                obj_id = bson.ObjectId(task_id)
+            except Exception:
+                return build_ret(ErrorMsg.NotFoundTask, {"task_id": task_id})
+
+            task = conn_db('icp_task').find_one({"_id": obj_id})
+            if not task:
+                return build_ret(ErrorMsg.NotFoundTask, {"task_id": task_id})
+
+            prev_status = task.get("status")
+            if prev_status in [TaskStatus.WAITING, TaskStatus.RUNNING, "running"]:
+                return build_ret(ErrorMsg.TaskIsRunning, {"task_id": task_id})
+            if prev_status not in [TaskStatus.STOP, TaskStatus.ERROR, "stop", "error"]:
+                return build_ret(ErrorMsg.Error, {"task_id": task_id, "error": "仅已停止或异常失败的任务支持断点续跑"})
+
+            cp = task.get("recon_checkpoint")
+            if not isinstance(cp, dict) or cp.get("completed"):
+                return build_ret(ErrorMsg.Error, {"task_id": task_id, "error": "该任务暂无可用断点，请使用重启任务"})
+
+            synced_scope_id = task.get("synced_scope_id")
+            if synced_scope_id:
+                try:
+                    scope_doc = conn_db('asset_scope').find_one({"_id": bson.ObjectId(synced_scope_id)})
+                    existing_utid = (scope_doc or {}).get("updating_icp_task_id")
+                    if existing_utid and str(existing_utid) != str(task_id):
+                        ex_task = conn_db('icp_task').find_one({"_id": bson.ObjectId(existing_utid)})
+                        if ex_task and ex_task.get("status") in [TaskStatus.WAITING, TaskStatus.RUNNING, "running"]:
+                            return build_ret(ErrorMsg.TaskIsRunning, {
+                                "task_id": task_id,
+                                "updating_task_id": str(existing_utid),
+                                "error": "该资产组已有主体资产更新任务正在执行中",
+                            })
+                except Exception:
+                    pass
+
+            conn_db('icp_task').update_one(
+                {"_id": obj_id, "status": prev_status},
+                {"$set": {"status": TaskStatus.WAITING, "end_time": "-", "error_msg": "", "is_resumed": True}},
+            )
+            if synced_scope_id:
+                try:
+                    conn_db('asset_scope').update_one(
+                        {"_id": bson.ObjectId(synced_scope_id)},
+                        {"$set": {"updating_icp_task_id": str(task_id)}},
+                    )
+                except Exception:
+                    pass
+
+            options = _build_task_recon_options(task, str(task_id), resume=True)
+            try:
+                _request_recon("resume", options)
+            except Exception as e:
+                logger.error(f"Failed to trigger resume for task {task_id}: {e}")
+                conn_db('icp_task').update_one(
+                    {"_id": obj_id, "status": TaskStatus.WAITING},
+                    {"$set": {"status": prev_status, "error_msg": f"断点续跑派发失败: {e}", "is_resumed": False}},
+                )
+                if synced_scope_id:
+                    try:
+                        conn_db('asset_scope').update_one(
+                            {"_id": bson.ObjectId(synced_scope_id), "updating_icp_task_id": str(task_id)},
+                            {"$unset": {"updating_icp_task_id": ""}},
+                        )
+                    except Exception:
+                        pass
+                return build_ret(ErrorMsg.Error, {"task_id": task_id, "error": f"微服务调度失败: {e}"})
+
+            return build_ret(ErrorMsg.Success, {"task_id": str(task_id), "status": "waiting"})
+        except Exception as e:
+            return build_ret(ErrorMsg.Error, {"error": str(e)})
+
+
+@ns.route('/backfill_details/<string:task_id>')
+class IcpTaskBackfillDetails(ARLResource):
+    @auth
+    def post(self, task_id):
+        """原位按需补抓任务内缺失名称的 APP/小程序/快应用详情"""
+        from flask import request as flask_request
+        try:
+            try:
+                obj_id = bson.ObjectId(task_id)
+            except Exception:
+                return build_ret(ErrorMsg.NotFoundTask, {"task_id": task_id})
+
+            task = conn_db('icp_task').find_one({"_id": obj_id})
+            if not task:
+                return build_ret(ErrorMsg.NotFoundTask, {"task_id": task_id})
+
+            if task.get("status") in [TaskStatus.WAITING, TaskStatus.RUNNING, "running"] or task.get("detail_backfill_running"):
+                return build_ret(ErrorMsg.TaskIsRunning, {"task_id": task_id, "error": "任务当前正在执行中，请稍后再试"})
+
+            args = flask_request.get_json(silent=True) or {}
+            query_types = args.get("query_types") or ["app", "mapp", "kapp"]
+            try:
+                _request_recon("backfill_details", {
+                    "task_id": str(task_id),
+                    "query_types": query_types,
+                })
+            except Exception as e:
+                logger.error(f"Failed to trigger backfill_details for task {task_id}: {e}")
+                return build_ret(ErrorMsg.Error, {"task_id": task_id, "error": f"微服务调度失败: {e}"})
+
+            return build_ret(ErrorMsg.Success, {"task_id": str(task_id)})
         except Exception as e:
             return build_ret(ErrorMsg.Error, {"error": str(e)})
 

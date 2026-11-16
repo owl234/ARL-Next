@@ -1,3 +1,6 @@
+import base64
+from datetime import datetime, timezone, timedelta
+import json
 import requests
 import time
 from urllib.parse import urljoin
@@ -135,6 +138,15 @@ class TycClient:
                     "请在「系统设置 -> 代理与出口策略」中配置中国大陆境内代理。"
                 )
 
+            if isinstance(data, dict):
+                state = str(data.get("state", "")).lower()
+                message = str(data.get("message", ""))
+                if state and state != "ok" and not any(h in message for h in ("无数据", "未找到", "为空")):
+                    if any(k in message for k in ("请登录", "未登录", "登录失效", "登录")):
+                        raise TycTokenExpiredException(f"TYC Token 已失效或未登录: {message}")
+                    if any(k in message for k in ("频繁", "验证码", "机器人", "操作过快")):
+                        raise TycRiskControlException(f"触发天眼查风控拦截: {message}")
+
             if record_osint_exit_event:
                 record_osint_exit_event(candidate_proxy, blocked=False)
 
@@ -249,6 +261,22 @@ class TycClient:
         return self.fetch_all_pages("GET", "/cloud-business-state/weibo/list",
                                   total_key="total", list_key="result", gid_field="graphId", gid_val=gid)
 
+    @staticmethod
+    def _inspect_jwt_expiry(token):
+        raw = str(token or "").strip()
+        parts = raw.split(".")
+        if len(parts) != 3:
+            return None
+        try:
+            payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64.encode("ascii")).decode("utf-8"))
+            exp = payload.get("exp")
+            if isinstance(exp, (int, float)):
+                return float(exp)
+        except Exception:
+            pass
+        return None
+
     def check_token_detail(self):
         """
         校验天眼查 ID 与 Token 是否有效，并返回结构化错误分类
@@ -256,6 +284,12 @@ class TycClient:
         """
         if not self.gid or not self.token:
             return False, "未配置天眼查 ID 或 Token，请在系统设置 -> 三方API配置中完善信息。", "unconfigured"
+
+        exp_ts = self._inspect_jwt_expiry(self.token)
+        if exp_ts is not None and exp_ts <= time.time():
+            tz = timezone(timedelta(hours=8))
+            expired_at = datetime.fromtimestamp(exp_ts, tz=tz).strftime("%Y-%m-%d %H:%M:%S")
+            return False, f"TYC Token 已于 {expired_at} 过期（第 2 页起将被要求登录），请在系统设置中更新。", "token_expired"
 
         path = "/cloud-business-state/weibo/list"
         params = {

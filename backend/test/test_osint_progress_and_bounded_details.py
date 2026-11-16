@@ -726,16 +726,16 @@ class JobRunnerIncrementalAndDedupTests(unittest.IsolatedAsyncioTestCase):
         fake_cfg = SimpleNamespace(system=sys_cfg, captcha=SimpleNamespace(enable=False))
 
         detail_calls = []
-        web_pages_queried = []
+        app_pages_queried = []
 
         async def fake_query(_name, sp, page_num, _page_size, _proxy=""):
-            if sp == 0:
-                web_pages_queried.append(page_num)
+            if sp == 1:
+                app_pages_queried.append(page_num)
                 if page_num == 2:
                     tasks_col.docs[0]["status"] = "stop"
                 return (
                     True,
-                    {"code": 200, "success": True, "params": {"total": 100, "pages": 4, "list": [{"domain": f"w{page_num}.qq.com"}]}},
+                    {"code": 200, "success": True, "params": {"total": 100, "pages": 4, "list": [{"dataId": f"did-{page_num}", "serviceLicence": "粤B2-KNOWN-APP"}]}},
                     {"p_uuid": "", "token": "tok", "sign": "s", "base_header": {}},
                 )
             return True, {"code": 200, "success": True, "params": {"total": 0, "pages": 0, "list": []}}, None
@@ -762,7 +762,7 @@ class JobRunnerIncrementalAndDedupTests(unittest.IsolatedAsyncioTestCase):
                 "company_name": "腾讯科技有限公司",
             })
 
-        self.assertEqual(web_pages_queried, [1, 2])
+        self.assertEqual(app_pages_queried, [1, 2])
         self.assertEqual(detail_calls, [])
         # 中止后绝不能把 status 改回 done
         self.assertEqual(tasks_col.docs[0]["status"], "stop")

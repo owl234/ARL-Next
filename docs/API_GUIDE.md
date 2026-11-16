@@ -80,6 +80,8 @@
 | **批量停止任务** | `POST /api/task/batch_stop/` | JSON：接口文档所示请求体 | 批量停止指定任务列表 |
 | **停止单个企业任务** | `GET /api/icp/stop/<task_id>` | URL 路径参数：`task_id` (24位十六进制) | ⚠️ **注意：此接口使用 GET 方法执行状态变更**；终止 `osint-service` 测绘协程并释放关联资产组更新锁；已结束任务返回错误码 `105` |
 | **批量停止企业任务** | `POST /api/icp/batch_stop/` | JSON：`{"task_ids": ["<task_id>"]}`（兼容 `task_id` 字段） | 逐项终止活跃企业测绘任务并释放关联资产组更新锁，自动跳过已结束任务，返回 `stopped_ids` / `skipped_ids` / `failed_ids` 明细 |
+| **断点续跑企业任务** | `POST /api/icp/resume/<task_id>` | URL 路径参数：`task_id` | 仅允许处于 `stop` 或 `error` 且存在未完成 `recon_checkpoint` 的任务；原位恢复剩余主体与维度测绘，保留已入库资产 |
+| **原位补全缺失详情** | `POST /api/icp/backfill_details/<task_id>` | URL 路径参数：`task_id`；可选 JSON：`{"query_types": ["app", "mapp", "kapp"]}` | 仅允许终态任务；针对 `dataId` 非空且 `serviceName` 为空的条目按需补抓详情并原位更新，不新建任务 |
 | **删除任务** | `POST /api/task/delete/` | JSON：`{"task_id": ["<task_id>"], "del_task_data": false}` | ⚠️ **前置条件约束**：仅允许删除处于 `done`、`stop` 或 `error` 结束态的任务；运行中任务将返回错误码 `104`（“任务运行中”） |
 | **重启任务** | `POST /api/task/restart/` | JSON：`{"task_id": ["<task_id>"]}` | 仅允许重启已结束的任务 |
 

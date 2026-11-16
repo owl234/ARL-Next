@@ -152,8 +152,8 @@ class beian:
         # APP/小程序/快应用详情查询接口
         self.queryDetailByAppAndMiniId = "https://hlwicpfwc.miit.gov.cn/icpproject_query/api/icpAbbreviateInfo/queryDetailByAppAndMiniId"
         self.sign = "eyJ0eXBlIjozLCJleHREYXRhIjp7InZhZnljb2RlX2ltYWdlX2tleSI6IjUyZWI1ZTcyODViNzRmNWJhM2YwYzBkNTg0YTg3NmVmIn0sImUiOjE3NTY5NzAyNDg4MjN9.Ngpkwn4T7sQoQF9pCk_sQQpH61wQUEKnK2sQ8hDIq-Q"
-        self.token = ""
-        self.token_expire = 0
+        # 按物理出口 exit_id 隔离 token / cookie / 复用会话上下文，避免多出口切换或轮转时混用 IP 绑定凭据
+        self._exit_states = {}
         self.timeout = aiohttp.ClientTimeout(total=getattr(getattr(config, 'system', object()), 'http_client_timeout', 30))
         self.local_ipv6_addresses = get_local_ipv6_addresses() if getattr(getattr(getattr(config, 'proxy', object()), 'local_ipv6_pool', object()), 'enable', False) else []
         self.ipv6_index = 0
@@ -184,13 +184,65 @@ class beian:
         # 全局自适应流控锁与时间戳（单 IP 直连物理消峰）
         self._rate_lock = None
         self._last_req_ts = 0.0
-        self._cached_jsluid = None
         self.proxy_router = OsintProxyRouter()
         self._progress_cb = None
         self._page_cb = None
         self._detail_cb = None
         self._should_stop_cb = None
         self._skip_detail_fn = None
+
+    def _get_exit_state(self, exit_id=None):
+        eid = str(exit_id or DIRECT_EXIT_ID)
+        st = self._exit_states.get(eid)
+        if st is None:
+            st = {
+                "token": "",
+                "token_expire": 0,
+                "jsluid": None,
+                "token_lock": None,
+                "token_lock_loop": None,
+                "session": None,
+                "connector": None,
+                "proxy_url": None,
+                "loop": None,
+            }
+            self._exit_states[eid] = st
+        return st
+
+    def _get_exit_token_lock(self, exit_id=None):
+        st = self._get_exit_state(exit_id)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if st["token_lock"] is None or (loop is not None and st["token_lock_loop"] is not loop):
+            st["token_lock"] = asyncio.Lock()
+            st["token_lock_loop"] = loop
+        return st["token_lock"]
+
+    @property
+    def token(self):
+        return self._get_exit_state(DIRECT_EXIT_ID)["token"]
+
+    @token.setter
+    def token(self, value):
+        self._get_exit_state(DIRECT_EXIT_ID)["token"] = value or ""
+
+    @property
+    def token_expire(self):
+        return self._get_exit_state(DIRECT_EXIT_ID)["token_expire"]
+
+    @token_expire.setter
+    def token_expire(self, value):
+        self._get_exit_state(DIRECT_EXIT_ID)["token_expire"] = value or 0
+
+    @property
+    def _cached_jsluid(self):
+        return self._get_exit_state(DIRECT_EXIT_ID)["jsluid"]
+
+    @_cached_jsluid.setter
+    def _cached_jsluid(self, value):
+        self._get_exit_state(DIRECT_EXIT_ID)["jsluid"] = value
 
     def attach_proxy_router(self, router):
         if router is not None:
@@ -371,18 +423,17 @@ class beian:
             return max(0.0, float(self._waf_block_ts) + float(self.waf_cooldown) - time.time())
         return 0.0
 
-    def _get_jsluid_cookie(self, proxy=None):
-        """获取有效的加速乐/创宇盾 Cookie 标识"""
-        if getattr(self, "_cached_jsluid", None):
-            return self._cached_jsluid
+    def _get_jsluid_cookie(self, proxy=None, exit_id=None):
+        """获取有效的加速乐/创宇盾 Cookie 标识（按 exit_id 隔离）"""
+        st = self._get_exit_state(exit_id)
+        if st.get("jsluid"):
+            return st["jsluid"]
         return uuid.uuid4().hex
 
     @property
     def token_lock(self):
-        """惰性绑定当前事件循环的异步锁，用于 Token 续期 DCL"""
-        if self._token_lock is None:
-            self._token_lock = asyncio.Lock()
-        return self._token_lock
+        """惰性绑定当前事件循环的异步锁，用于默认出口 Token 续期 DCL"""
+        return self._get_exit_token_lock(DIRECT_EXIT_ID)
 
     def _waf_open(self):
         """熔断是否处于开启态（冷却期内不再发起详情请求）"""
@@ -513,10 +564,10 @@ class beian:
             await session.close()
             await connector.close()
 
-    def _iter_attempt_exits(self, explicit_proxy=""):
+    def _iter_attempt_exits(self, explicit_proxy="", sticky=False):
         """返回本次请求可按序尝试的出口候选列表。"""
         if getattr(self, "proxy_router", None) is not None and self.proxy_router.has_structured_policy:
-            cands = self.proxy_router.get_candidates()
+            cands = self.proxy_router.get_candidates(sticky=sticky)
             if cands:
                 return cands
             return []
@@ -531,16 +582,38 @@ class beian:
             )]
         return [ExitCandidate(exit_id=DIRECT_EXIT_ID, name="主服务器直连", proxy_url=None, ip="")]
 
+    async def _close_exit_session(self, exit_id):
+        st = self._exit_states.get(str(exit_id or DIRECT_EXIT_ID))
+        if not st:
+            return
+        sess = st.pop("session", None)
+        conn = st.pop("connector", None)
+        st["loop"] = None
+        st["proxy_url"] = None
+        if sess is not None:
+            try:
+                if not sess.closed:
+                    await sess.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                if not conn.closed:
+                    await conn.close()
+            except Exception:
+                pass
+
     async def _handle_exit_failure(self, cand, *, blocked_ip=None, reason="", cooldown_sec=None, next_cand=None, scene="MIIT查询"):
-        eff_cd = cooldown_sec or (self.proxy_router.get_cooldown_sec() if getattr(self, "proxy_router", None) else self.waf_cooldown)
         if getattr(self, "proxy_router", None) is not None:
-            self.proxy_router.mark_exit_blocked(
+            eff_cd = self.proxy_router.mark_exit_blocked(
                 cand.exit_id,
                 reason=reason,
                 ip=blocked_ip or cand.ip or "",
-                cooldown_sec=eff_cd,
+                cooldown_sec=cooldown_sec,
             )
             await self.proxy_router.persist_runtime_status()
+        else:
+            eff_cd = cooldown_sec or self.waf_cooldown
         if cand.proxy_url:
             if blocked_ip:
                 self._add_blocked_ip(blocked_ip)
@@ -549,10 +622,12 @@ class beian:
         elif blocked_ip:
             self._add_blocked_ip(blocked_ip)
 
-        # 切换物理出口后需重置绑定 IP 的 Token / Cookie 上下文
-        self.token = ""
-        self.token_expire = 0
-        self._cached_jsluid = None
+        # 仅重置当前故障出口绑定的 Token / Cookie / 复用会话，不误伤其他健康出口
+        st = self._get_exit_state(cand.exit_id)
+        st["token"] = ""
+        st["token_expire"] = 0
+        st["jsluid"] = None
+        await self._close_exit_session(cand.exit_id)
 
         if next_cand is not None:
             msg = f"出口 [{cand.name}] 在{scene}时{reason}，已隔离 {eff_cd}s 并立即切换至 [{next_cand.name}] 重试"
@@ -580,11 +655,53 @@ class beian:
             elif switched_from_primary and cand.exit_id != DIRECT_EXIT_ID:
                 await self.proxy_router.emit_syslog("info", "备用节点接管", f"已使用备用代理节点 [{cand.name}] 成功完成本轮请求")
 
-    def _open_candidate_session(self, cand):
-        return self.get_session(
-            proxy=(cand.proxy_url or ""),
-            direct_override=(cand.proxy_url is None),
-        )
+    @asynccontextmanager
+    async def _open_candidate_session(self, cand):
+        # 若调用方或单测显式打桩覆盖了 get_session，则优先走 get_session 以保持兼容性
+        if getattr(type(self), "get_session", None) is not beian.get_session or "get_session" in self.__dict__:
+            async with self.get_session(
+                proxy=(cand.proxy_url or ""),
+                direct_override=(cand.proxy_url is None),
+            ) as sess:
+                yield sess
+            return
+
+        loop = asyncio.get_running_loop()
+        st = self._get_exit_state(cand.exit_id)
+        desired_proxy = cand.proxy_url or None
+        sess = st.get("session")
+        if (
+            sess is None
+            or sess.closed
+            or st.get("loop") is not loop
+            or st.get("proxy_url") != desired_proxy
+        ):
+            await self._close_exit_session(cand.exit_id)
+            local_ipv6 = None
+            if not desired_proxy and self.local_ipv6_addresses:
+                local_ipv6 = self._get_next_ipv6()
+            connector, req_proxy = build_aiohttp_connector(
+                desired_proxy,
+                local_ipv6=local_ipv6,
+                connector_config=self.connector_config,
+            )
+            sess = aiohttp.ClientSession(
+                timeout=self.timeout,
+                connector=connector,
+                headers={'Connection': 'keep-alive'},
+            )
+            sess._arl_proxy = req_proxy
+            sess._arl_proxy_url = desired_proxy
+            st["session"] = sess
+            st["connector"] = connector
+            st["loop"] = loop
+            st["proxy_url"] = desired_proxy
+
+        try:
+            yield sess
+        except Exception:
+            await self._close_exit_session(cand.exit_id)
+            raise
 
     async def get_token(self, proxy="", force=False, exit_candidate=None, _raise_on_exit_err=False):
         if exit_candidate is not None:
@@ -593,6 +710,7 @@ class beian:
             cands = self._iter_attempt_exits(proxy)
             cand = cands[0] if cands else ExitCandidate(exit_id=DIRECT_EXIT_ID, name="主服务器直连", proxy_url=None, ip="")
 
+        st = self._get_exit_state(cand.exit_id)
         base_header = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
@@ -605,20 +723,18 @@ class beian:
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
-            "Cookie": f"__jsluid_s={self._get_jsluid_cookie(cand.proxy_url)}",
+            "Cookie": f"__jsluid_s={self._get_jsluid_cookie(cand.proxy_url, exit_id=cand.exit_id)}",
         }
 
         now_ms = int(time.time() * 1000)
-        if not force and (self.token_expire - now_ms > 60000):
-            return True, self.token, base_header
+        if not force and st["token"] and (st["token_expire"] - now_ms > 60000):
+            return True, st["token"], base_header
 
-        if not hasattr(self, '_token_async_lock'):
-            self._token_async_lock = asyncio.Lock()
-
-        async with self._token_async_lock:
+        lock = self._get_exit_token_lock(cand.exit_id)
+        async with lock:
             now_ms = int(time.time() * 1000)
-            if not force and (self.token_expire - now_ms > 60000):
-                return True, self.token, base_header
+            if not force and st["token"] and (st["token_expire"] - now_ms > 60000):
+                return True, st["token"], base_header
 
             timeStamp = round(time.time() * 1000)
             authSecret = "testtest" + str(timeStamp)
@@ -652,8 +768,8 @@ class beian:
                 t = ujson.loads(req_text)
                 token = t["params"]["bussiness"]
                 expire = int(time.time() * 1000) + t["params"]["expire"]
-                self.token = token
-                self.token_expire = expire
+                st["token"] = token
+                st["token_expire"] = expire
                 return True, token, base_header
             except Exception as e:
                 logger.warning(f"get_token parse failed: {e}")
@@ -910,22 +1026,59 @@ class beian:
             except Exception as e:
                 return False, {"code": 500, "msg": f"解析异常: {e}", "success": False}
 
-        candidates = self._iter_attempt_exits(proxy)
+        candidates = self._iter_attempt_exits(proxy, sticky=True)
         if not candidates:
             self._detail_waf_trip("详情获取")
             return False, {"code": 403, "msg": "当前所有出口均处于冷却状态", "success": False}
 
+        cur_uuid = p_uuid
         cur_token = token
+        cur_sign = sign
         cur_header = base_header
         last_err = {"code": 500, "msg": "详情获取失败", "success": False}
         for idx, cand in enumerate(candidates):
             next_cand = candidates[idx + 1] if (idx + 1 < len(candidates)) else None
-            if idx > 0 and not captcha_enabled:
-                tok_ok, new_tok, new_hdr = await self.get_token(proxy, force=True, exit_candidate=cand)
-                if tok_ok:
-                    cur_token = new_tok
-                    cur_header = new_hdr
-            detail_header = _make_detail_headers(cur_token, cur_header)
+            if idx > 0:
+                if captcha_enabled:
+                    try:
+                        ok_ctx, new_uuid, new_tok, new_sign, new_hdr = await self.check_img(
+                            cand.proxy_url or "",
+                            exit_candidate=cand,
+                            force_token=True,
+                            _raise_on_exit_err=True,
+                        )
+                        if ok_ctx:
+                            cur_uuid = new_uuid
+                            cur_token = new_tok
+                            cur_sign = new_sign
+                            cur_header = new_hdr
+                        else:
+                            last_err = {"code": 500, "msg": str(new_uuid or "验证码刷新失败"), "success": False}
+                            if next_cand is not None:
+                                continue
+                            return False, last_err
+                    except _ExitAttemptError as ctx_err:
+                        await self._handle_exit_failure(
+                            cand,
+                            blocked_ip=ctx_err.blocked_ip,
+                            reason=ctx_err.reason,
+                            cooldown_sec=ctx_err.cooldown_sec,
+                            next_cand=next_cand,
+                            scene="详情补全",
+                        )
+                        if next_cand is not None:
+                            continue
+                        return False, last_err
+                else:
+                    tok_ok, new_tok, new_hdr = await self.get_token(proxy, force=True, exit_candidate=cand)
+                    if tok_ok:
+                        cur_token = new_tok
+                        cur_header = new_hdr
+            detail_header = dict(cur_header)
+            detail_header.update({"Content-Length": length, "uuid": cur_uuid, "token": cur_token, "sign": cur_sign})
+            if not captcha_enabled:
+                detail_header.pop("uuid", None)
+                detail_header.pop("Content-Length", None)
             try:
                 async with self._open_candidate_session(cand) as sess:
                     actual_proxy = getattr(sess, "_arl_proxy", None)
@@ -1100,6 +1253,7 @@ class beian:
             "token": token,
             "sign": sign if getattr(getattr(config, 'captcha', object()), 'enable', False) else self.sign,
             "base_header": base_header,
+            "exit_id": cand.exit_id,
         }
         return True, result, detail_context
 
@@ -1108,7 +1262,7 @@ class beian:
         if self._is_global_waf_blocked():
             return False, "当前访问已被创宇盾拦截", None
 
-        candidates = self._iter_attempt_exits(proxy)
+        candidates = self._iter_attempt_exits(proxy, sticky=True)
         if not candidates:
             return False, "当前所有出口均处于冷却状态", None
 
@@ -1217,22 +1371,60 @@ class beian:
             async def ensure_token_valid():
                 if captcha_enabled:
                     return
+                active_cands = self._iter_attempt_exits(proxy, sticky=True)
+                active_cand = active_cands[0] if active_cands else ExitCandidate(exit_id=DIRECT_EXIT_ID, name="主服务器直连", proxy_url=None, ip="")
+                st = self._get_exit_state(active_cand.exit_id)
                 now_ms = int(time.time() * 1000)
-                if self.token_expire - now_ms >= 60000:
+                if st["token"] and (st["token_expire"] - now_ms >= 60000):
+                    detail_context["token"] = st["token"]
                     return
-                async with self.token_lock:
+                lock = self._get_exit_token_lock(active_cand.exit_id)
+                async with lock:
                     now_ms = int(time.time() * 1000)
-                    if self.token_expire - now_ms >= 60000:
-                        detail_context["token"] = self.token
+                    if st["token"] and (st["token_expire"] - now_ms >= 60000):
+                        detail_context["token"] = st["token"]
                         return
                     try:
                         logger.info("ICP Token 即将过期，正在自动刷新 Token...")
-                        tok_ok, new_tok, _ = await self.get_token(proxy)
+                        tok_ok, new_tok, new_hdr = await self.get_token(proxy, exit_candidate=active_cand)
                         if tok_ok:
                             detail_context["token"] = new_tok
+                            if new_hdr:
+                                detail_context["base_header"] = new_hdr
                             logger.info("ICP Token 自动刷新成功")
                     except Exception as e:
                         logger.warning(f"刷新 Token 异常: {e}")
+
+            async def _refresh_detail_captcha_context():
+                cands = self._iter_attempt_exits(proxy, sticky=True)
+                if not getattr(self, "proxy_router", None) or not self.proxy_router.has_structured_policy:
+                    return await self.check_img(proxy, force_token=True)
+                if not cands:
+                    return False, "当前所有出口均处于冷却状态", "", "", ""
+                for idx, cand in enumerate(cands):
+                    next_cand = cands[idx + 1] if (idx + 1 < len(cands)) else None
+                    try:
+                        res_ctx = await self.check_img(
+                            cand.proxy_url or "",
+                            exit_candidate=cand,
+                            force_token=True,
+                            _raise_on_exit_err=True,
+                        )
+                        if res_ctx[0]:
+                            await self._handle_exit_success(cand, switched_from_primary=(idx > 0))
+                            return res_ctx
+                    except _ExitAttemptError as ctx_err:
+                        await self._handle_exit_failure(
+                            cand,
+                            blocked_ip=ctx_err.blocked_ip,
+                            reason=ctx_err.reason,
+                            cooldown_sec=ctx_err.cooldown_sec,
+                            next_cand=next_cand,
+                            scene="详情验证码刷新",
+                        )
+                        if next_cand is not None:
+                            continue
+                return False, "详情验证码刷新失败", "", "", ""
 
             def _is_waf_failure(d_data):
                 return self._detail_waf_open() or (
@@ -1295,7 +1487,7 @@ class beian:
                                 should_retry = True
                             elif not state["refresh_used_in_streak"]:
                                 state["refresh_used_in_streak"] = True
-                                ok, new_uuid, new_tok, new_sign, new_hdr = await self.check_img(proxy, force_token=True)
+                                ok, new_uuid, new_tok, new_sign, new_hdr = await _refresh_detail_captcha_context()
                                 if ok:
                                     detail_context["p_uuid"] = new_uuid
                                     detail_context["token"] = new_tok
@@ -1353,6 +1545,14 @@ class beian:
                     f"正在补全{target_prefix}{sp_label}详情：待查询 {len(target_indices)} 条{note_suffix}",
                 )
 
+            if captcha_enabled and not detail_context.get("sign") and not await self._check_should_stop():
+                ok_init, init_uuid, init_tok, init_sign, init_hdr = await _refresh_detail_captcha_context()
+                if ok_init:
+                    detail_context["p_uuid"] = init_uuid
+                    detail_context["token"] = init_tok
+                    detail_context["sign"] = init_sign
+                    detail_context["base_header"] = init_hdr
+
             detailed_list = list(items)
             batch_size = max_concurrency
             last_log_ts = time.monotonic()
@@ -1400,7 +1600,7 @@ class beian:
                     if await self._check_should_stop():
                         result["params"]["_stopped"] = True
                         break
-                    await asyncio.sleep(random.uniform(0.8, 1.6))
+                    await asyncio.sleep(random.uniform(0.25, 0.5))
 
             result["params"]["list"] = detailed_list
             missing = max(len(candidate_indices) - stats["enriched"], 0)
@@ -1665,7 +1865,9 @@ class beian:
 
 
     async def cleanup(self):
-        """清理资源 - 移除连接器缓存相关代码"""
+        """关闭并释放按出口缓存的所有会话与连接池资源"""
+        for eid in list(self._exit_states.keys()):
+            await self._close_exit_session(eid)
         logger.info("beian资源清理完成")
 
     def __del__(self):

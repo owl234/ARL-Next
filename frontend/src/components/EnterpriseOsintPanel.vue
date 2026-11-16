@@ -163,6 +163,31 @@
                   {{ assetText('assets.stopUpdate') }}
                 </a-button>
               </a-popconfirm>
+              <a-popconfirm
+                v-if="!isAnyDiscoveryActive && ['stop', 'error'].includes(taskStatus) && taskRecord.has_checkpoint"
+                :title="assetText('tasks.resumeFromCheckpointConfirm')"
+                :ok-text="assetText('tasks.resumeFromCheckpointBtn')"
+                :cancel-text="assetText('tasks.cancel')"
+                @confirm="handleResumeCheckpoint"
+              >
+                <a-button type="primary" ghost size="small" :loading="resumeLoading">
+                  <template #icon><play-circle-outlined /></template>
+                  {{ assetText('tasks.resumeFromCheckpointBtn') }}
+                </a-button>
+              </a-popconfirm>
+              <a-popconfirm
+                v-if="!isAnyDiscoveryActive && ['done', 'stop', 'error'].includes(taskStatus) && (taskRecord.missing_detail_cnt > 0 || taskRecord.detail_backfill_running)"
+                :title="assetText('tasks.backfillDetailsConfirm', { count: taskRecord.missing_detail_cnt || 0 })"
+                :ok-text="assetText('tasks.backfillDetailsBtn')"
+                :cancel-text="assetText('tasks.cancel')"
+                :disabled="backfillLoading || !!taskRecord.detail_backfill_running"
+                @confirm="handleBackfillDetails"
+              >
+                <a-button size="small" :loading="backfillLoading || !!taskRecord.detail_backfill_running" :disabled="backfillLoading || !!taskRecord.detail_backfill_running">
+                  <template #icon><sync-outlined :spin="backfillLoading || !!taskRecord.detail_backfill_running" /></template>
+                  {{ taskRecord.detail_backfill_running ? assetText('tasks.backfillDetailsRunning') : assetText('tasks.backfillDetailsCountBtn', { count: taskRecord.missing_detail_cnt || 0 }) }}
+                </a-button>
+              </a-popconfirm>
               <a-tooltip :title="assetText('assets.changeTheOrganizationLinkedToThisGroupAnd')">
                 <a-button size="small" @click="emit('openBind')">
                   <template #icon><link-outlined /></template>
@@ -435,7 +460,13 @@
 
           <!-- 名称字段多字段兼顾 -->
           <template v-else-if="column.key === 'serviceName' || column.key === 'name'">
-            {{ record.serviceName || record.name || record.webName || record.title || '-' }}
+            <template v-if="record.serviceName || record.name || record.webName || record.title">
+              {{ record.serviceName || record.name || record.webName || record.title }}
+            </template>
+            <a-tooltip v-else-if="['app', 'mapp', 'kapp'].includes(activeTab) && record.dataId" :title="assetText('tasks.detailPendingHint')">
+              <a-tag color="warning" style="margin-inline-end: 0;">{{ assetText('tasks.detailPendingBadge') }}</a-tag>
+            </a-tooltip>
+            <span v-else>-</span>
           </template>
 
           <!-- 法定代表人 -->
@@ -586,6 +617,7 @@ import {
   QrcodeOutlined,
   CopyOutlined,
   RedoOutlined,
+  PlayCircleOutlined,
   CodeOutlined,
   CheckCircleFilled,
   CheckCircleOutlined,
@@ -715,6 +747,8 @@ const isUpdating = ref(false);
 const updatingStatusState = ref('');
 const updateElapsed = ref(0);
 const stopLoading = ref(false);
+const resumeLoading = ref(false);
+const backfillLoading = ref(false);
 let isPanelActive = props.active !== false;
 let updateTimer = null;
 let elapsedTimer = null;
@@ -1087,6 +1121,48 @@ const handleRefreshTask = async () => {
   }
 };
 
+const handleResumeCheckpoint = async () => {
+  if (!props.taskId || isAnyDiscoveryActive.value || resumeLoading.value) return;
+  resumeLoading.value = true;
+  try {
+    const res = await request.post(`/icp/resume/${props.taskId}`);
+    if (res && res.code === 200) {
+      message.success(assetText('tasks.resumeFromCheckpointStarted'));
+      taskStatus.value = 'waiting';
+      await fetchTaskDetail();
+      if (isPanelActive) startBoundTaskPolling();
+    } else {
+      message.error(res?.data?.error || res?.message || assetText('tasks.resumeFromCheckpointFailed'));
+    }
+  } catch (err) {
+    message.error(assetText('assets.networkRequestFailed'));
+  } finally {
+    resumeLoading.value = false;
+  }
+};
+
+const handleBackfillDetails = async () => {
+  if (!props.taskId || isAnyDiscoveryActive.value || backfillLoading.value) return;
+  backfillLoading.value = true;
+  try {
+    const res = await request.post(`/icp/backfill_details/${props.taskId}`, {
+      query_types: ['app', 'mapp', 'kapp']
+    });
+    if (res && res.code === 200) {
+      message.success(assetText('tasks.backfillDetailsStarted'));
+      taskRecord.value = { ...taskRecord.value, detail_backfill_running: true };
+      await fetchTaskDetail();
+      if (isPanelActive) startBoundTaskPolling();
+    } else {
+      message.error(res?.data?.error || res?.message || assetText('tasks.backfillDetailsFailed'));
+    }
+  } catch (err) {
+    message.error(assetText('assets.networkRequestFailed'));
+  } finally {
+    backfillLoading.value = false;
+  }
+};
+
 const handleStopUpdate = async () => {
   const targetStopId = stopTargetTaskId.value;
   if (!targetStopId || stopLoading.value) return;
@@ -1339,6 +1415,7 @@ const fetchTaskDetail = async () => {
   if (!reqTaskId) return;
   const seq = ++latestTaskDetailSeq;
   const prevStatus = taskStatus.value;
+  const prevBackfillRunning = !!(taskRecord.value && taskRecord.value.detail_backfill_running);
   try {
     const res = await request.get(`/icp/task`, { params: { _id: reqTaskId } });
     if (seq !== latestTaskDetailSeq || props.taskId !== reqTaskId) return;
@@ -1359,8 +1436,9 @@ const fetchTaskDetail = async () => {
       queryCounts.kapp = stats.kapp_cnt || 0;
       queryCounts.invest = stats.invest_cnt || 0;
 
-      const isBoundActive = task.status === 'running' || task.status === 'waiting';
-      const wasBoundActive = !!boundTaskTimer || prevStatus === 'running' || prevStatus === 'waiting';
+      const isBackfilling = !!task.detail_backfill_running;
+      const isBoundActive = task.status === 'running' || task.status === 'waiting' || isBackfilling;
+      const wasBoundActive = !!boundTaskTimer || prevStatus === 'running' || prevStatus === 'waiting' || prevBackfillRunning;
 
       if (isBoundActive) {
         if (!props.updatingTaskId && !isUpdating.value && isPanelActive) {
@@ -1375,13 +1453,15 @@ const fetchTaskDetail = async () => {
           stopLogPolling();
         }
         if (wasBoundActive) {
-          if (task.status === 'done') {
-            const total = Object.values(queryCounts).reduce((a, b) => a + (Number(b) || 0), 0);
-            notification.success({
-              message: assetText('assets.organizationAssetDiscoveryCompleted'),
-              description: assetText('assets.theEnterpriseAssetProfileIsUpToDate', { count: total }),
-              duration: 5
-            });
+          if (task.status === 'done' || prevBackfillRunning) {
+            if (task.status === 'done' && !prevBackfillRunning) {
+              const total = Object.values(queryCounts).reduce((a, b) => a + (Number(b) || 0), 0);
+              notification.success({
+                message: assetText('assets.organizationAssetDiscoveryCompleted'),
+                description: assetText('assets.theEnterpriseAssetProfileIsUpToDate', { count: total }),
+                duration: 5
+              });
+            }
             fetchAllTaskWebDomains();
             if (props.scopeId) fetchManagedDomains();
             if (activeTab.value === 'log') {

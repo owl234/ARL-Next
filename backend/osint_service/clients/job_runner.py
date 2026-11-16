@@ -83,10 +83,17 @@ async def _wait_waf_cooldown_once(myicp, task_id, scene, insert_syslog=None):
     return True
 
 
-async def _claim_recon_task(task_id):
+async def _claim_recon_task(task_id, allowed_statuses=("waiting",), is_resume=False):
+    status_filter = allowed_statuses[0] if len(allowed_statuses) == 1 else {"$in": list(allowed_statuses)}
+    set_fields = {"status": "running"}
+    if is_resume:
+        set_fields["end_time"] = "-"
+        set_fields["error_msg"] = ""
+    else:
+        set_fields["start_time"] = curr_date()
     result = await db['icp_task'].update_one(
-        {"_id": ObjectId(task_id), "status": "waiting"},
-        {"$set": {"status": "running", "start_time": curr_date()}}
+        {"_id": ObjectId(task_id), "status": status_filter},
+        {"$set": set_fields}
     )
     return result.matched_count == 1
 
@@ -110,7 +117,10 @@ async def _task_is_running(task_id):
 
 async def run_recon_job(options):
     logger.info(f"Entering run_recon_job with options: {options}")
-    options.get("task_id")
+    action = options.get("action") or ("resume" if options.get("resume") else "start")
+    if action == "backfill_details":
+        await run_backfill_details_job(options)
+        return
     recon_type = options.get("type", "tyc")
     if recon_type == "tyc":
         await run_tyc_job(options)
@@ -228,19 +238,31 @@ async def run_icp_job(options):
     task_id = options.get("task_id")
     target = options.get("target")
     query_types = options.get("query_type", [])
+    is_resume = bool(options.get("resume"))
     if not task_id or not target:
         logger.error(f"Missing required ICP params for task {task_id}")
         if task_id:
             await _abort_recon_task(task_id, "ICP查询", "任务派发参数不完整(缺少 task_id 或查询目标)，无法启动查询")
         return
 
-    if not await _claim_recon_task(task_id):
-        logger.warning(f"ICP task {task_id} claim rejected (already running or not in waiting state)")
+    allowed = ("waiting", "stop", "error") if is_resume else ("waiting",)
+    if not await _claim_recon_task(task_id, allowed_statuses=allowed, is_resume=is_resume):
+        logger.warning(f"ICP task {task_id} claim rejected (already running or not in claimable state)")
         await _log_rejected_claim(task_id, "ICP查询")
         return
 
     total_assets = 0
     error_msg = []
+    counts = {"web": 0, "app": 0, "mapp": 0, "kapp": 0}
+    completed_qts = set()
+    if is_resume:
+        task_doc = await db['icp_task'].find_one({"_id": ObjectId(task_id)}, {"recon_checkpoint": 1, "statistic": 1})
+        cp = (task_doc or {}).get("recon_checkpoint") or {}
+        completed_qts = set(cp.get("completed_qts") or [])
+        stat = (task_doc or {}).get("statistic") or {}
+        for k in counts:
+            counts[k] = int(stat.get(f"{k}_cnt") or 0)
+        total_assets = sum(counts.values())
     
     # We must import ymicp dynamically since we are in clients/
     import sys
@@ -264,8 +286,6 @@ async def run_icp_job(options):
         "mapp": myicp.ymMiniApp,
         "kapp": myicp.ymKuaiApp,
     }
-    
-    counts = {"web": 0, "app": 0, "mapp": 0, "kapp": 0}
     
     async def insert_syslog(level, title, message):
         log_doc = {
@@ -298,149 +318,169 @@ async def run_icp_job(options):
             "info", "出口策略",
             f"OSINT 出口策略模式: {proxy_router.get_mode()}，已绑定备用代理节点 {len(proxy_router.nodes)} 个"
         )
-    await insert_syslog("info", "ICP查询", f"任务开始运行，目标: {target}，类型: {query_types}")
+    if is_resume:
+        await insert_syslog("info", "断点续跑", f"ICP 任务从断点恢复执行，已完成维度: {sorted(completed_qts) or '无'}")
+    else:
+        await insert_syslog("info", "ICP查询", f"任务开始运行，目标: {target}，类型: {query_types}")
 
-    for idx, qt in enumerate(query_types):
-        # 实时检测任务是否被主动终止
-        task_info = await db['icp_task'].find_one({"_id": ObjectId(task_id)}, {"status": 1})
-        if not task_info or task_info.get("status") != "running":
-            await insert_syslog("warning", "任务中止", "检测到 ICP 查询任务已被手动停止，退出执行流程。")
-            logger.info(f"ICP task {task_id} manually stopped.")
-            return
+    try:
+        for idx, qt in enumerate(query_types):
+            if qt in completed_qts:
+                continue
+            # 实时检测任务是否被主动终止
+            task_info = await db['icp_task'].find_one({"_id": ObjectId(task_id)}, {"status": 1})
+            if not task_info or task_info.get("status") != "running":
+                await insert_syslog("warning", "任务中止", "检测到 ICP 查询任务已被手动停止，退出执行流程。")
+                logger.info(f"ICP task {task_id} manually stopped.")
+                return
 
-        if idx > 0:
-            await asyncio.sleep(random.uniform(2.0, 5.0))
-            
-        if qt in handlers:
-            try:
-                # 全局 WAF 熔断：等待冷却后重试一次（仅一次），而非永久跳过该维度
-                _waf_check = getattr(myicp, "_is_global_waf_blocked", None)
-                if callable(_waf_check) and _waf_check():
-                    waited = await _wait_waf_cooldown_once(myicp, task_id, f"{qt}查询")
-                    if not waited:
-                        error_msg.append(f"{qt}: 出口网络被创宇盾封禁，跳过该维度查询")
-                        await insert_syslog("warning", f"{qt}查询", "检测到出口网络触发创宇盾封禁，跳过该维度查询，稍后可重跑补全")
-                        continue
-                    # 长等待后复查任务状态：等待期间用户可能已手动停止
+            if idx > 0:
+                await asyncio.sleep(random.uniform(2.0, 5.0))
+                
+            if qt in handlers:
+                try:
+                    # 全局 WAF 熔断：等待冷却后重试一次（仅一次），而非永久跳过该维度
+                    _waf_check = getattr(myicp, "_is_global_waf_blocked", None)
+                    if callable(_waf_check) and _waf_check():
+                        waited = await _wait_waf_cooldown_once(myicp, task_id, f"{qt}查询")
+                        if not waited:
+                            error_msg.append(f"{qt}: 出口网络被创宇盾封禁，跳过该维度查询")
+                            await insert_syslog("warning", f"{qt}查询", "检测到出口网络触发创宇盾封禁，跳过该维度查询，稍后可重跑补全")
+                            continue
+                        # 长等待后复查任务状态：等待期间用户可能已手动停止
+                        if not await _task_is_running(task_id):
+                            return
+                    await insert_syslog("info", f"{qt}查询", f"开始获取 {qt} 资产数据...")
+                    dim_state = {"page_persisted": False, "count": 0}
+                    dataid_to_docid = {}
+                    if hasattr(myicp, "attach_task_hooks"):
+                        async def _icp_progress_cb(_sp, _stage, message, _qt=qt):
+                            await insert_syslog("info", f"{_qt}查询", message)
+
+                        async def _icp_page_cb(_sp, items_batch, _page_num, _total_pages, _qt=qt, _state=dim_state, _id_map=dataid_to_docid):
+                            nonlocal total_assets
+                            if not await _task_is_running(task_id):
+                                return
+                            docs = []
+                            for asset in items_batch:
+                                doc = dict(asset)
+                                doc.pop('_id', None)
+                                doc_id = ObjectId()
+                                doc['_id'] = doc_id
+                                doc['task_id'] = task_id
+                                doc['query_type'] = _qt
+                                doc['source'] = 'icp'
+                                if doc.get('dataId') is not None:
+                                    _id_map[str(doc['dataId'])] = doc_id
+                                docs.append(doc)
+                            if not docs:
+                                return
+                            _state["page_persisted"] = True
+                            await db['icp_asset'].insert_many(docs, ordered=False)
+                            _state["count"] += len(docs)
+                            total_assets += len(docs)
+                            counts[_qt] += len(docs)
+                            await update_stats()
+
+                        async def _icp_detail_cb(_sp, enriched_items, _qt=qt, _id_map=dataid_to_docid):
+                            if not await _task_is_running(task_id):
+                                return
+                            for item in enriched_items:
+                                did = str(item.get("dataId") or "").strip()
+                                fields = {
+                                    k: v for k, v in item.items()
+                                    if k not in ("_id", "task_id", "query_type") and v not in (None, "")
+                                }
+                                if not fields:
+                                    continue
+                                if did and did in _id_map:
+                                    await db['icp_asset'].update_one({"_id": _id_map[did]}, {"$set": fields})
+                                elif did:
+                                    await db['icp_asset'].update_one(
+                                        {"task_id": task_id, "query_type": _qt, "dataId": item.get("dataId")},
+                                        {"$set": fields},
+                                    )
+
+                        async def _icp_should_stop_cb():
+                            return not await _task_is_running(task_id)
+
+                        myicp.attach_task_hooks(
+                            progress_cb=_icp_progress_cb,
+                            page_cb=_icp_page_cb,
+                            detail_cb=_icp_detail_cb,
+                            should_stop_cb=_icp_should_stop_cb,
+                        )
+
+                    try:
+                        res = await handlers[qt](target, "", "", proxy=sys_proxy)
+                    finally:
+                        if hasattr(myicp, "attach_task_hooks"):
+                            myicp.attach_task_hooks()
+
                     if not await _task_is_running(task_id):
                         return
-                await insert_syslog("info", f"{qt}查询", f"开始获取 {qt} 资产数据...")
-                dim_state = {"page_persisted": False, "count": 0}
-                dataid_to_docid = {}
-                if hasattr(myicp, "attach_task_hooks"):
-                    async def _icp_progress_cb(_sp, _stage, message, _qt=qt):
-                        await insert_syslog("info", f"{_qt}查询", message)
-
-                    async def _icp_page_cb(_sp, items_batch, _page_num, _total_pages, _qt=qt, _state=dim_state, _id_map=dataid_to_docid):
-                        nonlocal total_assets
-                        if not await _task_is_running(task_id):
+                    if res.get("code") == 200 and res.get("params"):
+                        if res["params"].get("_stopped"):
                             return
-                        docs = []
-                        for asset in items_batch:
-                            doc = dict(asset)
-                            doc.pop('_id', None)
-                            doc_id = ObjectId()
-                            doc['_id'] = doc_id
-                            doc['task_id'] = task_id
-                            doc['query_type'] = _qt
-                            if doc.get('dataId') is not None:
-                                _id_map[str(doc['dataId'])] = doc_id
-                            docs.append(doc)
-                        if not docs:
-                            return
-                        _state["page_persisted"] = True
-                        await db['icp_asset'].insert_many(docs, ordered=False)
-                        _state["count"] += len(docs)
-                        total_assets += len(docs)
-                        counts[_qt] += len(docs)
-                        await update_stats()
+                        assets = res["params"].get("list", [])
+                        if not dim_state["page_persisted"]:
+                            if assets:
+                                for asset in assets:
+                                    asset.pop('_id', None)
+                                    asset['task_id'] = task_id
+                                    asset['query_type'] = qt
+                                    asset.setdefault('source', 'icp')
+                                await db['icp_asset'].insert_many(assets, ordered=False)
+                            total_assets += len(assets)
+                            counts[qt] += len(assets)
+                            await update_stats()
+                            assets_count = len(assets)
+                        else:
+                            assets_count = dim_state["count"]
 
-                    async def _icp_detail_cb(_sp, enriched_items, _qt=qt, _id_map=dataid_to_docid):
-                        if not await _task_is_running(task_id):
-                            return
-                        for item in enriched_items:
-                            did = str(item.get("dataId") or "").strip()
-                            fields = {
-                                k: v for k, v in item.items()
-                                if k not in ("_id", "task_id", "query_type") and v not in (None, "")
-                            }
-                            if not fields:
-                                continue
-                            if did and did in _id_map:
-                                await db['icp_asset'].update_one({"_id": _id_map[did]}, {"$set": fields})
-                            elif did:
-                                await db['icp_asset'].update_one(
-                                    {"task_id": task_id, "query_type": _qt, "dataId": item.get("dataId")},
-                                    {"$set": fields},
-                                )
+                        await insert_syslog("info", f"{qt}查询", f"获取完成，共计 {assets_count} 条资产")
 
-                    async def _icp_should_stop_cb():
-                        return not await _task_is_running(task_id)
-
-                    myicp.attach_task_hooks(
-                        progress_cb=_icp_progress_cb,
-                        page_cb=_icp_page_cb,
-                        detail_cb=_icp_detail_cb,
-                        should_stop_cb=_icp_should_stop_cb,
-                    )
-
-                try:
-                    res = await handlers[qt](target, "", "", proxy=sys_proxy)
-                finally:
-                    if hasattr(myicp, "attach_task_hooks"):
-                        myicp.attach_task_hooks()
-
-                if not await _task_is_running(task_id):
-                    return
-                if res.get("code") == 200 and res.get("params"):
-                    if res["params"].get("_stopped"):
-                        return
-                    assets = res["params"].get("list", [])
-                    if not dim_state["page_persisted"]:
-                        if assets:
-                            for asset in assets:
-                                asset.pop('_id', None)
-                                asset['task_id'] = task_id
-                                asset['query_type'] = qt
-                            await db['icp_asset'].insert_many(assets, ordered=False)
-                        total_assets += len(assets)
-                        counts[qt] += len(assets)
-                        await update_stats()
-                        assets_count = len(assets)
-                    else:
-                        assets_count = dim_state["count"]
-
-                    await insert_syslog("info", f"{qt}查询", f"获取完成，共计 {assets_count} 条资产")
-
-                    # 详情降级/上限截断可观测：上游在 params 上回传缺口与跳过统计，避免"任务成功但列大面积空白"
-                    missing = res["params"].get("_detail_missing") or 0
-                    skipped_cap = res["params"].get("_detail_skipped_cap") or 0
-                    circuit_break = bool(res["params"].get("_detail_circuit_break") or res["params"].get("_detail_waf"))
-                    if missing or skipped_cap or circuit_break:
-                        reasons = []
-                        if res["params"].get("_detail_waf"):
-                            reasons.append("触发创宇盾风控熔断")
-                        elif circuit_break:
-                            reasons.append("详情接口连续失败触发保护熔断")
-                        if skipped_cap > 0:
-                            reasons.append(f"受单批详情上限控制跳过 {skipped_cap} 条详情查询")
-                        if not reasons:
-                            reasons.append("详情接口未返回有效数据")
-                        reason_text = "；".join(reasons)
-                        if missing and not (skipped_cap > 0 and not circuit_break and missing == skipped_cap):
-                            error_msg.append(f"{qt}: {reason_text}，{missing} 条详情缺失")
-                        await insert_syslog(
-                            "warning", f"{qt}查询",
-                            f"数据已入库（基础备案号已保留），部分详情未补全：共 {missing} 条无详情（{reason_text}）"
+                        # 详情降级/上限截断可观测：上游在 params 上回传缺口与跳过统计，避免"任务成功但列大面积空白"
+                        missing = res["params"].get("_detail_missing") or 0
+                        skipped_cap = res["params"].get("_detail_skipped_cap") or 0
+                        circuit_break = bool(res["params"].get("_detail_circuit_break") or res["params"].get("_detail_waf"))
+                        if missing or skipped_cap or circuit_break:
+                            reasons = []
+                            if res["params"].get("_detail_waf"):
+                                reasons.append("触发创宇盾风控熔断")
+                            elif circuit_break:
+                                reasons.append("详情接口连续失败触发保护熔断")
+                            if skipped_cap > 0:
+                                reasons.append(f"受单批详情上限控制跳过 {skipped_cap} 条详情查询")
+                            if not reasons:
+                                reasons.append("详情接口未返回有效数据")
+                            reason_text = "；".join(reasons)
+                            if missing and not (skipped_cap > 0 and not circuit_break and missing == skipped_cap):
+                                error_msg.append(f"{qt}: {reason_text}，{missing} 条详情缺失")
+                            await insert_syslog(
+                                "warning", f"{qt}查询",
+                                f"数据已入库（基础备案号已保留），部分详情未补全：共 {missing} 条无详情（{reason_text}）"
+                            )
+                        completed_qts.add(qt)
+                        await db['icp_task'].update_one(
+                            {"_id": ObjectId(task_id)},
+                            {"$set": {"recon_checkpoint": {"completed_qts": sorted(completed_qts), "updated_at": curr_date()}}}
                         )
-                elif res.get("code") != 200:
-                    err_text = res.get('msg') or res.get('message') or 'error'
-                    error_msg.append(f"{qt}: {err_text}")
-                    await insert_syslog("warning", f"{qt}查询", f"接口返回异常: {err_text}")
-            except Exception as e:
-                logger.error(f"ICP Query exception for {qt}: {e}")
-                error_msg.append(f"{qt} error: {str(e)}")
-                await insert_syslog("error", f"{qt}查询", f"执行过程发生异常: {str(e)}")
+                    elif res.get("code") != 200:
+                        err_text = res.get('msg') or res.get('message') or 'error'
+                        error_msg.append(f"{qt}: {err_text}")
+                        await insert_syslog("warning", f"{qt}查询", f"接口返回异常: {err_text}")
+                except Exception as e:
+                    logger.error(f"ICP Query exception for {qt}: {e}")
+                    error_msg.append(f"{qt} error: {str(e)}")
+                    await insert_syslog("error", f"{qt}查询", f"执行过程发生异常: {str(e)}")
+    finally:
+        cleanup_fn = getattr(myicp, "cleanup", None)
+        if callable(cleanup_fn):
+            try:
+                await cleanup_fn()
+            except Exception:
+                pass
         
     # 终态判定口径（与 TYC 任务保持一致）：
     # 只要成功抓取到资产即视为完成，确保前端【同步】资产组按钮畅通；
@@ -516,7 +556,7 @@ def _normalize_tyc_asset(item, query_type, company_name=None):
     return item
 
 
-async def _upsert_task_asset(task_id, query_type, asset, company_name, task_assets_index, source="tyc"):
+async def _upsert_task_asset(task_id, query_type, asset, company_name, task_assets_index, source="tyc", doc_sources=None):
     """
     统一任务全局资产去重与智能增量合并引擎：
     1. 网站备案 (web)：按标准化域名 (domain/ym) 全局去重；
@@ -672,8 +712,23 @@ async def _upsert_task_asset(task_id, query_type, asset, company_name, task_asse
         if asset.get("miniProgramIcpRecordDetail"):
             update_fields["miniProgramIcpRecordDetail"] = asset.get("miniProgramIcpRecordDetail")
 
+        # 仅当跨数据源合并（如既有记录来自 tyc 且本次来自 icp）时才置位 source_synced='tyc+icp'，
+        # 防止纯 MIIT 内部二次合并或详情补全回写把 icp 独占记录误标为 tyc+icp
         if source == "icp":
-            update_fields["source_synced"] = "tyc+icp"
+            existing_src = doc_sources.get(doc_id) if doc_sources is not None else None
+            existing_synced = None
+            if existing_src is None:
+                try:
+                    existing_doc = await db['icp_asset'].find_one({"_id": doc_id}, {"source": 1, "source_synced": 1})
+                    if existing_doc:
+                        existing_src = existing_doc.get("source")
+                        existing_synced = existing_doc.get("source_synced")
+                        if doc_sources is not None and existing_src:
+                            doc_sources[doc_id] = existing_src
+                except Exception:
+                    pass
+            if existing_src == "tyc" or existing_synced == "tyc+icp":
+                update_fields["source_synced"] = "tyc+icp"
 
         if update_fields:
             await db['icp_asset'].update_one({"_id": doc_id}, {"$set": update_fields})
@@ -694,6 +749,8 @@ async def _upsert_task_asset(task_id, query_type, asset, company_name, task_asse
         asset["source"] = source
         ins = await db['icp_asset'].insert_one(asset)
         new_id = ins.inserted_id
+        if doc_sources is not None:
+            doc_sources[new_id] = source
         if key:
             index_dict[key] = new_id
         if lic_key:
@@ -701,7 +758,7 @@ async def _upsert_task_asset(task_id, query_type, asset, company_name, task_asse
         return True
 
 
-async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_index, counts, total_assets_holder, insert_syslog, update_stats, proxy=None, known_named_lics=None):
+async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_index, counts, total_assets_holder, insert_syslog, update_stats, proxy=None, known_named_lics=None, enabled_miit_types=None, doc_sources=None):
     """
     针对指定企业主体发起工信部官方备案双轨查重与补全
     """
@@ -723,6 +780,8 @@ async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_
     }
 
     for qt, (handler, label) in handlers.items():
+        if enabled_miit_types is not None and qt not in enabled_miit_types:
+            continue
         # 实时检测任务是否被主动终止
         task_info = await db['icp_task'].find_one({"_id": ObjectId(task_id)}, {"status": 1})
         if not task_info or task_info.get("status") != "running":
@@ -772,7 +831,8 @@ async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_
                         asset=doc,
                         company_name=company_name,
                         task_assets_index=task_assets_index,
-                        source="icp"
+                        source="icp",
+                        doc_sources=doc_sources,
                     )
                     if is_new:
                         batch_new += 1
@@ -818,7 +878,8 @@ async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_
                             asset=doc_copy,
                             company_name=company_name,
                             task_assets_index=task_assets_index,
-                            source="icp"
+                            source="icp",
+                            doc_sources=doc_sources,
                         )
                         if extra_fields:
                             await db['icp_asset'].update_one({"_id": name_doc_id}, {"$set": extra_fields})
@@ -840,7 +901,8 @@ async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_
                             asset=doc_copy,
                             company_name=company_name,
                             task_assets_index=task_assets_index,
-                            source="icp"
+                            source="icp",
+                            doc_sources=doc_sources,
                         )
                         resolved_id = target_id or index_dict.get(name_key) or index_dict.get(lic_key)
                         if resolved_id and extra_fields:
@@ -888,7 +950,8 @@ async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_
                                 asset=asset,
                                 company_name=company_name,
                                 task_assets_index=task_assets_index,
-                                source="icp"
+                                source="icp",
+                                doc_sources=doc_sources,
                             )
                             if is_new:
                                 batch_new += 1
@@ -943,13 +1006,79 @@ async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_
                 await insert_syslog("warning", "工信部查重", f"主体【{company_name}】工信部 {label} 查询异常 ({err_msg})，已平滑降级跳过")
 
 
+async def _hydrate_task_state_from_db(task_id, task_assets_index, doc_sources, known_named_lics, counts, total_assets_holder):
+    """断点续跑时从 icp_asset 重建内存去重索引、已知许可集合与分维度计数。"""
+    assets_col = db['icp_asset']
+    find_fn = getattr(assets_col, "find", None)
+    if not callable(find_fn):
+        return
+    cursor = find_fn({"task_id": task_id})
+    docs = []
+    if hasattr(cursor, "to_list"):
+        docs = await cursor.to_list(length=50000)
+    elif hasattr(cursor, "__aiter__"):
+        async for d in cursor:
+            docs.append(d)
+    elif isinstance(cursor, list):
+        docs = cursor
+
+    for doc in docs:
+        qt = doc.get("query_type")
+        if qt not in task_assets_index:
+            continue
+        doc_id = doc.get("_id")
+        if doc_id is not None:
+            doc_sources[doc_id] = doc.get("source") or "icp"
+        counts[qt] = counts.get(qt, 0) + 1
+        total_assets_holder[0] += 1
+
+        idx_map = task_assets_index[qt]
+        key = None
+        lic_key = None
+        if qt == "web":
+            val = (doc.get("domain") or doc.get("ym") or "").strip().lower()
+            val = val.replace("http://", "").replace("https://", "").split("/")[0].split(":")[0].strip()
+            key = val or None
+        elif qt in ("app", "mapp", "kapp"):
+            rn = (doc.get("serviceName") or doc.get("name") or doc.get("appName") or "").strip()
+            lic = (doc.get("serviceLicence") or doc.get("serviceFilingNumber") or doc.get("liscense") or "").strip()
+            if rn:
+                key = rn.lower()
+            if lic:
+                lic_key = lic.lower()
+            if not key and lic_key:
+                key = lic_key
+            if rn and lic_key and qt in known_named_lics:
+                known_named_lics[qt].add(lic_key)
+        elif qt == "wechat":
+            rn = (doc.get("name") or doc.get("title") or "").strip()
+            wid = (doc.get("wechatId") or doc.get("publicNum") or "").strip()
+            key = (rn or wid).lower() or None
+        elif qt == "weibo":
+            rl = (doc.get("href") or doc.get("url") or doc.get("link") or "").strip()
+            if rl:
+                key = re.sub(r'\?.*$', '', rl).rstrip('/').lower()
+            else:
+                rn = (doc.get("name") or doc.get("title") or "").strip()
+                key = rn.lower() if rn else None
+        elif qt == "invest":
+            key = str(doc.get("id") or doc.get("name") or "").strip().lower() or None
+
+        if doc_id is not None:
+            if key:
+                idx_map[key] = doc_id
+            if lic_key:
+                idx_map[lic_key] = doc_id
+
+
 async def run_tyc_job(options):
     task_id = options.get("task_id")
     gid = options.get("gid")
-    depth = min(25, max(1, int(options.get("depth", 1) or 1)))
+    depth = min(20, max(1, int(options.get("depth", 1) or 1)))
     invest_ratio = options.get("invest_ratio", 0)
     query_types = options.get("query_type", [])
     enable_icp = bool(options.get("enable_icp", True))
+    is_resume = bool(options.get("resume"))
     tyc_id = options.get("tyc_id")
     tyc_token = options.get("tyc_token")
     if not task_id or not tyc_id or not tyc_token:
@@ -957,10 +1086,27 @@ async def run_tyc_job(options):
         if task_id:
             await _abort_recon_task(task_id, "派发参数缺失", "任务派发参数不完整(缺少 task_id / 天眼查凭据)，无法启动测绘")
         return
-    if not await _claim_recon_task(task_id):
-        logger.warning(f"TYC task {task_id} claim rejected (already running or not in waiting state)")
+    allowed = ("waiting", "stop", "error") if is_resume else ("waiting",)
+    if not await _claim_recon_task(task_id, allowed_statuses=allowed, is_resume=is_resume):
+        logger.warning(f"TYC task {task_id} claim rejected (already running or not in claimable state)")
         await _log_rejected_claim(task_id, "TYC查询")
         return
+
+    raw_max_companies = options.get("max_companies")
+    if raw_max_companies is None:
+        try:
+            import sys as _sys
+            import os as _os
+            _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+            from load_config import config as _osint_cfg
+            raw_max_companies = getattr(getattr(_osint_cfg, "system", object()), "max_traverse_companies", 100)
+        except Exception:
+            raw_max_companies = 100
+    try:
+        max_companies = int(raw_max_companies) if raw_max_companies is not None else 100
+    except (TypeError, ValueError):
+        max_companies = 100
+
     total_assets_holder = [0]
     error_msg = []
     counts = {"web": 0, "app": 0, "mapp": 0, "wechat": 0, "weibo": 0, "invest": 0, "kapp": 0}
@@ -1014,20 +1160,31 @@ async def run_tyc_job(options):
         "kapp": {},
         "invest": {}
     }
+    doc_sources = {}
     gid_to_name = {}
     known_named_lics = {"app": set(), "mapp": set(), "kapp": set()}
     root_company_name = ""
-    # 优先从 task 传参或数据库读取已解析好的官方 company_name
+
+    existing_task_doc = await db['icp_task'].find_one({"_id": ObjectId(task_id)})
     if options.get("company_name"):
         root_company_name = options.get("company_name").strip()
-    if not root_company_name:
-        task_doc = await db['icp_task'].find_one({"_id": ObjectId(task_id)}, {"company_name": 1})
-        if task_doc and task_doc.get("company_name"):
-            root_company_name = task_doc.get("company_name").strip()
+    elif existing_task_doc and existing_task_doc.get("company_name"):
+        root_company_name = str(existing_task_doc.get("company_name")).strip()
+
+    checkpoint = (existing_task_doc or {}).get("recon_checkpoint") or {}
+    if is_resume:
+        await _hydrate_task_state_from_db(
+            task_id, task_assets_index, doc_sources, known_named_lics, counts, total_assets_holder
+        )
+        if isinstance(checkpoint.get("gid_to_name"), dict):
+            gid_to_name.update({str(k): str(v) for k, v in checkpoint["gid_to_name"].items() if v})
 
     sys_proxy = await _resolve_system_proxy(options)
     proxy_router = await _build_osint_proxy_router(options, syslog_cb=insert_syslog)
     client = AsyncTycClient(gid=tyc_id, token=tyc_token, proxy=sys_proxy, proxy_router=proxy_router)
+
+    truncation_notes = []
+    truncation_seen = set()
     if hasattr(client, "attach_task_hooks"):
         async def _tyc_progress_cb(scene_label, msg):
             await insert_syslog("info", f"TYC·{scene_label}", msg)
@@ -1035,10 +1192,39 @@ async def run_tyc_job(options):
         async def _tyc_should_stop_cb():
             return not await _task_is_running(task_id)
 
+        async def _tyc_issue_cb(scene_label, issue):
+            fetched = issue.get("fetched", 0)
+            expected_total = issue.get("expected_total", 0)
+            page_num = issue.get("page_num", 1)
+            reason = issue.get("reason", "未知异常")
+            exp_tip = f"（预期总计 {expected_total} 条）" if expected_total else ""
+            await insert_syslog(
+                "warning",
+                f"TYC·{scene_label}",
+                f"目标 {issue.get('gid') or gid} {scene_label}分页在第 {page_num} 页被拦截或失败（{reason}），已保留前序 {fetched} 条{exp_tip}",
+            )
+            note = f"TYC {scene_label}: {reason}"
+            if note not in truncation_seen:
+                truncation_seen.add(note)
+                truncation_notes.append(note)
+
         client.attach_task_hooks(
             progress_cb=_tyc_progress_cb,
             should_stop_cb=_tyc_should_stop_cb,
+            issue_cb=_tyc_issue_cb,
         )
+
+    if hasattr(client, "inspect_token_status"):
+        tok_status = client.inspect_token_status()
+        if tok_status.get("is_jwt") and tok_status.get("expired"):
+            expired_at = tok_status.get("expired_at") or "未知时间"
+            msg = (
+                f"当前配置的 tyc_token 已于 {expired_at} 过期，天眼查第 2 页起可能触发「请登录以使用完整功能」截断；"
+                f"本次任务将自动保留第 1 页兜底数据并继续联动工信部补全，建议尽快前往系统设置更新凭据。"
+            )
+            await insert_syslog("warning", "凭据预检", msg)
+            truncation_notes.append(f"tyc_token 已于 {expired_at} 过期")
+
     if myicp and hasattr(myicp, "attach_proxy_router"):
         myicp.attach_proxy_router(proxy_router)
     if proxy_router.has_structured_policy and proxy_router.get_mode() != "direct_only":
@@ -1075,19 +1261,29 @@ async def run_tyc_job(options):
     if root_company_name:
         gid_to_name[str(gid)] = root_company_name
 
+    # 工信部双轨查重维度与任务 query_type 对齐（未选 kapp 时不再盲目空跑快应用请求）
+    if query_types:
+        enabled_miit_types = [qt for qt in ("web", "app", "mapp", "kapp") if qt in query_types]
+    else:
+        enabled_miit_types = ["web", "app", "mapp"]
+
     type_map = {
         "invest": "对外投资",
         "web": "备案网站",
         "app": "APP",
         "mapp": "小程序",
         "wechat": "微信公众号",
-        "weibo": "微博"
+        "weibo": "微博",
+        "kapp": "快应用",
     }
     modules_str = ",".join([type_map.get(qt, qt) for qt in query_types])
     ratio_str = f"{invest_ratio}%" if invest_ratio and float(invest_ratio) > 0 else "无限制"
     icp_tip = "开启" if enable_icp else "关闭"
-    config_msg = f"任务开始运行，配置如下：目标(GID): {gid}，查询层数: {depth}，最低投资比例: {ratio_str}，需查询模块: {modules_str}，工信部ICP联动: {icp_tip}"
-    await insert_syslog("info", "TYC查询", config_msg)
+    if is_resume:
+        await insert_syslog("info", "断点续跑", f"任务从断点恢复执行（已入库 {total_assets_holder[0]} 条资产），目标(GID): {gid}")
+    else:
+        config_msg = f"任务开始运行，配置如下：目标(GID): {gid}，查询层数: {depth}，最低投资比例: {ratio_str}，需查询模块: {modules_str}，工信部ICP联动: {icp_tip}"
+        await insert_syslog("info", "TYC查询", config_msg)
     if icp_init_error:
         await insert_syslog(
             "warning", "工信部查重",
@@ -1095,27 +1291,145 @@ async def run_tyc_job(options):
             f"不含工信部官方备案补全：{icp_init_error}"
         )
 
-    visited_gids = {str(gid)}
-    gids_to_query = [gid]
+    visited_gids = set(str(x) for x in (checkpoint.get("visited_gids") or [gid])) if is_resume else {str(gid)}
+    gids_to_query = list(checkpoint.get("level_gids") or [gid]) if is_resume else [gid]
+    start_level = int(checkpoint.get("current_level") or 0) if is_resume else 0
+    tyc_done_gids = set(str(x) for x in (checkpoint.get("tyc_done_gids") or [])) if is_resume else set()
+    miit_done_gids = set(str(x) for x in (checkpoint.get("miit_done_gids") or [])) if is_resume else set()
+    next_gids_resume = list(checkpoint.get("next_gids") or []) if is_resume else []
+    max_cap_logged = bool(checkpoint.get("max_companies_reached")) if is_resume else False
+
+    current_level_holder = [start_level]
+    current_level_gids_holder = [list(gids_to_query)]
+    current_next_gids_holder = [list(next_gids_resume)]
+    stopped_flag = [False]
+
+    async def _save_checkpoint(completed=False):
+        try:
+            await db['icp_task'].update_one(
+                {"_id": ObjectId(task_id)},
+                {"$set": {"recon_checkpoint": {
+                    "current_level": current_level_holder[0],
+                    "level_gids": [str(x) for x in current_level_gids_holder[0]],
+                    "next_gids": [str(x) for x in current_next_gids_holder[0]],
+                    "visited_gids": sorted(visited_gids),
+                    "gid_to_name": dict(gid_to_name),
+                    "tyc_done_gids": sorted(tyc_done_gids),
+                    "miit_done_gids": sorted(miit_done_gids),
+                    "max_companies_reached": max_cap_logged,
+                    "completed": bool(completed),
+                    "updated_at": curr_date(),
+                }}}
+            )
+        except Exception as cp_err:
+            logger.debug(f"Failed to persist recon_checkpoint for {task_id}: {cp_err}")
+
+    async def _ingest_tyc_batch(qt, raw_items, dedup_tip, syslog_title):
+        new_cnt = 0
+        merged_cnt = 0
+        for item in raw_items:
+            item = _normalize_tyc_asset(item, qt, company_name=current_company_name)
+            if qt in known_named_lics:
+                sn_val = (item.get("serviceName") or item.get("name") or item.get("appName") or "").strip()
+                lic_val = (item.get("serviceLicence") or item.get("serviceFilingNumber") or item.get("liscense") or "").strip().lower()
+                if sn_val and lic_val:
+                    known_named_lics[qt].add(lic_val)
+            is_new = await _upsert_task_asset(
+                task_id, qt, item, current_company_name, task_assets_index, source="tyc", doc_sources=doc_sources
+            )
+            if is_new:
+                new_cnt += 1
+            else:
+                merged_cnt += 1
+        counts[qt] += new_cnt
+        total_assets_holder[0] += new_cnt
+        await update_stats()
+        log_tip = f"新增 {new_cnt} 条记录"
+        if merged_cnt > 0:
+            log_tip += f"，{dedup_tip} {merged_cnt} 条"
+        await insert_syslog("info", syslog_title, f"目标 {current_gid} {syslog_title.replace('查询', '')}查询完成，{log_tip}")
+
+    miit_queue = None
+    miit_consumer_task = None
+    if enable_icp and myicp and enabled_miit_types:
+        miit_queue = asyncio.Queue()
+
+        async def _miit_consumer():
+            while True:
+                q_item = await miit_queue.get()
+                try:
+                    if q_item is None:
+                        break
+                    c_gid, c_name = q_item
+                    if str(c_gid) in miit_done_gids:
+                        continue
+                    if not await _task_is_running(task_id):
+                        stopped_flag[0] = True
+                        break
+                    if hasattr(proxy_router, "allow_primary_failback"):
+                        proxy_router.allow_primary_failback()
+                    if c_name:
+                        await _run_company_icp_enrichment(
+                            task_id=task_id,
+                            company_name=c_name,
+                            myicp=myicp,
+                            task_assets_index=task_assets_index,
+                            counts=counts,
+                            total_assets_holder=total_assets_holder,
+                            insert_syslog=insert_syslog,
+                            update_stats=update_stats,
+                            proxy=sys_proxy,
+                            known_named_lics=known_named_lics,
+                            enabled_miit_types=enabled_miit_types,
+                            doc_sources=doc_sources,
+                        )
+                        if not await _task_is_running(task_id):
+                            stopped_flag[0] = True
+                            break
+                    else:
+                        await insert_syslog("warning", "工信部查重", f"企业 GID {c_gid} 未能获取到官方全称，跳过工信部二次查重")
+                    miit_done_gids.add(str(c_gid))
+                    await _save_checkpoint(completed=False)
+                finally:
+                    miit_queue.task_done()
+
+        miit_consumer_task = asyncio.create_task(_miit_consumer())
+        # 断点恢复时先将此前已完成 TYC 但尚未跑完 MIIT 的主体补入消费队列
+        if is_resume:
+            for done_gid in sorted(tyc_done_gids):
+                if done_gid not in miit_done_gids:
+                    await miit_queue.put((done_gid, gid_to_name.get(done_gid, "")))
+
     try:
-        for level in range(depth):
+        for level in range(start_level, depth):
+            current_level_holder[0] = level
+            current_level_gids_holder[0] = list(gids_to_query)
+            next_gids = list(next_gids_resume) if (is_resume and level == start_level and next_gids_resume) else []
+            next_gids_resume = []
+            current_next_gids_holder[0] = next_gids
             await insert_syslog("info", "TYC查询", f"开始执行第 {level + 1} 层穿透查询，共 {len(gids_to_query)} 个目标...")
-            next_gids = []
+
             for idx, current_gid in enumerate(gids_to_query):
+                if stopped_flag[0]:
+                    break
                 # 在抓取每家公司前检查任务是否被中止
                 task_info = await db['icp_task'].find_one({"_id": ObjectId(task_id)}, {"status": 1})
                 if not task_info or task_info.get("status") != "running":
                     await insert_syslog("warning", "任务中止", "检测到任务已被手动停止，退出执行流程。")
                     logger.info(f"Task {task_id} manually stopped.")
+                    stopped_flag[0] = True
                     return
 
-                current_company_name = root_company_name if current_gid == gid else gid_to_name.get(str(current_gid), "")
+                if str(current_gid) in tyc_done_gids:
+                    continue
+
+                current_company_name = root_company_name if str(current_gid) == str(gid) else gid_to_name.get(str(current_gid), "")
                 if not current_company_name:
                     try:
                         current_company_name = await client.get_company_name(current_gid)
                         if current_company_name:
                             gid_to_name[str(current_gid)] = current_company_name
-                            if current_gid == gid:
+                            if str(current_gid) == str(gid):
                                 root_company_name = current_company_name
                                 await db['icp_task'].update_one({"_id": ObjectId(task_id)}, {"$set": {"company_name": root_company_name}})
                             await insert_syslog("info", "主体解析", f"已成功定向解析到企业官方全称【{current_company_name}】(GID: {current_gid})")
@@ -1189,14 +1503,23 @@ async def run_tyc_job(options):
 
                                 if is_passed:
                                     item = _normalize_tyc_asset(item, 'invest', company_name=current_company_name)
-                                    is_new = await _upsert_task_asset(task_id, 'invest', item, current_company_name, task_assets_index, source="tyc")
+                                    is_new = await _upsert_task_asset(
+                                        task_id, 'invest', item, current_company_name, task_assets_index, source="tyc", doc_sources=doc_sources
+                                    )
                                     sub_gid = str(item.get("id"))
                                     sub_name = item.get("name")
                                     if sub_gid and sub_name:
                                         gid_to_name[sub_gid] = sub_name.strip()
                                     if sub_gid and sub_gid not in visited_gids:
-                                        visited_gids.add(sub_gid)
-                                        next_gids.append(item.get("id"))
+                                        if max_companies <= 0 or len(visited_gids) < max_companies:
+                                            visited_gids.add(sub_gid)
+                                            next_gids.append(item.get("id"))
+                                        elif not max_cap_logged:
+                                            max_cap_logged = True
+                                            await insert_syslog(
+                                                "warning", "深穿透保护",
+                                                f"已达到单任务穿透主体数量上限（{max_companies} 家），停止向更深层扩展新子公司"
+                                            )
                                     if is_new:
                                         passed_count += 1
                                 else:
@@ -1221,23 +1544,7 @@ async def run_tyc_job(options):
                         await insert_syslog("info", "网站查询", f"正在查询目标 {current_gid} 的网站备案...")
                         web_list = await client.get_icp_record_list(current_gid)
                         if web_list:
-                            new_web_count = 0
-                            merged_web_count = 0
-                            for item in web_list:
-                                item = _normalize_tyc_asset(item, 'web', company_name=current_company_name)
-                                is_new = await _upsert_task_asset(task_id, 'web', item, current_company_name, task_assets_index, source="tyc")
-                                if is_new:
-                                    new_web_count += 1
-                                else:
-                                    merged_web_count += 1
-
-                            counts["web"] += new_web_count
-                            total_assets_holder[0] += new_web_count
-                            await update_stats()
-                            log_tip = f"新增 {new_web_count} 条记录"
-                            if merged_web_count > 0:
-                                log_tip += f"，全局域名去重合并 {merged_web_count} 条"
-                            await insert_syslog("info", "网站查询", f"目标 {current_gid} 网站备案查询完成，{log_tip}")
+                            await _ingest_tyc_batch('web', web_list, "全局域名去重合并", "网站查询")
                     except Exception as e:
                         logger.error(f"TYC Query exception for web: {e}")
                         error_msg.append(f"web error: {str(e)}")
@@ -1250,27 +1557,7 @@ async def run_tyc_job(options):
                         await insert_syslog("info", "APP查询", f"正在查询目标 {current_gid} 的APP...")
                         app_list = await client.get_app_list(current_gid)
                         if app_list:
-                            new_app_count = 0
-                            merged_app_count = 0
-                            for item in app_list:
-                                item = _normalize_tyc_asset(item, 'app', company_name=current_company_name)
-                                sn_val = (item.get("serviceName") or item.get("name") or item.get("appName") or "").strip()
-                                lic_val = (item.get("serviceLicence") or item.get("serviceFilingNumber") or item.get("liscense") or "").strip().lower()
-                                if sn_val and lic_val:
-                                    known_named_lics["app"].add(lic_val)
-                                is_new = await _upsert_task_asset(task_id, 'app', item, current_company_name, task_assets_index, source="tyc")
-                                if is_new:
-                                    new_app_count += 1
-                                else:
-                                    merged_app_count += 1
-
-                            counts["app"] += new_app_count
-                            total_assets_holder[0] += new_app_count
-                            await update_stats()
-                            log_tip = f"新增 {new_app_count} 条记录"
-                            if merged_app_count > 0:
-                                log_tip += f"，同名APP去重合并 {merged_app_count} 条"
-                            await insert_syslog("info", "APP查询", f"目标 {current_gid} APP查询完成，{log_tip}")
+                            await _ingest_tyc_batch('app', app_list, "同名APP去重合并", "APP查询")
                     except Exception as e:
                         logger.error(f"TYC Query exception for app: {e}")
                         error_msg.append(f"app error: {str(e)}")
@@ -1283,23 +1570,7 @@ async def run_tyc_job(options):
                         await insert_syslog("info", "微信查询", f"正在查询目标 {current_gid} 的微信公众号...")
                         wechat_list = await client.get_wechat_list(current_gid)
                         if wechat_list:
-                            new_wechat_count = 0
-                            merged_wechat_count = 0
-                            for item in wechat_list:
-                                item = _normalize_tyc_asset(item, 'wechat', company_name=current_company_name)
-                                is_new = await _upsert_task_asset(task_id, 'wechat', item, current_company_name, task_assets_index, source="tyc")
-                                if is_new:
-                                    new_wechat_count += 1
-                                else:
-                                    merged_wechat_count += 1
-
-                            counts["wechat"] += new_wechat_count
-                            total_assets_holder[0] += new_wechat_count
-                            await update_stats()
-                            log_tip = f"新增 {new_wechat_count} 条记录"
-                            if merged_wechat_count > 0:
-                                log_tip += f"，同名公众号去重合并 {merged_wechat_count} 条"
-                            await insert_syslog("info", "微信查询", f"目标 {current_gid} 微信查询完成，{log_tip}")
+                            await _ingest_tyc_batch('wechat', wechat_list, "同名公众号去重合并", "微信查询")
                     except Exception as e:
                         logger.error(f"TYC Query exception for wechat: {e}")
                         error_msg.append(f"wechat error: {str(e)}")
@@ -1312,23 +1583,7 @@ async def run_tyc_job(options):
                         await insert_syslog("info", "微博查询", f"正在查询目标 {current_gid} 的微博...")
                         weibo_list = await client.get_weibo_list(current_gid)
                         if weibo_list:
-                            new_weibo_count = 0
-                            merged_weibo_count = 0
-                            for item in weibo_list:
-                                item = _normalize_tyc_asset(item, 'weibo', company_name=current_company_name)
-                                is_new = await _upsert_task_asset(task_id, 'weibo', item, current_company_name, task_assets_index, source="tyc")
-                                if is_new:
-                                    new_weibo_count += 1
-                                else:
-                                    merged_weibo_count += 1
-
-                            counts["weibo"] += new_weibo_count
-                            total_assets_holder[0] += new_weibo_count
-                            await update_stats()
-                            log_tip = f"新增 {new_weibo_count} 条记录"
-                            if merged_weibo_count > 0:
-                                log_tip += f"，同链接微博去重合并 {merged_weibo_count} 条"
-                            await insert_syslog("info", "微博查询", f"目标 {current_gid} 微博查询完成，{log_tip}")
+                            await _ingest_tyc_batch('weibo', weibo_list, "同链接微博去重合并", "微博查询")
                     except Exception as e:
                         logger.error(f"TYC Query exception for weibo: {e}")
                         error_msg.append(f"weibo error: {str(e)}")
@@ -1341,63 +1596,55 @@ async def run_tyc_job(options):
                         await insert_syslog("info", "小程序查询", f"正在查询目标 {current_gid} 的小程序...")
                         mapp_list = await client.get_mini_program_list(current_gid)
                         if mapp_list:
-                            new_mapp_count = 0
-                            merged_mapp_count = 0
-                            for item in mapp_list:
-                                item = _normalize_tyc_asset(item, 'mapp', company_name=current_company_name)
-                                sn_val = (item.get("serviceName") or item.get("name") or "").strip()
-                                lic_val = (item.get("serviceLicence") or item.get("serviceFilingNumber") or "").strip().lower()
-                                if sn_val and lic_val:
-                                    known_named_lics["mapp"].add(lic_val)
-                                is_new = await _upsert_task_asset(task_id, 'mapp', item, current_company_name, task_assets_index, source="tyc")
-                                if is_new:
-                                    new_mapp_count += 1
-                                else:
-                                    merged_mapp_count += 1
-
-                            counts["mapp"] += new_mapp_count
-                            total_assets_holder[0] += new_mapp_count
-                            await update_stats()
-                            log_tip = f"新增 {new_mapp_count} 条记录"
-                            if merged_mapp_count > 0:
-                                log_tip += f"，同名小程序去重合并 {merged_mapp_count} 条"
-                            await insert_syslog("info", "小程序查询", f"目标 {current_gid} 小程序查询完成，{log_tip}")
+                            await _ingest_tyc_batch('mapp', mapp_list, "同名小程序去重合并", "小程序查询")
                     except Exception as e:
                         logger.error(f"TYC Query exception for mapp: {e}")
                         error_msg.append(f"mapp error: {str(e)}")
                         await insert_syslog("error", "小程序查询", f"目标 {current_gid} 小程序查询异常: {str(e)}")
 
-                # 工信部官方备案双轨查重与补全 (针对当前企业实体)
-                if enable_icp and myicp:
-                    if current_company_name:
-                        await _run_company_icp_enrichment(
-                            task_id=task_id,
-                            company_name=current_company_name,
-                            myicp=myicp,
-                            task_assets_index=task_assets_index,
-                            counts=counts,
-                            total_assets_holder=total_assets_holder,
-                            insert_syslog=insert_syslog,
-                            update_stats=update_stats,
-                            proxy=sys_proxy,
-                            known_named_lics=known_named_lics
-                        )
-                        if not await _task_is_running(task_id):
-                            return
-                    else:
-                        await insert_syslog("warning", "工信部查重", f"企业 GID {current_gid} 未能获取到官方全称，跳过工信部二次查重")
+                tyc_done_gids.add(str(current_gid))
+                current_next_gids_holder[0] = list(next_gids)
+                await _save_checkpoint(completed=False)
+
+                # 投递至 MIIT 单消费者队列并发查重（TYC 生产者继续处理下一家主体）
+                if miit_queue is not None and str(current_gid) not in miit_done_gids:
+                    await miit_queue.put((current_gid, current_company_name))
+
+            if stopped_flag[0] or not await _task_is_running(task_id):
+                stopped_flag[0] = True
+                return
 
             gids_to_query = next_gids
+            current_level_holder[0] = level + 1
+            current_level_gids_holder[0] = list(gids_to_query)
+            current_next_gids_holder[0] = []
+            await _save_checkpoint(completed=False)
             if not gids_to_query:
                 break
+
+        if miit_queue is not None and miit_consumer_task is not None:
+            await miit_queue.put(None)
+            await miit_consumer_task
+            if stopped_flag[0] or not await _task_is_running(task_id):
+                return
     finally:
+        if miit_consumer_task is not None and not miit_consumer_task.done():
+            miit_consumer_task.cancel()
+            try:
+                await miit_consumer_task
+            except (asyncio.CancelledError, Exception):
+                pass
         if myicp:
             try:
                 await myicp.cleanup()
             except Exception:
                 pass
 
-    tyc_task_status = "done" if total_assets_holder[0] > 0 else ("error" if error_msg else "done")
+    if stopped_flag[0] or not await _task_is_running(task_id):
+        return
+
+    all_errors = list(error_msg) + list(truncation_notes)
+    tyc_task_status = "done" if total_assets_holder[0] > 0 else ("error" if all_errors else "done")
     update_data = {
         "$set": {
             "status": tyc_task_status,
@@ -1411,11 +1658,191 @@ async def run_tyc_job(options):
                 "wechat_cnt": counts["wechat"],
                 "weibo_cnt": counts["weibo"],
                 "kapp_cnt": counts["kapp"]
-            }
+            },
+            "recon_checkpoint": {
+                "current_level": current_level_holder[0],
+                "level_gids": [],
+                "next_gids": [],
+                "visited_gids": sorted(visited_gids),
+                "gid_to_name": dict(gid_to_name),
+                "tyc_done_gids": sorted(tyc_done_gids),
+                "miit_done_gids": sorted(miit_done_gids),
+                "max_companies_reached": max_cap_logged,
+                "completed": True,
+                "updated_at": curr_date(),
+            },
         }
     }
-    if error_msg:
-        update_data["$set"]["error_msg"] = "; ".join(error_msg)
+    if all_errors:
+        update_data["$set"]["error_msg"] = "; ".join(all_errors)
     await _finish_recon_task(task_id, tyc_task_status, update_data)
     await insert_syslog("info", "任务完成", f"TYC+工信部联合测绘任务执行结束，共获取 {total_assets_holder[0]} 条资产")
     logger.info(f"TYC query task {task_id} completed.")
+
+
+async def run_backfill_details_job(options):
+    """
+    原位补全已有任务中缺失名称（serviceName 为空且带 dataId）的 APP/小程序/快应用详情，
+    不新建任务、不重跑列表分页，结束后恢复任务原先终态。
+    """
+    task_id = options.get("task_id")
+    if not task_id:
+        return
+
+    task_doc = await db['icp_task'].find_one({"_id": ObjectId(task_id)})
+    if not task_doc:
+        logger.warning(f"Backfill task {task_id} not found")
+        return
+    prev_status = task_doc.get("status")
+    if prev_status not in ("done", "stop", "error"):
+        logger.warning(f"Backfill task {task_id} skipped: status={prev_status}")
+        return
+
+    claim_res = await db['icp_task'].update_one(
+        {"_id": ObjectId(task_id), "status": prev_status},
+        {"$set": {"status": "running", "detail_backfill_running": True}},
+    )
+    if getattr(claim_res, "matched_count", 0) != 1:
+        return
+
+    async def insert_syslog(level, title, message):
+        try:
+            await db['syslog'].insert_one({
+                "task_id": task_id,
+                "level": level,
+                "title": title,
+                "message": message,
+                "create_time": curr_date(),
+            })
+        except Exception:
+            pass
+
+    target_qts = options.get("query_types") or ["app", "mapp", "kapp"]
+    sp_map = {"app": (1, "移动APP"), "mapp": (2, "小程序"), "kapp": (3, "快应用")}
+    myicp = None
+    filled_total = 0
+    remaining_total = 0
+    try:
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from ymicp import beian
+
+        myicp = beian()
+        sys_proxy = await _resolve_system_proxy(options)
+        proxy_router = await _build_osint_proxy_router(options, syslog_cb=insert_syslog)
+        if hasattr(myicp, "attach_proxy_router"):
+            myicp.attach_proxy_router(proxy_router)
+
+        assets_col = db['icp_asset']
+        cursor = assets_col.find({
+            "task_id": task_id,
+            "query_type": {"$in": list(target_qts)},
+        })
+        if hasattr(cursor, "to_list"):
+            all_docs = await cursor.to_list(length=50000)
+        elif hasattr(cursor, "__aiter__"):
+            all_docs = [d async for d in cursor]
+        elif isinstance(cursor, list):
+            all_docs = list(cursor)
+        else:
+            all_docs = []
+
+        missing_by_qt = {}
+        for doc in all_docs:
+            qt = doc.get("query_type")
+            if qt not in sp_map:
+                continue
+            if not doc.get("dataId"):
+                continue
+            sn = (doc.get("serviceName") or doc.get("name") or doc.get("appName") or "").strip()
+            if sn:
+                continue
+            missing_by_qt.setdefault(qt, []).append(doc)
+
+        pending_count = sum(len(v) for v in missing_by_qt.values())
+        if pending_count == 0:
+            await insert_syslog("info", "详情补全", "当前任务不存在缺失名称的待补全资产。")
+            return
+
+        await insert_syslog("info", "详情补全", f"开始原位补全缺失详情，共发现 {pending_count} 条待补全记录...")
+
+        for qt, docs_list in missing_by_qt.items():
+            if not await _task_is_running(task_id):
+                break
+            sp, label = sp_map[qt]
+            id_by_dataid = {str(d.get("dataId")): d.get("_id") for d in docs_list if d.get("dataId") is not None}
+
+            async def _bf_progress_cb(_sp, _stage, message, _label=label):
+                await insert_syslog("info", f"详情补全·{_label}", message)
+
+            async def _bf_should_stop_cb():
+                return not await _task_is_running(task_id)
+
+            async def _bf_detail_cb(_sp, enriched_items, _id_map=id_by_dataid, _qt=qt):
+                nonlocal filled_total
+                if not await _task_is_running(task_id):
+                    return
+                for item in enriched_items:
+                    did = str(item.get("dataId") or "").strip()
+                    doc_id = _id_map.get(did) or item.get("_id")
+                    extra_fields = {
+                        k: v for k, v in item.items()
+                        if k not in ("_id", "task_id", "query_type") and v not in (None, "")
+                    }
+                    if not extra_fields:
+                        continue
+                    sn = (item.get("serviceName") or item.get("name") or item.get("appName") or "").strip()
+                    if sn:
+                        extra_fields["serviceName"] = sn
+                        if _qt == "app":
+                            extra_fields["appName"] = sn
+                        filled_total += 1
+                    if doc_id is not None:
+                        await db['icp_asset'].update_one({"_id": doc_id}, {"$set": extra_fields})
+
+            myicp.attach_task_hooks(
+                progress_cb=_bf_progress_cb,
+                detail_cb=_bf_detail_cb,
+                should_stop_cb=_bf_should_stop_cb,
+            )
+            try:
+                res = await myicp._enrich_app_details(
+                    {"code": 200, "success": True, "params": {"list": docs_list}},
+                    sp,
+                    {},
+                    sys_proxy,
+                    target_name=task_doc.get("company_name") or task_doc.get("name") or "",
+                )
+                remaining_total += int((res.get("params") or {}).get("_detail_missing") or 0)
+            finally:
+                myicp.attach_task_hooks()
+
+        await insert_syslog(
+            "info",
+            "详情补全",
+            f"原位补全结束：本次成功补全 {filled_total} 条，仍剩余 {remaining_total} 条待补全。",
+        )
+    except Exception as e:
+        logger.error(f"Backfill details exception for {task_id}: {e}")
+        await insert_syslog("error", "详情补全", f"原位补全异常: {e}")
+    finally:
+        if myicp:
+            try:
+                await myicp.cleanup()
+            except Exception:
+                pass
+        cur = await db['icp_task'].find_one({"_id": ObjectId(task_id)}, {"status": 1})
+        if cur and cur.get("status") == "running":
+            await db['icp_task'].update_one(
+                {"_id": ObjectId(task_id), "status": "running"},
+                {
+                    "$set": {"status": prev_status, "detail_backfill_last_time": curr_date()},
+                    "$unset": {"detail_backfill_running": ""},
+                },
+            )
+        else:
+            await db['icp_task'].update_one(
+                {"_id": ObjectId(task_id)},
+                {"$unset": {"detail_backfill_running": ""}},
+            )
