@@ -113,6 +113,8 @@ class ARLAssetScope(ARLResource):
 
                     for item in items:
                         sid_str = str(item.get('_id'))
+                        # build_data 返回的 _id 已被序列化为字符串，落库写回时须还原 ObjectId
+                        scope_db_id = ObjectId(sid_str) if ObjectId.is_valid(sid_str) else item.get('_id')
 
                         # 🛡️ 检查并处理测绘更新中任务状态
                         utid = item.get('updating_icp_task_id')
@@ -123,31 +125,74 @@ class ARLAssetScope(ARLResource):
                                 # 测绘任务已圆满完成，原子晋升为主指针
                                 try:
                                     utils.conn_db('asset_scope').update_one(
-                                        {'_id': item['_id']},
+                                        {'_id': scope_db_id, 'updating_icp_task_id': str(utid)},
                                         {
                                             '$set': {'synced_icp_task_id': str(up_t['_id'])},
-                                            '$unset': {'updating_icp_task_id': ''}
+                                            '$unset': {
+                                                'updating_icp_task_id': '',
+                                                'last_update_error': '',
+                                                'last_update_error_task_id': '',
+                                                'last_update_error_time': ''
+                                            }
                                         }
                                     )
                                     item['synced_icp_task_id'] = str(up_t['_id'])
                                     item.pop('updating_icp_task_id', None)
+                                    item.pop('last_update_error', None)
+                                    item.pop('last_update_error_task_id', None)
+                                    item.pop('last_update_error_time', None)
                                 except Exception as up_err:
                                     logger.error(f"Failed to promote updating_icp_task_id: {up_err}")
-                            elif up_status in ['error', 'stop']:
-                                # 测绘任务执行失败或被终止，安全熔断回滚，保留原主指针
+                            elif up_status == 'error':
+                                # 测绘任务执行失败，持久化失败摘要并清理更新中指针，保留原主指针
+                                err_msg = up_t.get('error_msg') or '测绘任务执行失败'
+                                err_time = up_t.get('end_time') or utils.curr_date()
                                 try:
                                     utils.conn_db('asset_scope').update_one(
-                                        {'_id': item['_id']},
+                                        {'_id': scope_db_id, 'updating_icp_task_id': str(utid)},
+                                        {
+                                            '$set': {
+                                                'last_update_error': err_msg,
+                                                'last_update_error_task_id': str(up_t['_id']),
+                                                'last_update_error_time': err_time
+                                            },
+                                            '$unset': {'updating_icp_task_id': ''}
+                                        }
+                                    )
+                                    item.pop('updating_icp_task_id', None)
+                                    item['update_error_msg'] = err_msg
+                                    item['last_update_error'] = err_msg
+                                    item['last_update_error_task_id'] = str(up_t['_id'])
+                                    item['last_update_error_time'] = err_time
+                                except Exception as up_err:
+                                    logger.error(f"Failed to clear failed updating_icp_task_id: {up_err}")
+                            elif up_status == 'stop':
+                                # 用户手动停止更新，直接清理指针并保留原主指针
+                                try:
+                                    utils.conn_db('asset_scope').update_one(
+                                        {'_id': scope_db_id, 'updating_icp_task_id': str(utid)},
                                         {'$unset': {'updating_icp_task_id': ''}}
                                     )
                                     item.pop('updating_icp_task_id', None)
-                                    item['update_error_msg'] = up_t.get('error_msg') or '测绘任务执行失败'
                                 except Exception as up_err:
-                                    logger.error(f"Failed to clear failed updating_icp_task_id: {up_err}")
+                                    logger.error(f"Failed to clear stopped updating_icp_task_id: {up_err}")
                             else:
                                 item['updating_icp_task_id'] = str(up_t['_id'])
                                 item['updating_status'] = up_status
                                 item['updating_start_time'] = up_t.get('start_time')
+                        elif utid:
+                            # 关联的更新任务已被删除或无效，自动清理悬空更新指针
+                            try:
+                                utils.conn_db('asset_scope').update_one(
+                                    {'_id': scope_db_id, 'updating_icp_task_id': utid},
+                                    {'$unset': {'updating_icp_task_id': ''}}
+                                )
+                                item.pop('updating_icp_task_id', None)
+                            except Exception as up_err:
+                                logger.error(f"Failed to clear missing updating_icp_task_id: {up_err}")
+
+                        if item.get('last_update_error') and not item.get('update_error_msg'):
+                            item['update_error_msg'] = item['last_update_error']
 
                         t = None
                         if item.get('synced_icp_task_id') and str(item['synced_icp_task_id']) in task_by_id:
@@ -723,12 +768,48 @@ class BindEnterpriseScope(ARLResource):
         else:
             ent_name = task.get('target') or task.get('name')
 
+        # 换绑前清理旧的更新中任务与主指针双向关联，防止旧更新任务完成后回写覆盖新主体
+        old_utid = scope.get('updating_icp_task_id')
+        if old_utid and str(old_utid) != str(task_obj_id):
+            try:
+                old_utask = utils.conn_db('icp_task').find_one({'_id': ObjectId(old_utid)})
+                if old_utask and old_utask.get('status') in ['waiting', 'running']:
+                    utils.conn_db('icp_task').update_one(
+                        {'_id': ObjectId(old_utid), 'status': {'$in': ['waiting', 'running']}},
+                        {'$set': {'status': 'stop', 'end_time': utils.curr_date()}}
+                    )
+                    try:
+                        from app.routes.icp import _request_recon
+                        _request_recon('stop', {'task_id': str(old_utid)})
+                    except Exception as stop_err:
+                        logger.warning(f"Failed to stop superseded updating task {old_utid}: {stop_err}")
+            except Exception as ut_err:
+                logger.warning(f"Failed to inspect superseded updating task {old_utid}: {ut_err}")
+
+        old_stid = scope.get('synced_icp_task_id')
+        if old_stid and str(old_stid) != str(task_obj_id):
+            try:
+                utils.conn_db('icp_task').update_one(
+                    {'_id': ObjectId(old_stid), 'synced_scope_id': str(scope_obj_id)},
+                    {'$unset': {'synced_scope_id': '', 'synced_scope_name': ''}}
+                )
+            except Exception:
+                pass
+
         utils.conn_db('asset_scope').update_one(
             {'_id': scope_obj_id},
-            {'$set': {
-                'synced_icp_task_id': str(task_obj_id),
-                'enterprise_name': ent_name
-            }}
+            {
+                '$set': {
+                    'synced_icp_task_id': str(task_obj_id),
+                    'enterprise_name': ent_name
+                },
+                '$unset': {
+                    'updating_icp_task_id': '',
+                    'last_update_error': '',
+                    'last_update_error_task_id': '',
+                    'last_update_error_time': ''
+                }
+            }
         )
         utils.conn_db('icp_task').update_one(
             {'_id': task_obj_id},
@@ -738,3 +819,32 @@ class BindEnterpriseScope(ARLResource):
             }}
         )
         return utils.build_ret(ErrorMsg.Success, {"scope_id": scope_id, "task_id": task_id})
+
+
+clear_update_error_fields = ns.model('ClearScopeUpdateError', {
+    'scope_id': fields.String(description="资产组ID", required=True)
+})
+
+
+@ns.route('/clear_update_error/')
+class ClearScopeUpdateError(ARLResource):
+    @auth
+    @ns.expect(clear_update_error_fields)
+    def post(self):
+        """清除资产组最近一次后台主体更新失败提示"""
+        args = self.parse_args(clear_update_error_fields)
+        scope_id = args.get('scope_id')
+        try:
+            scope_obj_id = ObjectId(scope_id)
+        except Exception:
+            return utils.build_ret("参数错误", {"error": "无效的资产组ID格式"})
+
+        utils.conn_db('asset_scope').update_one(
+            {'_id': scope_obj_id},
+            {'$unset': {
+                'last_update_error': '',
+                'last_update_error_task_id': '',
+                'last_update_error_time': ''
+            }}
+        )
+        return utils.build_ret(ErrorMsg.Success, {"scope_id": scope_id})

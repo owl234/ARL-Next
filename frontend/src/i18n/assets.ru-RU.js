@@ -514,5 +514,18 @@ export default {
   "allCategoriesVisibleTooltip": "Показаны все 13 категорий. Выключите, чтобы скрыть пустые.",
   "viewAllCategories": "Показать все 13 категорий",
   "webServerLabel": "Веб-сервер:",
-  "ipLabel": "IP:"
+  "ipLabel": "IP:",
+  "stopUpdate": "Остановить обновление",
+  "confirmStopOrganizationUpdate": "Остановить текущее обновление активов организации? Существующий снимок активов сохранится.",
+  "organizationAssetUpdateStopped": "Обновление активов организации остановлено; существующий снимок сохранён",
+  "failedToStopUpdate": "Не удалось остановить обновление",
+  "initialOrganizationDiscoveryInProgress": "Связанная задача обнаружения активов организации выполняется; обновление станет доступно после завершения",
+  "discoveringOrganization": "Обнаружение...",
+  "updatingQueuedInQueue": "Обновление · В очереди",
+  "updatingInProgressLabel": "Обновление · Выполняется",
+  "updatingOrganizationAssetQueued": "Обновление активов организации в очереди",
+  "waitingInBackgroundQueueToStart": ": задача обновления поставлена в очередь планировщика и ожидает запуска",
+  "lastBackgroundUpdateFailedTitle": "Предыдущее фоновое обновление активов организации завершилось с ошибкой (существующий снимок сохранён)",
+  "existingUpdateTaskResumed": "Для этой группы активов уже выполняется задача обновления; отслеживание прогресса возобновлено",
+  "organizationAssetDiscoveryCompleted": "Связанное обнаружение активов организации завершено; данные обновлены"
 };

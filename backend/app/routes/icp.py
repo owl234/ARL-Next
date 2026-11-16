@@ -626,7 +626,12 @@ class IcpTaskStop(ARLResource):
             except Exception as e:
                 logger.error(f"Failed to stop osint-service task {task_id}: {e}")
                 return build_ret(ErrorMsg.Error, {"task_id": task_id, "error": "微服务未确认停止，请稍后重试停止操作"})
-                
+
+            conn_db('asset_scope').update_many(
+                {"updating_icp_task_id": str(task_id)},
+                {"$unset": {"updating_icp_task_id": ""}}
+            )
+
             return build_ret(ErrorMsg.Success, {"task_id": task_id})
         except Exception as e:
             return build_ret(ErrorMsg.Error, {"error": str(e)})
@@ -707,6 +712,10 @@ class IcpTaskBatchDelete(ARLResource):
                             {"synced_icp_task_id": str(tid)},
                             {"$unset": {"synced_icp_task_id": ""}}
                         )
+                        conn_db('asset_scope').update_many(
+                            {"updating_icp_task_id": str(tid)},
+                            {"$unset": {"updating_icp_task_id": ""}}
+                        )
                         success_count += 1
                 except Exception as item_err:
                     logger.error(f"Failed to cascade delete icp_task {tid}: {item_err}")
@@ -755,6 +764,10 @@ class IcpTaskDelete(ARLResource):
                     {"synced_icp_task_id": str(task_id)},
                     {"$unset": {"synced_icp_task_id": ""}}
                 )
+                conn_db('asset_scope').update_many(
+                    {"updating_icp_task_id": str(task_id)},
+                    {"$unset": {"updating_icp_task_id": ""}}
+                )
 
             return build_ret(ErrorMsg.Success, {"task_id": task_id, "deleted_count": del_count})
         except Exception as e:
@@ -775,6 +788,33 @@ def _restart_single_icp_task(task_id: str):
         if task.get("status") in [TaskStatus.WAITING, TaskStatus.RUNNING, "running"]:
             return False, "running", {"task_id": task_id, "error": "任务正在运行或等待中"}
 
+        # 解析原任务关联的资产组，并在新建前校验是否已有进行中的主体更新任务（并发互斥）
+        synced_scope_id = task.get('synced_scope_id')
+        scope_doc = None
+        if synced_scope_id:
+            try:
+                scope_doc = conn_db('asset_scope').find_one({"_id": bson.ObjectId(synced_scope_id)})
+            except Exception:
+                scope_doc = None
+        if not scope_doc:
+            scope_doc = conn_db('asset_scope').find_one({"synced_icp_task_id": str(task_id)})
+            if scope_doc:
+                synced_scope_id = str(scope_doc['_id'])
+
+        if scope_doc:
+            existing_utid = scope_doc.get('updating_icp_task_id')
+            if existing_utid:
+                try:
+                    existing_utask = conn_db('icp_task').find_one({"_id": bson.ObjectId(existing_utid)})
+                except Exception:
+                    existing_utask = None
+                if existing_utask and existing_utask.get("status") in [TaskStatus.WAITING, TaskStatus.RUNNING, "running"]:
+                    return False, "updating", {
+                        "task_id": task_id,
+                        "updating_task_id": str(existing_utid),
+                        "error": "该资产组已有主体资产更新任务正在执行中"
+                    }
+
         # 克隆旧任务数据
         task.pop('_id', None)
         task['status'] = TaskStatus.WAITING
@@ -783,27 +823,32 @@ def _restart_single_icp_task(task_id: str):
         task['statistic'] = {"asset_cnt": 0}
         task['error_msg'] = ""
         task['prev_task_id'] = str(task_id)
+        for auto_key in (
+            'auto_group', 'auto_group_scan', 'auto_group_claimed',
+            'auto_group_result', 'auto_group_domain_count',
+            'auto_group_scope_id', 'auto_group_time'
+        ):
+            task.pop(auto_key, None)
+        if synced_scope_id:
+            task['synced_scope_id'] = synced_scope_id
 
         # 插入新任务
         result = conn_db('icp_task').insert_one(task)
         new_task_id = str(result.inserted_id)
 
         # 若原任务关联了资产组，记录 updating_icp_task_id，保持原有主指针 synced_icp_task_id 不变
-        synced_scope_id = task.get('synced_scope_id')
-        if not synced_scope_id:
-            scope_doc = conn_db('asset_scope').find_one({"synced_icp_task_id": str(task_id)})
-            if scope_doc:
-                synced_scope_id = str(scope_doc['_id'])
-                conn_db('icp_task').update_one(
-                    {"_id": result.inserted_id},
-                    {"$set": {"synced_scope_id": synced_scope_id}}
-                )
-
         if synced_scope_id:
             try:
                 conn_db('asset_scope').update_one(
                     {"_id": bson.ObjectId(synced_scope_id)},
-                    {"$set": {"updating_icp_task_id": new_task_id}}
+                    {
+                        "$set": {"updating_icp_task_id": new_task_id},
+                        "$unset": {
+                            "last_update_error": "",
+                            "last_update_error_task_id": "",
+                            "last_update_error_time": ""
+                        }
+                    }
                 )
             except Exception as scope_err:
                 logger.warning(f"Failed to update asset_scope updating_icp_task_id: {scope_err}")
@@ -889,6 +934,12 @@ class IcpTaskRestart(ARLResource):
             return build_ret(ErrorMsg.NotFoundTask, {"task_id": task_id})
         if reason == "running":
             return build_ret(ErrorMsg.TaskIsRunning, {"task_id": task_id})
+        if reason == "updating":
+            return build_ret(ErrorMsg.TaskIsRunning, {
+                "task_id": task_id,
+                "updating_task_id": res.get("updating_task_id"),
+                "error": res.get("error")
+            })
         return build_ret(ErrorMsg.Error, {"error": res.get("error", "重启失败")})
 
 
@@ -914,7 +965,7 @@ class IcpTaskBatchRestart(ARLResource):
                 ok, reason, res = _restart_single_icp_task(str(tid))
                 if ok:
                     restarted_tasks.append(res)
-                elif reason == "running":
+                elif reason in ("running", "updating"):
                     skipped_tasks.append(tid)
                 else:
                     failed_tasks.append({"task_id": tid, "reason": reason, "error": res.get("error")})

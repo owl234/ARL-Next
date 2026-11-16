@@ -387,9 +387,18 @@
                   <a class="group-name-title" @click="goToDetail(record)">{{ record.name }}</a>
                   <a-badge v-if="record.has_increment" :count="assetText('assets.newAssets')" class="asset-increment-badge" />
                 </div>
-                <div v-if="record.enterprise_name" class="enterprise-tag-row">
-                  <a-tag color="cyan" size="small" class="enterprise-osint-tag" @click.stop="goToOsintDetail(record)">
+                <div v-if="record.enterprise_name || record.updating_icp_task_id" class="enterprise-tag-row">
+                  <a-tag v-if="record.enterprise_name" color="cyan" size="small" class="enterprise-osint-tag" @click.stop="goToOsintDetail(record)">
                     <BankOutlined style="margin-right: 2px;" />{{ record.enterprise_name }}
+                  </a-tag>
+                  <a-tag
+                    v-if="record.updating_icp_task_id"
+                    :color="record.updating_status === 'waiting' ? 'warning' : 'processing'"
+                    size="small"
+                    class="enterprise-updating-tag"
+                    @click.stop="goToOsintDetail(record)"
+                  >
+                    <SyncOutlined :spin="record.updating_status !== 'waiting'" style="margin-right: 2px;" />{{ record.updating_status === 'waiting' ? assetText('assets.updatingQueuedInQueue') : assetText('assets.updatingInProgressLabel') }}
                   </a-tag>
                 </div>
               </div>
@@ -3910,6 +3919,12 @@ onUnmounted(() => {
 .enterprise-tag-row {
   display: flex;
   align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.enterprise-updating-tag {
+  cursor: pointer;
+  margin-right: 0;
 }
 .enterprise-osint-tag {
   font-size: 11px !important;

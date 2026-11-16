@@ -1300,12 +1300,32 @@ def heal_stale_updating_icp_tasks():
                 t = task_col.find_one({"_id": bson.ObjectId(up_id)})
             except Exception:
                 t = None
-            if not t or t.get("status") in ["error", "stop"]:
+            if not t or t.get("status") == "stop":
                 scope_col.update_one({"_id": s["_id"]}, {"$unset": {"updating_icp_task_id": ""}})
+            elif t.get("status") == "error":
+                scope_col.update_one(
+                    {"_id": s["_id"]},
+                    {
+                        "$set": {
+                            "last_update_error": t.get("error_msg") or "后台测绘任务执行失败",
+                            "last_update_error_task_id": str(t.get("_id") or up_id),
+                            "last_update_error_time": t.get("end_time") or ""
+                        },
+                        "$unset": {"updating_icp_task_id": ""}
+                    }
+                )
             elif t.get("status") == "done":
                 scope_col.update_one(
                     {"_id": s["_id"]},
-                    {"$set": {"synced_icp_task_id": str(t["_id"])}, "$unset": {"updating_icp_task_id": ""}}
+                    {
+                        "$set": {"synced_icp_task_id": str(t["_id"])},
+                        "$unset": {
+                            "updating_icp_task_id": "",
+                            "last_update_error": "",
+                            "last_update_error_task_id": "",
+                            "last_update_error_time": ""
+                        }
+                    }
                 )
     except Exception as e:
         import logging

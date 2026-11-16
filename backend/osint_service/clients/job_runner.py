@@ -118,7 +118,7 @@ async def run_recon_job(options):
         await run_icp_job(options)
 
 
-async def _sync_scope_after_task_completion(task_id, task_status):
+async def _sync_scope_after_task_completion(task_id, task_status, error_msg=""):
     try:
         scope_doc = await db['asset_scope'].find_one({"updating_icp_task_id": str(task_id)})
         if scope_doc:
@@ -127,11 +127,29 @@ async def _sync_scope_after_task_completion(task_id, task_status):
                     {"_id": scope_doc["_id"], "updating_icp_task_id": str(task_id)},
                     {
                         "$set": {"synced_icp_task_id": str(task_id)},
-                        "$unset": {"updating_icp_task_id": ""}
+                        "$unset": {
+                            "updating_icp_task_id": "",
+                            "last_update_error": "",
+                            "last_update_error_task_id": "",
+                            "last_update_error_time": ""
+                        }
                     }
                 )
                 logger.info(f"Promoted updating_icp_task_id {task_id} to synced_icp_task_id for scope {scope_doc['_id']}")
-            elif task_status in ["error", "stop"]:
+            elif task_status == "error":
+                await db['asset_scope'].update_one(
+                    {"_id": scope_doc["_id"], "updating_icp_task_id": str(task_id)},
+                    {
+                        "$set": {
+                            "last_update_error": error_msg or "后台测绘任务执行失败",
+                            "last_update_error_task_id": str(task_id),
+                            "last_update_error_time": curr_date()
+                        },
+                        "$unset": {"updating_icp_task_id": ""}
+                    }
+                )
+                logger.warning(f"Cleared updating_icp_task_id {task_id} after error for scope {scope_doc['_id']}")
+            elif task_status == "stop":
                 await db['asset_scope'].update_one(
                     {"_id": scope_doc["_id"], "updating_icp_task_id": str(task_id)},
                     {"$unset": {"updating_icp_task_id": ""}}
@@ -147,7 +165,10 @@ async def _finish_recon_task(task_id, task_status, update_data):
     )
     # 停止或删除后到达的旧结果不能切换资产组当前数据。
     if result.matched_count:
-        await _sync_scope_after_task_completion(task_id, task_status)
+        err_msg = ""
+        if isinstance(update_data, dict):
+            err_msg = (update_data.get("$set") or {}).get("error_msg", "")
+        await _sync_scope_after_task_completion(task_id, task_status, error_msg=err_msg)
 
 
 async def _abort_recon_task(task_id, title, message):
@@ -159,7 +180,7 @@ async def _abort_recon_task(task_id, title, message):
     故在此直接写入 syslog 集合，保证任务详情运行日志可见。
     """
     try:
-        await db['icp_task'].update_one(
+        res = await db['icp_task'].update_one(
             {"_id": ObjectId(task_id), "status": {"$in": ["waiting", "running"]}},
             {"$set": {
                 "status": "error",
@@ -167,6 +188,8 @@ async def _abort_recon_task(task_id, title, message):
                 "error_msg": message
             }}
         )
+        if getattr(res, "matched_count", 0):
+            await _sync_scope_after_task_completion(task_id, "error", error_msg=message)
     except Exception as abort_err:
         logger.error(f"Failed to abort recon task {task_id}: {abort_err}")
     try:

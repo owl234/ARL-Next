@@ -43,8 +43,12 @@
                   <bank-outlined class="meta-icon" />
                 </span>
               </a-tooltip>
-              <a-tag v-if="scopeUpdatingTaskId" color="processing" class="hero-mini-tag">
-                <sync-outlined :spin="true" class="asset-status-icon" /> {{ assetText('assets.updatingDiscovery') }}
+              <a-tag
+                v-if="scopeUpdatingTaskId"
+                :color="scopeUpdatingStatus === 'waiting' ? 'warning' : 'processing'"
+                class="hero-mini-tag"
+              >
+                <sync-outlined :spin="scopeUpdatingStatus !== 'waiting'" class="asset-status-icon" /> {{ scopeUpdatingStatus === 'waiting' ? assetText('assets.updatingQueuedInQueue') : assetText('assets.updatingInProgressLabel') }}
               </a-tag>
               <a-tag v-else-if="taskStatusLabel" :color="taskStatusColor" class="hero-mini-tag">
                 {{ taskStatusLabel }}
@@ -739,17 +743,26 @@
   <div v-show="currentView === 'osint'">
     <EnterpriseOsintPanel
       v-if="boundIcpTaskId"
+      :key="scope_id"
       ref="osintPanelRef"
       :task-id="boundIcpTaskId"
       :scope-id="scope_id"
       :enterprise-name="scopeEnterpriseName"
       :updating-task-id="scopeUpdatingTaskId"
+      :updating-status="scopeUpdatingStatus"
+      :updating-start-time="scopeUpdatingStartTime"
+      :last-update-error="scopeUpdateError"
+      :active="isPageActive"
       :hide-header="true"
       :sticky-top-offset="heroHeight"
       @taskLoaded="handleOsintLoaded"
       @synced="handleOsintSynced"
       @openBind="openBindModal"
-      @refreshed="(newTid) => { if (newTid) { boundIcpTaskId = newTid; scopeUpdatingTaskId = ''; fetchBoundTaskDetail(newTid); fetchScopeMeta(); } }"
+      @updatingStarted="handleUpdatingStarted"
+      @updatingStopped="handleUpdatingStopped"
+      @updateFailed="handleUpdateFailed"
+      @dismissUpdateError="handleDismissUpdateError"
+      @refreshed="handleOsintRefreshed"
     />
     <div v-else class="osint-unbound-box">
       <ArlEmpty :description="assetText('assets.noOrganizationLinked')" />
@@ -890,7 +903,7 @@
 import { useI18n } from 'vue-i18n';
 defineOptions({ name: 'GroupAssetsDetail' });
 
-import { ref, onMounted, reactive, watch, computed, createVNode, onUnmounted, onDeactivated, nextTick } from 'vue';
+import { ref, onMounted, reactive, watch, computed, createVNode, onUnmounted, onActivated, onDeactivated, nextTick } from 'vue';
 const heroRef = ref(null);
 const asmControlRef = ref(null);
 const heroHeight = ref(48);
@@ -1065,6 +1078,14 @@ watch(() => route.query.view, (newVal) => {
 const osintPanelRef = ref(null);
 const boundIcpTaskId = ref('');
 const scopeUpdatingTaskId = ref('');
+const scopeUpdatingStatus = ref('');
+const scopeUpdatingStartTime = ref('');
+const scopeUpdateError = ref('');
+const isPageActive = ref(true);
+let hasDeactivated = false;
+let lastObservedScopeId = '';
+let justSyncedOnActivated = false;
+let latestScopeMetaSeq = 0;
 const scopeHasIncrement = ref(false);
 const scopeGroupName = ref('');
 const scopeType = ref('');
@@ -1167,6 +1188,7 @@ const openRawDrawer = (record) => {
 
 const handleOsintLoaded = (payload) => {
   if (!payload) return;
+  if (payload.task?._id && boundIcpTaskId.value && payload.task._id !== boundIcpTaskId.value) return;
   boundTaskRecord.value = payload.task || {};
   taskTarget.value = payload.taskTarget || '';
   taskStatusColor.value = payload.taskStatusColor || 'default';
@@ -1174,9 +1196,11 @@ const handleOsintLoaded = (payload) => {
 };
 
 const fetchBoundTaskDetail = async (taskId) => {
+  const reqScopeId = scope_id.value;
   if (!taskId) return;
   try {
     const res = await request.get('/icp/task', { params: { _id: taskId } });
+    if (scope_id.value !== reqScopeId || boundIcpTaskId.value !== taskId) return;
     if (res.code === 200 && res.items && res.items.length > 0) {
       const task = res.items[0];
       boundTaskRecord.value = task;
@@ -1197,7 +1221,8 @@ const fetchBoundTaskDetail = async (taskId) => {
 };
 
 const fetchAsmCounts = async () => {
-  if (!scope_id.value) return;
+  const reqScopeId = scope_id.value;
+  if (!reqScopeId) return;
   const keys = Object.keys(tabConfig);
   await Promise.allSettled(
     keys.map(async (key) => {
@@ -1205,8 +1230,9 @@ const fetchAsmCounts = async () => {
       if (!config || !config.url) return;
       try {
         const res = await request.get(config.url, {
-          params: { page: 1, size: 1, scope_id: scope_id.value }
+          params: { page: 1, size: 1, scope_id: reqScopeId }
         });
+        if (scope_id.value !== reqScopeId) return;
         if (res && res.code === 200) {
           asmCounts[key] = res.total || 0;
         }
@@ -1245,14 +1271,84 @@ const parsedBindGid = computed(() => {
   return parsed.gid;
 });
 
-const fetchScopeMeta = async () => {
-  if (!scope_id.value) return;
+const resetOsintAndScopeMeta = () => {
+  boundIcpTaskId.value = '';
+  scopeUpdatingTaskId.value = '';
+  scopeUpdatingStatus.value = '';
+  scopeUpdatingStartTime.value = '';
+  scopeUpdateError.value = '';
+  scopeHasIncrement.value = false;
+  scopeEnterpriseName.value = '';
+  scopeGroupName.value = '';
+  scopeType.value = '';
+  scopeDomainList.value = [];
+  boundTaskRecord.value = {};
+  taskTarget.value = '';
+  taskStatusColor.value = 'default';
+  osintTotalCount.value = 0;
+  Object.keys(asmCounts).forEach(k => { asmCounts[k] = 0; });
+};
+
+const handleUpdatingStarted = (taskId) => {
+  scopeUpdatingTaskId.value = taskId || '';
+  scopeUpdatingStatus.value = 'waiting';
+  scopeUpdatingStartTime.value = '';
+  scopeUpdateError.value = '';
+};
+
+const handleUpdatingStopped = () => {
+  scopeUpdatingTaskId.value = '';
+  scopeUpdatingStatus.value = '';
+  scopeUpdatingStartTime.value = '';
+  fetchScopeMeta();
+};
+
+const handleUpdateFailed = (payload) => {
+  scopeUpdatingTaskId.value = '';
+  scopeUpdatingStatus.value = '';
+  scopeUpdatingStartTime.value = '';
+  if (payload && payload.error) {
+    scopeUpdateError.value = payload.error;
+  }
+  fetchScopeMeta();
+};
+
+const handleOsintRefreshed = (newTid) => {
+  if (!newTid) return;
+  boundIcpTaskId.value = newTid;
+  scopeUpdatingTaskId.value = '';
+  scopeUpdatingStatus.value = '';
+  scopeUpdatingStartTime.value = '';
+  scopeUpdateError.value = '';
+  fetchBoundTaskDetail(newTid);
+  fetchScopeMeta();
+};
+
+const handleDismissUpdateError = async () => {
+  const reqScopeId = scope_id.value;
+  scopeUpdateError.value = '';
+  if (!reqScopeId) return;
   try {
-    const res = await request.get('/asset_scope/', { params: { _id: scope_id.value } });
+    await request.post('/asset_scope/clear_update_error/', { scope_id: reqScopeId });
+  } catch (e) {
+    // 清理异常摘要失败不影响当前关闭交互
+  }
+};
+
+const fetchScopeMeta = async () => {
+  const reqScopeId = scope_id.value;
+  if (!reqScopeId) return;
+  const seq = ++latestScopeMetaSeq;
+  try {
+    const res = await request.get('/asset_scope/', { params: { _id: reqScopeId } });
+    if (seq !== latestScopeMetaSeq || scope_id.value !== reqScopeId) return;
     if (res && res.code === 200 && res.items && res.items.length > 0) {
       const item = res.items[0];
       boundIcpTaskId.value = item.synced_icp_task_id || '';
       scopeUpdatingTaskId.value = item.updating_icp_task_id || '';
+      scopeUpdatingStatus.value = item.updating_status || (item.updating_icp_task_id ? 'running' : '');
+      scopeUpdatingStartTime.value = item.updating_start_time || '';
+      scopeUpdateError.value = item.update_error_msg || '';
       scopeEnterpriseName.value = item.enterprise_name || item.name || '';
       scopeHasIncrement.value = !!item.has_increment;
       scopeGroupName.value = item.group_name || '';
@@ -1260,6 +1356,11 @@ const fetchScopeMeta = async () => {
       scopeDomainList.value = item.domain_array || (item.scope ? item.scope.split(',').map(s => s.trim()).filter(Boolean) : []);
       if (boundIcpTaskId.value) {
         fetchBoundTaskDetail(boundIcpTaskId.value);
+      } else {
+        boundTaskRecord.value = {};
+        taskTarget.value = '';
+        taskStatusColor.value = 'default';
+        osintTotalCount.value = 0;
       }
       fetchAsmCounts();
     }
@@ -1285,13 +1386,22 @@ const openBindModal = async () => {
 
 const executeBindExisting = async () => {
   bindLoading.value = true;
+  const wasAlreadyBound = !!boundIcpTaskId.value;
   try {
     const res = await request.post('/asset_scope/bind_enterprise/', {
       scope_id: scope_id.value,
       task_id: selectedBindTaskId.value
     });
     if (res && res.code === 200) {
-      message.success(boundIcpTaskId.value ? assetText('assets.linkedOrganizationUpdated') : assetText('assets.organizationLinked'));
+      scopeUpdatingTaskId.value = '';
+      scopeUpdatingStatus.value = '';
+      scopeUpdatingStartTime.value = '';
+      scopeUpdateError.value = '';
+      boundTaskRecord.value = {};
+      if (selectedBindTaskId.value) {
+        boundIcpTaskId.value = selectedBindTaskId.value;
+      }
+      message.success(wasAlreadyBound ? assetText('assets.linkedOrganizationUpdated') : assetText('assets.organizationLinked'));
       bindModalVisible.value = false;
       fetchScopeMeta();
       currentView.value = 'osint';
@@ -1344,6 +1454,14 @@ const executeBindNew = async () => {
           scope_id: scope_id.value,
           task_id: newTaskId
         });
+      }
+      scopeUpdatingTaskId.value = '';
+      scopeUpdatingStatus.value = '';
+      scopeUpdatingStartTime.value = '';
+      scopeUpdateError.value = '';
+      boundTaskRecord.value = {};
+      if (newTaskId) {
+        boundIcpTaskId.value = newTaskId;
       }
       message.success(assetText('assets.enterpriseDiscoveryStartedAndLinked'));
       bindModalVisible.value = false;
@@ -2057,10 +2175,17 @@ watch(() => route.query.chain_target, (newTarget) => {
   }
 });
 
-// 🚨 修复 3：监听 scope_id 的变化，无论是初次进入还是组件复用，只要 ID 变了就刷新数据！
+// 🚨 修复 3：监听 scope_id 的变化，无论是初次进入还是组件复用，只要 ID 变了就重置并刷新数据
 watch(scope_id, (newId) => {
   if (newId) {
-    fetchScopeMeta();
+    if (newId !== lastObservedScopeId) {
+      resetOsintAndScopeMeta();
+      lastObservedScopeId = newId;
+    }
+    hasDeactivated = false;
+    if (!justSyncedOnActivated) {
+      fetchScopeMeta();
+    }
     isScopeSwitching.value = true;
     dataSource.value = [];
     selectedRowKeys.value = [];
@@ -2429,7 +2554,21 @@ const submitAddDomain = async () => {
   }
 };
 
+onActivated(() => {
+  isPageActive.value = true;
+  if (hasDeactivated && scope_id.value && scope_id.value === lastObservedScopeId) {
+    hasDeactivated = false;
+    justSyncedOnActivated = true;
+    queueMicrotask(() => {
+      justSyncedOnActivated = false;
+    });
+    fetchScopeMeta();
+  }
+});
+
 onDeactivated(() => {
+  isPageActive.value = false;
+  hasDeactivated = true;
   fingerModalVisible.value = false;
   cipDetailModalVisible.value = false;
   serviceDetailModalVisible.value = false;

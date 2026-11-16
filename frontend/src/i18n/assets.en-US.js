@@ -514,5 +514,18 @@ export default {
   "allCategoriesVisibleTooltip": "Showing all 13 categories. Toggle off to focus on matched findings.",
   "viewAllCategories": "View all 13 categories",
   "webServerLabel": "Web server:",
-  "ipLabel": "IP:"
+  "ipLabel": "IP:",
+  "stopUpdate": "Stop update",
+  "confirmStopOrganizationUpdate": "Stop the current organization asset update? The existing asset snapshot will remain unchanged.",
+  "organizationAssetUpdateStopped": "Organization asset update stopped; existing snapshot preserved",
+  "failedToStopUpdate": "Failed to stop update",
+  "initialOrganizationDiscoveryInProgress": "The linked organization discovery task is running; updates will be available once it finishes",
+  "discoveringOrganization": "Discovering...",
+  "updatingQueuedInQueue": "Update · Queued",
+  "updatingInProgressLabel": "Update · In progress",
+  "updatingOrganizationAssetQueued": "Organization asset update queued",
+  "waitingInBackgroundQueueToStart": ": the update task has entered the scheduling queue and is waiting to run",
+  "lastBackgroundUpdateFailedTitle": "Previous background organization update failed (existing snapshot preserved)",
+  "existingUpdateTaskResumed": "An update task is already running for this asset group; progress tracking has resumed",
+  "organizationAssetDiscoveryCompleted": "Linked organization discovery completed; asset data has been refreshed"
 };

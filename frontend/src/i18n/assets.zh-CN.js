@@ -514,5 +514,18 @@ export default {
   "allCategoriesVisibleTooltip": "正在展示全部 13 个维度，关闭可聚焦命中维度",
   "viewAllCategories": "查看全部 13 个维度",
   "webServerLabel": "Web 服务：",
-  "ipLabel": "IP："
+  "ipLabel": "IP：",
+  "stopUpdate": "停止更新",
+  "confirmStopOrganizationUpdate": "确认停止当前主体资产更新任务？已保留的历史快照数据不会受影响。",
+  "organizationAssetUpdateStopped": "已停止主体资产更新，保留当前历史快照",
+  "failedToStopUpdate": "停止更新失败",
+  "initialOrganizationDiscoveryInProgress": "当前关联的主体测绘任务正在执行中，完成后可发起更新",
+  "discoveringOrganization": "主体测绘中...",
+  "updatingQueuedInQueue": "主体更新 · 排队中",
+  "updatingInProgressLabel": "主体更新 · 进行中",
+  "updatingOrganizationAssetQueued": "主体资产更新排队中",
+  "waitingInBackgroundQueueToStart": "：更新任务已进入调度队列，等待执行",
+  "lastBackgroundUpdateFailedTitle": "上次后台主体资产更新失败（已保留历史快照）",
+  "existingUpdateTaskResumed": "当前资产组已有更新任务正在执行，已接管进度跟踪",
+  "organizationAssetDiscoveryCompleted": "关联主体测绘任务已完成，已刷新最新资产数据"
 };

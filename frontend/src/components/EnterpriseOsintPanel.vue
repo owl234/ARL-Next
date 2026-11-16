@@ -19,15 +19,40 @@
           <a-badge v-if="hasIncrement" :count="assetText('tasks.newAssets')" class="asset-increment-badge" />
         </div>
         <div style="display: flex; gap: 8px; align-items: center;">
-          <a-tooltip :title="isUpdating ? assetText('assets.organizationAssetsAreBeingUpdatedInTheBackground') : assetText('assets.fetchTheLatestIcpRecordsAppsAndInvestment')">
-            <a-button type="primary" size="small" :loading="refreshLoading || isUpdating" :disabled="isUpdating" @click="handleRefreshTask">
-              <template #icon><sync-outlined :spin="refreshLoading || isUpdating" /></template>
-              {{ isUpdating ? assetText('assets.updatingOrganization') : assetText('assets.updateOrganizationAssets') }}
+          <a-tooltip :title="updateActionTooltip">
+            <a-button type="primary" size="small" :loading="refreshLoading || isAnyDiscoveryActive" :disabled="isAnyDiscoveryActive" @click="handleRefreshTask">
+              <template #icon><sync-outlined :spin="refreshLoading || isAnyDiscoveryActive" /></template>
+              {{ updateActionLabel }}
             </a-button>
           </a-tooltip>
+          <a-popconfirm
+            v-if="stopTargetTaskId"
+            :title="assetText('assets.confirmStopOrganizationUpdate')"
+            :ok-text="assetText('tasks.confirmStop')"
+            :cancel-text="assetText('tasks.cancel')"
+            :ok-button-props="{ danger: true }"
+            @confirm="handleStopUpdate"
+          >
+            <a-button size="small" danger :loading="stopLoading">
+              <template #icon><stop-outlined /></template>
+              {{ assetText('assets.stopUpdate') }}
+            </a-button>
+          </a-popconfirm>
         </div>
       </div>
     </div>
+
+    <!-- 离页期间后台更新失败摘要提示（保留历史快照） -->
+    <a-alert
+      v-if="props.lastUpdateError && !isUpdating"
+      type="warning"
+      show-icon
+      closable
+      style="margin-bottom: 8px;"
+      :message="assetText('assets.lastBackgroundUpdateFailedTitle')"
+      :description="props.lastUpdateError"
+      @close="emit('dismissUpdateError')"
+    />
 
     <!-- 维度 Tabs 导航与控制检索区 (吸附在 Hero 顶栏正下方，与 ASM 保持同等视觉与吸顶标准) -->
     <div
@@ -39,12 +64,32 @@
       <!-- 测绘更新中顶部平滑提示条 -->
       <div v-if="isUpdating" class="osint-updating-banner">
         <div class="updating-banner-content">
-          <sync-outlined :spin="true" class="updating-spin-icon" />
-          <span class="updating-banner-text">
+          <sync-outlined :spin="updatingStatusState !== 'waiting'" class="updating-spin-icon" />
+          <span v-if="updatingStatusState === 'waiting'" class="updating-banner-text">
+            <b>{{ assetText('assets.updatingOrganizationAssetQueued') }}</b>{{ assetText('assets.waitingInBackgroundQueueToStart') }}{{ assetText('assets.theExistingSnapshotRemainsAvailableTheViewWill') }}
+          </span>
+          <span v-else class="updating-banner-text">
             <b>{{ assetText('assets.updatingOrganizationAssetDiscovery') }}</b>{{ assetText('assets.retrievingTheLatestCompanyRecordsIcpRecordsAnd') }}<span v-if="updateElapsed > 0">{{ assetText('assets.elapsed') }} {{ updateElapsed }} {{ assetText('assets.seconds') }}</span>{{ assetText('assets.theExistingSnapshotRemainsAvailableTheViewWill') }}
           </span>
         </div>
-        <a-tag color="processing" class="updating-banner-tag">{{ assetText('assets.comparingNewAssets') }}</a-tag>
+        <div class="updating-banner-actions">
+          <a-tag :color="formatTaskStatusColor(updatingStatusState || 'running')" class="updating-banner-tag">
+            {{ formatTaskStatus(updatingStatusState || 'running') }}
+          </a-tag>
+          <a-popconfirm
+            v-if="stopTargetTaskId"
+            :title="assetText('assets.confirmStopOrganizationUpdate')"
+            :ok-text="assetText('tasks.confirmStop')"
+            :cancel-text="assetText('tasks.cancel')"
+            :ok-button-props="{ danger: true }"
+            @confirm="handleStopUpdate"
+          >
+            <a-button size="small" danger ghost :loading="stopLoading">
+              <template #icon><stop-outlined /></template>
+              {{ assetText('assets.stopUpdate') }}
+            </a-button>
+          </a-popconfirm>
+        </div>
       </div>
 
       <!-- 维度 Tabs 导航 (微徽标胶囊风格) -->
@@ -63,7 +108,7 @@
           <template #tab>
             <span class="log-tab-pill">
               <code-outlined /> {{ assetText('assets.discoveryLogs') }}
-              <span v-if="taskRecord.status === 'running'" class="log-pulse-dot"></span>
+              <span v-if="isLogTaskActive" class="log-pulse-dot"></span>
             </span>
           </template>
         </a-tab-pane>
@@ -99,12 +144,25 @@
                 </a-button>
               </a-popconfirm>
 
-              <a-tooltip :title="isUpdating ? assetText('assets.organizationAssetsAreBeingUpdatedInTheBackground') : assetText('assets.fetchTheLatestIcpRecordsAppsAndInvestment')">
-                <a-button type="primary" size="small" :loading="refreshLoading || isUpdating" :disabled="isUpdating" @click="handleRefreshTask">
-                  <template #icon><sync-outlined :spin="refreshLoading || isUpdating" /></template>
-                  {{ isUpdating ? assetText('assets.updatingOrganization') : assetText('assets.updateOrganizationAssets') }}
+              <a-tooltip :title="updateActionTooltip">
+                <a-button type="primary" size="small" :loading="refreshLoading || isAnyDiscoveryActive" :disabled="isAnyDiscoveryActive" @click="handleRefreshTask">
+                  <template #icon><sync-outlined :spin="refreshLoading || isAnyDiscoveryActive" /></template>
+                  {{ updateActionLabel }}
                 </a-button>
               </a-tooltip>
+              <a-popconfirm
+                v-if="!isUpdating && isBoundTaskActive && stopTargetTaskId"
+                :title="assetText('assets.confirmStopOrganizationUpdate')"
+                :ok-text="assetText('tasks.confirmStop')"
+                :cancel-text="assetText('tasks.cancel')"
+                :ok-button-props="{ danger: true }"
+                @confirm="handleStopUpdate"
+              >
+                <a-button size="small" danger :loading="stopLoading">
+                  <template #icon><stop-outlined /></template>
+                  {{ assetText('assets.stopUpdate') }}
+                </a-button>
+              </a-popconfirm>
               <a-tooltip :title="assetText('assets.changeTheOrganizationLinkedToThisGroupAnd')">
                 <a-button size="small" @click="emit('openBind')">
                   <template #icon><link-outlined /></template>
@@ -136,8 +194,8 @@
               </a-button>
             </template>
             <template v-else>
-              <a-tag :color="taskStatusColor">{{ taskStatusLabel }}</a-tag>
-              <span v-if="taskRecord.status === 'running'" class="log-polling-hint">{{ assetText('assets.pollingEvery3Seconds') }}</span>
+              <a-tag :color="formatTaskStatusColor(effectiveLogStatus)">{{ formatTaskStatus(effectiveLogStatus) }}</a-tag>
+              <span v-if="isLogTaskActive" class="log-polling-hint">{{ assetText('assets.pollingEvery3Seconds') }}</span>
               <a-button size="small" :loading="logLoading" @click="() => fetchLogs(true)">
                 <template #icon><sync-outlined :spin="logLoading" /></template>
                 {{ assetText('assets.refreshLogs') }}
@@ -475,10 +533,10 @@
         <div class="log-terminal-header">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span class="asset-toolbar-heading">{{ assetText('assets.taskExecutionLogs') }}</span>
-            <a-tag :color="formatTaskStatusColor(taskRecord.status)">
-              {{ formatTaskStatus(taskRecord.status) }}
+            <a-tag :color="formatTaskStatusColor(effectiveLogStatus)">
+              {{ formatTaskStatus(effectiveLogStatus) }}
             </a-tag>
-            <span class="asset-secondary-caption" v-if="taskRecord.status === 'running'">{{ assetText('assets.automaticallyPollingForNewLogsEvery3Seconds') }}</span>
+            <span class="asset-secondary-caption" v-if="isLogTaskActive">{{ assetText('assets.automaticallyPollingForNewLogsEvery3Seconds') }}</span>
           </div>
           <a-button size="small" :loading="logLoading" @click="() => fetchLogs(true)">
             <template #icon><sync-outlined :spin="logLoading" /></template>
@@ -515,7 +573,7 @@
 
 <script setup>
 import { useI18n } from 'vue-i18n';
-import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue';
 import { useRouter } from 'vue-router';
 import { message, notification } from 'ant-design-vue';
 import {
@@ -523,6 +581,7 @@ import {
   DownloadOutlined,
   CloudSyncOutlined,
   SyncOutlined,
+  StopOutlined,
   ExportOutlined,
   QrcodeOutlined,
   CopyOutlined,
@@ -620,16 +679,58 @@ const props = defineProps({
   updatingTaskId: {
     type: String,
     default: ''
+  },
+  updatingStatus: {
+    type: String,
+    default: ''
+  },
+  updatingStartTime: {
+    type: String,
+    default: ''
+  },
+  lastUpdateError: {
+    type: String,
+    default: ''
+  },
+  active: {
+    type: Boolean,
+    default: true
   }
 });
 
-const emit = defineEmits(['synced', 'refreshed', 'taskLoaded', 'update:taskId', 'openBind']);
+const emit = defineEmits([
+  'synced',
+  'refreshed',
+  'taskLoaded',
+  'update:taskId',
+  'openBind',
+  'updatingStarted',
+  'updatingStopped',
+  'updateFailed',
+  'dismissUpdateError'
+]);
 
 const activeUpdatingTaskId = ref('');
 const isUpdating = ref(false);
+const updatingStatusState = ref('');
 const updateElapsed = ref(0);
+const stopLoading = ref(false);
+let isPanelActive = props.active !== false;
 let updateTimer = null;
 let elapsedTimer = null;
+let boundTaskTimer = null;
+let updateStartTimestampMs = 0;
+
+const parseStartTimeMs = (timeStr) => {
+  if (!timeStr || typeof timeStr !== 'string') return 0;
+  const parsed = Date.parse(timeStr.trim().replace(' ', 'T'));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const computeElapsedSeconds = (startMs) => {
+  if (!startMs) return 0;
+  return Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+};
 
 const stopUpdatePolling = () => {
   if (updateTimer) {
@@ -642,57 +743,12 @@ const stopUpdatePolling = () => {
   }
 };
 
-const startUpdatePolling = (targetUpdatingId) => {
-  if (!targetUpdatingId) return;
-  stopUpdatePolling();
-  isUpdating.value = true;
-  activeUpdatingTaskId.value = targetUpdatingId;
-  updateElapsed.value = 0;
-  elapsedTimer = setInterval(() => {
-    updateElapsed.value += 1;
-  }, 1000);
-
-  updateTimer = setInterval(async () => {
-    try {
-      const res = await request.get('/icp/task', { params: { _id: targetUpdatingId } });
-      if (res && res.code === 200 && res.items && res.items.length > 0) {
-        const task = res.items[0];
-        if (task.status === 'done') {
-          stopUpdatePolling();
-          isUpdating.value = false;
-          activeUpdatingTaskId.value = '';
-          notification.success({
-            message: assetText('assets.organizationAssetsUpdated'),
-            description: assetText('assets.theEnterpriseAssetProfileIsUpToDate', { count: task.statistic?.asset_cnt || 0 }),
-            duration: 4
-          });
-          emit('update:taskId', targetUpdatingId);
-          emit('refreshed', targetUpdatingId);
-          fetchTaskDetail();
-          fetchAssets(1, pagination.pageSize);
-        } else if (task.status === 'error' || task.status === 'stop') {
-          stopUpdatePolling();
-          isUpdating.value = false;
-          activeUpdatingTaskId.value = '';
-          notification.error({
-            message: assetText('assets.organizationAssetUpdateDidNotComplete'),
-            description: task.error_msg || assetText('assets.backgroundDiscoveryFailedExistingAssetsHaveBeenPreserved'),
-            duration: 5
-          });
-          fetchTaskDetail();
-        }
-      }
-    } catch (e) {
-      console.warn('轮询更新任务状态失败', e);
-    }
-  }, 3000);
-};
-
-watch(() => props.updatingTaskId, (newVal) => {
-  if (newVal && !isUpdating.value) {
-    startUpdatePolling(newVal);
+const stopBoundTaskPolling = () => {
+  if (boundTaskTimer) {
+    clearInterval(boundTaskTimer);
+    boundTaskTimer = null;
   }
-}, { immediate: true });
+};
 
 watch(isUpdating, () => {
   nextTick(() => {
@@ -735,12 +791,6 @@ onMounted(() => {
     osintResizeObserver.observe(osintControlRef.value);
   }
   updateOsintHeight();
-});
-
-onUnmounted(() => {
-  stopLogPolling();
-  stopUpdatePolling();
-  if (osintResizeObserver) osintResizeObserver.disconnect();
 });
 
 const rawDrawerVisible = ref(false);
@@ -798,6 +848,55 @@ const taskStatusColor = computed(() => {
   return formatTaskStatusColor(taskStatus.value);
 });
 
+const isBoundTaskActive = computed(() => taskStatus.value === 'running' || taskStatus.value === 'waiting');
+const isAnyDiscoveryActive = computed(() => isUpdating.value || isBoundTaskActive.value);
+
+const updateActionTooltip = computed(() => {
+  if (isUpdating.value) {
+    return assetText('assets.organizationAssetsAreBeingUpdatedInTheBackground');
+  }
+  if (isBoundTaskActive.value) {
+    return assetText('assets.initialOrganizationDiscoveryInProgress');
+  }
+  return assetText('assets.fetchTheLatestIcpRecordsAppsAndInvestment');
+});
+
+const updateActionLabel = computed(() => {
+  if (isUpdating.value) {
+    return updatingStatusState.value === 'waiting'
+      ? assetText('assets.updatingQueuedInQueue')
+      : assetText('assets.updatingInProgressLabel');
+  }
+  if (isBoundTaskActive.value) {
+    return assetText('assets.discoveringOrganization');
+  }
+  return assetText('assets.updateOrganizationAssets');
+});
+
+const stopTargetTaskId = computed(() => {
+  if (isUpdating.value && activeUpdatingTaskId.value) return activeUpdatingTaskId.value;
+  if (isBoundTaskActive.value && props.taskId) return props.taskId;
+  return '';
+});
+
+const effectiveLogTaskId = computed(() => {
+  if (isUpdating.value && activeUpdatingTaskId.value) {
+    return activeUpdatingTaskId.value;
+  }
+  return props.taskId || '';
+});
+
+const effectiveLogStatus = computed(() => {
+  if (isUpdating.value && activeUpdatingTaskId.value) {
+    return updatingStatusState.value || 'running';
+  }
+  return taskRecord.value?.status || taskStatus.value || 'waiting';
+});
+
+const isLogTaskActive = computed(() => {
+  return effectiveLogStatus.value === 'running' || effectiveLogStatus.value === 'waiting';
+});
+
 const syncModalVisible = ref(false);
 const selectedWebRowKeys = ref([]);
 const selectedWebDomains = ref([]);
@@ -808,12 +907,14 @@ const allTaskWebDomains = ref([]);
 const expandingScopeLoading = ref(false);
 
 const fetchManagedDomains = async () => {
-  if (!props.scopeId) {
+  const reqScopeId = props.scopeId;
+  if (!reqScopeId) {
     managedDomainSet.value = new Set();
     return;
   }
   try {
-    const res = await request.get('/asset_scope/', { params: { _id: props.scopeId } });
+    const res = await request.get('/asset_scope/', { params: { _id: reqScopeId } });
+    if (props.scopeId !== reqScopeId) return;
     if (res.code === 200 && res.items && res.items.length > 0) {
       const scopeItem = res.items[0];
       const domains = scopeItem.domain_array || (scopeItem.scope ? scopeItem.scope.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : []);
@@ -825,12 +926,14 @@ const fetchManagedDomains = async () => {
 };
 
 const fetchAllTaskWebDomains = async () => {
-  if (!props.taskId) {
+  const reqTaskId = props.taskId;
+  if (!reqTaskId) {
     allTaskWebDomains.value = [];
     return;
   }
   try {
-    const res = await request.get('/icp/asset', { params: { task_id: props.taskId, query_type: 'web', size: 5000 } });
+    const res = await request.get('/icp/asset', { params: { task_id: reqTaskId, query_type: 'web', size: 5000 } });
+    if (props.taskId !== reqTaskId) return;
     if (res.code === 200 && res.items) {
       const set = new Set();
       res.items.forEach(item => {
@@ -958,7 +1061,7 @@ const handleExpandSelectedToScope = async () => {
 };
 
 const handleRefreshTask = async () => {
-  if (!props.taskId || isUpdating.value) return;
+  if (!props.taskId || isAnyDiscoveryActive.value) return;
   refreshLoading.value = true;
   try {
     const res = await request.get(`/icp/restart/${props.taskId}`);
@@ -966,8 +1069,14 @@ const handleRefreshTask = async () => {
       message.success(assetText('assets.organizationAssetUpdateStartedDiscoveryAndComparisonAre'));
       const newTaskId = res.data?.task_id || res.data?.updating_task_id;
       if (newTaskId) {
-        startUpdatePolling(newTaskId);
+        emit('updatingStarted', newTaskId);
+        startUpdatePolling(newTaskId, '', 'waiting', false);
       }
+    } else if (res.data?.updating_task_id) {
+      const existingTaskId = res.data.updating_task_id;
+      message.info(assetText('assets.existingUpdateTaskResumed'));
+      emit('updatingStarted', existingTaskId);
+      startUpdatePolling(existingTaskId, '', 'running', true);
     } else {
       message.error(res.message || assetText('assets.failedToStartUpdate'));
     }
@@ -975,6 +1084,40 @@ const handleRefreshTask = async () => {
     message.error(assetText('assets.networkRequestFailed'));
   } finally {
     refreshLoading.value = false;
+  }
+};
+
+const handleStopUpdate = async () => {
+  const targetStopId = stopTargetTaskId.value;
+  if (!targetStopId || stopLoading.value) return;
+  stopLoading.value = true;
+  try {
+    const res = await request.get(`/icp/stop/${targetStopId}`);
+    if (res && res.code === 200) {
+      message.success(assetText('assets.organizationAssetUpdateStopped'));
+      if (activeUpdatingTaskId.value === targetStopId) {
+        stopUpdatePolling();
+        isUpdating.value = false;
+        activeUpdatingTaskId.value = '';
+        updatingStatusState.value = '';
+        updateElapsed.value = 0;
+        if (activeTab.value === 'log') {
+          fetchLogs(true);
+          stopLogPolling();
+        }
+      } else {
+        stopBoundTaskPolling();
+        stopLogPolling();
+        await fetchTaskDetail();
+      }
+      emit('updatingStopped', targetStopId);
+    } else {
+      message.error(res?.message || assetText('assets.failedToStopUpdate'));
+    }
+  } catch (err) {
+    message.error(assetText('assets.networkRequestFailed'));
+  } finally {
+    stopLoading.value = false;
   }
 };
 
@@ -1187,10 +1330,18 @@ const formatDate = (val) => {
   return String(val);
 };
 
+let latestTaskDetailSeq = 0;
+let latestAssetsSeq = 0;
+let latestLogsSeq = 0;
+
 const fetchTaskDetail = async () => {
-  if (!props.taskId) return;
+  const reqTaskId = props.taskId;
+  if (!reqTaskId) return;
+  const seq = ++latestTaskDetailSeq;
+  const prevStatus = taskStatus.value;
   try {
-    const res = await request.get(`/icp/task`, { params: { _id: props.taskId } });
+    const res = await request.get(`/icp/task`, { params: { _id: reqTaskId } });
+    if (seq !== latestTaskDetailSeq || props.taskId !== reqTaskId) return;
     if (res.code === 200 && res.items && res.items.length > 0) {
       const task = res.items[0];
       taskRecord.value = task;
@@ -1208,8 +1359,40 @@ const fetchTaskDetail = async () => {
       queryCounts.kapp = stats.kapp_cnt || 0;
       queryCounts.invest = stats.invest_cnt || 0;
 
-      if (task.status === 'done' || task.status === 'error') {
-        stopLogPolling();
+      const isBoundActive = task.status === 'running' || task.status === 'waiting';
+      const wasBoundActive = !!boundTaskTimer || prevStatus === 'running' || prevStatus === 'waiting';
+
+      if (isBoundActive) {
+        if (!props.updatingTaskId && !isUpdating.value && isPanelActive) {
+          startBoundTaskPolling();
+        }
+        if (activeTab.value === 'log' && isPanelActive && !logTimer) {
+          startLogPolling();
+        }
+      } else {
+        stopBoundTaskPolling();
+        if (!isUpdating.value) {
+          stopLogPolling();
+        }
+        if (wasBoundActive) {
+          if (task.status === 'done') {
+            const total = Object.values(queryCounts).reduce((a, b) => a + (Number(b) || 0), 0);
+            notification.success({
+              message: assetText('assets.organizationAssetDiscoveryCompleted'),
+              description: assetText('assets.theEnterpriseAssetProfileIsUpToDate', { count: total }),
+              duration: 5
+            });
+            fetchAllTaskWebDomains();
+            if (props.scopeId) fetchManagedDomains();
+            if (activeTab.value === 'log') {
+              fetchLogs(false);
+            } else {
+              fetchAssets(1, pagination.pageSize);
+            }
+          } else if (activeTab.value === 'log') {
+            fetchLogs(false);
+          }
+        }
       }
       fetchOsintProxyStatus();
 
@@ -1237,12 +1420,15 @@ const fetchTaskStatistic = async () => {
 };
 
 const fetchAssets = async (page = 1, size = 10) => {
-  if (!props.taskId || activeTab.value === 'log') return;
+  const reqTaskId = props.taskId;
+  const reqTab = activeTab.value;
+  if (!reqTaskId || reqTab === 'log') return;
+  const seq = ++latestAssetsSeq;
   loading.value = true;
   try {
     const params = {
-      task_id: props.taskId,
-      query_type: activeTab.value,
+      task_id: reqTaskId,
+      query_type: reqTab,
       page,
       size
     };
@@ -1272,6 +1458,7 @@ const fetchAssets = async (page = 1, size = 10) => {
       }
     }
     const res = await request.get('/icp/asset', { params });
+    if (seq !== latestAssetsSeq || props.taskId !== reqTaskId || activeTab.value !== reqTab) return;
     if (res.code === 200) {
       assetList.value = res.items || [];
       pagination.total = res.total || 0;
@@ -1281,29 +1468,34 @@ const fetchAssets = async (page = 1, size = 10) => {
   } catch (err) {
     console.error('获取资产列表失败', err);
   } finally {
-    loading.value = false;
+    if (seq === latestAssetsSeq) {
+      loading.value = false;
+    }
   }
 };
 
 const fetchLogs = async (isManual = false) => {
-  if (!props.taskId) return;
+  const targetTaskId = effectiveLogTaskId.value;
+  if (!targetTaskId) return;
+  const seq = ++latestLogsSeq;
   if (isManual) logLoading.value = true;
   try {
     let items = [];
     try {
-      const res = await request.get(`/icp/task/log/${props.taskId}`);
+      const res = await request.get(`/icp/task/log/${targetTaskId}`);
       if (res && res.code === 200 && Array.isArray(res.items)) {
         items = res.items;
       }
     } catch (e) {
       console.warn('Fallback to /syslog for task logs', e);
       const res = await request.get('/syslog/', {
-        params: { task_id: props.taskId, size: 500, order: 'create_time' }
+        params: { task_id: targetTaskId, size: 500, order: 'create_time' }
       });
       if (res && res.code === 200 && Array.isArray(res.items)) {
         items = res.items;
       }
     }
+    if (seq !== latestLogsSeq || effectiveLogTaskId.value !== targetTaskId) return;
 
     items.sort((a, b) => (a.create_time || '').localeCompare(b.create_time || ''));
     syslogList.value = items;
@@ -1315,16 +1507,22 @@ const fetchLogs = async (isManual = false) => {
   } catch (err) {
     console.error('获取日志失败', err);
   } finally {
-    if (isManual) logLoading.value = false;
+    if (isManual && seq === latestLogsSeq) logLoading.value = false;
   }
 };
 
 const startLogPolling = () => {
   stopLogPolling();
-  if (activeTab.value === 'log' && (taskRecord.value.status === 'running' || taskRecord.value.status === 'waiting')) {
+  if (isPanelActive && activeTab.value === 'log' && isLogTaskActive.value && effectiveLogTaskId.value) {
     logTimer = setInterval(() => {
+      if (!isPanelActive || activeTab.value !== 'log' || !isLogTaskActive.value) {
+        stopLogPolling();
+        return;
+      }
       fetchLogs(false);
-      fetchTaskDetail();
+      if (!isUpdating.value) {
+        fetchTaskDetail();
+      }
     }, 3000);
   }
 };
@@ -1333,6 +1531,172 @@ const stopLogPolling = () => {
   if (logTimer) {
     clearInterval(logTimer);
     logTimer = null;
+  }
+};
+
+const startBoundTaskPolling = () => {
+  if (!isPanelActive || !props.taskId || isUpdating.value || boundTaskTimer) return;
+  boundTaskTimer = setInterval(() => {
+    if (!isPanelActive || !props.taskId || isUpdating.value || !isBoundTaskActive.value) {
+      stopBoundTaskPolling();
+      return;
+    }
+    fetchTaskDetail();
+  }, 3000);
+};
+
+const startUpdatePolling = (targetUpdatingId, startTimeStr = '', initialStatus = '', immediateCheck = false) => {
+  if (!targetUpdatingId) {
+    stopUpdatePolling();
+    isUpdating.value = false;
+    activeUpdatingTaskId.value = '';
+    updatingStatusState.value = '';
+    updateElapsed.value = 0;
+    updateStartTimestampMs = 0;
+    return;
+  }
+
+  stopUpdatePolling();
+  stopBoundTaskPolling();
+  activeUpdatingTaskId.value = targetUpdatingId;
+  isUpdating.value = true;
+  if (initialStatus) {
+    updatingStatusState.value = initialStatus;
+  } else if (!updatingStatusState.value) {
+    updatingStatusState.value = 'running';
+  }
+
+  const parsedStart = parseStartTimeMs(startTimeStr);
+  if (parsedStart > 0) {
+    updateStartTimestampMs = parsedStart;
+  } else if (!updateStartTimestampMs) {
+    updateStartTimestampMs = Date.now();
+  }
+  updateElapsed.value = computeElapsedSeconds(updateStartTimestampMs);
+
+  const clearUpdatingState = () => {
+    stopUpdatePolling();
+    isUpdating.value = false;
+    activeUpdatingTaskId.value = '';
+    updatingStatusState.value = '';
+    updateElapsed.value = 0;
+    updateStartTimestampMs = 0;
+  };
+
+  const checkUpdatingStatus = async () => {
+    if (!isPanelActive || !activeUpdatingTaskId.value || activeUpdatingTaskId.value !== targetUpdatingId) {
+      stopUpdatePolling();
+      return;
+    }
+    try {
+      const res = await request.get('/icp/task', { params: { _id: targetUpdatingId } });
+      if (!isPanelActive || activeUpdatingTaskId.value !== targetUpdatingId) return;
+
+      if (res.code === 200 && res.items && res.items.length > 0) {
+        const t = res.items[0];
+        const st = t.status || 'running';
+        if (t.start_time) {
+          const serverStart = parseStartTimeMs(t.start_time);
+          if (serverStart > 0) {
+            updateStartTimestampMs = serverStart;
+            updateElapsed.value = computeElapsedSeconds(serverStart);
+          }
+        }
+        if (st === 'waiting' || st === 'running') {
+          updatingStatusState.value = st;
+          if (activeTab.value === 'log' && isPanelActive && !logTimer) {
+            startLogPolling();
+          }
+        } else if (st === 'done') {
+          clearUpdatingState();
+          const stat = t.statistic || {};
+          const total = (stat.web_cnt || 0) + (stat.app_cnt || 0) + (stat.mapp_cnt || 0) + (stat.wechat_cnt || 0) + (stat.weibo_cnt || 0) + (stat.kapp_cnt || 0) + (stat.invest_cnt || 0);
+          notification.success({
+            message: assetText('assets.organizationAssetsUpdated'),
+            description: assetText('assets.theEnterpriseAssetProfileIsUpToDate', { count: total }),
+            duration: 5
+          });
+          emit('update:taskId', targetUpdatingId);
+          emit('refreshed', targetUpdatingId);
+          if (props.taskId === targetUpdatingId) {
+            fetchTaskDetail();
+            fetchAllTaskWebDomains();
+            if (props.scopeId) fetchManagedDomains();
+            if (activeTab.value === 'log') {
+              fetchLogs(true);
+              stopLogPolling();
+            } else {
+              fetchAssets(1, pagination.pageSize);
+            }
+          }
+        } else if (st === 'stop') {
+          clearUpdatingState();
+          if (activeTab.value === 'log') {
+            fetchLogs(true);
+            stopLogPolling();
+          }
+          emit('updatingStopped', targetUpdatingId);
+        } else if (st === 'error') {
+          clearUpdatingState();
+          const errMsg = t.error_msg || assetText('assets.backgroundDiscoveryFailedExistingAssetsHaveBeenPreserved');
+          notification.error({
+            message: assetText('assets.organizationAssetUpdateDidNotComplete'),
+            description: errMsg,
+            duration: 6
+          });
+          if (activeTab.value === 'log') {
+            fetchLogs(true);
+            stopLogPolling();
+          }
+          emit('updateFailed', { taskId: targetUpdatingId, error: errMsg });
+        }
+      } else if (res.code === 200) {
+        clearUpdatingState();
+        if (activeTab.value === 'log') {
+          fetchLogs(true);
+          stopLogPolling();
+        }
+        emit('updatingStopped', targetUpdatingId);
+      }
+    } catch (e) {
+      // 网络波动忽略单次轮询失败
+    }
+  };
+
+  if (isPanelActive) {
+    elapsedTimer = setInterval(() => {
+      updateElapsed.value = computeElapsedSeconds(updateStartTimestampMs);
+    }, 1000);
+    updateTimer = setInterval(checkUpdatingStatus, 3000);
+    if (activeTab.value === 'log') {
+      fetchLogs(true);
+      startLogPolling();
+    }
+    if (immediateCheck) {
+      checkUpdatingStatus();
+    }
+  }
+};
+
+const stopAllPollers = () => {
+  stopUpdatePolling();
+  stopBoundTaskPolling();
+  stopLogPolling();
+};
+
+const syncActivePollers = () => {
+  if (!isPanelActive) return;
+  if (props.updatingTaskId) {
+    startUpdatePolling(props.updatingTaskId, props.updatingStartTime, props.updatingStatus, true);
+  } else if (isUpdating.value) {
+    startUpdatePolling('');
+  }
+  if (props.taskId) {
+    fetchTaskDetail();
+    if (activeTab.value === 'log') {
+      fetchLogs(false);
+      startLogPolling();
+    }
   }
 };
 
@@ -1411,7 +1775,23 @@ const handleExport = async () => {
   }
 };
 
-watch(() => props.taskId, (newVal) => {
+watch(() => props.taskId, (newVal, oldVal) => {
+  if (oldVal !== undefined && newVal !== oldVal) {
+    stopBoundTaskPolling();
+    stopLogPolling();
+    taskRecord.value = {};
+    taskName.value = '';
+    taskTarget.value = '';
+    taskStatus.value = '';
+    hasIncrement.value = false;
+    assetList.value = [];
+    syslogList.value = [];
+    selectedWebRowKeys.value = [];
+    selectedWebDomains.value = [];
+    pagination.current = 1;
+    pagination.total = 0;
+    Object.keys(queryCounts).forEach(k => { queryCounts[k] = 0; });
+  }
   if (newVal) {
     fetchTaskDetail();
     fetchAllTaskWebDomains();
@@ -1426,17 +1806,86 @@ watch(() => props.taskId, (newVal) => {
   }
 }, { immediate: true });
 
-watch(() => props.scopeId, (newVal) => {
+watch(() => props.scopeId, (newVal, oldVal) => {
+  if (oldVal !== undefined && newVal !== oldVal) {
+    managedDomainSet.value = new Set();
+    selectedWebRowKeys.value = [];
+    selectedWebDomains.value = [];
+  }
   if (newVal) {
     fetchManagedDomains();
   }
 }, { immediate: true });
 
+watch(
+  () => [props.updatingTaskId, props.updatingStatus, props.updatingStartTime],
+  ([newUtid, newStatus, newStart]) => {
+    if (newUtid) {
+      if (activeUpdatingTaskId.value !== newUtid || !isUpdating.value) {
+        startUpdatePolling(newUtid, newStart || '', newStatus || 'running', true);
+      } else {
+        if (newStatus === 'waiting' || newStatus === 'running') {
+          updatingStatusState.value = newStatus;
+        }
+        if (newStart) {
+          const parsed = parseStartTimeMs(newStart);
+          if (parsed > 0) {
+            updateStartTimestampMs = parsed;
+            updateElapsed.value = computeElapsedSeconds(parsed);
+          }
+        }
+      }
+    } else if (isUpdating.value || activeUpdatingTaskId.value) {
+      startUpdatePolling('');
+      if (activeTab.value === 'log') {
+        fetchLogs(false);
+        startLogPolling();
+      } else if (props.taskId && isBoundTaskActive.value && isPanelActive) {
+        startBoundTaskPolling();
+      }
+    }
+  },
+  { immediate: true }
+);
+
+watch(() => props.active, (val) => {
+  const nextActive = val !== false;
+  if (nextActive === isPanelActive) return;
+  isPanelActive = nextActive;
+  if (isPanelActive) {
+    syncActivePollers();
+  } else {
+    stopAllPollers();
+  }
+});
+
+onActivated(() => {
+  isPanelActive = props.active !== false;
+  syncActivePollers();
+});
+
+onDeactivated(() => {
+  isPanelActive = false;
+  stopAllPollers();
+});
+
+onUnmounted(() => {
+  isPanelActive = false;
+  stopAllPollers();
+  if (osintResizeObserver) {
+    osintResizeObserver.disconnect();
+    osintResizeObserver = null;
+  }
+});
+
 defineExpose({
   handleRefreshTask,
+  handleStopUpdate,
   refreshLoading,
   isUpdating,
+  updatingStatusState,
   activeUpdatingTaskId,
+  stopAllPollers,
   queryCounts,
   taskRecord,
   fetchTaskDetail
@@ -1452,6 +1901,8 @@ defineExpose({
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   padding: 8px 16px;
   background: var(--arl-theme-soft-bg);
   border-bottom: 1px solid var(--arl-theme-soft-border);
@@ -1475,8 +1926,20 @@ defineExpose({
   color: var(--arl-text-color, #1f2225);
 }
 
+.updating-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .updating-banner-tag {
   margin: 0;
+}
+
+.log-polling-hint {
+  font-size: 12px;
+  color: var(--arl-text-secondary, #8c8c8c);
 }
 
 /* ================= OSINT 吸顶控制区 (与 ASM 完全对齐) ================= */
