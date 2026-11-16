@@ -224,14 +224,14 @@ test('中英文下保存系统设置只提交当前分组的改动，配置字�
     i18n.global.locale.value = locale;
     const calls = [];
     const page = component('views/SystemSettings.vue', {
-      generalForm: ref({ fofa_max_page: 3, query_plugin_config: { custom: '用户配置' }, proxy_url: 'http://127.0.0.1:8888' }),
-      generalBaseline: ref({ fofa_max_page: 1, query_plugin_config: { custom: '用户配置' }, proxy_url: '' }),
+      generalForm: ref({ fofa_max_page: 3, query_plugin_config: { custom: '用户配置' }, port_top_10: '80,443,8443' }),
+      generalBaseline: ref({ fofa_max_page: 1, query_plugin_config: { custom: '用户配置' }, port_top_10: '' }),
       request: { async post(url, data) { calls.push({ url, data: plain(data) }); return { code: 200 }; } },
     });
     for (const name of ['GENERAL_FIELD_GROUPS', 'cloneDeep', 'changedFields', 'pendingByGroup']) page.read(name);
     assert.equal(await page.read('saveGeneralGroup')('api_config', ref(false)), true);
-    assert.equal(page.context.generalBaseline.value.proxy_url, '');
-    assert.equal(page.context.changedFields.value.proxy_url, 'http://127.0.0.1:8888');
+    assert.equal(page.context.generalBaseline.value.port_top_10, '');
+    assert.equal(page.context.changedFields.value.port_top_10, '80,443,8443');
     assert.equal(page.context.generalForm.value.query_plugin_config.custom, '用户配置');
     assert.ok(!page.notices.some(row => row.key === 'error'));
     results.push(calls);

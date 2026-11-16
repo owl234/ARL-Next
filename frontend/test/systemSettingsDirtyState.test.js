@@ -40,6 +40,7 @@ function loadSystemSettings() {
     },
     route: { query: {} },
     router: { push() {} },
+    proxyPanelRef: ref(null),
   });
 
   const read = (name) => {
@@ -197,16 +198,23 @@ test('SystemSettings: firstDirtyTabKey 与 goToFirstDirty 正确支持外层 Tab
   context.securityForm.value.blackIpsText = '';
 
   // 3. 当 system_general 有脏字段时
-  context.generalForm.value.proxy_url = 'http://127.0.0.1:8080';
+  context.generalForm.value.port_top_10 = '80,443,8443';
   assert.equal(context.firstDirtyTabKey.value, 'performance');
   context.goToFirstDirty();
   assert.equal(context.activeKey.value, 'performance');
   assert.equal(context.scanSubTab.value, 'system_general');
 
   // 还原
-  context.generalForm.value.proxy_url = '';
+  context.generalForm.value.port_top_10 = '';
 
-  // 4. 当 api_config 有脏字段时
+  // 4. 当 proxy 面板有脏字段时
+  context.proxyPanelRef.value = { hasUnsavedChanges: () => true };
+  assert.equal(context.firstDirtyTabKey.value, 'proxy');
+  context.goToFirstDirty();
+  assert.equal(context.activeKey.value, 'proxy');
+  context.proxyPanelRef.value = null;
+
+  // 5. 当 api_config 有脏字段时
   context.generalForm.value.fofa_key = 'test_key';
   assert.equal(context.firstDirtyTabKey.value, 'api_config');
   context.goToFirstDirty();

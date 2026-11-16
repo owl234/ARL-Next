@@ -49,40 +49,6 @@
       </div>
     </div>
 
-    <!-- 全局凭据总览：内容跨「资产测绘与情报 / 通知与回调 / 高级扫描」三个 Tab，
-         故置于 Tab 之外。默认折叠为一行摘要，需要时展开——避免每次进入设置页
-         都被 12 项明细占据首屏。 -->
-    <div v-if="credentialOverview.length" class="arl-global-cred">
-      <div class="arl-cred-summary" @click="credExpanded = !credExpanded">
-        <span class="arl-cred-chevron">{{ credExpanded ? '▾' : '▸' }}</span>
-        <span class="arl-cred-summary-title">{{ pageText('pages.credentialConfigurationStatus') }}</span>
-        <a-tag :color="missingRequiredCredentials.length ? 'red' : 'green'" style="margin: 0;">
-          {{ pageText('pages.configuredCredentialsCount', { configured: configuredCredentialCount, total: credentialOverview.length }) }}
-        </a-tag>
-        <span v-if="missingRequiredCredentials.length" class="arl-cred-alert">
-          {{ pageText('pages.missingCredentials', { names: missingRequiredCredentials.map(c => c.label).join(pageLocale !== 'zh-CN' ? ', ' : '、') }) }}
-        </span>
-        <span v-else class="arl-cred-ok">{{ pageText('pages.allRequiredCredentialsAreConfigured') }}</span>
-        <a class="arl-cred-toggle">{{ credExpanded ? pageText('pages.collapse') : pageText('pages.showDetails') }}</a>
-      </div>
-
-      <div v-show="credExpanded" class="arl-cred-body">
-        <div class="arl-cred-hint">
-          {{ pageText('pages.credentialStatusHelp') }}
-        </div>
-        <a-row :gutter="[8, 8]" style="margin-top: 12px;">
-          <a-col :xs="24" :sm="12" :lg="8" v-for="item in credentialOverview" :key="item.key">
-            <div class="arl-cred-item" :class="item.configured ? 'is-ok' : 'is-missing'">
-              <span class="arl-cred-name">{{ item.label }}</span>
-              <a-tag :color="item.configured ? 'green' : (item.required ? 'red' : 'default')" style="margin: 0;">
-                {{ item.configured ? pageText('pages.configured') : (item.required ? pageText('pages.notConfiguredRequired') : pageText('pages.notConfiguredOptional')) }}
-              </a-tag>
-            </div>
-          </a-col>
-        </a-row>
-      </div>
-    </div>
-
     <a-tabs v-model:activeKey="activeKey">
       <!-- 统一字典与规则库 Tab -->
       <a-tab-pane key="api_config" :tab="tabTitle(pageText('pages.assetDiscoveryAndIntelligence'), Object.keys(pendingByGroup.api_config).length > 0)">
@@ -1494,9 +1460,6 @@ const generalBaseline = ref({});
 
 const cloneDeep = (val) => (val === undefined ? undefined : JSON.parse(JSON.stringify(val)));
 
-// 生效值视图：仅含可编辑且非敏感字段，用于回显"当前系统实际生效值"
-const mergedConfig = ref({});
-const credentialStatus = ref({});
 const capacityInfo = ref({});
 
 const captureBaseline = () => {
@@ -1577,10 +1540,6 @@ const unsavedCount = computed(() => {
 // 每条索引把「用户会搜的词」映射到「Tab + 锚点」，keywords 覆盖中英文与别名，
 // 让用户不必记住设置项藏在哪个 Tab（这是 L1 定位成本的主要来源）。
 const SETTINGS_INDEX = [
-  // 全局凭据总览（不在任何 Tab 内，锚点指向页面顶部的折叠条）
-  { tab: 'api_config', get tabLabel() { return pageText('pages.globalOverview'); }, get label() { return pageText('pages.credentialConfigurationOverview'); }, anchor: 'credential_status',
-    get desc() { return pageText('pages.viewTheConfigurationStatusOfAll12CredentialsAcross'); },
-    keywords: ['凭据', '配置状态', '已配置', '未配置', 'credential', 'token', '密钥', '总览', "全站总览 / 凭据配置状态总览 / 一屏查看全部 12 项凭据的配置状态（跨多个 Tab）"] },
   // 资产测绘与情报
   { tab: 'api_config', get tabLabel() { return pageText('pages.assetDiscoveryAndIntelligence'); }, get label() { return pageText('pages.fofaDiscoveryCredentials'); }, anchor: 'fofa',
     get desc() { return pageText('pages.fofaUrlApiKeyAndQueryPageLimits'); }, keywords: ['fofa', '空间测绘', 'api key', '情报', "资产测绘与情报 / FOFA 空间测绘凭据 / FOFA URL / KEY 与查询页数"] },
@@ -1681,19 +1640,8 @@ const jumpToSetting = (item) => {
   }
   settingsKeyword.value = '';
   highlightedAnchor.value = item.anchor;
-  // 全局凭据总览位于 Tab 之外且默认折叠：需先展开再滚动
-  if (item.anchor === 'credential_status') {
-    credExpanded.value = true;
-  }
   const isSubTab = item.anchor === 'cdn' || item.anchor === 'dict';
-  let selector;
-  if (isSubTab) {
-    selector = '.dict-sub-tabs';
-  } else if (item.anchor === 'credential_status') {
-    selector = '.arl-global-cred';
-  } else {
-    selector = `[data-setting-anchor="${item.anchor}"]`;
-  }
+  const selector = isSubTab ? '.dict-sub-tabs' : `[data-setting-anchor="${item.anchor}"]`;
   scrollAndFlashAnchor(selector);
 };
 
@@ -1795,57 +1743,6 @@ const saveGeneralGroup = async (group, loadingRef, successText) => {
   }
 };
 
-// 凭据状态展示模型：label 为面向用户的业务名称，required 标记"不配就没法用"的硬依赖
-const CREDENTIAL_LABELS = [
-  { key: 'github_token', label: 'GitHub Token', required: true },
-  { key: 'fofa_key', label: 'FOFA KEY', required: false },
-  { key: 'tyc_id', get label() { return pageText('pages.tianyanchaId'); }, required: false },
-  { key: 'tyc_token', get label() { return pageText('pages.tianyanchaToken'); }, required: false },
-  { key: 'so_search_cookie', get label() { return pageText('pages.360SearchCookie'); }, required: false },
-  { key: 'bing_search_cookie', get label() { return pageText('pages.bingSearchCookie'); }, required: false },
-  { key: 'dingding_access_token', get label() { return pageText('pages.dingtalkBotLabel2'); }, required: false },
-  { key: 'feishu_webhook', get label() { return pageText('pages.feishuBotLabel2'); }, required: false },
-  { key: 'wx_work_webhook', get label() { return pageText('pages.wecomBotLabel2'); }, required: false },
-  { key: 'tg_bot_token', get label() { return pageText('pages.telegramBotLabel2'); }, required: false },
-  { key: 'email_username', get label() { return pageText('pages.smtpEmail'); }, required: false },
-  { key: 'api_key', label: 'API Token', required: false },
-];
-
-const credentialOverview = computed(() => CREDENTIAL_LABELS.map((meta) => ({
-  ...meta,
-  configured: Boolean((credentialStatus.value[meta.key] || {}).configured),
-})));
-
-// 全局凭据条默认折叠：12 项明细常驻首屏会挤占视觉空间
-const credExpanded = ref(false);
-
-const configuredCredentialCount = computed(() =>
-  credentialOverview.value.filter((c) => c.configured).length);
-
-// 仅"必需但未配置"的项才值得红色告警；可选项缺失属正常状态
-const missingRequiredCredentials = computed(() =>
-  credentialOverview.value.filter((c) => c.required && !c.configured));
-
-const fetchMergedConfig = async () => {
-  try {
-    const res = await request.get('/api/system_config/merged_general');
-    if (res.code === 200 && res.data) {
-      mergedConfig.value = res.data;
-      credentialStatus.value = res.data.credentials || {};
-      // 只读字段以生效值为准回显（如 FOFA URL、线程数），让用户看到真实生效状态
-      ['fofa_url', 'fofa_max_page', 'fofa_page_size', 'port_top_10',
-       'domain_brute_concurrent', 'alt_dns_concurrent', 'auth'].forEach((key) => {
-        if (res.data[key] !== undefined && res.data[key] !== null && res.data[key] !== '') {
-          generalForm.value[key] = res.data[key];
-          generalBaseline.value[key] = cloneDeep(res.data[key]);
-        }
-      });
-    }
-  } catch (e) {
-    console.error('获取生效值失败', e);
-  }
-};
-
 const fetchCapacityProbe = async () => {
   try {
     const res = await request.get('/api/system_config/capacity_probe');
@@ -1927,8 +1824,6 @@ const fetchGeneralConfig = async () => {
         telegram: { ...generalForm.value.telegram, ...(res.data.telegram || {}) },
         email: { ...generalForm.value.email, ...(res.data.email || {}) }
       };
-      // 先拉生效值回填只读项，再确立基线：否则回填本身会被误判为"用户改动"
-      await fetchMergedConfig();
       captureBaseline();
     } else {
       message.error(res.message || pageText('pages.failedToLoadGeneralSystemConfiguration'));
@@ -2865,68 +2760,6 @@ onBeforeRouteLeave(() => {
   opacity: 0.55;
 }
 
-/* 全局凭据状态条（跨 Tab 总览，默认折叠） */
-.arl-global-cred {
-  margin-bottom: 12px;
-  border: 1px solid var(--arl-border-color);
-  border-radius: 8px;
-  background: var(--arl-bg-white);
-  overflow: hidden;
-}
-
-.arl-cred-summary {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.arl-cred-summary:hover {
-  background: var(--arl-bg-light);
-}
-
-.arl-cred-chevron {
-  font-size: 12px;
-  color: var(--arl-text-color);
-  opacity: 0.5;
-  width: 12px;
-}
-
-.arl-cred-summary-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--arl-text-color);
-}
-
-.arl-cred-alert {
-  font-size: 12px;
-  color: #cf1322;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.arl-cred-ok {
-  font-size: 12px;
-  color: var(--arl-text-color);
-  opacity: 0.5;
-  flex: 1;
-}
-
-.arl-cred-toggle {
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.arl-cred-body {
-  padding: 0 14px 14px;
-  border-top: 1px solid var(--arl-border-color);
-}
-
 /* 字段级说明（区分并发语义等易混指标） */
 .arl-field-hint {
   margin-top: 6px;
@@ -2981,40 +2814,6 @@ onBeforeRouteLeave(() => {
   color: var(--arl-text-color);
   opacity: 0.5;
   font-size: 12px;
-}
-
-.arl-cred-hint {
-  color: var(--arl-text-color);
-  opacity: 0.55;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.arl-cred-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--arl-border-color);
-  background: var(--arl-bg-white);
-}
-
-.arl-cred-item.is-ok {
-  border-left: 3px solid #52c41a;
-}
-
-.arl-cred-item.is-missing {
-  border-left: 3px solid #d9d9d9;
-}
-
-.arl-cred-name {
-  font-size: 13px;
-  color: var(--arl-text-color);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 可以在此处添加自定义样式 */
@@ -3419,8 +3218,6 @@ onBeforeRouteLeave(() => {
 .page-wide-text .page-config-card-fixed,
 .page-wide-text .page-config-card-fixed-short,
 .page-wide-text .page-config-card-fixed-tall { height: auto; min-height: 190px; }
-.page-wide-text .arl-cred-summary { flex-wrap: wrap; row-gap: 8px; }
-.page-wide-text .arl-cred-item { flex-wrap: wrap; gap: 6px; }
 .page-wide-text :deep(.ant-card-head-title) { white-space: normal; line-height: 1.5; padding: 12px 0; }
 .performance-pending-alert { margin-bottom: 16px; border-radius: 6px; }
 </style>

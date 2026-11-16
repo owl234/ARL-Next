@@ -362,44 +362,7 @@ class Performance(ARLResource):
         }
 
 
-@ns.route('/merged_general')
-class MergedGeneralConfig(ARLResource):
-    """
-    获取用于前端"已生效值"对比的合并视图。
-
-    /general 返回的是按后端 config 键名组织、且已应用数据库覆盖后的生效值，
-    但它既包含只读的基础设施字段，也包含不能回显给前端的凭据（API Key、
-    各类 Token / 密码）。本接口只暴露可编辑且非敏感的字段，供前端回显
-    "当前系统实际生效值"，让用户能分辨空输入框是"未配置"还是"已配置"。
-    """
-    @auth
-    def get(self):
-        from app.config import Config
-
-        return {
-            "code": 200,
-            "message": "success",
-            "data": {
-                "fofa_url": Config.FOFA_URL,
-                "fofa_max_page": Config.FOFA_MAX_PAGE,
-                "fofa_page_size": Config.FOFA_PAGE_SIZE,
-                "proxy_url": Config.PROXY_URL,
-                "port_top_10": Config.TOP_10,
-                "domain_brute_concurrent": Config.DOMAIN_BRUTE_CONCURRENT,
-                "alt_dns_concurrent": Config.ALT_DNS_CONCURRENT,
-                "auth": Config.AUTH,
-                "push_options": Config.PUSH_OPTIONS,
-                "query_plugin_config": Config.QUERY_PLUGIN_CONFIG,
-                # 仅回显"是否已配置"的布尔值，绝不返回凭据明文或掩码片段
-                "credentials": _credential_presence(),
-                "security_policy_source": _security_policy_source(),
-            }
-        }
-
-
 from app.services.system_config_service import (
-    _credential_presence,
-    _security_policy_source,
     dispatch_test_push,
     _UPDATE_CACHE,
     get_local_version_str,

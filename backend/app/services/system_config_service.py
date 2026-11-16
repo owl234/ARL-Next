@@ -9,68 +9,6 @@ _UPDATE_CACHE = {
 }
 
 
-def _credential_presence():
-    """列出各三方凭据的配置状态，供前端渲染状态徽章。
-
-    只返回布尔值与"是否来自 config.yaml 默认"标记，避免凭据经 GET 泄漏。
-    """
-    from app.config import Config
-    from app.utils.conn import conn_db
-
-    doc = conn_db('system_config').find_one({"_id": "general_config"}) or {}
-
-    fields = {
-        "fofa_key": ("FOFA_KEY", "fofa_key"),
-        "github_token": ("GITHUB_TOKEN", "github_token"),
-        "tyc_id": ("TYC_ID", "tyc_id"),
-        "tyc_token": ("TYC_TOKEN", "tyc_token"),
-        "so_search_cookie": ("SO_SEARCH_COOKIE", "so_search_cookie"),
-        "bing_search_cookie": ("BING_SEARCH_COOKIE", "bing_search_cookie"),
-        "api_key": ("API_KEY", "api_key"),
-        "webhook_token": ("WEB_HOOK_TOKEN", "webhook_token"),
-        "dingding_access_token": ("DINGDING_ACCESS_TOKEN", "dingding_access_token"),
-        "feishu_webhook": ("FEISHU_WEBHOOK", "feishu_webhook"),
-        "wx_work_webhook": ("WX_WORK_WEBHOOK", "wx_work_webhook"),
-        "tg_bot_token": ("TG_BOT_TOKEN", "tg_bot_token"),
-        "email_username": ("EMAIL_USERNAME", "email_username"),
-    }
-
-    result = {}
-    for label, (attr_name, db_key) in fields.items():
-        try:
-            value = getattr(Config, attr_name, "") or ""
-        except Exception:
-            value = ""
-        configured = bool(str(value).strip())
-        result[label] = {
-            "configured": configured,
-            "from_db": db_key in doc,
-        }
-    return result
-
-
-def _security_policy_source():
-    """返回安全策略当前生效值及其来源，供前端回显。
-
-    显式区分 database / config_yaml 两种来源。
-    """
-    from app.config import Config
-    from app.utils.conn import conn_db
-
-    doc = conn_db('system_config').find_one({"_id": "security_policy"})
-    if doc:
-        return {
-            "source": "database",
-            "black_ips": doc.get("black_ips", []),
-            "forbidden_domains": doc.get("forbidden_domains", []),
-        }
-    return {
-        "source": "config_yaml",
-        "black_ips": list(getattr(Config, "BLACK_IPS", []) or []),
-        "forbidden_domains": list(getattr(Config, "FORBIDDEN_DOMAINS", []) or []),
-    }
-
-
 def dispatch_test_push(push_type: str, config: dict) -> dict:
     """执行单通道消息推送连通性测试"""
     from app.utils.push import dingding_send, feishu_send, wx_work_send, send_email, telegram_send
