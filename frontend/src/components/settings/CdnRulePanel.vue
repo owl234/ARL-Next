@@ -1,150 +1,143 @@
 <template>
   <div>
     <a-spin :spinning="cdnLoading">
-      <SettingsActionBar
-        anchor="cdn_save"
-        :description="pageText('pages.cdnPanelActionDesc')"
-        :save-label="pageText('pages.saveCdnRulesBtn')"
-        :dirty="isCdnDirty"
-        :saving="cdnSaveLoading"
-        @save="() => saveCdnData()"
-        @reset="() => resetCdnChanges()"
-      />
-      <div style="display: flex; gap: 0; height: calc(100vh - 230px); min-height: 540px; border-radius: 12px; overflow: hidden; box-shadow: 0 12px 48px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04); border: 1px solid rgba(0,0,0,0.05); background: var(--arl-bg-white);">
-        
-        <!-- 左侧：CDN 列表 -->
-        <div style="width: 256px; flex-shrink: 0; border-right: 1px solid var(--arl-border-color); background: var(--arl-bg-white); display: flex; flex-direction: column;">
-          <div style="padding: 16px; border-bottom: 1px solid var(--arl-border-color); min-height: 64px; box-sizing: border-box;">
-            <div style="display: flex; gap: 8px;">
-              <a-input-search v-model:value="cdnSearchText" :placeholder="pageText('pages.searchCdns')" class="page-search-field" />
-              <a-button type="primary" @click="openCdnDrawer" class="page-icon-padding" :title="pageText('pages.addCdnFingerprint')">
-                <template #icon><span style="margin-right:0px;">➕</span></template>
+      <div class="arl-split-workbench">
+        <!-- 左侧：CDN 厂商清单 -->
+        <div class="arl-split-sidebar">
+          <div class="arl-split-sidebar-head">
+            <a-input-search
+              v-model:value="cdnSearchText"
+              :placeholder="pageText('pages.searchCdns')"
+              size="small"
+              allow-clear
+              style="flex: 1;"
+            />
+            <a-tooltip :title="pageText('pages.addCdnFingerprint')">
+              <a-button type="primary" size="small" @click="openCdnDrawer">
+                <template #icon><PlusOutlined /></template>
               </a-button>
-            </div>
+            </a-tooltip>
           </div>
-          <div class="hide-scrollbar" style="flex: 1; overflow-y: auto; padding: 12px 8px;">
-            <div v-if="filteredCdnList.length === 0" style="padding: 48px 24px; text-align: center; color: var(--arl-text-color); opacity: 0.65; display: flex; flex-direction: column; align-items: center; gap: 12px;">
-              <span style="font-size: 32px; opacity: 0.8;">📭</span>
-              <span class="page-label">{{ pageText('pages.cdnNotFound') }}</span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 4px;">
-              <div
-                v-for="item in filteredCdnList" :key="item.name"
-                class="custom-list-item"
-                :class="{ 'is-active': selectedCdnName === item.name }"
-                @click="selectedCdnName = item.name"
-              >
-                <div style="display: flex; align-items: flex-start; gap: 8px;">
-                  <span style="font-size: 16px; margin-top: 2px; opacity: 0.9;">🌐</span>
-                  <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0;">
-                    <span class="dict-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500;">{{ item.name }}</span>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                      <span class="dict-subtitle">{{ pageText('pages.cdnRuleCounts', { cnames: (item.cname_domain || []).length, ips: (item.ip_cidr || []).length }) }}</span>
-                    </div>
-                  </div>
+          <div class="cdn-summary-strip">
+            {{ pageText('pages.cdnOverviewSummary', { count: cdnList.length, cnames: totalCnameCount, ips: totalIpCount }) }}
+          </div>
+          <div class="arl-split-sidebar-body">
+            <ArlEmpty v-if="filteredCdnList.length === 0" :description="pageText('pages.cdnNotFound')" />
+            <div
+              v-for="item in filteredCdnList"
+              :key="item.name"
+              class="arl-split-item"
+              :class="{ 'is-active': selectedCdnName === item.name }"
+              @click="selectedCdnName = item.name"
+            >
+              <div class="cdn-item-row">
+                <GlobalOutlined class="cdn-item-icon" />
+                <div class="cdn-item-meta">
+                  <span class="arl-split-item-title cdn-item-name">{{ item.name }}</span>
+                  <span class="arl-split-item-sub">
+                    {{ pageText('pages.cdnRuleCounts', { cnames: (item.cname_domain || []).length, ips: (item.ip_cidr || []).length }) }}
+                  </span>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 右侧：详情面板 -->
-        <div style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-width: 0; background: var(--arl-bg-white); position: relative;">
-          <!-- 健康概览 -->
-          <div v-if="!selectedCdn" class="health-dashboard-wrapper">
-            <div class="health-dashboard-bg"></div>
-            <div class="health-content">
-              <div class="health-icon-pulse">
-                <span style="font-size: 56px;">🌍</span>
-              </div>
-              <h3 class="health-title">{{ pageText('pages.cdnDataOverview') }}</h3>
-              <div class="health-stats-container">
-                <div class="health-stat-card primary-stat">
-                  <div class="stat-value">{{ cdnList.length }}</div>
-                  <div class="stat-label">{{ pageText('pages.cdnProviders') }}</div>
-                </div>
-                <div class="health-stat-card warning-stat">
-                  <div class="stat-value">{{ totalCnameCount }}</div>
-                  <div class="stat-label">{{ pageText('pages.cnameRules') }}</div>
-                </div>
-                <div class="health-stat-card danger-stat" style="background: rgba(245, 34, 45, 0.04); border: 1px solid rgba(245, 34, 45, 0.1);">
-                  <div class="stat-value" style="color: #cf1322;">{{ totalIpCount }}</div>
-                  <div class="stat-label page-danger-emphasis">{{ pageText('pages.ipRangeRules') }}</div>
-                </div>
-              </div>
-              <div class="health-hint">
-                <span class="pulse-dot"></span>
-                <span>{{ pageText('pages.systemStatusIsHealthySelectACdnOnThe') }}</span>
-              </div>
-            </div>
+        <!-- 右侧：详情与即时维护 -->
+        <div class="arl-split-main">
+          <div v-if="!selectedCdn" class="cdn-empty-center">
+            <ArlEmpty :description="pageText('pages.cdnNotFound')">
+              <a-button type="primary" size="small" @click="openCdnDrawer">
+                <template #icon><PlusOutlined /></template>
+                {{ pageText('pages.addCdnFingerprint') }}
+              </a-button>
+            </ArlEmpty>
           </div>
-          
-          <!-- CDN 详情与编辑 -->
-          <div v-else class="native-preview-container">
-            <div class="native-toolbar">
-               <div>
-                 <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
-                   <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--arl-text-color);">{{ selectedCdn.name }}</h3>
-                   <a-tag color="cyan" class="page-flush-tag">{{ pageText('pages.cdnFingerprints') }}</a-tag>
-                 </div>
-                 <div class="page-secondary-help">{{ pageText('pages.cdnRuleCounts', { cnames: (selectedCdn.cname_domain || []).length, ips: (selectedCdn.ip_cidr || []).length }) }}</div>
-               </div>
-               <div style="display: flex; gap: 8px; align-items: center;">
-                  <a-popconfirm :title="pageText('pages.deleteThisCdnTheDeletionTakesEffectAfterSaving')" placement="bottomRight" @confirm="deleteSelectedCdn">
-                    <a-button danger><template #icon><span class="page-icon-gap">🗑️</span></template> {{ pageText('pages.deleteFingerprint') }}</a-button>
-                  </a-popconfirm>
-                  <a-button type="primary" ghost @click="editSelectedCdn"><template #icon><span class="page-icon-gap">✏️</span></template> {{ pageText('pages.editFingerprint') }}</a-button>
-               </div>
+
+          <template v-else>
+            <div class="arl-split-toolbar">
+              <div>
+                <div class="cdn-detail-title-row">
+                  <h3 class="cdn-detail-title">{{ selectedCdn.name }}</h3>
+                  <a-tag color="cyan" style="margin: 0;">{{ pageText('pages.cdnFingerprints') }}</a-tag>
+                  <span class="cdn-instant-badge">{{ pageText('pages.settingsInstantModeHint') }}</span>
+                </div>
+                <div class="cdn-detail-sub">
+                  {{ pageText('pages.cdnRuleCounts', { cnames: (selectedCdn.cname_domain || []).length, ips: (selectedCdn.ip_cidr || []).length }) }}
+                </div>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <a-popconfirm
+                  :title="pageText('pages.deleteThisCdnTheDeletionTakesEffectAfterSaving')"
+                  placement="bottomRight"
+                  @confirm="deleteSelectedCdn"
+                >
+                  <a-button danger size="small" :loading="cdnSaveLoading">
+                    <template #icon><DeleteOutlined /></template>
+                    {{ pageText('pages.deleteFingerprint') }}
+                  </a-button>
+                </a-popconfirm>
+                <a-button type="primary" ghost size="small" @click="editSelectedCdn">
+                  <template #icon><EditOutlined /></template>
+                  {{ pageText('pages.editFingerprint') }}
+                </a-button>
+              </div>
             </div>
 
-            <!-- 极简内容预览区 (双区块) -->
-            <div class="native-preview-area hide-scrollbar" style="display: flex; flex-direction: column; gap: 16px; padding-bottom: 24px;">
-              
+            <div class="arl-split-preview-area">
               <!-- CNAME 规则 -->
-              <div class="native-code-wrapper" style="flex: none; display: flex; flex-direction: column; padding: 0;">
-                <div style="padding: 8px 16px; background: var(--arl-bg-subtle); border-bottom: 1px solid var(--arl-border-color); font-weight: 500; font-size: 13px; color: var(--arl-text-color); display: flex; justify-content: space-between; align-items: center;">
+              <div class="arl-code-wrapper cdn-rule-box">
+                <div class="cdn-rule-head">
                   <span>{{ pageText('pages.cnameRulesLabel2') }}{{ (selectedCdn.cname_domain || []).length }})</span>
-                  <a-button size="small" type="text" @click="() => copyTextList(selectedCdn.cname_domain, pageText('pages.cnameRulesLabel3'))">
+                  <a-button
+                    size="small"
+                    type="text"
+                    @click="() => copyTextList(selectedCdn.cname_domain, pageText('pages.cnameRulesLabel3'))"
+                  >
+                    <template #icon><CopyOutlined /></template>
                     {{ pageText('pages.copy') }}
                   </a-button>
                 </div>
-                <div style="display: flex; position: relative; padding: 16px;">
-                  <div class="native-line-numbers" v-if="selectedCdn.cname_domain && selectedCdn.cname_domain.length > 0">
-                    <div v-for="n in selectedCdn.cname_domain.length" :key="'cname-'+n" class="line-number">{{ n }}</div>
+                <div class="cdn-rule-content">
+                  <div v-if="selectedCdn.cname_domain && selectedCdn.cname_domain.length > 0" class="arl-code-lines">
+                    <div v-for="n in selectedCdn.cname_domain.length" :key="'cname-' + n" class="arl-code-line-num">{{ n }}</div>
                   </div>
-                  <div class="native-code-content" style="min-height: 40px;">
-                    <div v-if="!(selectedCdn.cname_domain && selectedCdn.cname_domain.length > 0)" class="empty-code" style="padding-top: 0;">
-                      <span>{{ pageText('pages.noCnameRules') }}</span>
+                  <div class="arl-code-body">
+                    <div v-if="!(selectedCdn.cname_domain && selectedCdn.cname_domain.length > 0)" class="arl-code-empty">
+                      {{ pageText('pages.noCnameRules') }}
                     </div>
-                    <pre v-else class="code-text">{{ selectedCdn.cname_domain.join('\n') }}</pre>
+                    <pre v-else class="arl-code-pre">{{ selectedCdn.cname_domain.join('\n') }}</pre>
                   </div>
                 </div>
               </div>
 
               <!-- IP CIDR 规则 -->
-              <div class="native-code-wrapper" style="flex: none; display: flex; flex-direction: column; padding: 0;">
-                <div style="padding: 8px 16px; background: var(--arl-bg-subtle); border-bottom: 1px solid var(--arl-border-color); font-weight: 500; font-size: 13px; color: var(--arl-text-color); display: flex; justify-content: space-between; align-items: center;">
+              <div class="arl-code-wrapper cdn-rule-box">
+                <div class="cdn-rule-head">
                   <span>{{ pageText('pages.ipCidrRules') }}{{ (selectedCdn.ip_cidr || []).length }})</span>
-                  <a-button size="small" type="text" @click="() => copyTextList(selectedCdn.ip_cidr, pageText('pages.ipCidrRulesLabel2'))">
+                  <a-button
+                    size="small"
+                    type="text"
+                    @click="() => copyTextList(selectedCdn.ip_cidr, pageText('pages.ipCidrRulesLabel2'))"
+                  >
+                    <template #icon><CopyOutlined /></template>
                     {{ pageText('pages.copy') }}
                   </a-button>
                 </div>
-                <div style="display: flex; position: relative; padding: 16px;">
-                  <div class="native-line-numbers" v-if="selectedCdn.ip_cidr && selectedCdn.ip_cidr.length > 0">
-                    <div v-for="n in selectedCdn.ip_cidr.length" :key="'ip-'+n" class="line-number">{{ n }}</div>
+                <div class="cdn-rule-content">
+                  <div v-if="selectedCdn.ip_cidr && selectedCdn.ip_cidr.length > 0" class="arl-code-lines">
+                    <div v-for="n in selectedCdn.ip_cidr.length" :key="'ip-' + n" class="arl-code-line-num">{{ n }}</div>
                   </div>
-                  <div class="native-code-content" style="min-height: 40px;">
-                    <div v-if="!(selectedCdn.ip_cidr && selectedCdn.ip_cidr.length > 0)" class="empty-code" style="padding-top: 0;">
-                      <span>{{ pageText('pages.noIpCidrRules') }}</span>
+                  <div class="arl-code-body">
+                    <div v-if="!(selectedCdn.ip_cidr && selectedCdn.ip_cidr.length > 0)" class="arl-code-empty">
+                      {{ pageText('pages.noIpCidrRules') }}
                     </div>
-                    <pre v-else class="code-text">{{ selectedCdn.ip_cidr.join('\n') }}</pre>
+                    <pre v-else class="arl-code-pre">{{ selectedCdn.ip_cidr.join('\n') }}</pre>
                   </div>
                 </div>
               </div>
-
             </div>
-          </div>
-
+          </template>
         </div>
       </div>
     </a-spin>
@@ -153,11 +146,11 @@
       v-model:open="cdnDrawerVisible"
       :title="isEditingCdn ? pageText('pages.editCdnFingerprint') : pageText('pages.addCdnFingerprint')"
       placement="right"
-      width="450"
+      width="460"
       @close="resetCdnForm"
     >
       <div style="display: flex; flex-direction: column; height: 100%;">
-        <div class="hide-scrollbar" style="flex: 1; overflow-y: auto; padding-right: 4px;">
+        <div style="flex: 1; overflow-y: auto; padding-right: 4px;">
           <a-form :label-wrap="true" :model="currentCdnForm" layout="vertical">
             <a-form-item :label="pageText('pages.cdnName')" required>
               <a-input v-model:value="currentCdnForm.name" :placeholder="pageText('pages.eGAlibabaCloudCdn')" />
@@ -171,8 +164,8 @@
           </a-form>
         </div>
         <div style="border-top: 1px solid var(--arl-border-color); padding-top: 16px; text-align: right; margin-top: 16px;">
-          <a-button @click="cdnDrawerVisible = false" class="page-inline-gap">{{ pageText('tasks.cancel') }}</a-button>
-          <a-button type="primary" @click="submitCdnDrawer">{{ pageText('pages.saveLabel2') }}</a-button>
+          <a-button @click="cdnDrawerVisible = false" style="margin-right: 8px;" :disabled="cdnSaveLoading">{{ pageText('tasks.cancel') }}</a-button>
+          <a-button type="primary" :loading="cdnSaveLoading" @click="submitCdnDrawer">{{ pageText('pages.saveLabel2') }}</a-button>
         </div>
       </div>
     </a-drawer>
@@ -183,43 +176,48 @@
 import { ref, reactive, computed, nextTick, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { message } from 'ant-design-vue';
+import {
+  GlobalOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  CopyOutlined,
+} from '@ant-design/icons-vue';
+import ArlEmpty from '@/components/ArlEmpty.vue';
 import request from '@/utils/request';
 import { copyText } from '@/utils/clipboard';
-import SettingsActionBar from './SettingsActionBar.vue';
 
 const { t: pageText } = useI18n({ useScope: 'global' });
 
 const cdnList = ref([]);
-const originalCdnList = ref([]);
 const cdnLoading = ref(false);
 const cdnSaveLoading = ref(false);
-
-const isCdnDirty = computed(() => {
-  return JSON.stringify(cdnList.value) !== JSON.stringify(originalCdnList.value);
-});
-
 const cdnSearchText = ref('');
 const selectedCdnName = ref('');
 
 const filteredCdnList = computed(() => {
   if (!cdnSearchText.value) return cdnList.value;
-  return cdnList.value.filter(item =>
-    item.name.toLowerCase().includes(cdnSearchText.value.toLowerCase())
-  );
+  const kw = cdnSearchText.value.toLowerCase();
+  return cdnList.value.filter((item) => item.name.toLowerCase().includes(kw));
 });
 
 const selectedCdn = computed(() => {
   if (!selectedCdnName.value) return null;
-  return cdnList.value.find(item => item.name === selectedCdnName.value);
+  return cdnList.value.find((item) => item.name === selectedCdnName.value) || null;
 });
 
-const totalCnameCount = computed(() => {
-  return cdnList.value.reduce((acc, curr) => acc + (curr.cname_domain || []).length, 0);
-});
+const totalCnameCount = computed(() => cdnList.value.reduce((acc, curr) => acc + (curr.cname_domain || []).length, 0));
+const totalIpCount = computed(() => cdnList.value.reduce((acc, curr) => acc + (curr.ip_cidr || []).length, 0));
 
-const totalIpCount = computed(() => {
-  return cdnList.value.reduce((acc, curr) => acc + (curr.ip_cidr || []).length, 0);
-});
+const ensureDefaultSelection = () => {
+  if (cdnList.value.length === 0) {
+    selectedCdnName.value = '';
+    return;
+  }
+  if (!selectedCdnName.value || !cdnList.value.some((c) => c.name === selectedCdnName.value)) {
+    selectedCdnName.value = cdnList.value[0].name;
+  }
+};
 
 const copyTextList = async (list, label = pageText('tasks.content')) => {
   if (!list || !list.length) {
@@ -239,7 +237,7 @@ const isEditingCdn = ref(false);
 const currentCdnForm = reactive({
   name: '',
   cnameText: '',
-  ipText: ''
+  ipText: '',
 });
 const currentEditIndex = ref(-1);
 
@@ -255,74 +253,98 @@ const openCdnDrawer = () => {
 const editSelectedCdn = () => {
   if (!selectedCdn.value) return;
   isEditingCdn.value = true;
-  currentEditIndex.value = cdnList.value.findIndex(c => c.name === selectedCdn.value.name);
+  currentEditIndex.value = cdnList.value.findIndex((c) => c.name === selectedCdn.value.name);
   currentCdnForm.name = selectedCdn.value.name;
   currentCdnForm.cnameText = (selectedCdn.value.cname_domain || []).join('\n');
   currentCdnForm.ipText = (selectedCdn.value.ip_cidr || []).join('\n');
   cdnDrawerVisible.value = true;
 };
 
-const deleteSelectedCdn = () => {
-  if (!selectedCdn.value) return;
-  const index = cdnList.value.findIndex(c => c.name === selectedCdn.value.name);
-  if (index > -1) {
-    cdnList.value.splice(index, 1);
-    selectedCdnName.value = '';
-    message.success(pageText('pages.deletedLocallySaveAllChangesToApply'));
-  }
-};
-
 const resetCdnForm = () => {
   cdnDrawerVisible.value = false;
 };
 
-const submitCdnDrawer = () => {
-  if (!currentCdnForm.name.trim()) {
+const persistCdnList = async (nextList, successText) => {
+  cdnSaveLoading.value = true;
+  try {
+    const res = await request.post('/api/cdn_dict/save', { data: nextList });
+    if (res.code === 200) {
+      cdnList.value = nextList;
+      ensureDefaultSelection();
+      if (successText) message.success(successText);
+      return true;
+    }
+    message.error(res.message || pageText('pages.failedToSaveLabel2'));
+    return false;
+  } catch (error) {
+    const errMsg = error?.response?.data?.message || pageText('pages.saveRequestFailed');
+    message.error(errMsg);
+    console.error(error);
+    return false;
+  } finally {
+    cdnSaveLoading.value = false;
+  }
+};
+
+const deleteSelectedCdn = async () => {
+  if (!selectedCdn.value) return;
+  const targetName = selectedCdn.value.name;
+  const nextList = cdnList.value.filter((c) => c.name !== targetName);
+  const ok = await persistCdnList(nextList, pageText('pages.cdnInstantDeleted', { name: targetName }));
+  if (ok) {
+    ensureDefaultSelection();
+  }
+};
+
+const submitCdnDrawer = async () => {
+  const name = currentCdnForm.name.trim();
+  if (!name) {
     message.warning(pageText('pages.enterACdnName'));
     return;
   }
-  const cname_domain = currentCdnForm.cnameText.split('\n').map(s => s.trim()).filter(s => s);
-  const ip_cidr = currentCdnForm.ipText.split('\n').map(s => s.trim()).filter(s => s);
+  const cname_domain = currentCdnForm.cnameText.split('\n').map((s) => s.trim()).filter(Boolean);
+  const ip_cidr = currentCdnForm.ipText.split('\n').map((s) => s.trim()).filter(Boolean);
 
   const cidrRe = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
-  const invalidCidr = ip_cidr.filter(cidr => {
+  const invalidCidr = ip_cidr.filter((cidr) => {
     if (!cidrRe.test(cidr)) return true;
     const parts = cidr.split('/');
     const octets = parts[0].split('.').map(Number);
-    if (octets.some(o => o < 0 || o > 255)) return true;
-    if (parts[1] && (parseInt(parts[1]) < 0 || parseInt(parts[1]) > 32)) return true;
+    if (octets.some((o) => o < 0 || o > 255)) return true;
+    if (parts[1] && (parseInt(parts[1], 10) < 0 || parseInt(parts[1], 10) > 32)) return true;
     return false;
   });
   if (invalidCidr.length > 0) {
     message.error(pageText('pages.invalidIpEGIpUseAnIpv4Address', { ip: invalidCidr[0] }));
     return;
   }
-  const invalidCname = cname_domain.filter(d => /[\s/\\]/.test(d));
+  const invalidCname = cname_domain.filter((d) => /[\s/\\]/.test(d));
   if (invalidCname.length > 0) {
     message.error(pageText('pages.invalidCnameSuffixEGSuffixUseADomain', { suffix: invalidCname[0] }));
     return;
   }
 
+  const nextList = JSON.parse(JSON.stringify(cdnList.value));
   if (isEditingCdn.value && currentEditIndex.value > -1) {
-    cdnList.value[currentEditIndex.value] = {
-      name: currentCdnForm.name.trim(),
-      cname_domain,
-      ip_cidr
-    };
-    selectedCdnName.value = currentCdnForm.name.trim();
-  } else {
-    if (cdnList.value.find(c => c.name === currentCdnForm.name.trim())) {
+    const duplicate = nextList.some((c, idx) => idx !== currentEditIndex.value && c.name === name);
+    if (duplicate) {
       message.warning(pageText('pages.thisCdnNameAlreadyExists'));
       return;
     }
-    cdnList.value.unshift({
-      name: currentCdnForm.name.trim(),
-      cname_domain,
-      ip_cidr
-    });
-    selectedCdnName.value = currentCdnForm.name.trim();
+    nextList[currentEditIndex.value] = { name, cname_domain, ip_cidr };
+  } else {
+    if (nextList.some((c) => c.name === name)) {
+      message.warning(pageText('pages.thisCdnNameAlreadyExists'));
+      return;
+    }
+    nextList.unshift({ name, cname_domain, ip_cidr });
   }
-  cdnDrawerVisible.value = false;
+
+  const ok = await persistCdnList(nextList, pageText('pages.cdnInstantSaved', { name }));
+  if (ok) {
+    selectedCdnName.value = name;
+    cdnDrawerVisible.value = false;
+  }
 };
 
 const fetchCdnList = async () => {
@@ -331,7 +353,7 @@ const fetchCdnList = async () => {
     const res = await request.get('/api/cdn_dict/list');
     if (res.code === 200) {
       cdnList.value = res.data || [];
-      originalCdnList.value = JSON.parse(JSON.stringify(cdnList.value));
+      ensureDefaultSelection();
     } else {
       message.error(res.message || pageText('pages.failedToLoadCdnList'));
     }
@@ -343,47 +365,11 @@ const fetchCdnList = async () => {
   }
 };
 
-const resetCdnChanges = ({ silent = false } = {}) => {
-  cdnList.value = JSON.parse(JSON.stringify(originalCdnList.value));
-  if (selectedCdnName.value && !cdnList.value.some((c) => c.name === selectedCdnName.value)) {
-    selectedCdnName.value = '';
-  }
-  if (!silent) {
-    message.info(pageText('pages.sectionChangesReset'));
-  }
-};
-
-const saveCdnData = async ({ silentSuccess = false } = {}) => {
-  cdnSaveLoading.value = true;
-  try {
-    const res = await request.post('/api/cdn_dict/save', {
-      data: cdnList.value
-    });
-    if (res.code === 200) {
-      originalCdnList.value = JSON.parse(JSON.stringify(cdnList.value));
-      if (!silentSuccess) {
-        message.success(pageText('pages.allChangesSaved'));
-      }
-      fetchCdnList();
-      return true;
-    } else {
-      message.error(res.message || pageText('pages.failedToSaveLabel2'));
-      return false;
-    }
-  } catch (error) {
-    message.error(pageText('pages.saveRequestFailed'));
-    console.error(error);
-    return false;
-  } finally {
-    cdnSaveLoading.value = false;
-  }
-};
-
 const closeDrawer = () => {
   cdnDrawerVisible.value = false;
 };
 
-const focusSection = (anchor = 'cdn_save', retries = 3) => {
+const focusSection = (anchor = 'cdn', retries = 3) => {
   if (!anchor) return;
   nextTick(() => {
     const el = document.querySelector(`[data-setting-anchor="${anchor}"]`);
@@ -404,236 +390,91 @@ onMounted(() => {
 defineExpose({
   fetchCdnList,
   closeDrawer,
-  hasUnsavedChanges: () => isCdnDirty.value,
-  saveChanges: saveCdnData,
-  resetChanges: resetCdnChanges,
+  hasUnsavedChanges: () => false,
   isSaving: () => cdnSaveLoading.value,
   focusSection,
 });
 </script>
 
 <style scoped>
-.page-search-field { flex: 1; border-radius: 4px; }
-.page-icon-padding { padding: 0 8px; }
-.page-label { font-size: 13px; font-weight: 500; }
-.page-icon-gap { margin-right: 4px; }
-.page-inline-gap { margin-right: 8px; }
-.page-danger-emphasis { color: #cf1322; }
-.page-flush-tag { margin: 0; }
-.page-secondary-help { color: var(--arl-text-color); opacity: 0.55; font-size: 12px; }
-
-.custom-list-item {
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid transparent;
-  color: var(--arl-text-color);
-}
-.custom-list-item:hover {
-  background: var(--arl-bg-light);
-  transform: translateX(4px);
-}
-.custom-list-item.is-active {
-  background: var(--arl-theme-color);
-  color: #fff;
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--arl-theme-color) 30%, transparent);
-}
-.custom-list-item.is-active .dict-title,
-.custom-list-item.is-active .dict-subtitle {
-  color: #fff;
-}
-.dict-subtitle {
+.cdn-summary-strip {
+  padding: 6px 14px;
   font-size: 12px;
-  opacity: 0.65;
+  color: var(--arl-text-secondary);
+  background: var(--arl-bg-light);
+  border-bottom: 1px solid var(--arl-border-color);
 }
-.hide-scrollbar::-webkit-scrollbar {
-  display: none;
+.cdn-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 }
-.hide-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+.cdn-item-icon {
+  margin-top: 3px;
+  opacity: 0.78;
+  flex-shrink: 0;
 }
-
-.health-dashboard-wrapper {
+.cdn-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
   flex: 1;
-  position: relative;
+}
+.cdn-item-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cdn-empty-center {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--arl-bg-white);
-  overflow: hidden;
+  padding: 32px;
 }
-.health-dashboard-bg {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(circle at 50% -20%, color-mix(in srgb, var(--arl-theme-color) 12%, transparent), transparent 60%),
-              radial-gradient(circle at -20% 80%, rgba(114, 46, 209, 0.05), transparent 50%);
-  pointer-events: none;
-}
-.health-content {
-  position: relative;
-  z-index: 1;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-}
-.health-icon-pulse {
-  animation: float 4s ease-in-out infinite;
-  margin-bottom: 8px;
-}
-@keyframes float {
-  0% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
-  100% { transform: translateY(0px); }
-}
-.health-title {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--arl-text-color);
-  margin: 0;
-  letter-spacing: 0.5px;
-}
-.health-stats-container {
-  display: flex;
-  gap: 24px;
-  margin-top: 16px;
-}
-.health-stat-card {
-  background: var(--arl-bg-subcard);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--arl-border-color);
-  border-radius: 16px;
-  padding: 24px 40px;
-  min-width: 180px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.06);
-  transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
-}
-.health-stat-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 32px rgba(0,0,0,0.12);
-  border-color: color-mix(in srgb, var(--arl-theme-color) 35%, var(--arl-border-color));
-}
-.stat-value {
-  font-size: 36px;
-  font-weight: 800;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  line-height: 1.2;
-}
-.primary-stat .stat-value {
-  background-image: linear-gradient(135deg, var(--arl-theme-color) 0%, #36cfc9 100%);
-}
-.warning-stat .stat-value {
-  background-image: linear-gradient(135deg, #fa8c16 0%, #ffc53d 100%);
-}
-.stat-label {
-  font-size: 14px;
-  color: var(--arl-text-secondary);
-  margin-top: 8px;
-  font-weight: 500;
-}
-.health-hint {
+.cdn-detail-title-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 32px;
+  margin-bottom: 4px;
+}
+.cdn-detail-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--arl-text-color);
+}
+.cdn-instant-badge {
+  font-size: 12px;
   color: var(--arl-text-secondary);
-  font-size: 13px;
-  background: var(--arl-bg-subcard);
-  padding: 8px 16px;
-  border-radius: 20px;
-  border: 1px solid var(--arl-border-color);
 }
-.pulse-dot {
-  width: 8px;
-  height: 8px;
-  background: #52c41a;
-  border-radius: 50%;
-  box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.7);
-  animation: dotPulse 2s infinite;
+.cdn-detail-sub {
+  font-size: 12px;
+  color: var(--arl-text-secondary);
 }
-@keyframes dotPulse {
-  0% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.7); }
-  70% { box-shadow: 0 0 0 8px rgba(82, 196, 26, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0); }
-}
-
-.native-preview-container {
-  flex: 1;
+.cdn-rule-box {
+  flex: none;
   display: flex;
   flex-direction: column;
-  background: var(--arl-bg-white);
-  position: relative;
+  padding: 0;
   overflow: hidden;
 }
-.native-toolbar {
-  padding: 16px 24px;
+.cdn-rule-head {
+  padding: 8px 14px;
+  background: var(--arl-bg-subtle);
   border-bottom: 1px solid var(--arl-border-color);
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--arl-text-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: var(--arl-bg-white);
-  min-height: 64px;
 }
-.native-preview-area {
-  flex: 1;
+.cdn-rule-content {
   display: flex;
-  overflow-y: auto;
-  padding: 24px;
-  background: var(--arl-bg-light);
-}
-.native-code-wrapper {
-  flex: 1;
-  display: flex;
-  background: var(--arl-bg-white);
-  border: 1px solid var(--arl-border-color);
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-  font-family: 'Fira Code', 'SFMono-Regular', Consolas, Menlo, monospace;
-  font-size: 13px;
-  line-height: 1.6;
-}
-.native-line-numbers {
-  display: flex;
-  flex-direction: column;
-  padding-right: 16px;
-  border-right: 1px solid var(--arl-border-color);
-  margin-right: 16px;
-  color: var(--arl-text-color);
-  opacity: 0.35;
-  text-align: right;
-  user-select: none;
-  min-width: 40px;
-}
-.line-number {
-  height: 21px;
-}
-.native-code-content {
-  flex: 1;
-  min-width: 0;
-}
-.code-text {
-  margin: 0;
-  color: var(--arl-text-color);
-  opacity: 0.85;
-  white-space: pre-wrap;
-  word-break: break-all;
-  font-family: inherit;
-}
-.empty-code {
-  color: var(--arl-text-color);
-  opacity: 0.3;
-  font-style: italic;
-  padding-top: 20px;
-  text-align: center;
+  position: relative;
+  padding: 14px 16px;
 }
 </style>

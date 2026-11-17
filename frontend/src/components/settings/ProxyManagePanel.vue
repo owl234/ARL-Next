@@ -1,16 +1,6 @@
 <template>
   <div class="proxy-panel-root" :class="{ 'page-wide-text': pageLocale !== 'zh-CN' }">
     <a-spin :spinning="initialLoading">
-      <SettingsActionBar
-        anchor="proxy_save"
-        :description="pageText('pages.proxyConfigDesc')"
-        :save-label="pageText('pages.proxySavePoliciesBtn')"
-        :dirty="isPolicyDirty"
-        :saving="policySaving"
-        @save="() => handleSavePolicies()"
-        @reset="() => resetPolicyEdits()"
-      />
-
       <a-alert
         v-if="capabilitiesLoaded && !capabilities.pysocks_installed"
         type="warning"
@@ -28,8 +18,28 @@
               <span class="section-subtitle">{{ pageText('pages.proxyPoolSubtitle') }}</span>
             </div>
             <div class="card-header-actions">
+              <a-dropdown-button
+                size="small"
+                :trigger="['click']"
+                :loading="batchProbing"
+                :disabled="!hasEnabledNodes"
+                @click="handleBatchProbeNodes('egress_ip')"
+              >
+                <template #icon>
+                  <DownOutlined />
+                </template>
+                {{ pageText('pages.proxyBatchProbeBtn') }}
+                <template #overlay>
+                  <a-menu @click="({ key }) => handleBatchProbeNodes(key)">
+                    <a-menu-item v-for="preset in probePresetOptions" :key="preset.value">
+                      {{ preset.label }}
+                    </a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown-button>
               <a-button type="primary" size="small" @click="openNodeModal(null)">
-                + {{ pageText('pages.proxyAddNodeBtn') }}
+                <template #icon><PlusOutlined /></template>
+                {{ pageText('pages.proxyAddNodeBtn') }}
               </a-button>
             </div>
           </div>
@@ -386,6 +396,19 @@
       :maskClosable="false"
     >
       <a-form layout="vertical" size="small">
+        <div class="quick-uri-box">
+          <div class="quick-uri-label">{{ pageText('pages.proxyQuickUriLabel') }}</div>
+          <div class="quick-uri-row">
+            <a-input
+              v-model:value="quickUriText"
+              :placeholder="pageText('pages.proxyQuickUriPlaceholder')"
+              allow-clear
+              @pressEnter="handleParseQuickUri"
+            />
+            <a-button @click="handleParseQuickUri">{{ pageText('pages.proxyParseUriBtn') }}</a-button>
+          </div>
+        </div>
+
         <a-row :gutter="12">
           <a-col :span="14">
             <a-form-item :label="pageText('pages.proxyNodeNameLabel')" required>
@@ -490,10 +513,10 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { message } from 'ant-design-vue';
-import { DownOutlined } from '@ant-design/icons-vue';
+import { DownOutlined, PlusOutlined } from '@ant-design/icons-vue';
 import request from '@/utils/request';
 import { formatProxyEgressLabel, formatProxyLevelClass, formatProxyTagColor } from '@/constants/proxyStatus';
-import SettingsActionBar from './SettingsActionBar.vue';
+import { parseProxyUri } from '@/utils/settingsHelpers';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 
@@ -503,7 +526,9 @@ const resetLoading = ref(false);
 const policySaving = ref(false);
 const togglingNodeId = ref('');
 const probingNodeId = ref('');
+const batchProbing = ref(false);
 const deletingNodeId = ref('');
+const quickUriText = ref('');
 
 const capabilitiesLoaded = ref(false);
 const capabilities = reactive({
@@ -805,8 +830,11 @@ const fetchProxyConfig = async (showInitialSpin = true) => {
   }
 };
 
+const hasEnabledNodes = computed(() => (config.nodes || []).some((n) => !!n.enabled));
+
 const openNodeModal = (node) => {
   modalProbeResult.value = null;
+  quickUriText.value = '';
   if (node) {
     editingNodeId.value = node.id;
     editingHasPassword.value = !!node.has_password;
@@ -974,6 +1002,65 @@ const handleProbeExistingNode = async (record, preset = 'egress_ip') => {
   }
 };
 
+const handleParseQuickUri = () => {
+  const parsed = parseProxyUri(quickUriText.value);
+  if (!parsed.ok) {
+    message.warning(pageText('pages.proxyUriInvalidWarn'));
+    return;
+  }
+  nodeForm.protocol = parsed.protocol;
+  nodeForm.host = parsed.host;
+  nodeForm.port = parsed.port;
+  nodeForm.username = parsed.username || '';
+  if (parsed.password) {
+    nodeForm.password = parsed.password;
+    nodeForm.clear_password = false;
+  }
+  if (!String(nodeForm.name || '').trim()) {
+    nodeForm.name = `${parsed.protocol.toUpperCase()}-${parsed.host}`;
+  }
+  message.success(pageText('pages.proxyUriParsedSuccess'));
+};
+
+const handleBatchProbeNodes = async (preset = 'egress_ip') => {
+  const targets = (config.nodes || []).filter((n) => !!n.enabled);
+  if (targets.length === 0) {
+    message.warning(pageText('pages.proxyBatchProbeNoEnabled'));
+    return;
+  }
+  batchProbing.value = true;
+  let okCount = 0;
+  let failCount = 0;
+  try {
+    for (const node of targets) {
+      probingNodeId.value = node.id;
+      try {
+        const res = await request.post('/api/system_config/proxy/probe', {
+          node_id: node.id,
+          preset: preset || 'egress_ip',
+          save_result: true,
+        });
+        if (res.code === 200 && res.data) {
+          applyServerPayload(res.data);
+          const r = res.data.result || {};
+          if (r.ok && !r.waf_blocked) okCount += 1;
+          else failCount += 1;
+        } else {
+          failCount += 1;
+        }
+      } catch {
+        failCount += 1;
+      }
+    }
+    const text = pageText('pages.proxyBatchProbeDone', { ok: okCount, fail: failCount });
+    if (failCount === 0) message.success(text);
+    else message.warning(text);
+  } finally {
+    probingNodeId.value = '';
+    batchProbing.value = false;
+  }
+};
+
 const handleProbeDraft = async () => {
   if (!validateNodeDraft()) return;
   modalProbeLoading.value = true;
@@ -1114,8 +1201,27 @@ defineExpose({
 
 <style scoped>
 .proxy-panel-root {
-  max-width: 1180px;
-  padding-bottom: 72px;
+  max-width: 1240px;
+  padding-bottom: 24px;
+}
+
+.quick-uri-box {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px dashed var(--arl-border-color);
+  background: var(--arl-bg-light);
+}
+.quick-uri-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--arl-text-secondary);
+  margin-bottom: 6px;
+}
+.quick-uri-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .osint-status-dot {
@@ -1131,9 +1237,9 @@ defineExpose({
 .osint-status-dot.is-ok { background: #52c41a; }
 
 .proxy-section-card {
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid var(--arl-border-color);
-  background: var(--arl-bg-white);
+  background: var(--arl-bg-card);
 }
 
 .card-header-flex {

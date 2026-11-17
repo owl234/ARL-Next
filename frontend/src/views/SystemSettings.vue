@@ -1,28 +1,126 @@
 <template>
   <div class="arl-page-container arl-settings-page" :class="{ 'page-wide-text': pageLocale !== 'zh-CN' }">
-    <!-- 全局未保存配置中枢：展示待保存分区清单，支持直接跳转、一键重置或一键全量保存 -->
-    <a-alert
-      v-if="hasUnsavedChanges"
-      type="warning"
-      show-icon
-      banner
-      style="margin-bottom: 12px; border-radius: 6px;"
-    >
-      <template #message>
-        <div class="arl-dirty-banner-row">
-          <div class="arl-dirty-banner-info">
-            <strong>{{ pageText('pages.unsavedSectionsCount', { count: unsavedCount }) }}</strong>
-            <a-tag
-              v-for="sec in dirtySections"
-              :key="sec.key"
-              color="warning"
-              class="arl-dirty-section-tag"
-              @click="navigateToSection(sec)"
-            >
-              {{ sec.label }}
-            </a-tag>
+    <!-- 统一吸顶 Hero 控制中枢（对齐全站 TaskList / McpCenter / GithubManage 规范） -->
+    <div ref="actionBarRef" class="arl-hero-card">
+      <div class="arl-hero-unified-bar">
+        <div class="arl-hero-left">
+          <div class="arl-hero-title">
+            <SettingOutlined class="hero-brand-icon" />
+            <span class="title-text">{{ pageText('navigation.settings') }}</span>
           </div>
-          <div class="arl-dirty-banner-actions">
+
+          <div class="arl-capsule-switcher">
+            <button
+              v-for="dom in DOMAIN_TABS"
+              :key="dom.key"
+              type="button"
+              class="arl-capsule-item"
+              :class="{ 'is-active': activeKey === dom.key }"
+              @click="switchDomain(dom.key)"
+            >
+              <component :is="dom.icon" class="capsule-icon" />
+              <span>{{ pageText(dom.labelKey) }}</span>
+              <span v-if="domainDirtyCounts[dom.key] > 0" class="arl-capsule-count">
+                <span class="arl-capsule-dot is-pulse"></span>
+                {{ domainDirtyCounts[dom.key] }}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div class="arl-hero-right">
+          <!-- 全局设置快速搜索（/ 或 Cmd/Ctrl+K 聚焦，下拉浮层不撑开页面） -->
+          <div class="hero-search-anchor" ref="searchBoxWrapRef">
+            <a-input
+              ref="searchInputRef"
+              v-model:value="settingsKeyword"
+              :placeholder="pageText('pages.settingsSearchShortcutPlaceholder')"
+              size="small"
+              allow-clear
+              class="hero-search-input"
+              @keydown.esc="settingsKeyword = ''"
+            >
+              <template #prefix>
+                <SearchOutlined style="opacity: 0.45;" />
+              </template>
+            </a-input>
+
+            <div v-if="settingsKeyword.trim()" class="arl-hero-search-dropdown">
+              <div class="arl-search-dropdown-meta">
+                <span>{{ pageText('pages.settingsMatchCount', { count: settingsSearchResults.length }) }}</span>
+                <a class="page-small-text" @click="settingsKeyword = ''">{{ pageText('pages.clear') }}</a>
+              </div>
+              <div v-if="settingsSearchResults.length === 0" class="arl-search-empty">
+                {{ pageText('pages.noMatchingSettingsTryFofaConcurrencyBlocklistWebhookProxy') }}
+              </div>
+              <div v-else class="arl-search-dropdown-list">
+                <div
+                  v-for="item in settingsSearchResults"
+                  :key="item.tab + ':' + item.anchor + ':' + item.label"
+                  class="arl-search-item"
+                  @click="jumpToSetting(item)"
+                >
+                  <div class="arl-search-item-main">
+                    <span class="arl-search-item-label">{{ item.label }}</span>
+                    <span class="arl-search-item-desc">{{ item.desc }}</span>
+                  </div>
+                  <a-tag color="blue" style="margin: 0;">{{ item.tabLabel }}</a-tag>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="arl-hero-v-divider"></div>
+
+          <!-- 统一操作区：当前页为可保存表单时提供重置/保存，多分区脏态提供全部保存，主按钮固定在最右侧 -->
+          <template v-if="activeViewSections.length > 0">
+            <a-button
+              v-if="activeKey === 'scanning_arsenal' && arsenalSubTab === 'concurrency'"
+              size="small"
+              :loading="performanceLoading"
+              @click="fetchPerformanceConfig"
+            >
+              <template #icon><ReloadOutlined /></template>
+              {{ pageText('pages.refreshStatus') }}
+            </a-button>
+
+            <a-popconfirm
+              v-if="activeSectionDirty"
+              :title="pageText('pages.confirmResetSectionChanges')"
+              :ok-text="pageText('pages.confirmResetBtn')"
+              :cancel-text="pageText('pages.cancel')"
+              ok-type="danger"
+              @confirm="resetActiveViewSections"
+            >
+              <a-button size="small" :disabled="batchSaving || activeSectionSaving">
+                <template #icon><UndoOutlined /></template>
+                {{ pageText('pages.reset') }}
+              </a-button>
+            </a-popconfirm>
+
+            <a-button
+              v-if="unsavedCount > 1"
+              size="small"
+              :loading="batchSaving"
+              @click="saveAllDirtySections"
+            >
+              {{ pageText('pages.saveAllCount', { count: unsavedCount }) }}
+            </a-button>
+
+            <a-button
+              type="primary"
+              size="small"
+              :disabled="!activeSectionDirty"
+              :loading="activeSectionSaving"
+              :class="{ 'arl-dirty-btn': activeSectionDirty }"
+              @click="saveActiveViewSections"
+            >
+              <template #icon><CheckOutlined /></template>
+              {{ activeSectionDirty ? pageText('pages.settingsSaveSectionBtn') : pageText('pages.settingsAllSavedStatus') }}
+            </a-button>
+          </template>
+
+          <template v-else-if="unsavedCount > 0">
             <a-popconfirm
               :title="pageText('pages.confirmResetAllChanges', { count: unsavedCount })"
               :ok-text="pageText('pages.confirmResetBtn')"
@@ -31,243 +129,693 @@
               @confirm="resetAllDirtySections"
             >
               <a-button size="small" :disabled="batchSaving">
+                <template #icon><UndoOutlined /></template>
                 {{ pageText('pages.resetAllChanges') }}
               </a-button>
             </a-popconfirm>
+
+            <a-button size="small" @click="goToFirstDirty">
+              {{ pageText('pages.settingsJumpFirstDirty', { count: unsavedCount }) }}
+            </a-button>
+
             <a-button
               type="primary"
               size="small"
+              class="arl-dirty-btn"
               :loading="batchSaving"
               @click="saveAllDirtySections"
             >
-              {{ pageText('pages.saveAllChanges') }}
+              <template #icon><CheckOutlined /></template>
+              {{ pageText('pages.saveAllCount', { count: unsavedCount }) }}
             </a-button>
-          </div>
-        </div>
-      </template>
-    </a-alert>
-    <!-- 设置项搜索：输入关键词直接定位到目标 Tab 并高亮，避免在 7 个 Tab 间盲翻 -->
-    <div class="arl-settings-search">
-      <a-input-search
-        v-model:value="settingsKeyword"
-        :placeholder="pageText('pages.searchSettingsEGFofaConcurrencyBlocklistWebhookOr')"
-        allow-clear
-        style="max-width: 520px;"
-      >
-        <template #prefix><span style="opacity: 0.45;">🔍</span></template>
-      </a-input-search>
-      <span v-if="settingsKeyword.trim()" class="arl-search-count">
-        {{ pageText('pages.settingsMatchCount', { count: settingsSearchResults.length }) }}
-      </span>
-      <a v-if="settingsKeyword.trim()" @click="settingsKeyword = ''" class="page-small-text">{{ pageText('pages.clear') }}</a>
-    </div>
+          </template>
 
-    <!-- 搜索结果：点击直达对应 Tab 并高亮目标设置项 -->
-    <div v-if="settingsKeyword.trim()" class="arl-search-panel">
-      <div v-if="settingsSearchResults.length === 0" class="arl-search-empty">
-        {{ pageText('pages.noMatchingSettingsTryFofaConcurrencyBlocklistWebhookProxy') }}
-      </div>
-      <div
-        v-for="item in settingsSearchResults"
-        :key="item.tab + item.label"
-        class="arl-search-item"
-        @click="jumpToSetting(item)"
-      >
-        <div class="arl-search-item-main">
-          <span class="arl-search-item-label">{{ item.label }}</span>
-          <span class="arl-search-item-desc">{{ item.desc }}</span>
+          <a-tag v-else color="success" style="margin: 0;">
+            {{ pageText('pages.settingsAllSavedStatus') }}
+          </a-tag>
         </div>
-        <a-tag color="blue" style="margin: 0;">{{ item.tabLabel }}</a-tag>
       </div>
-    </div>
 
-    <a-tabs v-model:activeKey="activeKey">
-      <!-- 统一字典与规则库 Tab -->
-      <a-tab-pane key="api_config" :tab="tabTitle(pageText('pages.assetDiscoveryAndIntelligence'), Object.keys(pendingByGroup.api_config).length > 0)">
-        <div style="max-width: 1000px; padding-bottom: 40px;">
-          <SettingsActionBar
-            anchor="api_config_save"
-            :description="pageText('pages.manageApiCredentialsForExternalIntelligenceAndSearchServices')"
-            :save-label="pageText('pages.saveApiConfiguration')"
-            :dirty="Object.keys(pendingByGroup.api_config).length > 0"
-            :saving="generalSaveLoading"
-            @save="() => saveGeneralConfig('api_config', pageText('pages.apiConfigurationSaved'))"
-            @reset="() => resetGeneralGroup('api_config')"
+      <!-- 二级导航（按当前主域动态呈现统一卡片页签） -->
+      <div v-if="activeKey === 'egress_guardrails'" class="hero-subtabs-row">
+        <a-tabs v-model:activeKey="guardrailSubTab" type="card" size="small" class="arl-detail-tabs settings-hero-tabs">
+          <a-tab-pane key="proxy" :tab="tabTitle(pageText('pages.settingsSubProxy'), !!proxyPanelRef?.hasUnsavedChanges?.())" />
+          <a-tab-pane key="security" :tab="tabTitle(pageText('pages.settingsSubGuardrails'), isSecurityDirty)" />
+        </a-tabs>
+      </div>
+
+      <div v-else-if="activeKey === 'scanning_arsenal'" class="hero-subtabs-row">
+        <a-tabs v-model:activeKey="arsenalSubTab" type="card" size="small" class="arl-detail-tabs settings-hero-tabs">
+          <a-tab-pane
+            key="concurrency"
+            :tab="tabTitle(pageText('pages.settingsSubConcurrency'), isPerformanceDirty || Object.keys(pendingByGroup.scan_params || {}).length > 0)"
           />
-          
-          <a-spin :spinning="generalLoading">
-            <a-form :label-wrap="true" layout="vertical">
+          <a-tab-pane key="dict" :tab="pageText('pages.settingsSubDict')" />
+          <a-tab-pane key="cdn" :tab="pageText('pages.settingsSubCdn')" />
+        </a-tabs>
+      </div>
 
-              <!-- 1. 空间测绘情报 -->
-              <a-card data-setting-anchor="fofa" :title="pageText('pages.assetDiscoveryIntelligenceFofa')" size="small" class="page-config-card">
-                <a-row :gutter="24">
-                  <a-col :xs="24" :md="12">
-                    <a-form-item label="FOFA URL" style="margin-bottom: 12px;">
-                      <a-input v-model:value="generalForm.fofa_url" :placeholder="pageText('pages.eGHttpsFofaInfo')" />
-                    </a-form-item>
-                  </a-col>
-                  <a-col :xs="24" :md="12">
-                    <a-form-item label="FOFA KEY" style="margin-bottom: 12px;">
-                      <a-input-password v-model:value="generalForm.fofa_key" :placeholder="pageText('pages.enterYourFofaApiKey')" />
-                    </a-form-item>
-                  </a-col>
-                  <a-col :xs="24" :md="12">
-                    <a-form-item :label="pageText('pages.maximumQueryPages')" class="page-flush-bottom">
-                      <a-input-number v-model:value="generalForm.fofa_max_page" :min="1" style="width: 100%" />
-                    </a-form-item>
-                  </a-col>
-                  <a-col :xs="24" :md="12">
-                    <a-form-item :label="pageText('pages.resultsPerPage')" class="page-flush-bottom">
-                      <a-input-number v-model:value="generalForm.fofa_page_size" :min="1" style="width: 100%" />
-                    </a-form-item>
-                  </a-col>
-                </a-row>
+      <div v-else-if="activeKey === 'system_ops'" class="hero-subtabs-row">
+        <a-tabs v-model:activeKey="opsSubTab" type="card" size="small" class="arl-detail-tabs settings-hero-tabs">
+          <a-tab-pane key="auth_infra" :tab="tabTitle(pageText('pages.settingsSubAuthInfra'), Object.keys(pendingByGroup.system_auth || {}).length > 0)" />
+          <a-tab-pane key="backup" :tab="pageText('pages.settingsSubBackup')" />
+          <a-tab-pane key="update" :tab="pageText('pages.settingsSubUpdate')" />
+        </a-tabs>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- 主域 1：情报凭据（默认首屏） -->
+    <!-- ================================================================ -->
+    <div v-show="activeKey === 'intel'" class="settings-section-container">
+      <a-spin :spinning="generalLoading">
+        <a-form :label-wrap="true" layout="vertical">
+          <!-- 1. FOFA 空间测绘 -->
+          <a-card data-setting-anchor="fofa" size="small" class="page-config-card">
+            <template #title>
+              <div class="card-title-with-meta">
+                <RadarChartOutlined class="card-title-icon" />
+                <span>{{ pageText('pages.assetDiscoveryIntelligenceFofa') }}</span>
+                <a-tag color="purple" class="proxy-route-tag" @click="jumpToProxyDomain('intel')">
+                  {{ pageText('pages.proxyDomainTagPrefix', { domain: 'INTEL' }) }}
+                </a-tag>
+                <a-tag v-if="intelChecks.fofa.status !== 'idle'" :color="intelChecks.fofa.color" style="margin: 0;">
+                  {{ intelChecks.fofa.text }}
+                </a-tag>
+              </div>
+            </template>
+            <template #extra>
+              <a-button size="small" :loading="intelChecks.fofa.loading" @click="verifyFofaConnection">
+                <template #icon><ApiOutlined /></template>
+                {{ pageText('pages.testFofaBtn') }}
+              </a-button>
+            </template>
+
+            <a-row :gutter="24">
+              <a-col :xs="24" :md="12">
+                <a-form-item label="FOFA URL" style="margin-bottom: 12px;">
+                  <a-input v-model:value="generalForm.fofa_url" :placeholder="pageText('pages.eGHttpsFofaInfo')" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="12">
+                <a-form-item label="FOFA KEY" style="margin-bottom: 12px;">
+                  <a-input-password v-model:value="generalForm.fofa_key" :placeholder="pageText('pages.enterYourFofaApiKey')" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="pageText('pages.maximumQueryPages')" class="page-flush-bottom">
+                  <a-input-number v-model:value="generalForm.fofa_max_page" :min="1" style="width: 100%" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="pageText('pages.resultsPerPage')" class="page-flush-bottom">
+                  <a-input-number v-model:value="generalForm.fofa_page_size" :min="1" style="width: 100%" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+          </a-card>
+
+          <!-- 2. 天眼查 & GitHub Token -->
+          <a-row :gutter="16">
+            <a-col :xs="24" :lg="12">
+              <a-card data-setting-anchor="tyc" size="small" class="page-config-card">
+                <template #title>
+                  <div class="card-title-with-meta">
+                    <BankOutlined class="card-title-icon" />
+                    <span>{{ pageText('pages.enterpriseDiscoveryCredentialsTianyanchaApi') }}</span>
+                    <a-tag color="orange" class="proxy-route-tag" @click="jumpToProxyDomain('osint')">
+                      {{ pageText('pages.proxyDomainTagPrefix', { domain: 'OSINT' }) }}
+                    </a-tag>
+                    <a-tag v-if="intelChecks.tyc.status !== 'idle'" :color="intelChecks.tyc.color" style="margin: 0;">
+                      {{ intelChecks.tyc.text }}
+                    </a-tag>
+                  </div>
+                </template>
+                <template #extra>
+                  <a-button size="small" :loading="intelChecks.tyc.loading" @click="verifyTycCredentials">
+                    <template #icon><SafetyCertificateOutlined /></template>
+                    {{ pageText('pages.testTycBtn') }}
+                  </a-button>
+                </template>
+
+                <a-form-item :label="pageText('pages.tianyanchaIdXTycid')" class="page-field-spacing">
+                  <a-input v-model:value="generalForm.tyc_id" :placeholder="pageText('pages.enterYourTianyanchaId')" />
+                </a-form-item>
+                <a-form-item :label="pageText('pages.tianyanchaTokenXAuthToken')" style="margin-bottom: 6px;">
+                  <a-input-password v-model:value="generalForm.tyc_token" :placeholder="pageText('pages.enterAJwtToken')" />
+                </a-form-item>
+                <div class="arl-field-hint">{{ pageText('pages.tycFallbackTip') }}</div>
               </a-card>
+            </a-col>
 
+            <a-col :xs="24" :lg="12">
+              <a-card data-setting-anchor="github_token" size="small" class="page-config-card">
+                <template #title>
+                  <div class="card-title-with-meta">
+                    <GithubOutlined class="card-title-icon" />
+                    <span>GitHub Token</span>
+                    <a-tag color="purple" class="proxy-route-tag" @click="jumpToProxyDomain('intel')">
+                      {{ pageText('pages.proxyDomainTagPrefix', { domain: 'INTEL' }) }}
+                    </a-tag>
+                    <a-tag v-if="intelChecks.github.status !== 'idle'" :color="intelChecks.github.color" style="margin: 0;">
+                      {{ intelChecks.github.text }}
+                    </a-tag>
+                  </div>
+                </template>
+                <template #extra>
+                  <a-button size="small" :loading="intelChecks.github.loading" @click="verifyGithubToken">
+                    <template #icon><KeyOutlined /></template>
+                    {{ pageText('pages.testGithubBtn') }}
+                  </a-button>
+                </template>
+
+                <a-form-item :label="pageText('pages.githubTokenMonitoringTasks')" style="margin-bottom: 6px;">
+                  <a-input-password v-model:value="generalForm.github_token" :placeholder="pageText('pages.enterYourGithubPat')" />
+                </a-form-item>
+                <div class="arl-field-hint">{{ pageText('pages.requiredForCodeLeakMonitoringAndCveTracking') }}</div>
+              </a-card>
+            </a-col>
+          </a-row>
+
+          <!-- 3. 搜索引擎反爬 Cookie（统一卡片，消除孤岛） -->
+          <a-card data-setting-anchor="search_cookie" size="small" class="page-config-card">
+            <template #title>
+              <div class="card-title-with-meta">
+                <SearchOutlined class="card-title-icon" />
+                <span>{{ pageText('pages.searchEnginesAndOpenSourceIntelligence') }}</span>
+              </div>
+            </template>
+            <a-row :gutter="24">
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="pageText('pages.360SearchCookieAntiBotAccess')" class="page-flush-bottom">
+                  <a-input-password v-model:value="generalForm.so_search_cookie" :placeholder="pageText('pages.enterA360SearchCookie')" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="pageText('pages.bingSearchCookieBingSearchCookie')" class="page-flush-bottom">
+                  <a-input-password v-model:value="generalForm.bing_search_cookie" :placeholder="pageText('pages.enterABingSearchCookie')" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+          </a-card>
+
+          <!-- 4. 域名收集扩展插件 (QUERY_PLUGIN) -->
+          <a-card data-setting-anchor="query_plugin" size="small" class="page-rounded">
+            <template #title>
+              <div class="card-title-with-meta">
+                <AppstoreOutlined class="card-title-icon" />
+                <span>{{ pageText('pages.domainCollectionPluginConfigurationQueryPlugin') }}</span>
+              </div>
+            </template>
+            <template #extra>
+              <a-radio-group v-model:value="pluginFilterMode" size="small" button-style="solid">
+                <a-radio-button value="all">{{ pageText('pages.pluginFilterAll', { count: pluginTotalCount }) }}</a-radio-button>
+                <a-radio-button value="enabled">{{ pageText('pages.pluginFilterEnabled', { count: pluginEnabledCount }) }}</a-radio-button>
+                <a-radio-button value="key_required">{{ pageText('pages.pluginFilterWithKey', { count: pluginWithKeyCount }) }}</a-radio-button>
+              </a-radio-group>
+            </template>
+
+            <ArlEmpty v-if="filteredQueryPlugins.length === 0" :description="pageText('pages.pluginFilterEmpty')" />
+            <div v-else class="plugin-grid-container">
+              <a-row :gutter="[12, 12]">
+                <a-col :xs="24" :sm="12" :lg="8" v-for="[pluginName, conf] in filteredQueryPlugins" :key="pluginName">
+                  <div class="plugin-tile-card">
+                    <div class="plugin-tile-header">
+                      <span class="plugin-tile-name">{{ pluginName }}</span>
+                      <a-switch v-model:checked="conf.enable" size="small" />
+                    </div>
+
+                    <a-input-password
+                      v-if="hasOwn(conf, 'api_key')"
+                      v-model:value="conf.api_key"
+                      placeholder="API Key"
+                      size="small"
+                    />
+                    <div v-if="pluginName === 'hunter_qax'" class="plugin-tile-pair">
+                      <a-input-number v-model:value="conf.max_page" :placeholder="pageText('pages.maxPagesPlaceholder')" size="small" class="page-flex-input" />
+                      <a-input-number v-model:value="conf.page_size" :placeholder="pageText('pages.pageSizePlaceholder')" size="small" class="page-flex-input" />
+                    </div>
+                    <div v-if="pluginName === 'certspotter'" style="margin-top: 8px;">
+                      <a-input-number v-model:value="conf.max_page" :placeholder="pageText('pages.maxPagesPlaceholder')" size="small" class="page-full-width-input" />
+                    </div>
+                    <a-input-password
+                      v-if="hasOwn(conf, 'quake_token')"
+                      v-model:value="conf.quake_token"
+                      placeholder="Quake Token"
+                      size="small"
+                      style="margin-top: 8px;"
+                    />
+                    <div v-if="pluginName === 'passivetotal'" class="plugin-tile-stack">
+                      <a-input v-model:value="conf.auth_email" :placeholder="pageText('pages.authEmailPlaceholder')" size="small" />
+                      <a-input-password v-model:value="conf.auth_key" :placeholder="pageText('pages.authKeyPlaceholder')" size="small" />
+                    </div>
+                    <div v-if="!pluginRequiresCredential(conf, pluginName)" class="plugin-free-badge">
+                      {{ pageText('pages.pluginNoCredentialNeeded') }}
+                    </div>
+                  </div>
+                </a-col>
+              </a-row>
+            </div>
+          </a-card>
+        </a-form>
+      </a-spin>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- 主域 2：代理与红线 -->
+    <!-- ================================================================ -->
+    <div v-if="visitedDomains.egress_guardrails" v-show="activeKey === 'egress_guardrails'">
+      <div v-if="visitedSubTabs.proxy" v-show="guardrailSubTab === 'proxy'">
+        <ProxyManagePanel ref="proxyPanelRef" />
+      </div>
+
+      <div v-show="guardrailSubTab === 'security'" class="settings-section-container">
+        <a-spin :spinning="securityLoading">
+          <a-card data-setting-anchor="security" size="small" class="page-config-card">
+            <template #title>
+              <div class="card-title-with-meta">
+                <SafetyOutlined class="card-title-icon" />
+                <span>{{ pageText('pages.securityPolicyIpDomainScanExclusions') }}</span>
+              </div>
+            </template>
+
+            <div class="guardrail-preset-bar">
+              <span class="guardrail-preset-label">{{ pageText('pages.guardrailPresetLabel') }}</span>
+              <div class="guardrail-preset-actions">
+                <a-button size="small" @click="applyGuardrailIpPreset('add')">
+                  {{ pageText('pages.guardrailPresetAddPrivate') }}
+                </a-button>
+                <a-button size="small" @click="applyGuardrailIpPreset('remove')">
+                  {{ pageText('pages.guardrailPresetRemovePrivate') }}
+                </a-button>
+                <a-button size="small" @click="applyGuardrailDomainPreset">
+                  {{ pageText('pages.guardrailPresetAddGovEdu') }}
+                </a-button>
+              </div>
+            </div>
+
+            <a-form :label-wrap="true" layout="vertical">
               <a-row :gutter="16">
-                <!-- 2. 企业与代码监控 (左半边) -->
                 <a-col :xs="24" :lg="12">
-                  <a-card data-setting-anchor="tyc" :title="pageText('pages.enterpriseDiscoveryCredentialsTianyanchaApi')" size="small" class="page-config-card-min-height">
-                    <template #extra>
-                      <a-tooltip :title="pageText('pages.optionalEnablesInvestmentRelationshipTraversalAndCrossCheckingAgainst')">
-                        <info-circle-outlined style="color: #bfbfbf;" />
-                      </a-tooltip>
-                    </template>
-                    <a-form-item :label="pageText('pages.tianyanchaIdXTycid')" class="page-field-spacing">
-                      <a-input v-model:value="generalForm.tyc_id" :placeholder="pageText('pages.enterYourTianyanchaId')" />
-                    </a-form-item>
-                    <a-form-item :label="pageText('pages.tianyanchaTokenXAuthToken')" class="page-flush-bottom">
-                      <a-input-password v-model:value="generalForm.tyc_token" :placeholder="pageText('pages.enterAJwtToken')" />
-                    </a-form-item>
-                  </a-card>
+                  <div class="guardrail-editor-box">
+                    <div class="guardrail-editor-header">
+                      <span class="guardrail-editor-title">{{ pageText('pages.ipBlocklistSupportsCidrEG12700') }}</span>
+                      <a-tag color="blue" style="margin: 0;">
+                        {{ pageText('pages.guardrailValidCount', { count: securityAnalysis.ipCount }) }}
+                      </a-tag>
+                    </div>
+                    <a-textarea
+                      v-model:value="securityForm.blackIpsText"
+                      :rows="10"
+                      class="guardrail-mono-textarea"
+                      :placeholder="pageText('pages.eG1270008100')"
+                    />
+                    <a-alert
+                      v-if="securityAnalysis.invalidIps.length > 0"
+                      type="error"
+                      show-icon
+                      style="margin-top: 8px;"
+                      :message="pageText('pages.guardrailInvalidLines', {
+                        count: securityAnalysis.invalidIps.length,
+                        line: securityAnalysis.invalidIps[0].line,
+                        sample: securityAnalysis.invalidIps[0].raw
+                      })"
+                    />
+                  </div>
                 </a-col>
 
-                <!-- 3. 代码与搜索引擎 (右半边) -->
                 <a-col :xs="24" :lg="12">
-                  <a-card data-setting-anchor="search_cookie" :title="pageText('pages.searchEnginesAndOpenSourceIntelligence')" size="small" class="page-config-card-fixed">
-                    <a-form-item data-setting-anchor="github_token" :label="pageText('pages.githubTokenMonitoringTasks')" class="page-field-spacing">
-                      <a-input-password v-model:value="generalForm.github_token" :placeholder="pageText('pages.enterYourGithubPat')" />
-                    </a-form-item>
-                    <a-form-item :label="pageText('pages.360SearchCookieAntiBotAccess')" class="page-flush-bottom">
-                      <a-input-password v-model:value="generalForm.so_search_cookie" placeholder="so_search_cookie" />
-                    </a-form-item>
-                  </a-card>
+                  <div class="guardrail-editor-box">
+                    <div class="guardrail-editor-header">
+                      <span class="guardrail-editor-title">{{ pageText('pages.excludedDomainsSuffixMatchingEGGovCnOr') }}</span>
+                      <a-tag color="blue" style="margin: 0;">
+                        {{ pageText('pages.guardrailValidCount', { count: securityAnalysis.domainCount }) }}
+                      </a-tag>
+                    </div>
+                    <a-textarea
+                      v-model:value="securityForm.forbiddenDomainsText"
+                      :rows="10"
+                      class="guardrail-mono-textarea"
+                      :placeholder="pageText('pages.eGGovCnEduCn')"
+                    />
+                    <a-alert
+                      v-if="securityAnalysis.invalidDomains.length > 0"
+                      type="warning"
+                      show-icon
+                      style="margin-top: 8px;"
+                      :message="pageText('pages.guardrailInvalidLines', {
+                        count: securityAnalysis.invalidDomains.length,
+                        line: securityAnalysis.invalidDomains[0].line,
+                        sample: securityAnalysis.invalidDomains[0].raw
+                      })"
+                    />
+                  </div>
+                </a-col>
+              </a-row>
+            </a-form>
+
+            <!-- 目标命中预检 (Dry-Run) -->
+            <div class="guardrail-dryrun-box">
+              <div class="guardrail-dryrun-title">
+                <AimOutlined />
+                <span>{{ pageText('pages.guardrailDryRunTitle') }}</span>
+              </div>
+              <div class="guardrail-dryrun-row">
+                <a-input
+                  v-model:value="guardrailDryRunInput"
+                  :placeholder="pageText('pages.guardrailDryRunPlaceholder')"
+                  allow-clear
+                  style="max-width: 460px;"
+                />
+                <a-tag
+                  v-if="guardrailDryRunResult.status !== 'empty'"
+                  :color="guardrailDryRunTagColor"
+                  style="margin: 0;"
+                >
+                  {{ guardrailDryRunText }}
+                </a-tag>
+              </div>
+            </div>
+          </a-card>
+        </a-spin>
+      </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- 主域 3：扫描与武器库 -->
+    <!-- ================================================================ -->
+    <div v-show="activeKey === 'scanning_arsenal'">
+      <!-- 3.1 并发与默认参数 -->
+      <div v-show="arsenalSubTab === 'concurrency'" class="settings-section-container">
+        <a-spin :spinning="performanceLoading || generalLoading">
+          <a-form :label-wrap="true" layout="vertical">
+            <!-- 区域 A：进程级队列并发 -->
+            <div class="section-group-header">
+              <ThunderboltOutlined />
+              <span>{{ pageText('pages.concurrencySectionQueueTitle') }}</span>
+            </div>
+
+            <a-alert type="info" show-icon style="margin-bottom: 14px; border-radius: 6px;">
+              <template #message>
+                <div style="font-size: 13px; line-height: 1.75;">
+                  <div>{{ pageText('pages.queueMemoryHelp', { heavy: (capacityInfo.queue_memory_caps_mb || {}).heavy || 488, light: (capacityInfo.queue_memory_caps_mb || {}).light || 292 }) }}</div>
+                  <div><strong class="page-warning-emphasis">{{ pageText('pages.smallMemoryQueueHelp') }}</strong></div>
+                </div>
+              </template>
+            </a-alert>
+
+            <a-alert
+              v-if="pendingConvergence"
+              type="warning"
+              show-icon
+              class="performance-pending-alert"
+              :message="pendingConvergenceText"
+            />
+
+            <a-row :gutter="16">
+              <a-col :xs="24" :lg="12">
+                <a-card data-setting-anchor="performance" :title="pageText('pages.heavyTaskScheduling')" size="small" class="page-config-card-danger">
+                  <a-form-item class="page-flush-bottom">
+                    <template #label>
+                      <span>{{ pageText('pages.heavyTaskConcurrency') }}</span>
+                      <a-tag v-if="runtimePerformance.runtime_heavy_concurrency !== null" color="blue" style="margin-left: 8px; font-size: 12px;">
+                        {{ pageText('pages.runningProcessesCount', { count: runtimePerformance.runtime_heavy_concurrency }) }}
+                      </a-tag>
+                      <a-tag v-else color="default" class="page-choice-gap">{{ pageText('pages.workerOffline') }}</a-tag>
+                      <a-popover placement="right">
+                        <template #content>
+                          <div style="max-width: 320px;">
+                            <div class="page-strong-heading">{{ pageText('pages.assignmentLongRunningTasks') }}</div>
+                            <ul style="padding-left: 18px; margin: 0; line-height: 1.8;">
+                              <li>{{ pageText('pages.regularDomainIpScans') }}</li>
+                              <li>{{ pageText('pages.riskScansBulkVulnerabilityChecks') }}</li>
+                              <li>{{ pageText('pages.scheduledDomainIpMonitoring') }}</li>
+                            </ul>
+                          </div>
+                        </template>
+                        <InfoCircleOutlined style="margin-left: 4px; color: var(--arl-text-secondary); cursor: pointer;" />
+                      </a-popover>
+                    </template>
+                    <a-input-number v-model:value="performanceForm.celery_heavy_concurrency" :min="1" :max="128" style="width: 100%" />
+                    <div class="arl-field-hint">{{ pageText('pages.controlConcurrencyForRegularScansRiskScansAndOther') }}</div>
+                    <div v-if="capacityInfo.heavy_recommended" class="arl-recommend-row">
+                      <span>
+                        <span class="arl-recommend-label">{{ pageText('pages.recommended') }}</span>
+                        <strong>{{ capacityInfo.heavy_recommended }}</strong>
+                        <span class="arl-recommend-basis">
+                          {{ pageText('pages.queueMemoryBudget', { available: capacityInfo.available_memory_mb, budget: capacityInfo.headroom_mb }) }}
+                        </span>
+                      </span>
+                      <a-button size="small" type="link" @click="applyRecommended(performanceForm, 'heavy')">{{ pageText('pages.apply') }}</a-button>
+                    </div>
+                    <div v-if="capacityInfo.basis" class="arl-recommend-basis" style="margin-top: 4px;">{{ capacityInfo.basis }}</div>
+                    <a-alert
+                      v-if="capacityInfo.steady_ok === false"
+                      type="error"
+                      show-icon
+                      style="margin-top: 8px; border-radius: 6px;"
+                    >
+                      <template #message>
+                        <span style="font-size: 12px;">
+                          {{ pageText('pages.insufficientQueueMemory', { peak: capacityInfo.peak_used_mb, budget: capacityInfo.headroom_mb }) }}
+                        </span>
+                      </template>
+                    </a-alert>
+                  </a-form-item>
+                </a-card>
+              </a-col>
+
+              <a-col :xs="24" :lg="12">
+                <a-card :title="pageText('pages.lightTaskScheduling')" size="small" class="page-config-card-success">
+                  <a-form-item class="page-flush-bottom">
+                    <template #label>
+                      <span>{{ pageText('pages.lightTaskConcurrency') }}</span>
+                      <a-tag v-if="runtimePerformance.runtime_light_concurrency !== null" color="green" style="margin-left: 8px; font-size: 12px;">
+                        {{ pageText('pages.runningProcessesCount', { count: runtimePerformance.runtime_light_concurrency }) }}
+                      </a-tag>
+                      <a-tag v-else color="default" class="page-choice-gap">{{ pageText('pages.workerOffline') }}</a-tag>
+                      <a-popover placement="right">
+                        <template #content>
+                          <div style="max-width: 320px;">
+                            <div class="page-strong-heading">{{ pageText('pages.assignmentSingleTargetApiTasks') }}</div>
+                            <ul style="padding-left: 18px; margin: 0; line-height: 1.8;">
+                              <li>{{ pageText('pages.assetSearchQueriesFofaEtc') }}</li>
+                              <li>{{ pageText('pages.updateAWebsiteScreenshotFingerprints') }}</li>
+                              <li>{{ pageText('pages.singleTargetWebInfoHunterWihExtraction') }}</li>
+                              <li>{{ pageText('pages.manuallyAddAWebsite') }}</li>
+                              <li>{{ pageText('pages.forceTaskDataSynchronization') }}</li>
+                            </ul>
+                          </div>
+                        </template>
+                        <InfoCircleOutlined style="margin-left: 4px; color: var(--arl-text-secondary); cursor: pointer;" />
+                      </a-popover>
+                    </template>
+                    <a-input-number v-model:value="performanceForm.celery_light_concurrency" :min="1" :max="256" style="width: 100%" />
+                    <div class="arl-field-hint">{{ pageText('pages.usesADedicatedQueueAndDoesNotWaitFor') }}</div>
+                    <div v-if="capacityInfo.light_recommended" class="arl-recommend-row">
+                      <span>
+                        <span class="arl-recommend-label">{{ pageText('pages.recommended') }}</span>
+                        <strong>{{ capacityInfo.light_recommended }}</strong>
+                        <span class="arl-recommend-basis">{{ pageText('pages.allocatedUsingThePeakMemoryModelLightTasksHave') }}</span>
+                      </span>
+                      <a-button size="small" type="link" @click="applyRecommended(performanceForm, 'light')">{{ pageText('pages.apply') }}</a-button>
+                    </div>
+                  </a-form-item>
+                </a-card>
+              </a-col>
+
+              <a-col :xs="24" :lg="12">
+                <a-card :title="pageText('pages.externalIntelligenceTaskScheduling')" size="small" class="page-config-card-info">
+                  <a-form-item class="page-flush-bottom">
+                    <template #label>
+                      <span>{{ pageText('pages.osintTaskConcurrency') }}</span>
+                      <a-popover placement="right">
+                        <template #content>
+                          <div style="max-width: 320px;">
+                            <div class="page-strong-heading">{{ pageText('pages.assignmentExternalIntelligenceTasks') }}</div>
+                            <ul style="padding-left: 18px; margin: 0; line-height: 1.8;">
+                              <li>{{ pageText('pages.icpRecordsWebsitesAppsMiniPrograms') }}</li>
+                              <li>{{ pageText('pages.tianyanchaInvestmentRelationshipsAndAssetCollection') }}</li>
+                            </ul>
+                          </div>
+                        </template>
+                        <InfoCircleOutlined style="margin-left: 4px; color: var(--arl-text-secondary); cursor: pointer;" />
+                      </a-popover>
+                    </template>
+                    <a-input-number v-model:value="performanceForm.osint_concurrency" :min="1" :max="128" style="width: 100%" />
+                    <div class="arl-field-hint">{{ pageText('pages.controlConcurrentOsintRequestsToExternalServicesSuchAs') }}</div>
+                    <div v-if="capacityInfo.osint_recommended" class="arl-recommend-row">
+                      <span>
+                        <span class="arl-recommend-label">{{ pageText('pages.recommended') }}</span>
+                        <strong>{{ capacityInfo.osint_recommended }}</strong>
+                        <span class="arl-recommend-basis">{{ pageText('pages.keepTheDefaultToReduceExternalAntiBotRestrictions') }}</span>
+                      </span>
+                      <a-button size="small" type="link" @click="applyRecommended(performanceForm, 'osint')">{{ pageText('pages.apply') }}</a-button>
+                    </div>
+                  </a-form-item>
+                </a-card>
+              </a-col>
+
+              <a-col :xs="24" :lg="12">
+                <a-card :title="pageText('pages.githubMonitoringScheduling')" size="small" class="page-config-card-purple">
+                  <a-form-item class="page-flush-bottom">
+                    <template #label>
+                      <span>{{ pageText('pages.githubMonitoringConcurrency') }}</span>
+                      <a-tag v-if="runtimePerformance.runtime_github_concurrency !== null" color="purple" style="margin-left: 8px; font-size: 12px;">
+                        {{ pageText('pages.runningProcessesCount', { count: runtimePerformance.runtime_github_concurrency }) }}
+                      </a-tag>
+                      <a-tag v-else color="default" class="page-choice-gap">{{ pageText('pages.workerOffline') }}</a-tag>
+                      <a-popover placement="right">
+                        <template #content>
+                          <div style="max-width: 320px;">
+                            <div class="page-strong-heading">{{ pageText('pages.assignmentGithubMonitoringTasks') }}</div>
+                            <ul style="padding-left: 18px; margin: 0; line-height: 1.8;">
+                              <li>{{ pageText('pages.codeLeakKeywordMonitoring') }}</li>
+                              <li>{{ pageText('pages.cveSecurityToolUpdates') }}</li>
+                              <li>{{ pageText('pages.researcherActivityMonitoring') }}</li>
+                            </ul>
+                          </div>
+                        </template>
+                        <InfoCircleOutlined style="margin-left: 4px; color: var(--arl-text-secondary); cursor: pointer;" />
+                      </a-popover>
+                    </template>
+                    <a-input-number v-model:value="performanceForm.github_concurrency" :min="1" :max="64" style="width: 100%" />
+                    <div class="arl-field-hint">{{ pageText('pages.usesTheDedicatedArlgithubQueueIndependentlyOfScanningTasks') }}</div>
+                    <div v-if="capacityInfo.github_recommended" class="arl-recommend-row">
+                      <span>
+                        <span class="arl-recommend-label">{{ pageText('pages.recommended') }}</span>
+                        <strong>{{ capacityInfo.github_recommended }}</strong>
+                        <span class="arl-recommend-basis">{{ pageText('pages.queueProcessLimit', { limit: (capacityInfo.queue_memory_caps_mb || {}).github || 292 }) }}</span>
+                      </span>
+                      <a-button size="small" type="link" @click="applyRecommended(performanceForm, 'github')">{{ pageText('pages.apply') }}</a-button>
+                    </div>
+                  </a-form-item>
+                </a-card>
+              </a-col>
+            </a-row>
+
+            <!-- 区域 B：单任务内发包并发与默认端口 -->
+            <div class="section-group-header" style="margin-top: 8px;">
+              <ControlOutlined />
+              <span>{{ pageText('pages.concurrencySectionTaskTitle') }}</span>
+            </div>
+
+            <a-card size="small" class="page-config-card">
+              <a-row :gutter="24">
+                <a-col :xs="24" :md="12">
+                  <a-form-item data-setting-anchor="brute_concurrent" :label="pageText('pages.dnsQueryConcurrencyForRegularSubdomainDiscovery')">
+                    <a-input-number v-model:value="generalForm.domain_brute_concurrent" :min="1" style="width: 100%" />
+                    <div class="arl-field-hint">
+                      {{ pageText('pages.dnsQueryConcurrencyWithinOneTaskTheMassdns') }} <code>-s</code> {{ pageText('pages.optionRatherThanAProcessOrThreadCountHigher') }}
+                    </div>
+                  </a-form-item>
+                </a-col>
+                <a-col :xs="24" :md="12">
+                  <a-form-item :label="pageText('pages.dnsQueryConcurrencyForSubdomainMutationDiscovery')">
+                    <a-input-number v-model:value="generalForm.alt_dns_concurrent" :min="1" style="width: 100%" />
+                    <div class="arl-field-hint">
+                      {{ pageText('pages.usedDuringAltdnsDiscoveryItsDefaultIsHigherBecause') }}
+                    </div>
+                  </a-form-item>
                 </a-col>
               </a-row>
 
-              <!-- 单独一行放必应，如果上面放不下 -->
-              <a-card size="small" style="margin-bottom: 16px; border-radius: 6px;">
-                 <a-form-item :label="pageText('pages.bingSearchCookieBingSearchCookie')" class="page-flush-bottom">
-                   <a-input-password v-model:value="generalForm.bing_search_cookie" :placeholder="pageText('pages.enterABingSearchCookie')" />
-                 </a-form-item>
-              </a-card>
+              <a-form-item data-setting-anchor="port_top_10" class="page-flush-bottom">
+                <template #label>
+                  <span>{{ pageText('pages.top10WebPortsUsedByFrontendPortScan') }}</span>
+                  <a-tag color="blue" style="margin-left: 8px;">
+                    {{ pageText('pages.portCountSummary', { count: portTop10Info.count }) }}
+                  </a-tag>
+                </template>
+                <a-input v-model:value="generalForm.port_top_10" :placeholder="pageText('pages.separateValuesWithCommas')" />
+                <a-alert
+                  v-if="portTop10Info.invalidItems.length > 0"
+                  type="warning"
+                  show-icon
+                  style="margin-top: 8px;"
+                  :message="pageText('pages.portInvalidWarning', { items: portTop10Info.invalidItems.join(', ') })"
+                />
+              </a-form-item>
+            </a-card>
+          </a-form>
+        </a-spin>
+      </div>
 
-
-              <!-- 4. 插件配置 -->
-              <a-card data-setting-anchor="query_plugin" :title="pageText('pages.domainCollectionPluginConfigurationQueryPlugin')" size="small" class="page-rounded">
-                <div style="background: var(--arl-bg-light); border-radius: 4px; padding: 12px;">
-                  <a-row :gutter="[12, 12]">
-                    <a-col :xs="24" :sm="12" :lg="8" v-for="(conf, pluginName) in generalForm.query_plugin_config" :key="pluginName">
-                      <div style="border: 1px solid var(--arl-border-color); background: var(--arl-bg-white); padding: 12px; border-radius: 4px; min-height: 110px; position: relative;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                          <a style="font-weight: 600; text-transform: uppercase; ">{{ pluginName }}</a>
-                          <a-switch v-model:checked="conf.enable" size="small" />
-                        </div>
-                        
-                        <a-input 
-                          v-if="conf.hasOwnProperty('api_key')" 
-                          v-model:value="conf.api_key" 
-                          placeholder="API Key" 
-                          size="small" 
-                        />
-                        <div v-if="pluginName === 'hunter_qax'" style="margin-top: 8px; display: flex; gap: 8px;">
-                          <a-input-number v-model:value="conf.max_page" :placeholder="pageText('pages.maxPagesPlaceholder')" size="small" class="page-flex-input" />
-                          <a-input-number v-model:value="conf.page_size" :placeholder="pageText('pages.pageSizePlaceholder')" size="small" class="page-flex-input" />
-                        </div>
-                        <div v-if="pluginName === 'certspotter'" style="margin-top: 8px;">
-                          <a-input-number v-model:value="conf.max_page" :placeholder="pageText('pages.maxPagesPlaceholder')" size="small" class="page-full-width-input" />
-                        </div>
-                        <a-input 
-                          v-if="conf.hasOwnProperty('quake_token')" 
-                          v-model:value="conf.quake_token" 
-                          placeholder="Quake Token" 
-                          size="small"
-                          style="margin-top: 8px;"
-                        />
-                        <div v-if="pluginName === 'passivetotal'" style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
-                          <a-input v-model:value="conf.auth_email" :placeholder="pageText('pages.authEmailPlaceholder')" size="small" />
-                          <a-input v-model:value="conf.auth_key" :placeholder="pageText('pages.authKeyPlaceholder')" size="small" />
-                        </div>
-                      </div>
-                    </a-col>
-                  </a-row>
-                </div>
-              </a-card>
-
-            </a-form>
-          </a-spin>
-        </div>
-      </a-tab-pane>
-      <a-tab-pane key="dictionary" :tab="tabTitle(pageText('pages.dictionariesAndRules'), !!cdnPanelRef?.hasUnsavedChanges?.())">
-        <a-tabs v-model:activeKey="dictSubTab" type="card" class="dict-sub-tabs" style="margin-bottom: 16px;">
-          <a-tab-pane key="dict" :tab="pageText('pages.textDictionaries')">
-            <a-spin :spinning="loading || bruteLoading">
-            <div style="display: flex; gap: 0; height: calc(100vh - 180px); min-height: 580px; border-radius: 12px; overflow: hidden; box-shadow: 0 12px 48px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04); border: 1px solid var(--arl-border-color); background: var(--arl-bg-white);"> <!-- 左侧语义化菜单与独立滚动 -->
-            <div style="width: 256px; flex-shrink: 0; border-right: 1px solid var(--arl-border-color); background: var(--arl-bg-white); display: flex; flex-direction: column;">
-              <div style="padding: 16px; border-bottom: 1px solid var(--arl-border-color); display: flex; align-items: center; min-height: 64px; box-sizing: border-box;">
+      <!-- 3.2 字典武器库 -->
+      <div v-show="arsenalSubTab === 'dict'" data-setting-anchor="dict">
+        <a-spin :spinning="loading || bruteLoading">
+          <div class="arl-split-workbench">
+            <!-- 1. 左侧：分类导航（支持全部分类） -->
+            <div class="arl-split-sidebar" style="width: 224px;">
+              <div class="arl-split-sidebar-head">
                 <span class="page-panel-heading">{{ pageText('pages.dictionaryCategories') }}</span>
               </div>
-              <div class="hide-scrollbar" style="flex: 1; overflow-y: auto;">
-                <div style="padding: 12px 8px; display: flex; flex-direction: column; gap: 4px;">
-                  <div
-                    v-for="group in treeData" :key="group.key"
-                    class="custom-list-item"
-                    :class="{ 'is-active': selectedCategoryKeys.includes(group.key) }"
-                    @click="handleCategorySelect({ key: group.key })"
-                  >
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <span style="opacity: 0.9;">🗂️</span>
-                      <span class="dict-title" style="font-weight: 600;">{{ group.title }}</span>
-                    </div>
+              <div class="dict-summary-strip">
+                {{ pageText('pages.dictOverviewSummary', { assetCount: dictList.length, bruteCount: bruteDictList.length }) }}
+              </div>
+              <div class="arl-split-sidebar-body">
+                <div
+                  class="arl-split-item"
+                  :class="{ 'is-active': selectedCategoryKeys.includes('__all__') }"
+                  @click="handleCategorySelect({ key: '__all__' })"
+                >
+                  <div class="dict-cat-row">
+                    <AppstoreOutlined />
+                    <span class="arl-split-item-title">{{ pageText('pages.dictAllCategories') }}</span>
+                  </div>
+                </div>
+                <div
+                  v-for="group in treeData"
+                  :key="group.key"
+                  class="arl-split-item"
+                  :class="{ 'is-active': selectedCategoryKeys.includes(group.key) }"
+                  @click="handleCategorySelect({ key: group.key })"
+                >
+                  <div class="dict-cat-row">
+                    <KeyOutlined v-if="group.key === 'group_brute_all'" />
+                    <FolderOutlined v-else />
+                    <span class="arl-split-item-title" style="flex: 1; min-width: 0;">{{ group.title }}</span>
+                    <span class="arl-split-item-badge">{{ group.children.length }}</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- 2. 中间：字典列表 -->
-            <div style="width: 250px; flex-shrink: 0; border-right: 1px solid var(--arl-border-color); background: var(--arl-bg-white); display: flex; flex-direction: column;">
-              <div style="padding: 16px; border-bottom: 1px solid var(--arl-border-color); min-height: 64px; box-sizing: border-box;">
-                <div style="display: flex; gap: 8px;">
-                  <a-input-search v-model:value="menuSearch" :placeholder="pageText('pages.searchDictionariesInThisCategory')" class="page-search-field" />
-                  <a-button type="primary" @click="openCreateDictDrawer" class="page-icon-padding" :title="pageText('pages.newDictionary')">
-                    <template #icon><span style="margin-right:0px;">➕</span></template>
+            <!-- 2. 中间：字典清单（在全部分类或关键字搜索下支持跨分类检索） -->
+            <div class="arl-split-sidebar" style="width: 268px;">
+              <div class="arl-split-sidebar-head">
+                <a-input-search
+                  v-model:value="menuSearch"
+                  :placeholder="pageText('pages.dictSearchAllPlaceholder')"
+                  size="small"
+                  allow-clear
+                  style="flex: 1;"
+                />
+                <a-tooltip :title="pageText('pages.newDictionary')">
+                  <a-button type="primary" size="small" @click="openCreateDictDrawer">
+                    <template #icon><PlusOutlined /></template>
                   </a-button>
-                </div>
+                </a-tooltip>
               </div>
-              <div class="hide-scrollbar" style="flex: 1; overflow-y: auto; padding: 12px 8px;">
-                <div v-if="currentFilteredDicts.length === 0" style="padding: 48px 24px; text-align: center; color: var(--arl-text-color); opacity: 0.65; display: flex; flex-direction: column; align-items: center; gap: 12px;">
-                  <span style="font-size: 32px; opacity: 0.8;">📭</span>
-                  <span class="page-label">{{ pageText('pages.noDictionariesInThisCategory') }}</span>
-                  <span class="page-quiet-help">{{ pageText('pages.selectNewDictionaryAboveOrChooseAnotherCategory') }}</span>
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 4px;">
-                  <div
-                    v-for="item in currentFilteredDicts" :key="item.key"
-                    class="custom-list-item"
-                    :class="{ 'is-active': unifiedSelectedKeys.includes(item.key) }"
-                    @click="handleUnifiedSelect([item.key])"
-                  >
-                    <div style="display: flex; align-items: flex-start; gap: 8px;">
-                      <span style="font-size: 16px; margin-top: 2px; opacity: 0.9;">📄</span>
-                      <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0;">
-                        <span class="dict-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500;">{{ item.mainTitle }}</span>
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                          <span class="dict-subtitle">{{ item.subTitle }}</span>
-                          <div style="display: flex; gap: 4px; align-items: center;">
-                            <a-tag v-if="item.is_builtin" color="purple" class="page-tiny-tag">{{ pageText('pages.builtIn') }}</a-tag>
-                            <span class="dict-badge">txt</span>
-                          </div>
-                        </div>
+              <div class="arl-split-sidebar-body">
+                <ArlEmpty
+                  v-if="currentFilteredDicts.length === 0"
+                  :description="pageText('pages.noDictionariesInThisCategory')"
+                />
+                <div
+                  v-for="item in currentFilteredDicts"
+                  :key="item.key"
+                  class="arl-split-item"
+                  :class="{ 'is-active': unifiedSelectedKeys.includes(item.key) }"
+                  @click="handleUnifiedSelect([item.key])"
+                >
+                  <div class="dict-item-row">
+                    <FileTextOutlined class="dict-item-icon" />
+                    <div class="dict-item-meta">
+                      <span class="arl-split-item-title dict-item-name">{{ item.mainTitle }}</span>
+                      <div class="dict-item-bottom">
+                        <span class="arl-split-item-sub">{{ item.subTitle }}</span>
+                        <a-tag v-if="item.is_builtin" color="purple" class="page-tiny-tag">{{ pageText('pages.builtIn') }}</a-tag>
                       </div>
                     </div>
                   </div>
@@ -275,86 +823,67 @@
               </div>
             </div>
 
-            <!-- 右侧统一操作面板 -->
-            <div style="flex: 1; overflow: hidden; display: flex; flex-direction: column; min-width: 0; background: var(--arl-bg-white); position: relative;">
-
-              <!-- 未选中时占位（健康看板） -->
-              <div v-if="!unifiedSelectedType" class="health-dashboard-wrapper">
-                <div class="health-dashboard-bg"></div>
-                <div class="health-content">
-                  <div class="health-icon-pulse">
-                    <span style="font-size: 56px;">🌌</span>
-                  </div>
-                  <h3 class="health-title">{{ pageText('pages.dictionaryLibraryOverview') }}</h3>
-                  <div class="health-stats-container">
-                    <div class="health-stat-card primary-stat">
-                      <div class="stat-value">{{ dictList.length }}</div>
-                      <div class="stat-label">{{ pageText('pages.coreAssetDictionaries') }}</div>
-                    </div>
-                    <div class="health-stat-card warning-stat">
-                      <div class="stat-value">{{ bruteDictList.length }}</div>
-                      <div class="stat-label">{{ pageText('pages.credentialDictionaries') }}</div>
-                    </div>
-                  </div>
-                  <div class="health-hint">
-                    <span class="pulse-dot"></span>
-                    <span>{{ pageText('pages.systemStatusIsHealthySelectADictionaryOnThe') }}</span>
-                  </div>
-                </div>
+            <!-- 3. 右侧：内容预览与维护面板 -->
+            <div class="arl-split-main">
+              <div v-if="!unifiedSelectedType" class="dict-empty-center">
+                <ArlEmpty :description="pageText('pages.noDictionariesInThisCategory')" />
               </div>
 
-              <!-- 统一操作面板（沉浸式代码编辑器预览与悬浮操作） -->
-              <div v-else class="native-preview-container">
-                <!-- 顶部固定操作栏 -->
-                <div class="native-toolbar">
-                   <div>
-                     <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
-                       <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: var(--arl-text-color);">{{ unifiedSelectedName }}</h3>
-                       <a-tag :color="unifiedSelectedType === 'asset' ? 'blue' : 'orange'" style="margin: 0;">
-                         {{ unifiedSelectedType === 'asset' ? pageText('pages.assetDiscovery') : pageText('pages.credentialChecks') }}
-                       </a-tag>
-                       <a-tag v-if="unifiedSelectedIsBuiltin" color="purple" style="margin: 0;">
-                         {{ pageText('pages.systemBuiltIn') }}
-                       </a-tag>
-                     </div>
-                     <div class="page-dictionary-summary">{{ pageText('pages.dictionaryDescriptionCount', { description: unifiedSelectedDesc, count: totalLines }) }}</div>
-                   </div>
-                   <div style="display: flex; gap: 8px; align-items: center;">
-                      <a-button @click="handleDownloadDict" :loading="downloadLoading" :title="pageText('pages.exportDictionaryFile')">
-                        <template #icon><span class="page-icon-gap">📥</span></template> {{ pageText('pages.exportDictionary') }}
-                      </a-button>
-                      <a-tooltip v-if="unifiedSelectedIsBuiltin" :title="pageText('pages.coreBuiltInDictionariesAreProtectedAndCannotBe')">
-                        <a-button danger disabled>
-                          <template #icon><span class="page-icon-gap">🗑️</span></template> {{ pageText('pages.deleteDictionary') }}
-                        </a-button>
-                      </a-tooltip>
-                      <a-popconfirm
-                        v-else
-                        :title="pageText('pages.permanentlyDeleteThisDictionaryFileThisCannotBeUndone')"
-                        placement="bottomRight"
-                        @confirm="handleDeleteDict"
-                      >
-                        <a-button danger>
-                          <template #icon><span class="page-icon-gap">🗑️</span></template> {{ pageText('pages.deleteDictionary') }}
-                        </a-button>
-                      </a-popconfirm>
-                     <a-button @click="searchDrawerVisible = true">
-                       <template #icon><span class="page-icon-gap">🔍</span></template> {{ pageText('pages.searchAndRemove') }}
-                     </a-button>
-                     <a-button type="primary" @click="appendDrawerVisible = true">
-                       <template #icon><span class="page-icon-gap">➕</span></template> {{ pageText('pages.appendEntries') }}
-                     </a-button>
-                   </div>
-                </div>
-                
-                <!-- 极简内容预览区 -->
-                <div class="native-preview-area hide-scrollbar" style="display: flex; flex-direction: column; gap: 12px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; background: var(--arl-bg-white); padding: 8px 16px; border-radius: 8px; border: 1px solid var(--arl-border-color); box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <span style="font-size: 13px; font-weight: 500; color: var(--arl-text-color);">
-                        {{ pageText('pages.dictionaryPreviewCount', { shown: previewLimit, total: totalLines }) }}
-                      </span>
+              <template v-else>
+                <div class="arl-split-toolbar">
+                  <div>
+                    <div class="dict-detail-head-row">
+                      <h3 class="dict-detail-title">{{ unifiedSelectedName }}</h3>
+                      <a-tag :color="unifiedSelectedType === 'asset' ? 'blue' : 'orange'" style="margin: 0;">
+                        {{ unifiedSelectedType === 'asset' ? pageText('pages.assetDiscovery') : pageText('pages.credentialChecks') }}
+                      </a-tag>
+                      <a-tag v-if="unifiedSelectedIsBuiltin" color="purple" style="margin: 0;">
+                        {{ pageText('pages.systemBuiltIn') }}
+                      </a-tag>
+                      <span class="dict-instant-badge">{{ pageText('pages.settingsInstantModeHint') }}</span>
                     </div>
+                    <div class="page-dictionary-summary">
+                      {{ pageText('pages.dictionaryDescriptionCount', { description: unifiedSelectedDesc, count: totalLines }) }}
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                    <a-button size="small" @click="handleDownloadDict" :loading="downloadLoading">
+                      <template #icon><DownloadOutlined /></template>
+                      {{ pageText('pages.exportDictionary') }}
+                    </a-button>
+                    <a-tooltip v-if="unifiedSelectedIsBuiltin" :title="pageText('pages.coreBuiltInDictionariesAreProtectedAndCannotBe')">
+                      <a-button danger size="small" disabled>
+                        <template #icon><DeleteOutlined /></template>
+                        {{ pageText('pages.deleteDictionary') }}
+                      </a-button>
+                    </a-tooltip>
+                    <a-popconfirm
+                      v-else
+                      :title="pageText('pages.permanentlyDeleteThisDictionaryFileThisCannotBeUndone')"
+                      placement="bottomRight"
+                      @confirm="handleDeleteDict"
+                    >
+                      <a-button danger size="small">
+                        <template #icon><DeleteOutlined /></template>
+                        {{ pageText('pages.deleteDictionary') }}
+                      </a-button>
+                    </a-popconfirm>
+                    <a-button size="small" @click="searchDrawerVisible = true">
+                      <template #icon><SearchOutlined /></template>
+                      {{ pageText('pages.searchAndRemove') }}
+                    </a-button>
+                    <a-button type="primary" size="small" @click="appendDrawerVisible = true">
+                      <template #icon><PlusOutlined /></template>
+                      {{ pageText('pages.appendEntries') }}
+                    </a-button>
+                  </div>
+                </div>
+
+                <div class="arl-split-preview-area">
+                  <div class="dict-preview-bar">
+                    <span class="dict-preview-title">
+                      {{ pageText('pages.dictionaryPreviewCount', { shown: previewLimit, total: totalLines }) }}
+                    </span>
                     <div style="display: flex; gap: 8px; align-items: center;">
                       <span class="page-muted-label">{{ pageText('pages.previewLines') }}</span>
                       <a-radio-group v-model:value="previewLimit" size="small" @change="() => fetchPreview(selectedDict)">
@@ -364,28 +893,28 @@
                         <a-radio-button :value="1000">1000</a-radio-button>
                       </a-radio-group>
                       <a-button size="small" @click="copyPreviewContent">
-                        <template #icon><span class="page-small-icon-gap">📋</span></template> {{ pageText('pages.copyPreview') }}
+                        <template #icon><CopyOutlined /></template>
+                        {{ pageText('pages.copyPreview') }}
                       </a-button>
                     </div>
                   </div>
 
-                  <div class="native-code-wrapper" style="flex: 1;">
-                    <div class="native-line-numbers" v-if="previewContent">
-                      <div v-for="n in previewLinesCount" :key="n" class="line-number">{{ n }}</div>
+                  <div class="arl-code-wrapper">
+                    <div class="arl-code-lines" v-if="previewContent">
+                      <div v-for="n in previewLinesCount" :key="n" class="arl-code-line-num">{{ n }}</div>
                     </div>
-                    <div class="native-code-content">
-                      <div v-if="!previewContent" class="empty-code">
-                        <span>{{ pageText('pages.thisDictionaryIsEmpty') }}</span>
+                    <div class="arl-code-body">
+                      <div v-if="!previewContent" class="arl-code-empty">
+                        {{ pageText('pages.thisDictionaryIsEmpty') }}
                       </div>
-                      <pre v-else class="code-text">{{ previewContent }}</pre>
-                      <div v-if="totalLines > previewLimit" class="code-limit-hint">
+                      <pre v-else class="arl-code-pre">{{ previewContent }}</pre>
+                      <div v-if="totalLines > previewLimit" class="arl-code-limit-hint">
                         {{ pageText('pages.dictionaryPreviewTail', { shown: previewLimit, total: totalLines }) }}
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
-
+              </template>
             </div>
           </div>
         </a-spin>
@@ -393,7 +922,6 @@
         <!-- 新建字典抽屉 -->
         <a-drawer v-model:open="createDictDrawerVisible" :title="pageText('pages.newDictionary')" placement="right" width="450" @close="resetCreateDictForm">
           <a-tabs v-model:activeKey="createDictTabKey">
-            <!-- 手动输入新建 -->
             <a-tab-pane key="manual" :tab="pageText('pages.createFromText')">
               <div class="page-description">{{ pageText('pages.selectADictionaryCategoryAndEnterInitialContentThe') }}</div>
               <a-form :label-wrap="true" layout="vertical">
@@ -422,7 +950,6 @@
               </div>
             </a-tab-pane>
 
-            <!-- 文件上传新建 -->
             <a-tab-pane key="upload" :tab="pageText('pages.createFromFile')">
               <div class="page-description">{{ pageText('pages.selectADictionaryCategoryAndUploadATxtFile') }}</div>
               <a-form :label-wrap="true" layout="vertical">
@@ -443,7 +970,7 @@
                 </a-form-item>
                 <a-form-item :label="pageText('pages.dictionaryFileTxt')" required>
                   <a-upload :file-list="createDictForm.fileList" :before-upload="(f) => { createDictForm.fileList = [f]; return false; }" @remove="createDictForm.fileList = []" accept=".txt">
-                    <a-button><template #icon>📁</template> {{ pageText('pages.selectFile') }}</a-button>
+                    <a-button><template #icon><FolderOutlined /></template> {{ pageText('pages.selectFile') }}</a-button>
                   </a-upload>
                 </a-form-item>
               </a-form>
@@ -455,8 +982,7 @@
           </a-tabs>
         </a-drawer>
 
-        <!-- 上传字典弹窗 -->
-        <!-- 追加数据抽屉（合并手动输入与大文件上传） -->
+        <!-- 追加条目抽屉 -->
         <a-drawer v-model:open="appendDrawerVisible" :title="pageText('pages.appendDictionaryEntries')" placement="right" width="450">
           <a-tabs v-model:activeKey="appendMode" style="margin-bottom: 16px;">
             <a-tab-pane key="text" :tab="pageText('pages.pasteText')">
@@ -479,13 +1005,9 @@
                   accept=".txt"
                   :showUploadList="false"
                 >
-                  <p class="ant-upload-drag-icon" style="font-size: 48px; margin-bottom: 16px;">
-                    📄
-                  </p>
+                  <p class="ant-upload-drag-icon"><InboxOutlined /></p>
                   <p class="ant-upload-text">{{ pageText('pages.clickOrDragATxtFileHere') }}</p>
-                  <p class="ant-upload-hint">
-                    {{ pageText('pages.plainTextOnlyOneEntryPerLine') }}
-                  </p>
+                  <p class="ant-upload-hint">{{ pageText('pages.plainTextOnlyOneEntryPerLine') }}</p>
                 </a-upload-dragger>
               </div>
             </a-tab-pane>
@@ -504,7 +1026,7 @@
             >
               <template #enterButton><a-button type="primary">{{ pageText('pages.search') }}</a-button></template>
             </a-input-search>
-            
+
             <div v-if="searchResult !== null" style="margin-top: 12px;">
               <div v-if="searchResult.length > 0" class="page-success-detail">{{ pageText('pages.found') }} {{ searchResult.length }} {{ pageText('pages.matchingEntries') }}</div>
               <div v-else class="page-error-detail">{{ pageText('pages.noMatchingEntries') }}</div>
@@ -517,9 +1039,9 @@
               <div v-if="searchResult.length === 100" class="page-warning-detail">{{ pageText('pages.onlyTheFirst100ResultsAreShownRefineYour') }}</div>
             </div>
           </div>
-          
+
           <a-divider />
-          
+
           <div>
             <div class="page-danger-section-title">{{ pageText('pages.deleteEntriesInBulk') }}</div>
             <div class="page-empty-detail">{{ pageText('pages.enterTheExactEntriesToDeleteOnePerLine') }}</div>
@@ -527,549 +1049,347 @@
             <a-button danger block @click="handleDeleteBatchCustom" :loading="deleteLoading" :disabled="!batchDeleteEntries.trim()">{{ pageText('pages.deleteSubmittedEntries') }}</a-button>
           </div>
         </a-drawer>
-      </a-tab-pane>
+      </div>
 
-      <a-tab-pane key="cdn" :tab="tabTitle(pageText('pages.cdnFingerprintsAndRules'), !!cdnPanelRef?.hasUnsavedChanges?.())">
+      <!-- 3.3 CDN 识别规则 -->
+      <div v-if="visitedSubTabs.cdn" v-show="arsenalSubTab === 'cdn'" data-setting-anchor="cdn">
         <CdnRulePanel ref="cdnPanelRef" />
-      </a-tab-pane>
-        </a-tabs>
-      </a-tab-pane>
-      <a-tab-pane key="performance" :tab="tabTitle(pageText('pages.scanningAndConcurrency'), isPerformanceDirty || isSecurityDirty || Object.keys(pendingByGroup.system_general || {}).length > 0)">
-        <a-tabs v-model:activeKey="scanSubTab" type="card" class="dict-sub-tabs" style="margin-bottom: 16px;">
-          <a-tab-pane key="performance" :tab="tabTitle(pageText('pages.taskQueueConcurrency'), isPerformanceDirty)">
-            <div style="max-width: 1000px; padding-bottom: 40px;">
-              <SettingsActionBar
-                anchor="performance_save"
-                :description="pageText('pages.setTheNumberOfWorkerProcessesInEachTask')"
-                :save-label="pageText('pages.savePerformanceSettings')"
-                :dirty="isPerformanceDirty"
-                :saving="performanceSaveLoading"
-                @save="() => savePerformanceConfig()"
-                @reset="() => resetPerformanceForm()"
-              >
-                <template #extra-actions>
-                  <a-button @click="fetchPerformanceConfig" :loading="performanceLoading">
-                    {{ pageText('pages.refreshStatus') }}
-                  </a-button>
-                </template>
-              </SettingsActionBar>
-              <a-spin :spinning="performanceLoading">
-                <a-form :label-wrap="true" layout="vertical">
-                  <!-- 语义分区说明：本页是「进程级队列并发」，与「高级扫描与环境」页的
-                       「单任务内爆破线程数」是两套不同量级的指标，避免用户混淆调错 -->
-                  <a-alert type="info" show-icon style="margin-bottom: 16px; border-radius: 6px;">
-                    <template #message>
-                      <div style="font-size: 13px; line-height: 1.8;">
-                        <div>{{ pageText('pages.queueMemoryHelp', { heavy: (capacityInfo.queue_memory_caps_mb || {}).heavy || 488, light: (capacityInfo.queue_memory_caps_mb || {}).light || 292 }) }}</div>
-                        <div><strong class="page-warning-emphasis">{{ pageText('pages.smallMemoryQueueHelp') }}</strong></div>
-                        <div>{{ pageText('pages.perTaskConcurrencyHelp') }} <a @click="goToBruteConcurrent">{{ pageText('pages.scanningAndConcurrencyAdvancedScanningAndEnvironment') }}</a></div>
-                      </div>
-                    </template>
-                  </a-alert>
-                  <a-alert
-                    v-if="pendingConvergence"
-                    type="warning"
-                    show-icon
-                    class="performance-pending-alert"
-                    :message="pendingConvergenceText"
-                  />
-                  <a-row :gutter="24">
-                    <a-col :xs="24" :lg="12">
-                      <a-card data-setting-anchor="performance" :title="pageText('pages.heavyTaskScheduling')" size="small" class="page-config-card-danger">
-                        <a-form-item>
-                          <template #label>
-                            <span>{{ pageText('pages.heavyTaskConcurrency') }}</span>
-                            <a-tag v-if="runtimePerformance.runtime_heavy_concurrency !== null" color="blue" style="margin-left: 8px; font-size: 12px;">
-                              {{ pageText('pages.runningProcessesCount', { count: runtimePerformance.runtime_heavy_concurrency }) }}
-                            </a-tag>
-                            <a-tag v-else color="default" class="page-choice-gap">{{ pageText('pages.workerOffline') }}</a-tag>
-                            <a-popover placement="right">
-                              <template #content>
-                                <div style="max-width: 320px;">
-                                  <div class="page-strong-heading">{{ pageText('pages.assignmentLongRunningTasks') }}</div>
-                                  <ul style="padding-left: 18px; margin: 0; line-height: 1.8;">
-                                    <li>{{ pageText('pages.regularDomainIpScans') }}</li>
-                                    <li>{{ pageText('pages.riskScansBulkVulnerabilityChecks') }}</li>
-                                    <li>{{ pageText('pages.scheduledDomainIpMonitoring') }}</li>
-                                  </ul>
-                                </div>
-                              </template>
-                              <InfoCircleOutlined style="margin-left: 4px; color: #888; cursor: pointer;" />
-                            </a-popover>
-                          </template>
-                          <a-input-number v-model:value="performanceForm.celery_heavy_concurrency" :min="1" :max="128" style="width: 100%" />
-                          <div style="margin-top: 8px; color: var(--arl-text-color); opacity: 0.45; font-size: 13px;">
-                            {{ pageText('pages.controlConcurrencyForRegularScansRiskScansAndOther') }}
-                          </div>
-                          <div v-if="capacityInfo.heavy_recommended" class="arl-recommend-row">
-                            <span>
-                              <span class="arl-recommend-label">{{ pageText('pages.recommended') }}</span>
-                              <strong>{{ capacityInfo.heavy_recommended }}</strong>
-                              <span class="arl-recommend-basis">
-                                {{ pageText('pages.queueMemoryBudget', { available: capacityInfo.available_memory_mb, budget: capacityInfo.headroom_mb }) }}
-                              </span>
-                            </span>
-                            <a-button size="small" type="link" @click="applyRecommended(performanceForm, 'heavy')">{{ pageText('pages.apply') }}</a-button>
-                          </div>
-                          <div class="arl-recommend-basis" style="margin-top: 4px;">{{ capacityInfo.basis }}</div>
-                          <a-alert
-                            v-if="capacityInfo.steady_ok === false"
-                            type="error"
-                            show-icon
-                            style="margin-top: 8px; border-radius: 6px;"
-                          >
-                            <template #message>
-                              <span style="font-size: 12px;">
-                                {{ pageText('pages.insufficientQueueMemory', { peak: capacityInfo.peak_used_mb, budget: capacityInfo.headroom_mb }) }}
-                              </span>
-                            </template>
-                          </a-alert>
-                        </a-form-item>
-                      </a-card>
-                    </a-col>
-                    <a-col :xs="24" :lg="12">
-                      <a-card :title="pageText('pages.lightTaskScheduling')" size="small" class="page-config-card-success">
-                        <a-form-item>
-                          <template #label>
-                            <span>{{ pageText('pages.lightTaskConcurrency') }}</span>
-                            <a-tag v-if="runtimePerformance.runtime_light_concurrency !== null" color="green" style="margin-left: 8px; font-size: 12px;">
-                              {{ pageText('pages.runningProcessesCount', { count: runtimePerformance.runtime_light_concurrency }) }}
-                            </a-tag>
-                            <a-tag v-else color="default" class="page-choice-gap">{{ pageText('pages.workerOffline') }}</a-tag>
-                            <a-popover placement="right">
-                              <template #content>
-                                <div style="max-width: 320px;">
-                                  <div class="page-strong-heading">{{ pageText('pages.assignmentSingleTargetApiTasks') }}</div>
-                                  <ul style="padding-left: 18px; margin: 0; line-height: 1.8;">
-                                    <li>{{ pageText('pages.assetSearchQueriesFofaEtc') }}</li>
-                                    <li>{{ pageText('pages.updateAWebsiteScreenshotFingerprints') }}</li>
-                                    <li>{{ pageText('pages.singleTargetWebInfoHunterWihExtraction') }}</li>
-                                    <li>{{ pageText('pages.manuallyAddAWebsite') }}</li>
-                                    <li>{{ pageText('pages.forceTaskDataSynchronization') }}</li>
-                                  </ul>
-                                </div>
-                              </template>
-                              <InfoCircleOutlined style="margin-left: 4px; color: #888; cursor: pointer;" />
-                            </a-popover>
-                          </template>
-                          <a-input-number v-model:value="performanceForm.celery_light_concurrency" :min="1" :max="256" style="width: 100%" />
-                          <div style="margin-top: 8px; color: var(--arl-text-color); opacity: 0.45; font-size: 13px;">
-                            {{ pageText('pages.usesADedicatedQueueAndDoesNotWaitFor') }}
-                          </div>
-                          <div v-if="capacityInfo.light_recommended" class="arl-recommend-row">
-                            <span>
-                              <span class="arl-recommend-label">{{ pageText('pages.recommended') }}</span>
-                              <strong>{{ capacityInfo.light_recommended }}</strong>
-                              <span class="arl-recommend-basis">{{ pageText('pages.allocatedUsingThePeakMemoryModelLightTasksHave') }}</span>
-                            </span>
-                            <a-button size="small" type="link" @click="applyRecommended(performanceForm, 'light')">{{ pageText('pages.apply') }}</a-button>
-                          </div>
-                        </a-form-item>
-                      </a-card>
-                    </a-col>
-                  </a-row>
-                  <a-row :gutter="24">
-                    <a-col :xs="24" :lg="12">
-                      <a-card :title="pageText('pages.externalIntelligenceTaskScheduling')" size="small" class="page-config-card-info">
-                        <a-form-item>
-                          <template #label>
-                            {{ pageText('pages.osintTaskConcurrency') }}
-                            <a-popover placement="right">
-                              <template #content>
-                                <div style="max-width: 320px;">
-                                  <div class="page-strong-heading">{{ pageText('pages.assignmentExternalIntelligenceTasks') }}</div>
-                                  <ul style="padding-left: 18px; margin: 0; line-height: 1.8;">
-                                    <li>{{ pageText('pages.icpRecordsWebsitesAppsMiniPrograms') }}</li>
-                                    <li>{{ pageText('pages.tianyanchaInvestmentRelationshipsAndAssetCollection') }}</li>
-                                  </ul>
-                                </div>
-                              </template>
-                              <InfoCircleOutlined style="margin-left: 4px; color: #888; cursor: pointer;" />
-                            </a-popover>
-                          </template>
-                          <a-input-number v-model:value="performanceForm.osint_concurrency" :min="1" :max="128" style="width: 100%" />
-                          <div style="margin-top: 8px; color: var(--arl-text-color); opacity: 0.45; font-size: 13px;">
-                            {{ pageText('pages.controlConcurrentOsintRequestsToExternalServicesSuchAs') }}
-                          </div>
-                          <div v-if="capacityInfo.osint_recommended" class="arl-recommend-row">
-                            <span>
-                              <span class="arl-recommend-label">{{ pageText('pages.recommended') }}</span>
-                              <strong>{{ capacityInfo.osint_recommended }}</strong>
-                              <span class="arl-recommend-basis">{{ pageText('pages.keepTheDefaultToReduceExternalAntiBotRestrictions') }}</span>
-                            </span>
-                            <a-button size="small" type="link" @click="applyRecommended(performanceForm, 'osint')">{{ pageText('pages.apply') }}</a-button>
-                          </div>
-                        </a-form-item>
-                      </a-card>
-                    </a-col>
-                    <a-col :xs="24" :lg="12">
-                      <a-card :title="pageText('pages.githubMonitoringScheduling')" size="small" class="page-config-card-purple">
-                        <a-form-item>
-                          <template #label>
-                            <span>{{ pageText('pages.githubMonitoringConcurrency') }}</span>
-                            <a-tag v-if="runtimePerformance.runtime_github_concurrency !== null" color="purple" style="margin-left: 8px; font-size: 12px;">
-                              {{ pageText('pages.runningProcessesCount', { count: runtimePerformance.runtime_github_concurrency }) }}
-                            </a-tag>
-                            <a-tag v-else color="default" class="page-choice-gap">{{ pageText('pages.workerOffline') }}</a-tag>
-                            <a-popover placement="right">
-                              <template #content>
-                                <div style="max-width: 320px;">
-                                  <div class="page-strong-heading">{{ pageText('pages.assignmentGithubMonitoringTasks') }}</div>
-                                  <ul style="padding-left: 18px; margin: 0; line-height: 1.8;">
-                                    <li>{{ pageText('pages.codeLeakKeywordMonitoring') }}</li>
-                                    <li>{{ pageText('pages.cveSecurityToolUpdates') }}</li>
-                                    <li>{{ pageText('pages.researcherActivityMonitoring') }}</li>
-                                  </ul>
-                                </div>
-                              </template>
-                              <InfoCircleOutlined style="margin-left: 4px; color: #888; cursor: pointer;" />
-                            </a-popover>
-                          </template>
-                          <a-input-number v-model:value="performanceForm.github_concurrency" :min="1" :max="64" style="width: 100%" />
-                          <div style="margin-top: 8px; color: var(--arl-text-color); opacity: 0.45; font-size: 13px;">
-                            {{ pageText('pages.usesTheDedicatedArlgithubQueueIndependentlyOfScanningTasks') }}
-                          </div>
-                          <div v-if="capacityInfo.github_recommended" class="arl-recommend-row">
-                            <span>
-                              <span class="arl-recommend-label">{{ pageText('pages.recommended') }}</span>
-                              <strong>{{ capacityInfo.github_recommended }}</strong>
-                              <span class="arl-recommend-basis">{{ pageText('pages.queueProcessLimit', { limit: (capacityInfo.queue_memory_caps_mb || {}).github || 292 }) }}</span>
-                            </span>
-                            <a-button size="small" type="link" @click="applyRecommended(performanceForm, 'github')">{{ pageText('pages.apply') }}</a-button>
-                          </div>
-                        </a-form-item>
-                      </a-card>
-                    </a-col>
-                  </a-row>
+      </div>
+    </div>
 
-                </a-form>
-              </a-spin>
-            </div>
-          </a-tab-pane>
-          <a-tab-pane key="security" :tab="tabTitle(pageText('pages.securityPolicyIpDomainScanExclusions'), isSecurityDirty)">
-            <div style="max-width: 1000px; padding-bottom: 40px;">
-              <SettingsActionBar
-                anchor="security_save"
-                :description="pageText('pages.preventScanningSpecifiedIpsOrDomainsGloballySavedChanges')"
-                :save-label="pageText('pages.saveSecurityPolicy')"
-                :dirty="isSecurityDirty"
-                :saving="securitySaveLoading"
-                @save="() => saveSecurityPolicy()"
-                @reset="() => resetSecurityForm()"
-              />
-              <a-spin :spinning="securityLoading">
-                <a-form :label-wrap="true" layout="vertical">
-                  <a-form-item data-setting-anchor="security" :label="pageText('pages.ipBlocklistSupportsCidrEG12700')">
-                    <a-textarea v-model:value="securityForm.blackIpsText" :rows="8" :placeholder="pageText('pages.eG1270008100')" />
-                  </a-form-item>
-              
-                  <a-form-item :label="pageText('pages.excludedDomainsSuffixMatchingEGGovCnOr')">
-                    <a-textarea v-model:value="securityForm.forbiddenDomainsText" :rows="8" :placeholder="pageText('pages.eGGovCnEduCn')" />
-                  </a-form-item>
-                </a-form>
-              </a-spin>
-            </div>
-          </a-tab-pane>
-          <a-tab-pane key="system_general" :tab="tabTitle(pageText('pages.advancedScanningAndEnvironment'), Object.keys(pendingByGroup.system_general || {}).length > 0)">
-            <div style="max-width: 1000px; padding-bottom: 40px;">
-              <SettingsActionBar
-                anchor="system_general_save"
-                :description="pageText('pages.configurePerTaskExecutionSettingsOutboundProxyDefaultPorts')"
-                :save-label="pageText('pages.saveAdvancedConfiguration')"
-                :dirty="Object.keys(pendingByGroup.system_general || {}).length > 0"
-                :saving="generalSaveLoading"
-                @save="() => saveGeneralConfig('system_general', pageText('pages.advancedConfigurationSaved'))"
-                @reset="() => resetGeneralGroup('system_general')"
-              />
-              <a-spin :spinning="generalLoading">
-                <a-form :label-wrap="true" layout="vertical">
-                  <!-- 语义分区说明：本页的爆破并发度属于「单任务内」，与「任务队列并发」页的
-                       进程数不是同一指标，避免用户跨页误填同量级数值 -->
-                  <a-alert type="info" show-icon style="margin-bottom: 16px; border-radius: 6px;">
-                    <template #message>
-                      <div style="font-size: 13px; line-height: 1.8;">
-                        {{ pageText('pages.dnsConcurrencyHelp') }} <a @click="goToQueueConcurrency">{{ pageText('pages.scanningAndConcurrencyTaskQueueConcurrency') }}</a>
-                      </div>
-                    </template>
-                  </a-alert>
-                  <a-row :gutter="24">
-                    <a-col :xs="24" :md="12">
-                      <a-form-item data-setting-anchor="brute_concurrent" :label="pageText('pages.dnsQueryConcurrencyForRegularSubdomainDiscovery')">
-                        <a-input-number v-model:value="generalForm.domain_brute_concurrent" :min="1" style="width: 100%" />
-                        <div class="arl-field-hint">
-                          {{ pageText('pages.dnsQueryConcurrencyWithinOneTaskTheMassdns') }} <code>-s</code> {{ pageText('pages.optionRatherThanAProcessOrThreadCountHigher') }}
-                        </div>
-                      </a-form-item>
-                    </a-col>
-                    <a-col :xs="24" :md="12">
-                      <a-form-item :label="pageText('pages.dnsQueryConcurrencyForSubdomainMutationDiscovery')">
-                        <a-input-number v-model:value="generalForm.alt_dns_concurrent" :min="1" style="width: 100%" />
-                        <div class="arl-field-hint">
-                          {{ pageText('pages.usedDuringAltdnsDiscoveryItsDefaultIsHigherBecause') }}
-                        </div>
-                      </a-form-item>
-                    </a-col>
-                  </a-row>
-
-                  <a-form-item data-setting-anchor="port_top_10" :label="pageText('pages.top10WebPortsUsedByFrontendPortScan')">
-                    <a-input v-model:value="generalForm.port_top_10" :placeholder="pageText('pages.separateValuesWithCommas')" />
-                  </a-form-item>
-
-
-                  <a-row :gutter="24">
-                    <a-col :xs="24" :md="12">
-                      <a-form-item data-setting-anchor="auth" :label="pageText('pages.apiAuthentication')">
-                        <a-switch v-model:checked="generalForm.auth" :checked-children="pageText('pages.on')" :un-checked-children="pageText('pages.off')" />
-                      </a-form-item>
-                    </a-col>
-                    <a-col :xs="24" :md="12">
-                      <a-form-item label="API Token (Swagger API Key)">
-                        <a-input-password v-model:value="generalForm.api_key" :placeholder="pageText('pages.apiKeyOnlyRequiredWhenApiAuthenticationIsEnabled')" />
-                      </a-form-item>
-                    </a-col>
-                  </a-row>
-
-                  <a-form-item data-setting-anchor="infra" :label="pageText('pages.infrastructureServiceConnectionsReadOnly')">
-                    <div style="background: var(--arl-bg-light); border: 1px solid var(--arl-border-color); border-radius: 4px; padding: 16px;">
-                      <a-descriptions bordered size="small" :column="1">
-                        <a-descriptions-item :label="pageText('pages.celeryMessageQueueBrokerUrl')">
-                          <code style="word-break: break-all;">{{ generalForm.celery_broker_url }}</code>
-                        </a-descriptions-item>
-                        <a-descriptions-item :label="pageText('pages.mongodbUri')">
-                          <code style="word-break: break-all;">{{ generalForm.mongo_url }}</code>
-                        </a-descriptions-item>
-                        <a-descriptions-item :label="pageText('pages.defaultMongodbDatabase')">
-                          <code>{{ generalForm.mongo_db }}</code>
-                        </a-descriptions-item>
-                        <a-descriptions-item :label="pageText('pages.absolutePathToGeoipCityDatabase')">
-                          <code style="word-break: break-all;">{{ generalForm.geoip_city }}</code>
-                        </a-descriptions-item>
-                        <a-descriptions-item :label="pageText('pages.absolutePathToGeoipAsnDatabase')">
-                          <code style="word-break: break-all;">{{ generalForm.geoip_asn }}</code>
-                        </a-descriptions-item>
-                        <a-descriptions-item :label="pageText('pages.absolutePathToIp2regionDatabase')">
-                          <code style="word-break: break-all;">{{ generalForm.geoip_ip2region || '-' }}</code>
-                        </a-descriptions-item>
-                      </a-descriptions>
-                    </div>
-                  </a-form-item>
-                </a-form>
-              </a-spin>
-            </div>
-          </a-tab-pane>
-        </a-tabs>
-      </a-tab-pane>
-      <a-tab-pane key="message_push" :tab="tabTitle(pageText('pages.notificationsAndCallbacks'), Object.keys(pendingByGroup.message_push).length > 0)">
-        <div style="max-width: 1100px; padding-bottom: 40px;">
-          <SettingsActionBar
-            anchor="message_push_save"
-            :description="pageText('pages.configureNotificationsAfterMonitoringTasksFinishAndAutomatedWebhook')"
-            :save-label="pageText('pages.saveNotificationConfiguration')"
-            :dirty="Object.keys(pendingByGroup.message_push || {}).length > 0"
-            :saving="generalSaveLoading"
-            @save="() => saveGeneralConfig('message_push', pageText('pages.notificationConfigurationSaved'))"
-            @reset="() => resetGeneralGroup('message_push')"
+    <!-- ================================================================ -->
+    <!-- 主域 4：告警与回调 -->
+    <!-- ================================================================ -->
+    <div v-show="activeKey === 'notifications'" class="settings-section-container">
+      <a-spin :spinning="generalLoading">
+        <a-form :label-wrap="true" layout="vertical">
+          <a-alert
+            type="info"
+            show-icon
+            style="margin-bottom: 14px; border-radius: 6px;"
+            :message="pageText('pages.testPushDraftHint')"
           />
 
-          <a-spin :spinning="generalLoading">
-            <a-form :label-wrap="true" layout="vertical">
-              
-              <!-- 1. 订阅消息类型 -->
-              <a-card data-setting-anchor="push_options" :title="pageText('pages.subscribedEvents')" size="small" class="page-config-card-theme">
-                <a-checkbox-group v-model:value="generalForm.push_options" style="width: 100%;">
-                  <a-row :gutter="[12, 8]">
-                    <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="task_complete">{{ pageText('pages.assetDiscoveryTaskCompleted') }}</a-checkbox></a-col>
-                    <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_leak">{{ pageText('pages.githubKeywordAlert') }}</a-checkbox></a-col>
-                    <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_cve">{{ pageText('pages.githubCveUpdate') }}</a-checkbox></a-col>
-                    <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_tools">{{ pageText('pages.githubSecurityToolUpdate') }}</a-checkbox></a-col>
-                    <a-col :xs="24" :sm="12" :md="8" :xl="6"><a-checkbox value="github_hackers">{{ pageText('pages.githubResearcherActivity') }}</a-checkbox></a-col>
-                    <a-col :xs="24" :sm="12" :md="8" :xl="6"><a-checkbox value="asset_site">{{ pageText('pages.websiteMonitoringUpdate') }}</a-checkbox></a-col>
-                  </a-row>
-                </a-checkbox-group>
-              </a-card>
+          <a-card data-setting-anchor="push_options" size="small" class="page-config-card-theme">
+            <template #title>
+              <div class="card-title-with-meta">
+                <BellOutlined class="card-title-icon" />
+                <span>{{ pageText('pages.subscribedEvents') }}</span>
+              </div>
+            </template>
+            <a-checkbox-group v-model:value="generalForm.push_options" style="width: 100%;">
+              <a-row :gutter="[12, 8]">
+                <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="task_complete">{{ pageText('pages.assetDiscoveryTaskCompleted') }}</a-checkbox></a-col>
+                <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_leak">{{ pageText('pages.githubKeywordAlert') }}</a-checkbox></a-col>
+                <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_cve">{{ pageText('pages.githubCveUpdate') }}</a-checkbox></a-col>
+                <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_tools">{{ pageText('pages.githubSecurityToolUpdate') }}</a-checkbox></a-col>
+                <a-col :xs="24" :sm="12" :md="8" :xl="6"><a-checkbox value="github_hackers">{{ pageText('pages.githubResearcherActivity') }}</a-checkbox></a-col>
+                <a-col :xs="24" :sm="12" :md="8" :xl="6"><a-checkbox value="asset_site">{{ pageText('pages.websiteMonitoringUpdate') }}</a-checkbox></a-col>
+              </a-row>
+            </a-checkbox-group>
+          </a-card>
 
-              <!-- 2. 即时通讯推送配置 (2列) -->
-              <a-row :gutter="[16, 16]">
-                <!-- 钉钉 -->
-                <a-col :xs="24" :lg="12">
-                  <a-card data-setting-anchor="im" :title="pageText('pages.dingtalkBot')" size="small" class="page-config-card-fixed-short">
-                    <template #extra>
-                      <a-button type="link" size="small" @click="handleTestPush('dingding')" :loading="testPushLoading.dingding">{{ pageText('pages.sendTest') }}</a-button>
-                    </template>
-                    <a-row :gutter="12">
-                      <a-col :xs="24" :sm="12">
-                        <a-form-item label="Access Token" style="margin-bottom: 0;">
-                          <a-input v-model:value="generalForm.dingding.access_token" :placeholder="pageText('pages.dingtalkToken')" size="small" />
-                        </a-form-item>
-                      </a-col>
-                      <a-col :xs="24" :sm="12">
-                        <a-form-item :label="pageText('pages.signingSecret')" class="page-flush-bottom">
-                          <a-input-password v-model:value="generalForm.dingding.secret" :placeholder="pageText('pages.dingtalkSecret')" size="small" />
-                        </a-form-item>
-                      </a-col>
-                    </a-row>
-                  </a-card>
-                </a-col>
-
-                <!-- 飞书 -->
-                <a-col :xs="24" :lg="12">
-                  <a-card :title="pageText('pages.feishuBot')" size="small" class="page-config-card-fixed-short">
-                    <template #extra>
-                      <a-button type="link" size="small" @click="handleTestPush('feishu')" :loading="testPushLoading.feishu">{{ pageText('pages.sendTest') }}</a-button>
-                    </template>
-                    <a-form-item label="Webhook URL" style="margin-bottom: 8px;">
-                      <a-input v-model:value="generalForm.feishu.webhook_url" :placeholder="pageText('pages.feishuWebhookUrl')" size="small" />
+          <!-- 6 通道自适应网格卡片（无固定高度，带已配置/未配置角标与代理域标注） -->
+          <a-row :gutter="[16, 16]">
+            <!-- 钉钉 -->
+            <a-col :xs="24" :lg="12">
+              <a-card data-setting-anchor="im" size="small" class="notify-channel-card">
+                <template #title>
+                  <div class="card-title-with-meta">
+                    <MessageOutlined class="card-title-icon" />
+                    <span>{{ pageText('pages.dingtalkBot') }}</span>
+                    <a-tag :color="channelStatus.dingding ? 'success' : 'default'" style="margin: 0;">
+                      {{ channelStatus.dingding ? pageText('pages.channelConfiguredTag') : pageText('pages.channelUnconfiguredTag') }}
+                    </a-tag>
+                    <a-tag color="cyan" style="margin: 0;">{{ pageText('pages.channelBypassDomesticTag') }}</a-tag>
+                  </div>
+                </template>
+                <template #extra>
+                  <a-button type="link" size="small" @click="handleTestPush('dingding')" :loading="testPushLoading.dingding">{{ pageText('pages.sendTest') }}</a-button>
+                </template>
+                <a-row :gutter="12">
+                  <a-col :xs="24" :sm="12">
+                    <a-form-item label="Access Token" class="page-flush-bottom">
+                      <a-input-password v-model:value="generalForm.dingding.access_token" :placeholder="pageText('pages.dingtalkToken')" size="small" />
                     </a-form-item>
+                  </a-col>
+                  <a-col :xs="24" :sm="12">
                     <a-form-item :label="pageText('pages.signingSecret')" class="page-flush-bottom">
-                      <a-input-password v-model:value="generalForm.feishu.secret" :placeholder="pageText('pages.feishuSecret')" size="small" />
+                      <a-input-password v-model:value="generalForm.dingding.secret" :placeholder="pageText('pages.dingtalkSecret')" size="small" />
                     </a-form-item>
-                  </a-card>
-                </a-col>
+                  </a-col>
+                </a-row>
+              </a-card>
+            </a-col>
 
-                <!-- 企业微信 -->
-                <a-col :xs="24" :lg="12">
-                  <a-card :title="pageText('pages.wecomBot')" size="small" class="page-config-card-fixed-short">
-                    <template #extra>
-                      <a-button type="link" size="small" @click="handleTestPush('wxwork')" :loading="testPushLoading.wxwork">{{ pageText('pages.sendTest') }}</a-button>
-                    </template>
-                    <a-form-item label="Webhook URL" style="margin-bottom: 0;">
-                      <a-input v-model:value="generalForm.wxwork.webhook_url" :placeholder="pageText('pages.wecomWebhookUrl')" size="small" />
+            <!-- 飞书 -->
+            <a-col :xs="24" :lg="12">
+              <a-card size="small" class="notify-channel-card">
+                <template #title>
+                  <div class="card-title-with-meta">
+                    <MessageOutlined class="card-title-icon" />
+                    <span>{{ pageText('pages.feishuBot') }}</span>
+                    <a-tag :color="channelStatus.feishu ? 'success' : 'default'" style="margin: 0;">
+                      {{ channelStatus.feishu ? pageText('pages.channelConfiguredTag') : pageText('pages.channelUnconfiguredTag') }}
+                    </a-tag>
+                    <a-tag color="cyan" style="margin: 0;">{{ pageText('pages.channelBypassDomesticTag') }}</a-tag>
+                  </div>
+                </template>
+                <template #extra>
+                  <a-button type="link" size="small" @click="handleTestPush('feishu')" :loading="testPushLoading.feishu">{{ pageText('pages.sendTest') }}</a-button>
+                </template>
+                <a-form-item label="Webhook URL" style="margin-bottom: 8px;">
+                  <a-input v-model:value="generalForm.feishu.webhook_url" :placeholder="pageText('pages.feishuWebhookUrl')" size="small" />
+                </a-form-item>
+                <a-form-item :label="pageText('pages.signingSecret')" class="page-flush-bottom">
+                  <a-input-password v-model:value="generalForm.feishu.secret" :placeholder="pageText('pages.feishuSecret')" size="small" />
+                </a-form-item>
+              </a-card>
+            </a-col>
+
+            <!-- 企业微信 -->
+            <a-col :xs="24" :lg="12">
+              <a-card size="small" class="notify-channel-card">
+                <template #title>
+                  <div class="card-title-with-meta">
+                    <MessageOutlined class="card-title-icon" />
+                    <span>{{ pageText('pages.wecomBot') }}</span>
+                    <a-tag :color="channelStatus.wxwork ? 'success' : 'default'" style="margin: 0;">
+                      {{ channelStatus.wxwork ? pageText('pages.channelConfiguredTag') : pageText('pages.channelUnconfiguredTag') }}
+                    </a-tag>
+                    <a-tag color="cyan" style="margin: 0;">{{ pageText('pages.channelBypassDomesticTag') }}</a-tag>
+                  </div>
+                </template>
+                <template #extra>
+                  <a-button type="link" size="small" @click="handleTestPush('wxwork')" :loading="testPushLoading.wxwork">{{ pageText('pages.sendTest') }}</a-button>
+                </template>
+                <a-form-item label="Webhook URL" class="page-flush-bottom">
+                  <a-input v-model:value="generalForm.wxwork.webhook_url" :placeholder="pageText('pages.wecomWebhookUrl')" size="small" />
+                </a-form-item>
+              </a-card>
+            </a-col>
+
+            <!-- Telegram -->
+            <a-col :xs="24" :lg="12">
+              <a-card size="small" class="notify-channel-card">
+                <template #title>
+                  <div class="card-title-with-meta">
+                    <SendOutlined class="card-title-icon" />
+                    <span>{{ pageText('pages.telegramBot') }}</span>
+                    <a-tag :color="channelStatus.telegram ? 'success' : 'default'" style="margin: 0;">
+                      {{ channelStatus.telegram ? pageText('pages.channelConfiguredTag') : pageText('pages.channelUnconfiguredTag') }}
+                    </a-tag>
+                    <a-tag color="purple" class="proxy-route-tag" @click="jumpToProxyDomain('intel')">
+                      {{ pageText('pages.channelProxyIntelTag') }}
+                    </a-tag>
+                  </div>
+                </template>
+                <template #extra>
+                  <a-button type="link" size="small" @click="handleTestPush('telegram')" :loading="testPushLoading.telegram">{{ pageText('pages.sendTest') }}</a-button>
+                </template>
+                <a-row :gutter="12">
+                  <a-col :xs="24" :sm="12">
+                    <a-form-item label="Bot Token" class="page-flush-bottom">
+                      <a-input-password v-model:value="generalForm.telegram.bot_token" placeholder="Bot Token" size="small" />
                     </a-form-item>
-                  </a-card>
-                </a-col>
+                  </a-col>
+                  <a-col :xs="24" :sm="12">
+                    <a-form-item label="Chat ID" class="page-flush-bottom">
+                      <a-input v-model:value="generalForm.telegram.chat_id" :placeholder="pageText('pages.recipientChatId')" size="small" />
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+              </a-card>
+            </a-col>
 
-                <!-- Telegram -->
-                <a-col :xs="24" :lg="12">
-                  <a-card :title="pageText('pages.telegramBot')" size="small" class="page-config-card-fixed-short">
-                    <template #extra>
-                      <a-button type="link" size="small" @click="handleTestPush('telegram')" :loading="testPushLoading.telegram">{{ pageText('pages.sendTest') }}</a-button>
-                    </template>
-                    <a-row :gutter="12">
-                      <a-col :xs="24" :sm="12">
-                        <a-form-item label="Bot Token" style="margin-bottom: 0;">
-                          <a-input v-model:value="generalForm.telegram.bot_token" placeholder="Bot Token" size="small" />
-                        </a-form-item>
-                      </a-col>
-                      <a-col :xs="24" :sm="12">
-                        <a-form-item label="Chat ID" style="margin-bottom: 0;">
-                          <a-input v-model:value="generalForm.telegram.chat_id" :placeholder="pageText('pages.recipientChatId')" size="small" />
-                        </a-form-item>
-                      </a-col>
-                    </a-row>
-                  </a-card>
+            <!-- 全局 Webhook -->
+            <a-col :xs="24" :lg="12">
+              <a-card data-setting-anchor="webhook" size="small" class="notify-channel-card">
+                <template #title>
+                  <div class="card-title-with-meta">
+                    <LinkOutlined class="card-title-icon" />
+                    <span>{{ pageText('pages.globalWebhookCallback') }}</span>
+                    <a-tag :color="channelStatus.webhook ? 'success' : 'default'" style="margin: 0;">
+                      {{ channelStatus.webhook ? pageText('pages.channelConfiguredTag') : pageText('pages.channelUnconfiguredTag') }}
+                    </a-tag>
+                    <a-tag color="purple" class="proxy-route-tag" @click="jumpToProxyDomain('intel')">
+                      {{ pageText('pages.channelProxyIntelTag') }}
+                    </a-tag>
+                  </div>
+                </template>
+                <template #extra>
+                  <a-space size="small">
+                    <a-popover placement="topRight" :title="pageText('pages.webhookSchemaTitle')">
+                      <template #content>
+                        <div style="max-width: 340px; font-size: 12px; line-height: 1.6;">
+                          <p style="margin-bottom: 6px;">{{ pageText('pages.webhookSchemaDesc') }}</p>
+                          <pre class="webhook-schema-pre">{{ WEBHOOK_SAMPLE_PAYLOAD }}</pre>
+                        </div>
+                      </template>
+                      <a-button type="link" size="small">{{ pageText('pages.webhookSchemaBtn') }}</a-button>
+                    </a-popover>
+                    <a-button type="link" size="small" @click="handleTestPush('webhook')" :loading="testPushLoading.webhook">{{ pageText('pages.sendTest') }}</a-button>
+                  </a-space>
+                </template>
+                <a-form-item :label="pageText('pages.callbackPostUrl')" class="page-field-spacing">
+                  <a-input v-model:value="generalForm.webhook_url" :placeholder="pageText('pages.urlOfTheEndpointReceivingJsonData')" size="small" />
+                </a-form-item>
+                <a-form-item :label="pageText('pages.authenticationTokenHeader')" class="page-flush-bottom">
+                  <a-input-password v-model:value="generalForm.webhook_token" :placeholder="pageText('pages.tokenForAuthentication')" size="small" />
+                </a-form-item>
+              </a-card>
+            </a-col>
+
+            <!-- SMTP 邮件 -->
+            <a-col :xs="24" :lg="12">
+              <a-card size="small" class="notify-channel-card">
+                <template #title>
+                  <div class="card-title-with-meta">
+                    <MailOutlined class="card-title-icon" />
+                    <span>{{ pageText('pages.smtpEmailNotifications') }}</span>
+                    <a-tag :color="channelStatus.email ? 'success' : 'default'" style="margin: 0;">
+                      {{ channelStatus.email ? pageText('pages.channelConfiguredTag') : pageText('pages.channelUnconfiguredTag') }}
+                    </a-tag>
+                  </div>
+                </template>
+                <template #extra>
+                  <a-button type="link" size="small" @click="handleTestPush('email')" :loading="testPushLoading.email">{{ pageText('pages.sendTest') }}</a-button>
+                </template>
+                <a-row :gutter="12">
+                  <a-col :xs="24" :sm="16">
+                    <a-form-item data-setting-anchor="email" :label="pageText('pages.smtpHost')" class="page-form-spacing">
+                      <a-input v-model:value="generalForm.email.host" placeholder="smtp.qq.com" size="small" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="24" :sm="8">
+                    <a-form-item :label="pageText('tasks.port')" class="page-form-spacing">
+                      <a-input-number v-model:value="generalForm.email.port" style="width: 100%;" size="small" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="24" :sm="12">
+                    <a-form-item :label="pageText('pages.senderUsername')" class="page-form-spacing">
+                      <a-input v-model:value="generalForm.email.username" :placeholder="pageText('pages.senderAccount')" size="small" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="24" :sm="12">
+                    <a-form-item :label="pageText('pages.authorizationCodePassword')" class="page-form-spacing">
+                      <a-input-password v-model:value="generalForm.email.password" :placeholder="pageText('pages.authorizationPassword')" size="small" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="24">
+                    <a-form-item :label="pageText('pages.recipientsToCommaSeparated')" class="page-flush-bottom">
+                      <a-input v-model:value="generalForm.email.to" placeholder="receiver@test.com" size="small" />
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+              </a-card>
+            </a-col>
+          </a-row>
+        </a-form>
+      </a-spin>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- 主域 5：系统运维 -->
+    <!-- ================================================================ -->
+    <div v-if="visitedDomains.system_ops" v-show="activeKey === 'system_ops'">
+      <!-- 5.1 API 安全认证与基础设施诊断 -->
+      <div v-show="opsSubTab === 'auth_infra'" class="settings-section-container">
+        <a-spin :spinning="generalLoading">
+          <a-alert
+            type="info"
+            show-icon
+            style="margin-bottom: 16px; border-radius: 6px;"
+            :message="pageText('pages.authDistinctionTitle')"
+            :description="pageText('pages.authDistinctionBody')"
+          />
+
+          <a-form :label-wrap="true" layout="vertical">
+            <a-card data-setting-anchor="auth" size="small" class="page-config-card">
+              <template #title>
+                <div class="card-title-with-meta">
+                  <KeyOutlined class="card-title-icon" />
+                  <span>{{ pageText('pages.apiAuthentication') }}</span>
+                </div>
+              </template>
+              <template #extra>
+                <a-space size="small">
+                  <a-button size="small" @click="handleGenerateApiKey">{{ pageText('pages.generateApiKeyBtn') }}</a-button>
+                  <a-button size="small" :disabled="!generalForm.api_key" @click="handleCopyApiHeaderExample">
+                    <template #icon><CopyOutlined /></template>
+                    {{ pageText('pages.copyCurlExampleBtn') }}
+                  </a-button>
+                </a-space>
+              </template>
+
+              <a-row :gutter="24">
+                <a-col :xs="24" :md="8">
+                  <a-form-item :label="pageText('pages.apiAuthentication')" class="page-flush-bottom">
+                    <a-switch v-model:checked="generalForm.auth" :checked-children="pageText('pages.on')" :un-checked-children="pageText('pages.off')" />
+                  </a-form-item>
+                </a-col>
+                <a-col :xs="24" :md="16">
+                  <a-form-item label="API Token (Swagger API Key)" class="page-flush-bottom">
+                    <a-input-password v-model:value="generalForm.api_key" :placeholder="pageText('pages.apiKeyOnlyRequiredWhenApiAuthenticationIsEnabled')" />
+                  </a-form-item>
                 </a-col>
               </a-row>
+            </a-card>
 
-              <!-- 3. Webhook & Email (较复杂的配置放下方) -->
-              <a-row :gutter="[16, 16]">
-                <!-- 全局 Webhook -->
-                <a-col :xs="24" :lg="12">
-                  <a-card data-setting-anchor="webhook" :title="pageText('pages.globalWebhookCallback')" size="small" class="page-config-card-fixed-tall">
-                    <template #extra>
-                      <a-button type="link" size="small" @click="handleTestPush('webhook')" :loading="testPushLoading.webhook">{{ pageText('pages.sendTest') }}</a-button>
-                    </template>
-                    <a-form-item :label="pageText('pages.callbackPostUrl')" class="page-field-spacing">
-                      <a-input v-model:value="generalForm.webhook_url" :placeholder="pageText('pages.urlOfTheEndpointReceivingJsonData')" size="small" />
-                    </a-form-item>
-                    <a-form-item :label="pageText('pages.authenticationTokenHeader')" class="page-flush-bottom">
-                      <a-input v-model:value="generalForm.webhook_token" :placeholder="pageText('pages.tokenForAuthentication')" size="small" />
-                    </a-form-item>
-                  </a-card>
-                </a-col>
+            <a-card data-setting-anchor="infra" size="small" class="page-config-card">
+              <template #title>
+                <div class="card-title-with-meta">
+                  <DatabaseOutlined class="card-title-icon" />
+                  <span>{{ pageText('pages.infrastructureServiceConnectionsReadOnly') }}</span>
+                </div>
+              </template>
+              <template #extra>
+                <a-button size="small" type="text" @click="revealInfraSecrets = !revealInfraSecrets">
+                  <template #icon>
+                    <EyeInvisibleOutlined v-if="revealInfraSecrets" />
+                    <EyeOutlined v-else />
+                  </template>
+                  {{ revealInfraSecrets ? pageText('pages.hideRawSecrets') : pageText('pages.showRawSecrets') }}
+                </a-button>
+              </template>
 
-                <!-- SMTP 邮件 -->
-                <a-col :xs="24" :lg="12">
-                  <a-card :title="pageText('pages.smtpEmailNotifications')" size="small" class="page-config-card-fixed-tall">
-                    <template #extra>
-                      <a-button type="link" size="small" @click="handleTestPush('email')" :loading="testPushLoading.email">{{ pageText('pages.sendTest') }}</a-button>
-                    </template>
-                    <a-row :gutter="12">
-                      <a-col :xs="24" :sm="16">
-                        <a-form-item data-setting-anchor="email" :label="pageText('pages.smtpHost')" class="page-form-spacing">
-                          <a-input v-model:value="generalForm.email.host" placeholder="smtp.qq.com" size="small" />
-                        </a-form-item>
-                      </a-col>
-                      <a-col :xs="24" :sm="8">
-                        <a-form-item :label="pageText('tasks.port')" class="page-form-spacing">
-                          <a-input-number v-model:value="generalForm.email.port" style="width: 100%;" size="small" />
-                        </a-form-item>
-                      </a-col>
-                      <a-col :xs="24" :sm="12">
-                        <a-form-item :label="pageText('pages.senderUsername')" class="page-form-spacing">
-                          <a-input v-model:value="generalForm.email.username" :placeholder="pageText('pages.senderAccount')" size="small" />
-                        </a-form-item>
-                      </a-col>
-                      <a-col :xs="24" :sm="12">
-                        <a-form-item :label="pageText('pages.authorizationCodePassword')" class="page-form-spacing">
-                          <a-input-password v-model:value="generalForm.email.password" :placeholder="pageText('pages.authorizationPassword')" size="small" />
-                        </a-form-item>
-                      </a-col>
-                      <a-col :span="24">
-                        <a-form-item :label="pageText('pages.recipientsToCommaSeparated')" class="page-flush-bottom">
-                          <a-input v-model:value="generalForm.email.to" placeholder="receiver@test.com" size="small" />
-                        </a-form-item>
-                      </a-col>
-                    </a-row>
-                  </a-card>
-                </a-col>
-              </a-row>
-
-            </a-form>
-          </a-spin>
-        </div>
-      </a-tab-pane>
-      <a-tab-pane key="proxy" :tab="tabTitle(pageText('pages.proxyTab'), !!proxyPanelRef?.hasUnsavedChanges?.())">
-        <ProxyManagePanel ref="proxyPanelRef" />
-      </a-tab-pane>
-      <a-tab-pane key="system_backup" :tab="tabTitle(pageText('pages.backupTab'), false)">
-        <BackupRestorePanel ref="backupPanelRef" />
-      </a-tab-pane>
-      <a-tab-pane key="system_update" :tab="tabTitle(pageText('pages.systemVersionAndUpdates'), false)">
-        <SystemUpdatePanel ref="updatePanelRef" />
-      </a-tab-pane>
-    </a-tabs>
-
-    <!-- 统一底部悬浮操作条：在任意长配置页滚动编辑时无需回滚即可一键保存/重置 -->
-    <transition name="floating-slide">
-      <div v-if="activeSectionDirty" class="arl-floating-action-bar">
-        <div class="floating-info">
-          <span class="arl-floating-dirty-dot"></span>
-          <span>{{ activeEditableSection.label }} · {{ pageText('pages.unsavedChanges') }}</span>
-        </div>
-        <div class="floating-actions">
-          <a-popconfirm
-            :title="pageText('pages.confirmResetSectionChanges')"
-            :ok-text="pageText('pages.confirmResetBtn')"
-            :cancel-text="pageText('pages.cancel')"
-            ok-type="danger"
-            @confirm="() => activeEditableSection.reset()"
-          >
-            <a-button size="small" :disabled="batchSaving || activeSectionSaving">
-              {{ pageText('pages.reset') }}
-            </a-button>
-          </a-popconfirm>
-          <a-button
-            type="primary"
-            size="small"
-            :loading="activeSectionSaving"
-            :disabled="batchSaving"
-            @click="() => activeEditableSection.save()"
-          >
-            {{ pageText('pages.saveCurrentSection') }}
-          </a-button>
-          <a-button
-            v-if="unsavedCount > 1"
-            size="small"
-            :loading="batchSaving"
-            @click="saveAllDirtySections"
-          >
-            {{ pageText('pages.saveAllCount', { count: unsavedCount }) }}
-          </a-button>
-        </div>
+              <a-descriptions bordered size="small" :column="1">
+                <a-descriptions-item :label="pageText('pages.celeryMessageQueueBrokerUrl')">
+                  <code style="word-break: break-all;">{{ displayBrokerUri }}</code>
+                </a-descriptions-item>
+                <a-descriptions-item :label="pageText('pages.mongodbUri')">
+                  <code style="word-break: break-all;">{{ displayMongoUri }}</code>
+                </a-descriptions-item>
+                <a-descriptions-item :label="pageText('pages.defaultMongodbDatabase')">
+                  <code>{{ generalForm.mongo_db }}</code>
+                </a-descriptions-item>
+                <a-descriptions-item :label="pageText('pages.absolutePathToGeoipCityDatabase')">
+                  <code style="word-break: break-all;">{{ generalForm.geoip_city }}</code>
+                </a-descriptions-item>
+                <a-descriptions-item :label="pageText('pages.absolutePathToGeoipAsnDatabase')">
+                  <code style="word-break: break-all;">{{ generalForm.geoip_asn }}</code>
+                </a-descriptions-item>
+                <a-descriptions-item :label="pageText('pages.absolutePathToIp2regionDatabase')">
+                  <code style="word-break: break-all;">{{ generalForm.geoip_ip2region || '-' }}</code>
+                </a-descriptions-item>
+              </a-descriptions>
+            </a-card>
+          </a-form>
+        </a-spin>
       </div>
-    </transition>
 
-    <!-- 离开系统设置三选一防护弹窗：留在当前页 / 放弃改动并离开 / 保存全部并离开 -->
+      <!-- 5.2 数据备份与恢复 -->
+      <div v-if="visitedSubTabs.backup" v-show="opsSubTab === 'backup'" data-setting-anchor="backup">
+        <BackupRestorePanel ref="backupPanelRef" />
+      </div>
+
+      <!-- 5.3 版本与系统更新 -->
+      <div v-if="visitedSubTabs.update" v-show="opsSubTab === 'update'" data-setting-anchor="update">
+        <SystemUpdatePanel ref="updatePanelRef" />
+      </div>
+    </div>
+
+    <!-- 离开系统设置三选一防护弹窗 -->
     <a-modal
       v-model:open="leaveConfirmVisible"
       :title="pageText('pages.unsavedConfigurationChangesLabel2')"
@@ -1110,18 +1430,61 @@
 import { useI18n } from 'vue-i18n';
 defineOptions({ name: 'SystemSettings' });
 import {
-  InfoCircleOutlined, ExclamationCircleOutlined
+  SettingOutlined,
+  ApiOutlined,
+  SafetyOutlined,
+  ThunderboltOutlined,
+  BellOutlined,
+  ToolOutlined,
+  SearchOutlined,
+  ReloadOutlined,
+  UndoOutlined,
+  CheckOutlined,
+  InfoCircleOutlined,
+  ExclamationCircleOutlined,
+  RadarChartOutlined,
+  BankOutlined,
+  GithubOutlined,
+  KeyOutlined,
+  SafetyCertificateOutlined,
+  AppstoreOutlined,
+  ControlOutlined,
+  FolderOutlined,
+  FileTextOutlined,
+  PlusOutlined,
+  DownloadOutlined,
+  DeleteOutlined,
+  CopyOutlined,
+  InboxOutlined,
+  MessageOutlined,
+  SendOutlined,
+  LinkOutlined,
+  MailOutlined,
+  DatabaseOutlined,
+  EyeOutlined,
+  EyeInvisibleOutlined,
+  AimOutlined,
 } from '@ant-design/icons-vue';
 import { ref, reactive, onMounted, onUnmounted, onDeactivated, computed, nextTick, watch, createVNode } from 'vue';
 import { message, Modal } from 'ant-design-vue';
 import request from '@/utils/request';
 import { copyText } from '@/utils/clipboard';
+import {
+  analyzeSecurityPolicy,
+  applySecurityPreset,
+  SECURITY_IP_PRESETS,
+  SECURITY_DOMAIN_PRESETS,
+  testTargetAgainstGuardrails,
+  maskConnectionUri,
+  generateStrongApiKey,
+  parsePortListInfo,
+} from '@/utils/settingsHelpers';
 import { useRoute, onBeforeRouteLeave } from 'vue-router';
+import ArlEmpty from '@/components/ArlEmpty.vue';
 import CdnRulePanel from '@/components/settings/CdnRulePanel.vue';
 import ProxyManagePanel from '@/components/settings/ProxyManagePanel.vue';
 import BackupRestorePanel from '@/components/settings/BackupRestorePanel.vue';
 import SystemUpdatePanel from '@/components/settings/SystemUpdatePanel.vue';
-import SettingsActionBar from '@/components/settings/SettingsActionBar.vue';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 
@@ -1129,11 +1492,60 @@ const cdnPanelRef = ref(null);
 const proxyPanelRef = ref(null);
 const backupPanelRef = ref(null);
 const updatePanelRef = ref(null);
+const searchInputRef = ref(null);
+const searchBoxWrapRef = ref(null);
 
 const route = useRoute();
-const activeKey = ref('dictionary');
-const dictSubTab = ref('dict');
-const scanSubTab = ref('performance');
+
+// 5 个渗透实战主域与默认首屏（默认打开「情报凭据」）
+const DOMAIN_TABS = [
+  { key: 'intel', labelKey: 'pages.settingsDomainIntel', icon: ApiOutlined },
+  { key: 'egress_guardrails', labelKey: 'pages.settingsDomainGuardrails', icon: SafetyOutlined },
+  { key: 'scanning_arsenal', labelKey: 'pages.settingsDomainArsenal', icon: ThunderboltOutlined },
+  { key: 'notifications', labelKey: 'pages.settingsDomainNotifications', icon: BellOutlined },
+  { key: 'system_ops', labelKey: 'pages.settingsDomainOps', icon: ToolOutlined },
+];
+
+const activeKey = ref('intel');
+const guardrailSubTab = ref('proxy');
+const arsenalSubTab = ref('concurrency');
+const opsSubTab = ref('auth_infra');
+
+// 懒挂载追踪：避免未访问子面板在首屏抢跑请求，访问后保持 Keep-Alive
+const visitedDomains = reactive({
+  intel: true,
+  egress_guardrails: false,
+  scanning_arsenal: true,
+  notifications: true,
+  system_ops: false,
+});
+const visitedSubTabs = reactive({
+  proxy: false,
+  cdn: false,
+  backup: false,
+  update: false,
+});
+
+const markVisitedState = () => {
+  if (visitedDomains[activeKey.value] !== undefined) {
+    visitedDomains[activeKey.value] = true;
+  }
+  if (activeKey.value === 'egress_guardrails' && guardrailSubTab.value === 'proxy') {
+    visitedSubTabs.proxy = true;
+  } else if (activeKey.value === 'scanning_arsenal' && arsenalSubTab.value === 'cdn') {
+    visitedSubTabs.cdn = true;
+  } else if (activeKey.value === 'system_ops') {
+    if (opsSubTab.value === 'backup') visitedSubTabs.backup = true;
+    else if (opsSubTab.value === 'update') visitedSubTabs.update = true;
+  }
+};
+
+watch([activeKey, guardrailSubTab, arsenalSubTab, opsSubTab], markVisitedState, { immediate: true });
+
+const switchDomain = (key) => {
+  activeKey.value = key;
+};
+
 const loading = ref(false);
 const searchLoading = ref(false);
 const submitLoading = ref(false);
@@ -1141,6 +1553,161 @@ const deleteLoading = ref(false);
 
 const menuSearch = ref('');
 const menuOpenKeys = ref([]);
+
+const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+
+// ======================= 情报凭据：插件筛选与原位校验 =======================
+const pluginFilterMode = ref('all');
+
+const pluginRequiresCredential = (conf, name) => (
+  hasOwn(conf, 'api_key') || hasOwn(conf, 'quake_token') || name === 'passivetotal'
+);
+
+const queryPluginEntries = computed(() => Object.entries(generalForm.value.query_plugin_config || {}));
+const pluginTotalCount = computed(() => queryPluginEntries.value.length);
+const pluginEnabledCount = computed(() => queryPluginEntries.value.filter(([, c]) => !!c?.enable).length);
+const pluginWithKeyCount = computed(() => queryPluginEntries.value.filter(([n, c]) => pluginRequiresCredential(c, n)).length);
+
+const filteredQueryPlugins = computed(() => {
+  const entries = queryPluginEntries.value;
+  if (pluginFilterMode.value === 'enabled') {
+    return entries.filter(([, c]) => !!c?.enable);
+  }
+  if (pluginFilterMode.value === 'key_required') {
+    return entries.filter(([n, c]) => pluginRequiresCredential(c, n));
+  }
+  return entries;
+});
+
+const intelChecks = reactive({
+  fofa: { loading: false, status: 'idle', color: 'default', text: '' },
+  tyc: { loading: false, status: 'idle', color: 'default', text: '' },
+  github: { loading: false, status: 'idle', color: 'default', text: '' },
+});
+
+const ensureIntelSavedBeforeCheck = async () => {
+  const dirtyKeys = Object.keys(pendingByGroup.value.api_config || {});
+  if (dirtyKeys.length === 0) return { savedNow: false, ok: true };
+  const ok = await saveGeneralConfig('api_config', '', { silentSuccess: true });
+  return { savedNow: true, ok };
+};
+
+const verifyFofaConnection = async () => {
+  intelChecks.fofa.loading = true;
+  try {
+    const { savedNow, ok } = await ensureIntelSavedBeforeCheck();
+    if (!ok) return;
+    const res = await request.post('/task_fofa/test', { query: 'port="80"' });
+    if (res.code === 200) {
+      const size = res.data?.size ?? res.data?.total ?? 0;
+      intelChecks.fofa.status = 'ok';
+      intelChecks.fofa.color = 'success';
+      intelChecks.fofa.text = pageText('pages.fofaProbeOk', { size });
+      message.success(savedNow ? pageText('pages.autoSavedAndChecked') : intelChecks.fofa.text);
+    } else {
+      intelChecks.fofa.status = 'error';
+      intelChecks.fofa.color = 'error';
+      intelChecks.fofa.text = pageText('pages.fofaProbeErr', { msg: res.message || pageText('tasks.testFailed') });
+      message.error(intelChecks.fofa.text);
+    }
+  } catch (err) {
+    const msg = err?.response?.data?.message || pageText('tasks.testRequestFailedCheckTheConfiguration');
+    intelChecks.fofa.status = 'error';
+    intelChecks.fofa.color = 'error';
+    intelChecks.fofa.text = pageText('pages.fofaProbeErr', { msg });
+    message.error(intelChecks.fofa.text);
+  } finally {
+    intelChecks.fofa.loading = false;
+  }
+};
+
+const verifyTycCredentials = async () => {
+  intelChecks.tyc.loading = true;
+  try {
+    const { savedNow, ok } = await ensureIntelSavedBeforeCheck();
+    if (!ok) return;
+    const res = await request.get('/icp/tyc_check');
+    if (res.code === 200 && res.data) {
+      if (!res.data.configured) {
+        intelChecks.tyc.status = 'unconfigured';
+        intelChecks.tyc.color = 'default';
+        intelChecks.tyc.text = pageText('pages.tycStatusUnconfigured');
+        message.info(savedNow ? pageText('pages.autoSavedAndChecked') : intelChecks.tyc.text);
+      } else if (res.data.valid) {
+        intelChecks.tyc.status = 'ok';
+        intelChecks.tyc.color = 'success';
+        intelChecks.tyc.text = pageText('pages.tycStatusValid');
+        message.success(savedNow ? pageText('pages.autoSavedAndChecked') : intelChecks.tyc.text);
+      } else {
+        intelChecks.tyc.status = 'error';
+        intelChecks.tyc.color = 'error';
+        intelChecks.tyc.text = pageText('pages.tycStatusInvalid', { msg: res.data.message || pageText('tasks.testFailed') });
+        message.warning(intelChecks.tyc.text);
+      }
+    }
+  } catch (err) {
+    const msg = err?.response?.data?.message || pageText('tasks.testRequestFailedCheckTheConfiguration');
+    intelChecks.tyc.status = 'error';
+    intelChecks.tyc.color = 'error';
+    intelChecks.tyc.text = pageText('pages.tycStatusInvalid', { msg });
+    message.error(intelChecks.tyc.text);
+  } finally {
+    intelChecks.tyc.loading = false;
+  }
+};
+
+const verifyGithubToken = async () => {
+  intelChecks.github.loading = true;
+  try {
+    const { savedNow, ok } = await ensureIntelSavedBeforeCheck();
+    if (!ok) return;
+    const res = await request.get('/github_threat/token_status');
+    if (res.code === 200 && res.data) {
+      const d = res.data;
+      if (d.status === 'valid') {
+        intelChecks.github.status = 'ok';
+        intelChecks.github.color = 'success';
+        intelChecks.github.text = pageText('pages.githubStatusValid', {
+          core: d.core?.remaining ?? 0,
+          coreLimit: d.core?.limit ?? 5000,
+          search: d.search?.remaining ?? 0,
+          searchLimit: d.search?.limit ?? 30,
+        });
+        message.success(savedNow ? pageText('pages.autoSavedAndChecked') : intelChecks.github.text);
+      } else if (d.status === 'rate_limited') {
+        intelChecks.github.status = 'warning';
+        intelChecks.github.color = 'warning';
+        intelChecks.github.text = pageText('pages.githubStatusLimited', {
+          search: d.search?.remaining ?? 0,
+          searchLimit: d.search?.limit ?? 30,
+        });
+        message.warning(intelChecks.github.text);
+      } else {
+        intelChecks.github.status = 'error';
+        intelChecks.github.color = 'error';
+        intelChecks.github.text = d.msg || pageText('tasks.testFailed');
+        message.warning(intelChecks.github.text);
+      }
+    }
+  } catch (err) {
+    const msg = err?.response?.data?.message || pageText('tasks.testRequestFailedCheckTheConfiguration');
+    intelChecks.github.status = 'error';
+    intelChecks.github.color = 'error';
+    intelChecks.github.text = msg;
+    message.error(msg);
+  } finally {
+    intelChecks.github.loading = false;
+  }
+};
+
+const jumpToProxyDomain = (domainAnchor) => {
+  activeKey.value = 'egress_guardrails';
+  guardrailSubTab.value = 'proxy';
+  nextTick(() => {
+    proxyPanelRef.value?.focusSection?.(domainAnchor);
+  });
+};
+
 // ======================= 新建字典模块 =======================
 const createDictDrawerVisible = ref(false);
 const createDictTabKey = ref('manual');
@@ -1149,7 +1716,7 @@ const createDictForm = reactive({
   prefix: 'domain_',
   customName: '',
   content: '',
-  fileList: []
+  fileList: [],
 });
 
 const openCreateDictDrawer = () => {
@@ -1174,15 +1741,14 @@ const openCreateDictDrawer = () => {
   }
 };
 
-const isCreateDictValid = computed(() => {
-  return createDictForm.customName && /^[a-zA-Z0-9_]+$/.test(createDictForm.customName);
-});
+const isCreateDictValid = computed(() => (
+  createDictForm.customName && /^[a-zA-Z0-9_]+$/.test(createDictForm.customName)
+));
 
-// 新建字典时按前缀自动路由：username_/password_ → 弱口令字典目录 (brute_dict)，其余 → 资产字典目录 (dictionary)
-const isBruteCreatePrefix = computed(() => {
-  return createDictForm.prefix === 'username_' || createDictForm.prefix === 'password_';
-});
-const createDictApiBase = computed(() => isBruteCreatePrefix.value ? '/api/brute_dict' : '/api/dictionary');
+const isBruteCreatePrefix = computed(() => (
+  createDictForm.prefix === 'username_' || createDictForm.prefix === 'password_'
+));
+const createDictApiBase = computed(() => (isBruteCreatePrefix.value ? '/api/brute_dict' : '/api/dictionary'));
 
 const resetCreateDictForm = () => {
   createDictForm.prefix = 'domain_';
@@ -1192,7 +1758,7 @@ const resetCreateDictForm = () => {
   createDictTabKey.value = 'manual';
 };
 
-// ======================= 字典后台导入全受控轮询器 =======================
+// ======================= 字典后台导入受控轮询 =======================
 const activeDictPollTimers = ref(new Set());
 
 const clearAllDictPollTimers = () => {
@@ -1227,11 +1793,11 @@ const handlePasteNewEntries = (e) => {
 const startDictPolling = (taskId, targetName, apiBase, isBrute, isAppend = false) => {
   const hideMsg = message.loading(pageText('pages.dictionaryNameModeImportRunningInTheBackgroundYou', { name: targetName, mode: isAppend ? pageText('pages.append') : '' }), 0);
   let pollCount = 0;
-  const MAX_POLL_COUNT = 300; // 最多轮询 300 次 (10分钟)
+  const MAX_POLL_COUNT = 300;
   let lastUpdateTime = null;
   let staleCount = 0;
   let consecutive404Count = 0;
-  const MAX_CONSECUTIVE_404 = 5; // 容忍最多 5 次（10秒）404 排队/延迟窗口
+  const MAX_CONSECUTIVE_404 = 5;
 
   const timer = setInterval(async () => {
     pollCount++;
@@ -1246,15 +1812,11 @@ const startDictPolling = (taskId, targetName, apiBase, isBrute, isAppend = false
     try {
       const statusRes = await request.get(`${apiBase}/upload_status`, { params: { task_id: taskId } });
       if (statusRes.code === 200 && statusRes.data) {
-        consecutive404Count = 0; // 重置 404 计数
+        consecutive404Count = 0;
         const data = statusRes.data;
 
-        // 排队等待状态
-        if (data.status === 'pending') {
-          return;
-        }
+        if (data.status === 'pending') return;
 
-        // 心跳停滞检测：若连续 60 次轮询（120秒）且 update_time 毫无变化，提示可能中断并熔断
         if (data.status === 'processing') {
           if (data.update_time && data.update_time === lastUpdateTime) {
             staleCount++;
@@ -1275,15 +1837,15 @@ const startDictPolling = (taskId, targetName, apiBase, isBrute, isAppend = false
           clearInterval(timer);
           activeDictPollTimers.value.delete(timer);
           hideMsg();
-          message.success(pageText('pages.dictionaryNameModeImportCompletedAddedAddedDuplicatesSkipped', { name: targetName, mode: isAppend ? pageText('pages.append') : '', added: data.inserted_lines, duplicates: data.ignored_lines }));
-          if (isBrute) {
-            fetchBruteDictList(false);
-          } else {
-            fetchDictList(false);
-          }
-          if (isAppend) {
-            fetchPreview(targetName);
-          }
+          message.success(pageText('pages.dictionaryNameModeImportCompletedAddedAddedDuplicatesSkipped', {
+            name: targetName,
+            mode: isAppend ? pageText('pages.append') : '',
+            added: data.inserted_lines,
+            duplicates: data.ignored_lines,
+          }));
+          if (isBrute) fetchBruteDictList(false);
+          else fetchDictList(false);
+          if (isAppend) fetchPreview(targetName);
         } else if (data.status === 'error') {
           clearInterval(timer);
           activeDictPollTimers.value.delete(timer);
@@ -1291,7 +1853,6 @@ const startDictPolling = (taskId, targetName, apiBase, isBrute, isAppend = false
           message.error(pageText('pages.failedToImportNameReasonLabel2', { name: targetName, reason: data.message || pageText('tasks.unknownError') }));
         }
       } else if (statusRes.code === 404) {
-        // 允许排队空窗期容错：Worker 启动消费前可能存在短暂 404
         consecutive404Count++;
         if (consecutive404Count >= MAX_CONSECUTIVE_404) {
           clearInterval(timer);
@@ -1300,13 +1861,12 @@ const startDictPolling = (taskId, targetName, apiBase, isBrute, isAppend = false
           message.warning(pageText('pages.importTaskStateWasLostReasonRefreshAndVerify', { reason: statusRes.message || pageText('pages.taskNotFound') }));
         }
       } else {
-        // 任务不存在或状态异常
         clearInterval(timer);
         activeDictPollTimers.value.delete(timer);
         hideMsg();
         message.warning(pageText('pages.unexpectedImportTaskStateReasonRefreshAndVerifyThe', { reason: statusRes.message || pageText('tasks.unknownError') }));
       }
-    } catch (e) {
+    } catch {
       // 忽略轮询网络抖动
     }
   }, 2000);
@@ -1315,13 +1875,11 @@ const startDictPolling = (taskId, targetName, apiBase, isBrute, isAppend = false
 };
 
 const handleCreateDictManual = async () => {
-  let targetName = `${createDictForm.prefix}${createDictForm.customName}.txt`;
+  const targetName = `${createDictForm.prefix}${createDictForm.customName}.txt`;
   const rawContent = createDictForm.content || '';
 
   createDictLoading.value = true;
   try {
-    // 智能流式分流：若内容大于 500KB 或超过 5000 行，自动打包为 Blob 走后台异步 upload_large 通道，
-    // 避免超大 JSON 请求造成 Gunicorn Worker 线程长时间同步阻塞与 120s 超时
     const lineCount = (rawContent.match(/\n/g) || []).length;
     if (rawContent.length > 500 * 1024 || lineCount > 5000) {
       const blob = new Blob([rawContent], { type: 'text/plain' });
@@ -1331,7 +1889,7 @@ const handleCreateDictManual = async () => {
 
       const res = await request.post(`${createDictApiBase.value}/upload_large`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 300000
+        timeout: 300000,
       });
       if (res.code === 200) {
         message.info(pageText('pages.largeDictionaryAboutCountLinesUsingTheBackgroundStreaming', { count: lineCount + 1 }));
@@ -1341,30 +1899,26 @@ const handleCreateDictManual = async () => {
         resetCreateDictForm();
         startDictPolling(res.task_id, targetName, apiBase, isBrute, false);
         return;
-      } else {
-        message.error(res.message || pageText('pages.failedToCreate'));
-        return;
       }
+      message.error(res.message || pageText('pages.failedToCreate'));
+      return;
     }
 
     const res = await request.post(`${createDictApiBase.value}/create`, {
       name: targetName,
-      content: rawContent
+      content: rawContent,
     });
     if (res.code === 200) {
       message.success(pageText('pages.dictionaryNameCreated', { name: targetName }));
       const isBrute = isBruteCreatePrefix.value;
       createDictDrawerVisible.value = false;
       resetCreateDictForm();
-      if (isBrute) {
-        fetchBruteDictList();
-      } else {
-        fetchDictList();
-      }
+      if (isBrute) fetchBruteDictList();
+      else fetchDictList();
     } else {
       message.error(res.message || pageText('pages.failedToCreate'));
     }
-  } catch (error) {
+  } catch {
     message.error(pageText('pages.dictionaryCreationRequestFailed'));
   } finally {
     createDictLoading.value = false;
@@ -1381,8 +1935,7 @@ const handleCreateDictUploadCancel = () => {
 };
 
 const handleCreateDictUpload = async () => {
-  let targetName = `${createDictForm.prefix}${createDictForm.customName}.txt`;
-
+  const targetName = `${createDictForm.prefix}${createDictForm.customName}.txt`;
   const file = createDictForm.fileList[0];
   if (!file) return;
 
@@ -1394,7 +1947,7 @@ const handleCreateDictUpload = async () => {
   try {
     const res = await request.post(`${createDictApiBase.value}/upload_large`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 300000
+      timeout: 300000,
     });
     if (res.code === 200) {
       const apiBase = createDictApiBase.value;
@@ -1405,7 +1958,7 @@ const handleCreateDictUpload = async () => {
     } else {
       message.error(res.message || pageText('pages.uploadFailedLabel2'));
     }
-  } catch (error) {
+  } catch {
     message.error(pageText('pages.uploadRequestFailed'));
   } finally {
     createDictLoading.value = false;
@@ -1416,8 +1969,6 @@ const handleCreateDictUpload = async () => {
 const appendDrawerVisible = ref(false);
 const appendMode = ref('text');
 
-// 上传字典状态
-// 执行大文件上传
 const handleLargeUpload = async (info) => {
   const file = info.file;
   if (!file) return;
@@ -1428,17 +1979,14 @@ const handleLargeUpload = async (info) => {
 
   const targetName = unifiedSelectedName.value;
   const currentType = unifiedSelectedType.value;
-
   const uploadUrl = currentType === 'asset' ? '/api/dictionary/upload_large' : '/api/brute_dict/upload_large';
   const apiBase = currentType === 'asset' ? '/api/dictionary' : '/api/brute_dict';
   const isBrute = currentType !== 'asset';
 
   try {
     const res = await request.post(uploadUrl, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
-      timeout: 300000
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
     });
 
     if (res.code === 200) {
@@ -1447,16 +1995,16 @@ const handleLargeUpload = async (info) => {
     } else {
       message.error(res.message || pageText('pages.uploadFailedLabel2'));
     }
-  } catch (error) {
+  } catch {
     message.error(pageText('pages.networkOrServerError'));
   }
 };
+
 const searchDrawerVisible = ref(false);
 const batchDeleteEntries = ref('');
 
 const generalLoading = ref(false);
 const generalSaveLoading = ref(false);
-const activePushPanels = ref(['dingding', 'feishu', 'wxwork', 'telegram', 'email', 'webhook']);
 
 const testPushLoading = reactive({
   dingding: false,
@@ -1464,27 +2012,35 @@ const testPushLoading = reactive({
   wxwork: false,
   telegram: false,
   email: false,
-  webhook: false
+  webhook: false,
 });
+
+const WEBHOOK_SAMPLE_PAYLOAD = JSON.stringify({
+  type: 'domain_task',
+  task_id: '65f0...',
+  task_name: 'example.com',
+  status: 'done',
+  timestamp: 1731800000,
+}, null, 2);
 
 const handleTestPush = async (type) => {
   let config = {};
   if (type === 'webhook') {
     config = {
       webhook_url: generalForm.value.webhook_url,
-      webhook_token: generalForm.value.webhook_token
+      webhook_token: generalForm.value.webhook_token,
     };
   } else {
     config = generalForm.value[type];
   }
-  
+
   testPushLoading[type] = true;
   try {
     const res = await request.post('/api/system_config/test_push', {
       push_type: type,
-      config: config
+      config,
     });
-    
+
     if (res.code === 200) {
       message.success(res.message || pageText('pages.testNotificationSent'));
     } else {
@@ -1498,34 +2054,25 @@ const handleTestPush = async (type) => {
   }
 };
 
-// ======================= 全局配置脏状态追踪 (P0) =======================
-// 每个一级 Tab 对应一个配置分组。用户只提交"当前分组内发生变更的字段"，
-// 避免在 A 页改完未保存、切到 B 页点保存时用 B 页旧值覆盖 A 页修改。
+// ======================= 全局配置脏状态追踪 (Hero 唯一中枢) =======================
 const GENERAL_FIELD_GROUPS = {
   api_config: ['fofa_key', 'fofa_url', 'fofa_max_page', 'fofa_page_size', 'github_token',
-               'tyc_id', 'tyc_token', 'so_search_cookie', 'bing_search_cookie', 'query_plugin_config'],
+    'tyc_id', 'tyc_token', 'so_search_cookie', 'bing_search_cookie', 'query_plugin_config'],
   message_push: ['push_options', 'dingding', 'feishu', 'wxwork', 'telegram', 'email',
-                 'webhook_url', 'webhook_token'],
-  system_general: ['port_top_10', 'domain_brute_concurrent', 'alt_dns_concurrent',
-                   'auth', 'api_key'],
+    'webhook_url', 'webhook_token'],
+  scan_params: ['port_top_10', 'domain_brute_concurrent', 'alt_dns_concurrent'],
+  system_auth: ['auth', 'api_key'],
 };
 
-// 首轮配置基准同步完成标记：在挂载并首轮同步基准前，所有脏状态判定恒为 false / {}，
-// 杜绝首屏因接口异步返回耗时差（如 Celery inspect 阻塞 1s）造成的虚假未保存提示与路由拦截。
 const isConfigInitialized = ref(false);
-
-// 打开页面时保存的基线快照，用于 diff 出真正变更的字段
 const generalBaseline = ref({});
-
 const cloneDeep = (val) => (val === undefined ? undefined : JSON.parse(JSON.stringify(val)));
-
 const capacityInfo = ref({});
 
 const captureBaseline = () => {
   generalBaseline.value = cloneDeep(generalForm.value);
 };
 
-// 以基线为准逐字段比较，得出所有变更字段（跨分组）
 const changedFields = computed(() => {
   const base = generalBaseline.value;
   const cur = generalForm.value;
@@ -1541,7 +2088,6 @@ const changedFields = computed(() => {
   return changed;
 });
 
-// 按分组切出各自待提交的字段
 const pendingByGroup = computed(() => {
   const out = {};
   const changed = changedFields.value;
@@ -1555,7 +2101,6 @@ const pendingByGroup = computed(() => {
   return out;
 });
 
-// 安全策略与性能配置走独立接口，各自维护基线
 const securityBaseline = ref({ blackIpsText: '', forbiddenDomainsText: '' });
 const performanceBaseline = ref({
   celery_heavy_concurrency: 1,
@@ -1564,15 +2109,17 @@ const performanceBaseline = ref({
   github_concurrency: 1,
 });
 
-const isSecurityDirty = computed(() =>
+const isSecurityDirty = computed(() => (
   securityForm.value.blackIpsText !== securityBaseline.value.blackIpsText
-  || securityForm.value.forbiddenDomainsText !== securityBaseline.value.forbiddenDomainsText);
+  || securityForm.value.forbiddenDomainsText !== securityBaseline.value.forbiddenDomainsText
+));
 
 const isPerformanceDirty = computed(() => (
   performanceForm.value.celery_heavy_concurrency !== performanceBaseline.value.celery_heavy_concurrency
   || performanceForm.value.celery_light_concurrency !== performanceBaseline.value.celery_light_concurrency
   || performanceForm.value.osint_concurrency !== performanceBaseline.value.osint_concurrency
-  || performanceForm.value.github_concurrency !== performanceBaseline.value.github_concurrency));
+  || performanceForm.value.github_concurrency !== performanceBaseline.value.github_concurrency
+));
 
 const batchSaving = ref(false);
 const leaveConfirmVisible = ref(false);
@@ -1583,13 +2130,45 @@ const isSectionRefDirty = (panelRef) => (
   typeof panelRef !== 'undefined' && !!panelRef.value?.hasUnsavedChanges?.()
 );
 
-// 统一可编辑配置分区注册表：唯一事实源（驱动计数、横幅清单、悬浮条、批量保存/重置与跳转定位）
+// 统一可编辑配置分区注册表（与 5 主域壳层一一映射）
 const SECTION_SPECS = [
   {
+    key: 'api_config',
+    tab: 'intel',
+    anchor: 'fofa',
+    get label() { return pageText('pages.settingsDomainIntel'); },
+    isDirty: () => Object.keys(pendingByGroup.value.api_config || {}).length > 0,
+    isSaving: () => generalSaveLoading.value,
+    save: (opts) => saveGeneralConfig('api_config', pageText('pages.apiConfigurationSaved'), opts),
+    reset: (opts) => resetGeneralGroup('api_config', opts),
+  },
+  {
+    key: 'proxy',
+    tab: 'egress_guardrails',
+    subTab: 'proxy',
+    anchor: 'proxy',
+    get label() { return pageText('pages.settingsSubProxy'); },
+    isDirty: () => isSectionRefDirty(typeof proxyPanelRef !== 'undefined' ? proxyPanelRef : undefined),
+    isSaving: () => (typeof proxyPanelRef !== 'undefined' && !!proxyPanelRef.value?.isSaving?.()),
+    save: (opts) => (typeof proxyPanelRef !== 'undefined' ? proxyPanelRef.value?.saveChanges?.(opts) : Promise.resolve(false)),
+    reset: (opts) => (typeof proxyPanelRef !== 'undefined' ? proxyPanelRef.value?.resetChanges?.(opts) : undefined),
+  },
+  {
+    key: 'security',
+    tab: 'egress_guardrails',
+    subTab: 'security',
+    anchor: 'security',
+    get label() { return pageText('pages.settingsSubGuardrails'); },
+    isDirty: () => isSecurityDirty.value,
+    isSaving: () => securitySaveLoading.value,
+    save: (opts) => saveSecurityPolicy(opts),
+    reset: (opts) => resetSecurityForm(opts),
+  },
+  {
     key: 'performance',
-    tab: 'performance',
-    subTab: 'performance',
-    anchor: 'performance_save',
+    tab: 'scanning_arsenal',
+    subTab: 'concurrency',
+    anchor: 'performance',
     get label() { return pageText('pages.taskQueueConcurrency'); },
     isDirty: () => isPerformanceDirty.value,
     isSaving: () => performanceSaveLoading.value,
@@ -1597,67 +2176,36 @@ const SECTION_SPECS = [
     reset: (opts) => resetPerformanceForm(opts),
   },
   {
-    key: 'security',
-    tab: 'performance',
-    subTab: 'security',
-    anchor: 'security_save',
-    get label() { return pageText('pages.securityPolicyIpDomainScanExclusions'); },
-    isDirty: () => isSecurityDirty.value,
-    isSaving: () => securitySaveLoading.value,
-    save: (opts) => saveSecurityPolicy(opts),
-    reset: (opts) => resetSecurityForm(opts),
-  },
-  {
-    key: 'system_general',
-    tab: 'performance',
-    subTab: 'system_general',
-    anchor: 'system_general_save',
-    get label() { return pageText('pages.advancedScanningAndEnvironment'); },
-    isDirty: () => Object.keys(pendingByGroup.value.system_general || {}).length > 0,
+    key: 'scan_params',
+    tab: 'scanning_arsenal',
+    subTab: 'concurrency',
+    anchor: 'brute_concurrent',
+    get label() { return pageText('pages.settingsSubConcurrency'); },
+    isDirty: () => Object.keys(pendingByGroup.value.scan_params || {}).length > 0,
     isSaving: () => generalSaveLoading.value,
-    save: (opts) => saveGeneralConfig('system_general', pageText('pages.advancedConfigurationSaved'), opts),
-    reset: (opts) => resetGeneralGroup('system_general', opts),
-  },
-  {
-    key: 'proxy',
-    tab: 'proxy',
-    anchor: 'proxy_save',
-    get label() { return pageText('pages.proxyTab'); },
-    isDirty: () => isSectionRefDirty(typeof proxyPanelRef !== 'undefined' ? proxyPanelRef : undefined),
-    isSaving: () => (typeof proxyPanelRef !== 'undefined' && !!proxyPanelRef.value?.isSaving?.()),
-    save: (opts) => (typeof proxyPanelRef !== 'undefined' ? proxyPanelRef.value?.saveChanges?.(opts) : Promise.resolve(false)),
-    reset: (opts) => (typeof proxyPanelRef !== 'undefined' ? proxyPanelRef.value?.resetChanges?.(opts) : undefined),
-  },
-  {
-    key: 'cdn',
-    tab: 'dictionary',
-    subTab: 'cdn',
-    anchor: 'cdn_save',
-    get label() { return pageText('pages.cdnFingerprintsAndRules'); },
-    isDirty: () => isSectionRefDirty(typeof cdnPanelRef !== 'undefined' ? cdnPanelRef : undefined),
-    isSaving: () => (typeof cdnPanelRef !== 'undefined' && !!cdnPanelRef.value?.isSaving?.()),
-    save: (opts) => (typeof cdnPanelRef !== 'undefined' ? cdnPanelRef.value?.saveChanges?.(opts) : Promise.resolve(false)),
-    reset: (opts) => (typeof cdnPanelRef !== 'undefined' ? cdnPanelRef.value?.resetChanges?.(opts) : undefined),
-  },
-  {
-    key: 'api_config',
-    tab: 'api_config',
-    anchor: 'api_config_save',
-    get label() { return pageText('pages.assetDiscoveryAndIntelligence'); },
-    isDirty: () => Object.keys(pendingByGroup.value.api_config || {}).length > 0,
-    isSaving: () => generalSaveLoading.value,
-    save: (opts) => saveGeneralConfig('api_config', pageText('pages.apiConfigurationSaved'), opts),
-    reset: (opts) => resetGeneralGroup('api_config', opts),
+    save: (opts) => saveGeneralConfig('scan_params', pageText('pages.advancedConfigurationSaved'), opts),
+    reset: (opts) => resetGeneralGroup('scan_params', opts),
   },
   {
     key: 'message_push',
-    tab: 'message_push',
-    anchor: 'message_push_save',
-    get label() { return pageText('pages.notificationsAndCallbacks'); },
+    tab: 'notifications',
+    anchor: 'push_options',
+    get label() { return pageText('pages.settingsDomainNotifications'); },
     isDirty: () => Object.keys(pendingByGroup.value.message_push || {}).length > 0,
     isSaving: () => generalSaveLoading.value,
     save: (opts) => saveGeneralConfig('message_push', pageText('pages.notificationConfigurationSaved'), opts),
     reset: (opts) => resetGeneralGroup('message_push', opts),
+  },
+  {
+    key: 'system_auth',
+    tab: 'system_ops',
+    subTab: 'auth_infra',
+    anchor: 'auth',
+    get label() { return pageText('pages.settingsSubAuthInfra'); },
+    isDirty: () => Object.keys(pendingByGroup.value.system_auth || {}).length > 0,
+    isSaving: () => generalSaveLoading.value,
+    save: (opts) => saveGeneralConfig('system_auth', pageText('pages.advancedConfigurationSaved'), opts),
+    reset: (opts) => resetGeneralGroup('system_auth', opts),
   },
 ];
 
@@ -1666,84 +2214,115 @@ const dirtySections = computed(() => {
   return SECTION_SPECS.filter((sec) => sec.isDirty());
 });
 
-// 全局是否存在未保存改动（统一按分区注册表判定）
 const hasUnsavedChanges = computed(() => dirtySections.value.length > 0);
-
-// 未保存改动分区数，用于页头横幅与离开拦截
 const unsavedCount = computed(() => dirtySections.value.length);
 
-const activeEditableSection = computed(() => {
+const domainDirtyCounts = computed(() => {
+  const counts = {
+    intel: 0,
+    egress_guardrails: 0,
+    scanning_arsenal: 0,
+    notifications: 0,
+    system_ops: 0,
+  };
+  dirtySections.value.forEach((sec) => {
+    if (counts[sec.tab] !== undefined) counts[sec.tab] += 1;
+  });
+  return counts;
+});
+
+const currentSubTabForDomain = (domainKey) => {
+  if (domainKey === 'egress_guardrails') return guardrailSubTab.value;
+  if (domainKey === 'scanning_arsenal') return arsenalSubTab.value;
+  if (domainKey === 'system_ops') return opsSubTab.value;
+  return undefined;
+};
+
+const activeViewSections = computed(() => {
   const curTab = activeKey.value;
-  if (curTab === 'performance') {
-    return SECTION_SPECS.find((sec) => sec.tab === 'performance' && sec.subTab === scanSubTab.value) || null;
-  }
-  if (curTab === 'dictionary') {
-    return dictSubTab.value === 'cdn'
-      ? SECTION_SPECS.find((sec) => sec.key === 'cdn') || null
-      : null;
-  }
-  return SECTION_SPECS.find((sec) => sec.tab === curTab) || null;
+  const sub = currentSubTabForDomain(curTab);
+  return SECTION_SPECS.filter((sec) => sec.tab === curTab && (!sec.subTab || sec.subTab === sub));
 });
 
 const activeSectionDirty = computed(() => {
   if (typeof isConfigInitialized !== 'undefined' && !isConfigInitialized.value) return false;
-  return !!activeEditableSection.value?.isDirty();
+  return activeViewSections.value.some((sec) => sec.isDirty());
 });
 
-const activeSectionSaving = computed(() => !!activeEditableSection.value?.isSaving());
+const activeSectionSaving = computed(() => activeViewSections.value.some((sec) => sec.isSaving()));
 
-// ======================= 设置项索引与搜索 (P2) =======================
-// 每条索引把「用户会搜的词」映射到「Tab + 锚点」，keywords 覆盖中英文与别名，
-// 让用户不必记住设置项藏在哪个 Tab（这是 L1 定位成本的主要来源）。
+const saveActiveViewSections = async () => {
+  const targets = activeViewSections.value.filter((sec) => sec.isDirty());
+  if (targets.length === 0) return true;
+  if (targets.length === 1) {
+    return targets[0].save();
+  }
+  // 并发与默认参数同页包含队列进程数 (performance) 与单任务发包参数 (scan_params) 时串行提交
+  let allOk = true;
+  for (const sec of targets) {
+    const ok = await sec.save({ silentSuccess: true });
+    if (!ok) allOk = false;
+  }
+  if (allOk) {
+    message.success(pageText('pages.performanceSettingsUpdated'));
+  }
+  return allOk;
+};
+
+const resetActiveViewSections = () => {
+  const targets = activeViewSections.value.filter((sec) => sec.isDirty());
+  targets.forEach((sec, idx) => sec.reset({ silent: idx > 0 }));
+};
+
+// ======================= 设置项索引与搜索 =======================
 const SETTINGS_INDEX = [
-  // 资产测绘与情报
-  { tab: 'api_config', get tabLabel() { return pageText('pages.assetDiscoveryAndIntelligence'); }, get label() { return pageText('pages.fofaDiscoveryCredentials'); }, anchor: 'fofa',
-    get desc() { return pageText('pages.fofaUrlApiKeyAndQueryPageLimits'); }, keywords: ['fofa', '空间测绘', 'api key', '情报', "资产测绘与情报 / FOFA 空间测绘凭据 / FOFA URL / KEY 与查询页数"] },
-  { tab: 'api_config', get tabLabel() { return pageText('pages.assetDiscoveryAndIntelligence'); }, get label() { return pageText('pages.tianyanchaEnterpriseDiscoveryCredentials'); }, anchor: 'tyc',
-    get desc() { return pageText('pages.xTycidXAuthTokenFallsBackToMiit'); }, keywords: ['天眼查', 'tyc', '股权穿透', '企业', "资产测绘与情报 / 天眼查企业测绘凭据 / X-Tycid / X-Auth-Token，未配置时降级为工信部 ICP"] },
-  { tab: 'api_config', get tabLabel() { return pageText('pages.assetDiscoveryAndIntelligence'); }, label: 'GitHub Token', anchor: 'github_token',
-    get desc() { return pageText('pages.requiredForCodeLeakMonitoringAndCveTracking'); }, keywords: ['github', 'token', 'pat', '监控', '泄露', 'cve', "资产测绘与情报 / GitHub Token / 代码泄露监控与 CVE 追踪的硬依赖"] },
-  { tab: 'api_config', get tabLabel() { return pageText('pages.assetDiscoveryAndIntelligence'); }, get label() { return pageText('pages.searchEngineCookies'); }, anchor: 'search_cookie',
-    get desc() { return pageText('pages.cookiesUsedToAccess360SearchAndBingSearch'); }, keywords: ['cookie', '360', '必应', 'bing', '搜索', '反爬', "资产测绘与情报 / 搜索引擎 Cookie / 360 搜索与必应搜索的反爬 Cookie"] },
-  { tab: 'api_config', get tabLabel() { return pageText('pages.assetDiscoveryAndIntelligence'); }, get label() { return pageText('pages.domainCollectionPlugins'); }, anchor: 'query_plugin',
-    get desc() { return pageText('pages.queryPluginDataSourceSwitchesAndCredentials'); }, keywords: ['插件', 'plugin', 'quake', 'hunter', 'virustotal', '扩展', "资产测绘与情报 / 域名收集扩展插件 / QUERY_PLUGIN 各数据源开关与凭据"] },
-  // 字典与规则库
-  { tab: 'dictionary', get tabLabel() { return pageText('pages.dictionariesAndRules'); }, get label() { return pageText('pages.textDictionaries'); }, anchor: 'dict',
-    get desc() { return pageText('pages.manageSubdomainPortDirectoryAndCredentialDictionaries'); }, keywords: ['字典', 'dict', '弱口令', '爆破', '子域名', '端口', '目录', "字典与规则库 / 通用文本字典 / 子域名 / 端口 / 目录 / 弱口令字典管理"] },
-  { tab: 'dictionary', get tabLabel() { return pageText('pages.dictionariesAndRules'); }, get label() { return pageText('pages.cdnFingerprintsAndRulesLabel2'); }, anchor: 'cdn',
-    get desc() { return pageText('pages.cnameAndIpCidrRulesForIdentifyingCdns'); }, keywords: ['cdn', 'cname', 'cidr', '特征', '规则', "字典与规则库 / CDN 特征与规则 / CNAME 与 IP CIDR 特征库，用于 CDN 识别"] },
-  // 扫描与并发
-  { tab: 'performance', get tabLabel() { return pageText('pages.scanningAndConcurrencyQueueConcurrency'); }, get label() { return pageText('pages.taskQueueConcurrencyWorkerProcesses'); }, anchor: 'performance',
-    get desc() { return pageText('pages.memoryConstrainedWorkerProcessCountsForHeavyLightAnd'); },
-    keywords: ['并发', '线程', '性能', '队列', 'celery', 'worker', '进程', '扩容', '缩容', "扫描与并发 · 队列并发 / 任务队列并发（Worker 进程数） / 重任务 / 轻任务 / OSINT 的 Worker 进程数，受内存约束"] },
-  { tab: 'security', get tabLabel() { return pageText('pages.scanningAndConcurrencySecurityPolicy'); }, get label() { return pageText('pages.securityPolicyIpBlocklist'); }, anchor: 'security',
-    get desc() { return pageText('pages.ipRangesExcludedFromScanningIncludingSystemDefaults'); }, keywords: ['黑名单', 'blacklist', 'ip', 'cidr', '禁止', '安全策略', "扫描与并发 · 安全策略 / 安全策略：IP 黑名单 / 禁止扫描的 IP 段（含系统默认值）"] },
-  { tab: 'security', get tabLabel() { return pageText('pages.scanningAndConcurrencySecurityPolicy'); }, get label() { return pageText('pages.securityPolicyExcludedDomains'); }, anchor: 'security',
-    get desc() { return pageText('pages.domainSuffixesExcludedFromScanningEGGovCn'); }, keywords: ['禁止域名', '域名', '禁扫', '安全策略', 'gov.cn', "扫描与并发 · 安全策略 / 安全策略：禁止扫描域名 / 按后缀匹配的禁扫域名（如 gov.cn）"] },
-  { tab: 'proxy', get tabLabel() { return pageText('pages.proxyTab'); }, get label() { return pageText('pages.systemProxy'); }, anchor: 'proxy',
-    get desc() { return pageText('pages.proxyConfigDesc'); }, keywords: ['代理', 'proxy', '出口', 'socks5', 'socks5h', 'failover', '分流', 'osint', 'bypass', '旁路'] },
-  { tab: 'system_general', get tabLabel() { return pageText('pages.scanningAndConcurrencyAdvancedScanning'); }, get label() { return pageText('pages.dnsQueryConcurrencyWithinATask'); }, anchor: 'brute_concurrent',
-    get desc() { return pageText('pages.massdnsQueryConcurrencyForRegularAndMutationDiscoveryThis'); },
-    keywords: ['线程', '爆破', '并发', '并发度', 'dns', '域名', 'altdns', 'massdns', '发包', "扫描与并发 · 高级扫描 / DNS 发包并发度（单任务内） / 常规爆破与 DNS 智能生成的 massdns 发包并发度，非进程数"] },
-  { tab: 'system_general', get tabLabel() { return pageText('pages.scanningAndConcurrencyAdvancedScanning'); }, get label() { return pageText('pages.top10PortList'); }, anchor: 'port_top_10',
-    get desc() { return pageText('pages.defaultPortListUsedByFrontendTestOptions'); }, keywords: ['端口', 'port', 'top10', '扫描', "扫描与并发 · 高级扫描 / 端口扫描 Top 10 端口串 / 前端测试选项使用的默认端口列表"] },
-  { tab: 'system_general', get tabLabel() { return pageText('pages.scanningAndConcurrencyAdvancedScanning'); }, get label() { return pageText('pages.infrastructureConnections'); }, anchor: 'infra',
-    get desc() { return pageText('pages.readOnlyBrokerMongodbGeoipConnectionDetails'); }, keywords: ['mongodb', 'broker', 'celery', 'geoip', '数据库', '基础设施', "扫描与并发 · 高级扫描 / 基础服务连接信息 / 只读展示 Broker / MongoDB / GeoIP 路径"] },
-  // 通知与系统
-  { tab: 'message_push', get tabLabel() { return pageText('pages.notificationsAndCallbacks'); }, get label() { return pageText('pages.subscribedEventTypes'); }, anchor: 'push_options',
-    get desc() { return pageText('pages.chooseWhichEventsSendNotifications'); }, keywords: ['订阅', '推送', '通知', '告警', '消息类型', "通知与回调 / 订阅消息类型 / 选择哪些事件触发推送"] },
-  { tab: 'message_push', get tabLabel() { return pageText('pages.notificationsAndCallbacks'); }, get label() { return pageText('pages.dingtalkFeishuWecomTelegramBots'); }, anchor: 'im',
-    get desc() { return pageText('pages.messagingNotificationChannelsAndTestDelivery'); }, keywords: ['钉钉', 'dingding', '飞书', 'feishu', '企业微信', 'wxwork', 'telegram', '机器人', 'webhook', "通知与回调 / 钉钉 / 飞书 / 企微 / Telegram 机器人 / 即时通讯告警通道与测试发送"] },
-  { tab: 'message_push', get tabLabel() { return pageText('pages.notificationsAndCallbacks'); }, get label() { return pageText('pages.globalWebhookCallbackLabel2'); }, anchor: 'webhook',
-    get desc() { return pageText('pages.postJsonToAnExternalEndpointWhenATask'); }, keywords: ['webhook', '回调', 'callback', 'post', '接口', "通知与回调 / 系统全局 Webhook 回调 / 任务完成后向外部接口 POST JSON"] },
-  { tab: 'message_push', get tabLabel() { return pageText('pages.notificationsAndCallbacks'); }, get label() { return pageText('pages.smtpEmailNotificationsLabel2'); }, anchor: 'email',
-    get desc() { return pageText('pages.mailServerSenderAndRecipientConfiguration'); }, keywords: ['邮件', 'email', 'smtp', '推送', "通知与回调 / SMTP 邮件推送 / 邮件服务器、发件人与收件人配置"] },
-  { tab: 'system_general', get tabLabel() { return pageText('pages.scanningAndConcurrencyAdvancedScanning'); }, get label() { return pageText('pages.apiAuthentication'); }, anchor: 'auth',
-    get desc() { return pageText('pages.swaggerApiAuthenticationAndApiToken'); }, keywords: ['api', '认证', 'auth', 'token', 'swagger', '安全', "扫描与并发 · 高级扫描 / API 安全认证机制 / Swagger API 认证开关与 API Token"] },
-  { tab: 'system_backup', get tabLabel() { return pageText('pages.backupTab'); }, get label() { return pageText('pages.backupTitle'); }, anchor: 'backup',
-    get desc() { return pageText('pages.backupIndexDescription'); }, keywords: ['备份', '恢复', 'backup', 'restore', '导出', '导入', '快照', '全量备份', '迁移'] },
-  { tab: 'system_update', get tabLabel() { return pageText('pages.systemVersionAndUpdates'); }, get label() { return pageText('pages.systemVersionAndUpdates'); }, anchor: 'update',
-    get desc() { return pageText('pages.versionComparisonReleaseNotesAndSystemUpdates'); }, keywords: ['版本', '更新', '升级', 'update', 'version', 'changelog', "系统版本与更新 / 系统版本与更新 / 版本比对、更新日志与一键更新"] },
+  // 主域 1：情报凭据
+  { tab: 'intel', get tabLabel() { return pageText('pages.settingsDomainIntel'); }, get label() { return pageText('pages.fofaDiscoveryCredentials'); }, anchor: 'fofa',
+    get desc() { return pageText('pages.fofaUrlApiKeyAndQueryPageLimits'); }, keywords: ['fofa', '空间测绘', 'api key', '情报', '测试连接'] },
+  { tab: 'intel', get tabLabel() { return pageText('pages.settingsDomainIntel'); }, get label() { return pageText('pages.tianyanchaEnterpriseDiscoveryCredentials'); }, anchor: 'tyc',
+    get desc() { return pageText('pages.xTycidXAuthTokenFallsBackToMiit'); }, keywords: ['天眼查', 'tyc', '股权穿透', '企业', 'icp'] },
+  { tab: 'intel', get tabLabel() { return pageText('pages.settingsDomainIntel'); }, label: 'GitHub Token', anchor: 'github_token',
+    get desc() { return pageText('pages.requiredForCodeLeakMonitoringAndCveTracking'); }, keywords: ['github', 'token', 'pat', '监控', '泄露', 'cve', '额度'] },
+  { tab: 'intel', get tabLabel() { return pageText('pages.settingsDomainIntel'); }, get label() { return pageText('pages.searchEngineCookies'); }, anchor: 'search_cookie',
+    get desc() { return pageText('pages.cookiesUsedToAccess360SearchAndBingSearch'); }, keywords: ['cookie', '360', '必应', 'bing', '搜索', '反爬'] },
+  { tab: 'intel', get tabLabel() { return pageText('pages.settingsDomainIntel'); }, get label() { return pageText('pages.domainCollectionPlugins'); }, anchor: 'query_plugin',
+    get desc() { return pageText('pages.queryPluginDataSourceSwitchesAndCredentials'); }, keywords: ['插件', 'plugin', 'quake', 'hunter', 'virustotal', 'securitytrails', 'zoomeye', 'chaos', '扩展'] },
+  // 主域 2：代理与红线
+  { tab: 'egress_guardrails', subTab: 'proxy', get tabLabel() { return pageText('pages.settingsSubProxy'); }, get label() { return pageText('pages.systemProxy'); }, anchor: 'proxy',
+    get desc() { return pageText('pages.proxyConfigDesc'); }, keywords: ['代理', 'proxy', '出口', 'socks5', 'socks5h', 'failover', '分流', 'osint', 'bypass', '旁路', 'uri'] },
+  { tab: 'egress_guardrails', subTab: 'security', get tabLabel() { return pageText('pages.settingsSubGuardrails'); }, get label() { return pageText('pages.securityPolicyIpBlocklist'); }, anchor: 'security',
+    get desc() { return pageText('pages.ipRangesExcludedFromScanningIncludingSystemDefaults'); }, keywords: ['黑名单', 'blacklist', 'ip', 'cidr', '禁止', '安全策略', '内网', '红线', 'rfc1918'] },
+  { tab: 'egress_guardrails', subTab: 'security', get tabLabel() { return pageText('pages.settingsSubGuardrails'); }, get label() { return pageText('pages.securityPolicyExcludedDomains'); }, anchor: 'security',
+    get desc() { return pageText('pages.domainSuffixesExcludedFromScanningEGGovCn'); }, keywords: ['禁止域名', '域名', '禁扫', '安全策略', 'gov.cn', 'edu.cn', '红线'] },
+  // 主域 3：扫描与武器库
+  { tab: 'scanning_arsenal', subTab: 'concurrency', get tabLabel() { return pageText('pages.settingsSubConcurrency'); }, get label() { return pageText('pages.taskQueueConcurrencyWorkerProcesses'); }, anchor: 'performance',
+    get desc() { return pageText('pages.memoryConstrainedWorkerProcessCountsForHeavyLightAnd'); }, keywords: ['并发', '线程', '性能', '队列', 'celery', 'worker', '进程', '扩容', '缩容', 'concurrency'] },
+  { tab: 'scanning_arsenal', subTab: 'concurrency', get tabLabel() { return pageText('pages.settingsSubConcurrency'); }, get label() { return pageText('pages.dnsQueryConcurrencyWithinATask'); }, anchor: 'brute_concurrent',
+    get desc() { return pageText('pages.massdnsQueryConcurrencyForRegularAndMutationDiscoveryThis'); }, keywords: ['线程', '爆破', '并发', '并发度', 'dns', '域名', 'altdns', 'massdns', '发包', 'concurrency'] },
+  { tab: 'scanning_arsenal', subTab: 'concurrency', get tabLabel() { return pageText('pages.settingsSubConcurrency'); }, get label() { return pageText('pages.top10PortList'); }, anchor: 'port_top_10',
+    get desc() { return pageText('pages.defaultPortListUsedByFrontendTestOptions'); }, keywords: ['端口', 'port', 'top10', '扫描', '并发'] },
+  { tab: 'scanning_arsenal', subTab: 'dict', get tabLabel() { return pageText('pages.settingsSubDict'); }, get label() { return pageText('pages.textDictionaries'); }, anchor: 'dict',
+    get desc() { return pageText('pages.manageSubdomainPortDirectoryAndCredentialDictionaries'); }, keywords: ['字典', 'dict', '弱口令', '爆破', '子域名', '端口', '目录'] },
+  { tab: 'scanning_arsenal', subTab: 'cdn', get tabLabel() { return pageText('pages.settingsSubCdn'); }, get label() { return pageText('pages.cdnFingerprintsAndRulesLabel2'); }, anchor: 'cdn',
+    get desc() { return pageText('pages.cnameAndIpCidrRulesForIdentifyingCdns'); }, keywords: ['cdn', 'cname', 'cidr', '特征', '规则'] },
+  // 主域 4：告警与回调
+  { tab: 'notifications', get tabLabel() { return pageText('pages.settingsDomainNotifications'); }, get label() { return pageText('pages.subscribedEventTypes'); }, anchor: 'push_options',
+    get desc() { return pageText('pages.chooseWhichEventsSendNotifications'); }, keywords: ['订阅', '推送', '通知', '告警', '消息类型'] },
+  { tab: 'notifications', get tabLabel() { return pageText('pages.settingsDomainNotifications'); }, get label() { return pageText('pages.dingtalkFeishuWecomTelegramBots'); }, anchor: 'im',
+    get desc() { return pageText('pages.messagingNotificationChannelsAndTestDelivery'); }, keywords: ['钉钉', 'dingding', '飞书', 'feishu', '企业微信', 'wxwork', 'telegram', '机器人'] },
+  { tab: 'notifications', get tabLabel() { return pageText('pages.settingsDomainNotifications'); }, get label() { return pageText('pages.globalWebhookCallbackLabel2'); }, anchor: 'webhook',
+    get desc() { return pageText('pages.postJsonToAnExternalEndpointWhenATask'); }, keywords: ['webhook', '回调', 'callback', 'post', '接口'] },
+  { tab: 'notifications', get tabLabel() { return pageText('pages.settingsDomainNotifications'); }, get label() { return pageText('pages.smtpEmailNotificationsLabel2'); }, anchor: 'email',
+    get desc() { return pageText('pages.mailServerSenderAndRecipientConfiguration'); }, keywords: ['邮件', 'email', 'smtp', '推送'] },
+  // 主域 5：系统运维
+  { tab: 'system_ops', subTab: 'auth_infra', get tabLabel() { return pageText('pages.settingsSubAuthInfra'); }, get label() { return pageText('pages.apiAuthentication'); }, anchor: 'auth',
+    get desc() { return pageText('pages.swaggerApiAuthenticationAndApiToken'); }, keywords: ['api', '认证', 'auth', 'token', 'swagger', '安全'] },
+  { tab: 'system_ops', subTab: 'auth_infra', get tabLabel() { return pageText('pages.settingsSubAuthInfra'); }, get label() { return pageText('pages.infrastructureConnections'); }, anchor: 'infra',
+    get desc() { return pageText('pages.readOnlyBrokerMongodbGeoipConnectionDetails'); }, keywords: ['mongodb', 'broker', 'celery', 'geoip', '数据库', '基础设施'] },
+  { tab: 'system_ops', subTab: 'backup', get tabLabel() { return pageText('pages.settingsSubBackup'); }, get label() { return pageText('pages.backupTitle'); }, anchor: 'backup',
+    get desc() { return pageText('pages.backupIndexDescription'); }, keywords: ['备份', '恢复', 'backup', 'restore', '导出', '导入', '快照', '迁移'] },
+  { tab: 'system_ops', subTab: 'update', get tabLabel() { return pageText('pages.settingsSubUpdate'); }, get label() { return pageText('pages.systemVersionAndUpdates'); }, anchor: 'update',
+    get desc() { return pageText('pages.versionComparisonReleaseNotesAndSystemUpdates'); }, keywords: ['版本', '更新', '升级', 'update', 'version', 'changelog'] },
 ];
 
 const settingsKeyword = ref('');
@@ -1759,7 +2338,7 @@ const settingsSearchResults = computed(() => {
   });
 });
 
-const scrollAndFlashAnchor = (selector, retries = 3) => {
+const scrollAndFlashAnchor = (selector, retries = 4) => {
   nextTick(() => {
     const el = document.querySelector(selector);
     if (el) {
@@ -1767,72 +2346,51 @@ const scrollAndFlashAnchor = (selector, retries = 3) => {
       el.classList.add('arl-anchor-flash');
       setTimeout(() => el.classList.remove('arl-anchor-flash'), 2200);
     } else if (retries > 0) {
-      setTimeout(() => scrollAndFlashAnchor(selector, retries - 1), 60);
+      setTimeout(() => scrollAndFlashAnchor(selector, retries - 1), 80);
     }
   });
 };
 
-// 点击搜索结果：切到目标 Tab（含嵌套子 Tab），并把锚点元素滚动进视野 + 短暂高亮
+const applyDomainAndSubTab = (tab, subTab) => {
+  activeKey.value = tab;
+  if (tab === 'egress_guardrails' && subTab) guardrailSubTab.value = subTab;
+  else if (tab === 'scanning_arsenal' && subTab) arsenalSubTab.value = subTab;
+  else if (tab === 'system_ops' && subTab) opsSubTab.value = subTab;
+  markVisitedState();
+};
+
 const jumpToSetting = (item) => {
-  if (item.tab === 'proxy') {
-    activeKey.value = 'proxy';
-    settingsKeyword.value = '';
-    highlightedAnchor.value = item.anchor;
-    proxyPanelRef.value?.focusSection?.(item.anchor);
-    return;
-  }
-  // 三组 Tab 均使用嵌套子结构：需同时切换外层 activeKey 与内层子 Tab
-  if (item.tab === 'dictionary') {
-    activeKey.value = 'dictionary';
-    dictSubTab.value = item.anchor === 'cdn' ? 'cdn' : 'dict';
-  } else if (item.tab === 'security' || item.tab === 'system_general') {
-    activeKey.value = 'performance';
-    scanSubTab.value = item.tab;
-  } else if (item.tab === 'performance') {
-    activeKey.value = 'performance';
-    scanSubTab.value = 'performance';
-  } else {
-    activeKey.value = item.tab;
-  }
+  applyDomainAndSubTab(item.tab, item.subTab);
   settingsKeyword.value = '';
   highlightedAnchor.value = item.anchor;
-  const isSubTab = item.anchor === 'cdn' || item.anchor === 'dict';
-  const selector = isSubTab ? '.dict-sub-tabs' : `[data-setting-anchor="${item.anchor}"]`;
-  scrollAndFlashAnchor(selector);
-};
-
-// 两套并发指标互相指引，避免用户在同一页找不到对应字段
-const goToBruteConcurrent = () => {
-  activeKey.value = 'performance';
-  scanSubTab.value = 'system_general';
-  scrollAndFlashAnchor('[data-setting-anchor="brute_concurrent"]');
-};
-
-const goToQueueConcurrency = () => {
-  activeKey.value = 'performance';
-  scanSubTab.value = 'performance';
-  scrollAndFlashAnchor('[data-setting-anchor="performance"]');
+  if (item.tab === 'egress_guardrails' && item.subTab === 'proxy') {
+    nextTick(() => {
+      proxyPanelRef.value?.focusSection?.(item.anchor);
+    });
+    return;
+  }
+  if (item.tab === 'scanning_arsenal' && item.subTab === 'cdn') {
+    nextTick(() => {
+      cdnPanelRef.value?.focusSection?.('cdn');
+    });
+    return;
+  }
+  scrollAndFlashAnchor(`[data-setting-anchor="${item.anchor}"]`);
 };
 
 const navigateToSection = (sec) => {
   if (!sec) return;
-  activeKey.value = sec.tab;
-  if (sec.tab === 'performance' && sec.subTab) {
-    scanSubTab.value = sec.subTab;
-  } else if (sec.tab === 'dictionary' && sec.subTab) {
-    dictSubTab.value = sec.subTab;
-  }
+  applyDomainAndSubTab(sec.tab, sec.subTab);
   if (sec.key === 'proxy') {
-    if (typeof proxyPanelRef !== 'undefined') proxyPanelRef.value?.focusSection?.(sec.anchor);
-  } else if (sec.key === 'cdn') {
-    if (typeof cdnPanelRef !== 'undefined') cdnPanelRef.value?.focusSection?.(sec.anchor);
+    nextTick(() => {
+      if (typeof proxyPanelRef !== 'undefined') proxyPanelRef.value?.focusSection?.(sec.anchor);
+    });
   } else if (sec.anchor && typeof scrollAndFlashAnchor === 'function') {
     scrollAndFlashAnchor(`[data-setting-anchor="${sec.anchor}"]`);
   }
 };
 
-// 定位第一个存在未保存改动的 Tab，供提示条与测试契约使用
-const firstDirtyTabKey = computed(() => dirtySections.value[0]?.tab || 'api_config');
+const firstDirtyTabKey = computed(() => dirtySections.value[0]?.tab || 'intel');
 
 const goToFirstDirty = () => {
   const target = dirtySections.value[0];
@@ -1840,25 +2398,21 @@ const goToFirstDirty = () => {
     navigateToSection(target);
     return;
   }
-  activeKey.value = 'api_config';
+  activeKey.value = 'intel';
 };
 
-// 关闭/刷新浏览器窗口时兜底拦截（系统级，无法自定义文案）
 const handleBeforeUnload = (e) => {
   if (!hasUnsavedChanges.value) return;
   e.preventDefault();
   e.returnValue = '';
 };
 
-// Tab 标题挂角标，让"未保存"成为常驻可见状态而非点保存才发现
 const tabTitle = (base, dirty) => (dirty ? `${base} ·` : base);
 
-// 分组保存：只提交本组变更字段
+// ======================= 分组保存与全部重置 =======================
 const saveGeneralGroup = async (group, loadingRef, successText, { silentSuccess = false } = {}) => {
   const payload = pendingByGroup.value[group] || {};
-  if (Object.keys(payload).length === 0) {
-    return true;
-  }
+  if (Object.keys(payload).length === 0) return true;
   loadingRef.value = true;
   try {
     const res = await request.post('/api/system_config/general', payload);
@@ -1866,7 +2420,6 @@ const saveGeneralGroup = async (group, loadingRef, successText, { silentSuccess 
       if (!silentSuccess) {
         message.success(successText || pageText('pages.changesSavedCount', { count: Object.keys(payload).length }));
       }
-      // 仅把本组已提交的字段写回基线，其他分组的未保存改动继续保持脏状态
       Object.keys(payload).forEach((key) => {
         generalBaseline.value[key] = cloneDeep(payload[key]);
       });
@@ -1902,11 +2455,8 @@ const saveAllDirtySections = async () => {
   try {
     for (const sec of targets) {
       const ok = await sec.save({ silentSuccess: true });
-      if (ok) {
-        savedCount += 1;
-      } else {
-        failed.push(sec);
-      }
+      if (ok) savedCount += 1;
+      else failed.push(sec);
     }
     if (failed.length === 0) {
       message.success(pageText('pages.savedAllSectionsCount', { count: savedCount }));
@@ -1944,7 +2494,6 @@ const RECOMMENDED_FIELD_MAP = {
   github: 'github_concurrency',
 };
 
-// 从「生效值」一键回填，降低"该填什么"的决策成本
 const applyRecommended = (formRef, key) => {
   const rec = capacityInfo.value[`${key}_recommended`];
   if (rec) {
@@ -1961,7 +2510,7 @@ const generalForm = ref({
   geoip_city: '',
   geoip_asn: '',
   geoip_ip2region: '',
-  
+
   fofa_key: '',
   fofa_url: '',
   fofa_max_page: 5,
@@ -1975,31 +2524,65 @@ const generalForm = ref({
   port_top_10: '',
   domain_brute_concurrent: 300,
   alt_dns_concurrent: 1500,
-  
 
-  
   auth: false,
   api_key: '',
-  
+
   webhook_url: '',
   webhook_token: '',
-  
+
   dingding: { secret: '', access_token: '' },
   feishu: { webhook_url: '', secret: '' },
   wxwork: { webhook_url: '' },
   telegram: { bot_token: '', chat_id: '' },
   email: { host: '', port: 465, username: '', password: '', to: '' },
   query_plugin_config: {},
-  push_options: ['task_complete', 'github_leak', 'github_cve', 'github_tools', 'github_hackers', 'asset_site']
+  push_options: ['task_complete', 'github_leak', 'github_cve', 'github_tools', 'github_hackers', 'asset_site'],
 });
 captureBaseline();
+
+const channelStatus = computed(() => {
+  const f = generalForm.value;
+  return {
+    dingding: !!(f.dingding?.access_token && f.dingding?.access_token.trim()),
+    feishu: !!(f.feishu?.webhook_url && f.feishu?.webhook_url.trim()),
+    wxwork: !!(f.wxwork?.webhook_url && f.wxwork?.webhook_url.trim()),
+    telegram: !!(f.telegram?.bot_token?.trim() && f.telegram?.chat_id?.trim()),
+    webhook: !!(f.webhook_url && f.webhook_url.trim()),
+    email: !!(f.email?.host?.trim() && f.email?.username?.trim() && f.email?.to?.trim()),
+  };
+});
+
+const portTop10Info = computed(() => parsePortListInfo(generalForm.value.port_top_10));
+
+const revealInfraSecrets = ref(false);
+const displayBrokerUri = computed(() => (
+  revealInfraSecrets.value ? (generalForm.value.celery_broker_url || '-') : (maskConnectionUri(generalForm.value.celery_broker_url) || '-')
+));
+const displayMongoUri = computed(() => (
+  revealInfraSecrets.value ? (generalForm.value.mongo_url || '-') : (maskConnectionUri(generalForm.value.mongo_url) || '-')
+));
+
+const handleGenerateApiKey = () => {
+  generalForm.value.api_key = generateStrongApiKey(32);
+  message.success(pageText('pages.apiKeyGenerated'));
+};
+
+const handleCopyApiHeaderExample = async () => {
+  const key = generalForm.value.api_key || '<API_KEY>';
+  const ok = await copyText(`Token: ${key}`);
+  if (ok) {
+    message.success(pageText('pages.curlExampleCopied'));
+  } else {
+    message.error(pageText('pages.copyFailedSelectAndCopyTheTextManually'));
+  }
+};
 
 const fetchGeneralConfig = async () => {
   generalLoading.value = true;
   try {
     const res = await request.get('/api/system_config/general');
     if (res.code === 200) {
-      // 深度合并防止旧数据结构缺失导致报错
       generalForm.value = {
         ...generalForm.value,
         ...res.data,
@@ -2007,57 +2590,53 @@ const fetchGeneralConfig = async () => {
         feishu: { ...generalForm.value.feishu, ...(res.data.feishu || {}) },
         wxwork: { ...generalForm.value.wxwork, ...(res.data.wxwork || {}) },
         telegram: { ...generalForm.value.telegram, ...(res.data.telegram || {}) },
-        email: { ...generalForm.value.email, ...(res.data.email || {}) }
+        email: { ...generalForm.value.email, ...(res.data.email || {}) },
       };
       captureBaseline();
     } else {
       message.error(res.message || pageText('pages.failedToLoadGeneralSystemConfiguration'));
-      if (!isConfigInitialized.value) {
-        captureBaseline();
-      }
+      if (!isConfigInitialized.value) captureBaseline();
     }
   } catch (error) {
     message.error(pageText('pages.generalSystemConfigurationRequestFailed'));
     console.error(error);
-    if (!isConfigInitialized.value) {
-      captureBaseline();
-    }
+    if (!isConfigInitialized.value) captureBaseline();
   } finally {
     generalLoading.value = false;
   }
 };
 
-// 三个 Tab 共用同一个提交入口，但只提交各自分组内的变更字段
-const saveGeneralConfig = async (group = 'api_config', successText = '', opts = {}) =>
-  saveGeneralGroup(group, generalSaveLoading, successText, opts);
+const saveGeneralConfig = async (group = 'api_config', successText = '', opts = {}) => (
+  saveGeneralGroup(group, generalSaveLoading, successText, opts)
+);
 
+// ======================= 字典管理逻辑 =======================
 const dictList = ref([]);
 const selectedDict = ref(null);
 const bruteLoading = ref(false);
-const bruteDictList = ref([]);  // [{name, size}, ...]
+const bruteDictList = ref([]);
 
-// ======================= 字典元数据配置 =======================
 const ASSET_DICT_META = {
   'domain_2w.txt':       { get label() { return pageText('pages.mainSubdomainDictionary20000Entries'); }, group: '🌍 子域名爆破' },
-  'altdnsdict.txt':      { get label() { return pageText('pages.subdomainMutationWords'); },   group: '🧠 智能子域爆破' },
-  'dnsserver.txt':       { get label() { return pageText('pages.dnsResolverList'); },     group: '🌐 DNS 解析配置' },
-  'file_top_200.txt':    { get label() { return pageText('pages.top200Paths'); },       group: '📂 目录文件泄露' },
-  'file_top_2000.txt':   { get label() { return pageText('pages.top2000Paths'); },      group: '📂 目录文件泄露' },
+  'altdnsdict.txt':      { get label() { return pageText('pages.subdomainMutationWords'); }, group: '🧠 智能子域爆破' },
+  'dnsserver.txt':       { get label() { return pageText('pages.dnsResolverList'); }, group: '🌐 DNS 解析配置' },
+  'file_top_200.txt':    { get label() { return pageText('pages.top200Paths'); }, group: '📂 目录文件泄露' },
+  'file_top_2000.txt':   { get label() { return pageText('pages.top2000Paths'); }, group: '📂 目录文件泄露' },
 
-  'port_top100.txt':     { get label() { return pageText('pages.top100CommonPorts'); },          group: '🔌 端口扫描策略' },
-  'port_top1000.txt':    { get label() { return pageText('pages.top1000CommonPorts'); },         group: '🔌 端口扫描策略' },
-  'port_custom.txt':     { get label() { return pageText('tasks.customPorts'); },             group: '🔌 端口扫描策略' },
-  'port_all.txt':        { get label() { return pageText('tasks.allPorts165535'); },       group: '🔌 端口扫描策略' },
-  'port_alive.txt':      { get label() { return pageText('pages.aliveProbePorts'); },      group: '🔌 端口扫描策略' },
+  'port_top100.txt':     { get label() { return pageText('pages.top100CommonPorts'); }, group: '🔌 端口扫描策略' },
+  'port_top1000.txt':    { get label() { return pageText('pages.top1000CommonPorts'); }, group: '🔌 端口扫描策略' },
+  'port_custom.txt':     { get label() { return pageText('tasks.customPorts'); }, group: '🔌 端口扫描策略' },
+  'port_all.txt':        { get label() { return pageText('tasks.allPorts165535'); }, group: '🔌 端口扫描策略' },
+  'port_alive.txt':      { get label() { return pageText('pages.aliveProbePorts'); }, group: '🔌 端口扫描策略' },
 
-  'blackdomain.txt':     { get label() { return pageText('pages.rootDomainExclusionDictionary'); },     group: '🛡️ 全局黑名单拦截' },
-  'black_asset_site.txt':{ get label() { return pageText('pages.maliciousUnwantedWebsiteBlocklist'); },  group: '🛡️ 全局黑名单拦截' },
-  'blackhexie.txt':      { get label() { return pageText('pages.sensitiveWordFilterDictionary'); },       group: '🛡️ 全局黑名单拦截' },
+  'blackdomain.txt':     { get label() { return pageText('pages.rootDomainExclusionDictionary'); }, group: '🛡️ 全局黑名单拦截' },
+  'black_asset_site.txt':{ get label() { return pageText('pages.maliciousUnwantedWebsiteBlocklist'); }, group: '🛡️ 全局黑名单拦截' },
+  'blackhexie.txt':      { get label() { return pageText('pages.sensitiveWordFilterDictionary'); }, group: '🛡️ 全局黑名单拦截' },
 };
 
 const assetMenuGroups = computed(() => {
   const groups = { '🌍 子域名爆破': [], '🧠 智能子域爆破': [], '📂 目录文件泄露': [], '🔌 端口扫描策略': [], '🌐 DNS 解析配置': [], '🛡️ 全局黑名单拦截': [] };
-  
+
   const getGroupAndLabel = (dictName) => {
     if (ASSET_DICT_META[dictName]) {
       return { group: ASSET_DICT_META[dictName].group, label: ASSET_DICT_META[dictName].label };
@@ -2071,20 +2650,15 @@ const assetMenuGroups = computed(() => {
     return null;
   };
 
-  dictList.value.forEach(dict => {
+  dictList.value.forEach((dict) => {
     const meta = getGroupAndLabel(dict.name);
     if (!meta) return;
-    
     if (!groups[meta.group]) groups[meta.group] = [];
-    groups[meta.group].push({
-      ...dict,
-      title: meta.label
-    });
+    groups[meta.group].push({ ...dict, title: meta.label });
   });
   return groups;
 });
 
-// 弱口令字典：按服务名分组（提取 username_ssh.txt → SSH）
 const bruteSvcGroups = computed(() => {
   const groups = {};
   const SVC_LABEL = {
@@ -2095,10 +2669,9 @@ const bruteSvcGroups = computed(() => {
     activemq: 'ActiveMQ', openfire: 'OpenFire', manageiq: 'ManageIQ',
     shiro: 'Shiro Key', imap: 'IMAP', pop3: 'POP3', smtp: 'SMTP',
     exchange: 'Exchange', csts: 'CSTS', clickhouse: 'ClickHouse',
-    'alibaba-druid': 'Alibaba Druid'
+    'alibaba-druid': 'Alibaba Druid',
   };
-  bruteDictList.value.forEach(item => {
-    // 通用弱口令字典（如 common_password.txt）归入独立分组
+  bruteDictList.value.forEach((item) => {
     if (item.name.startsWith('common_') && item.name.endsWith('.txt')) {
       if (!groups['通用弱口令']) groups['通用弱口令'] = [];
       groups['通用弱口令'].push(item);
@@ -2109,54 +2682,49 @@ const bruteSvcGroups = computed(() => {
     const svcKey = m[1];
     const svc = SVC_LABEL[svcKey] || svcKey.toUpperCase();
     if (!groups[svc]) groups[svc] = [];
-    // username_* 排前面
     if (item.name.startsWith('username_')) groups[svc].unshift(item);
     else groups[svc].push(item);
   });
   return groups;
 });
 
-const formatDictionaryGroup = group => {
+const formatDictionaryGroup = (group) => {
   const keys = {
     '🌍 子域名爆破': 'pages.dictionaryGroupDomains',
     '🧠 智能子域爆破': 'pages.dictionaryGroupMutations',
     '📂 目录文件泄露': 'pages.dictionaryGroupFiles',
     '🔌 端口扫描策略': 'pages.dictionaryGroupPorts',
     '🌐 DNS 解析配置': 'pages.dictionaryGroupDns',
-    '🛡️ 全局黑名单拦截': 'pages.dictionaryGroupBlocklist'
+    '🛡️ 全局黑名单拦截': 'pages.dictionaryGroupBlocklist',
   };
   return keys[group] ? pageText(keys[group]) : group;
 };
 
 const treeData = computed(() => {
   const data = [];
-  // 资产字典分组
   Object.entries(assetMenuGroups.value).forEach(([group, items]) => {
     if (items.length) {
-      const children = items.map(item => {
+      const children = items.map((item) => {
         const friendly = item.title && item.title !== item.name ? item.title : item.name;
         return {
           mainTitle: friendly,
           subTitle: item.name,
           key: `asset__${item.name}`,
-          is_builtin: item.is_builtin
+          is_builtin: item.is_builtin,
         };
       });
       data.push({ title: formatDictionaryGroup(group), key: `group_asset_${group}`, selectable: false, children });
     }
   });
-  // 弱口令字典分组（将所有协议合并到一个大组，极大提升简洁度）
   const npocChildren = [];
   Object.entries(bruteSvcGroups.value).forEach(([svc, items]) => {
     if (items.length) {
-      items.forEach(item => {
-        // 自动将 username_/password_ 翻译为友好的中文前缀
+      items.forEach((item) => {
         let friendlyPrefix = '';
         if (item.name.startsWith('username_')) friendlyPrefix = pageText('pages.usernameDictionary');
         else if (item.name.startsWith('password_')) friendlyPrefix = pageText('pages.passwordDictionary');
         else if (item.name.includes('common_')) friendlyPrefix = pageText('pages.commonCredentialDictionary');
 
-        // 通用弱口令组内直接显示文件名，避免 "[通用弱口令] 通用弱口令" 冗余
         const mainTitle = svc === '通用弱口令'
           ? (item.name.includes('common_') ? item.name : `${friendlyPrefix || item.name}`)
           : `[${svc}] ${friendlyPrefix || item.name}`;
@@ -2165,7 +2733,7 @@ const treeData = computed(() => {
           mainTitle,
           subTitle: item.name,
           key: `brute__${item.name}`,
-          is_builtin: item.is_builtin
+          is_builtin: item.is_builtin,
         });
       });
     }
@@ -2179,62 +2747,23 @@ const treeData = computed(() => {
 const filteredTreeData = computed(() => {
   if (!menuSearch.value.trim()) return treeData.value;
   const kw = menuSearch.value.toLowerCase();
-  return treeData.value.map(group => {
-    const matchedChildren = group.children.filter(c => 
-      (c.mainTitle && c.mainTitle.toLowerCase().includes(kw)) || 
-      (c.subTitle && c.subTitle.toLowerCase().includes(kw))
-    );
+  return treeData.value.map((group) => {
+    const matchedChildren = group.children.filter((c) => (
+      (c.mainTitle && c.mainTitle.toLowerCase().includes(kw))
+      || (c.subTitle && c.subTitle.toLowerCase().includes(kw))
+    ));
     return { ...group, children: matchedChildren };
-  }).filter(group => group.children.length > 0);
+  }).filter((group) => group.children.length > 0);
 });
 
-watch(treeData, (newVal) => {
-  if (menuOpenKeys.value.length === 0 && newVal.length > 0) {
-    menuOpenKeys.value = newVal.map(g => g.key);
-  }
-  if (newVal.length > 0 && (!selectedCategoryKeys.value.length || !newVal.find(g => g.key === selectedCategoryKeys.value[0]))) {
-    selectedCategoryKeys.value = [newVal[0].key];
-  }
-}, { immediate: true });
-
-
-const handleAppendAndClose = async () => {
-  const ok = await handleAppend();
-  if (ok) appendDrawerVisible.value = false;
-};
-
-const handleDeleteBatchCustom = () => {
-  if (!batchDeleteEntries.value.trim()) return;
-  const entryCount = batchDeleteEntries.value.split('\n').map(x => x.trim()).filter(Boolean).length;
-  Modal.confirm({
-    title: pageText('pages.deleteDictionaryEntries'),
-    icon: createVNode(ExclamationCircleOutlined),
-    content: pageText('pages.deleteTheSubmittedEntriesCountFromTheCurrentDictionary', { count: entryCount }),
-    okText: pageText('tasks.confirmDeletion'),
-    okButtonProps: { danger: true },
-    cancelText: pageText('assets.cancel'),
-    onOk: async () => {
-      const ok = await deleteEntries(batchDeleteEntries.value);
-      if (ok) {
-        batchDeleteEntries.value = '';
-        searchDrawerVisible.value = false;
-      }
-      return ok;
-    }
-  });
-};
-
-// 分类选择状态（默认对齐首个分类的唯一分组 key）
 const selectedCategoryKeys = ref(['group_asset_🌍 子域名爆破']);
 
 const handleCategorySelect = ({ key }) => {
   selectedCategoryKeys.value = [key];
-  menuSearch.value = '';
 };
 
-// 统一字典选择状态
 const unifiedSelectedKeys = ref([]);
-const unifiedSelectedType = ref('');  // 'asset' | 'brute'
+const unifiedSelectedType = ref('');
 const unifiedSelectedName = ref('');
 const unifiedSelectedDesc = computed(() => {
   const name = unifiedSelectedName.value;
@@ -2250,25 +2779,76 @@ const unifiedSelectedDesc = computed(() => {
 const unifiedSelectedIsBuiltin = computed(() => {
   if (!unifiedSelectedName.value) return false;
   if (unifiedSelectedType.value === 'asset') {
-    const item = dictList.value.find(d => d.name === unifiedSelectedName.value);
+    const item = dictList.value.find((d) => d.name === unifiedSelectedName.value);
     return item ? Boolean(item.is_builtin) : false;
-  } else if (unifiedSelectedType.value === 'brute') {
-    const item = bruteDictList.value.find(d => d.name === unifiedSelectedName.value);
+  }
+  if (unifiedSelectedType.value === 'brute') {
+    const item = bruteDictList.value.find((d) => d.name === unifiedSelectedName.value);
     return item ? Boolean(item.is_builtin) : false;
   }
   return false;
 });
 
+// 支持全部分类或关键字跨分类全局检索
 const currentFilteredDicts = computed(() => {
-  if (!selectedCategoryKeys.value.length) return [];
-  const activeKey = selectedCategoryKeys.value[0];
-  const group = filteredTreeData.value.find(g => g.key === activeKey);
+  const kw = menuSearch.value.trim();
+  const activeCat = selectedCategoryKeys.value[0];
+  if (kw || activeCat === '__all__' || !activeCat) {
+    return filteredTreeData.value.flatMap((g) => g.children || []);
+  }
+  const group = filteredTreeData.value.find((g) => g.key === activeCat);
   return group ? group.children || [] : [];
 });
 
-const handleUnifiedSelect = (selectedKeys, info) => {
+watch(treeData, (newVal) => {
+  if (menuOpenKeys.value.length === 0 && newVal.length > 0) {
+    menuOpenKeys.value = newVal.map((g) => g.key);
+  }
+  if (
+    newVal.length > 0
+    && selectedCategoryKeys.value[0] !== '__all__'
+    && (!selectedCategoryKeys.value.length || !newVal.find((g) => g.key === selectedCategoryKeys.value[0]))
+  ) {
+    selectedCategoryKeys.value = [newVal[0].key];
+  }
+  // 消除空状态阻断：首次加载且未选择时自动选中首份字典直接预览
+  if (!unifiedSelectedName.value && newVal.length > 0) {
+    const firstItem = newVal.flatMap((g) => g.children || [])[0];
+    if (firstItem) {
+      handleUnifiedSelect([firstItem.key]);
+    }
+  }
+}, { immediate: true });
+
+const handleAppendAndClose = async () => {
+  const ok = await handleAppend();
+  if (ok) appendDrawerVisible.value = false;
+};
+
+const handleDeleteBatchCustom = () => {
+  if (!batchDeleteEntries.value.trim()) return;
+  const entryCount = batchDeleteEntries.value.split('\n').map((x) => x.trim()).filter(Boolean).length;
+  Modal.confirm({
+    title: pageText('pages.deleteDictionaryEntries'),
+    icon: createVNode(ExclamationCircleOutlined),
+    content: pageText('pages.deleteTheSubmittedEntriesCountFromTheCurrentDictionary', { count: entryCount }),
+    okText: pageText('tasks.confirmDeletion'),
+    okButtonProps: { danger: true },
+    cancelText: pageText('assets.cancel'),
+    onOk: async () => {
+      const ok = await deleteEntries(batchDeleteEntries.value);
+      if (ok) {
+        batchDeleteEntries.value = '';
+        searchDrawerVisible.value = false;
+      }
+      return ok;
+    },
+  });
+};
+
+const handleUnifiedSelect = (selectedKeys) => {
   const key = Array.isArray(selectedKeys) ? selectedKeys[0] : selectedKeys;
-  unifiedSelectedKeys.value = [key];
+  unifiedSelectedKeys.value = key ? [key] : [];
   searchKeyword.value = '';
   searchResult.value = null;
   newEntries.value = '';
@@ -2309,9 +2889,8 @@ const handleDownloadDict = async () => {
   try {
     const res = await request.get(`${dictApiBase.value}/download`, {
       params: { name: selectedDict.value },
-      responseType: 'blob'
+      responseType: 'blob',
     });
-    // 后端异常时以 HTTP 4xx/5xx 返回，axios 会走 catch 分支
     const blob = new Blob([res], { type: 'text/plain;charset=utf-8' });
     const downloadUrl = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -2329,7 +2908,7 @@ const handleDownloadDict = async () => {
         const text = await e.response.data.text();
         const parsed = JSON.parse(text);
         if (parsed.message) errMsg = parsed.message;
-      } catch (_) { /* ignore parse errors */ }
+      } catch { /* ignore */ }
     }
     message.error(errMsg);
     console.error(e);
@@ -2353,15 +2932,12 @@ const copyPreviewContent = async () => {
 
 const searchKeyword = ref('');
 const searchResult = ref(null);
-
 const newEntries = ref('');
 
-// 根据当前选中类型返回 API 前缀
-const dictApiBase = computed(() =>
+const dictApiBase = computed(() => (
   unifiedSelectedType.value === 'brute' ? '/api/brute_dict' : '/api/dictionary'
-);
+));
 
-// 获取字典列表
 const fetchDictList = async (showLoading = true) => {
   if (showLoading) loading.value = true;
   try {
@@ -2379,13 +2955,12 @@ const fetchDictList = async (showLoading = true) => {
   }
 };
 
-// 获取预览（自动路由到对应 API）
 const fetchPreview = async (name) => {
   if (!name) return;
   loading.value = true;
   try {
     const res = await request.get(`${dictApiBase.value}/preview`, {
-      params: { name, limit: previewLimit.value }
+      params: { name, limit: previewLimit.value },
     });
     if (res.code === 200) {
       previewContent.value = res.data.lines.join('\n');
@@ -2401,7 +2976,6 @@ const fetchPreview = async (name) => {
   }
 };
 
-// 搜索功能（自动路由）
 const handleSearch = async () => {
   if (!searchKeyword.value.trim()) {
     message.warning(pageText('pages.enterASearchKeyword'));
@@ -2410,7 +2984,7 @@ const handleSearch = async () => {
   searchLoading.value = true;
   try {
     const res = await request.get(`${dictApiBase.value}/search`, {
-      params: { name: selectedDict.value, keyword: searchKeyword.value }
+      params: { name: selectedDict.value, keyword: searchKeyword.value },
     });
     if (res.code === 200) {
       searchResult.value = res.data.matches;
@@ -2430,7 +3004,6 @@ const handleSearch = async () => {
   }
 };
 
-// 追加条目（自动路由），返回是否成功
 const handleAppend = async () => {
   if (!newEntries.value.trim()) return false;
 
@@ -2440,19 +3013,18 @@ const handleAppend = async () => {
     return false;
   }
 
-  // 智能格式校验（阻断无效输入）
-  const lines = newEntries.value.split('\n').map(s => s.trim()).filter(s => s);
+  const lines = newEntries.value.split('\n').map((s) => s.trim()).filter(Boolean);
   if (selectedDict.value && selectedDict.value.startsWith('port_')) {
-    const invalidPorts = lines.filter(p => !/^\d+$/.test(p) || parseInt(p) < 1 || parseInt(p) > 65535);
+    const invalidPorts = lines.filter((p) => !/^\d+$/.test(p) || parseInt(p, 10) < 1 || parseInt(p, 10) > 65535);
     if (invalidPorts.length > 0) {
       message.error(pageText('pages.invalidPortNumberEGPortEnterIntegersFrom', { port: invalidPorts[0] }));
       return false;
     }
   } else if (selectedDict.value && selectedDict.value.includes('domain')) {
-    const invalidDomains = lines.filter(d => /[\s,;!@#%^&*()<>{}\[\]]/.test(d));
+    const invalidDomains = lines.filter((d) => /[\s,;!@#%^&*()<>{}[\]]/.test(d));
     if (invalidDomains.length > 0) {
-       message.error(pageText('pages.theSubdomainDictionaryContainsInvalidCharactersSuchAsSpaces'));
-       return false;
+      message.error(pageText('pages.theSubdomainDictionaryContainsInvalidCharactersSuchAsSpaces'));
+      return false;
     }
   }
 
@@ -2460,7 +3032,7 @@ const handleAppend = async () => {
   try {
     const res = await request.post(`${dictApiBase.value}/append`, {
       name: selectedDict.value,
-      content: newEntries.value
+      content: newEntries.value,
     });
     if (res.code === 200) {
       message.success(pageText('pages.savedSubmittedSubmittedNewEntriesAddedAdded', { submitted: res.data.total_submitted, added: res.data.added }));
@@ -2469,10 +3041,9 @@ const handleAppend = async () => {
       fetchBruteDictList();
       fetchPreview(selectedDict.value);
       return true;
-    } else {
-      message.error(res.message || pageText('pages.failedToSaveLabel2'));
-      return false;
     }
+    message.error(res.message || pageText('pages.failedToSaveLabel2'));
+    return false;
   } catch (error) {
     message.error(pageText('pages.saveRequestFailed'));
     console.error(error);
@@ -2482,8 +3053,6 @@ const handleAppend = async () => {
   }
 };
 
-
-// 单条删除
 const handleDeleteSingle = (item) => {
   if (!item) return false;
   Modal.confirm({
@@ -2496,15 +3065,14 @@ const handleDeleteSingle = (item) => {
     onOk: async () => {
       const ok = await deleteEntries(item);
       if (ok && searchResult.value) {
-        searchResult.value = searchResult.value.filter(x => x !== item);
+        searchResult.value = searchResult.value.filter((x) => x !== item);
       }
       return ok;
-    }
+    },
   });
   return true;
 };
 
-// 删除选中字典文件
 const handleDeleteDict = () => {
   if (!selectedDict.value) return;
   const targetName = selectedDict.value;
@@ -2515,31 +3083,26 @@ const handleDeleteDict = () => {
     okText: pageText('tasks.confirmDeletion'),
     okButtonProps: { danger: true },
     cancelText: pageText('assets.cancel'),
-    onOk: () => executeDeleteDict(targetName)
+    onOk: () => executeDeleteDict(targetName),
   });
 };
 
 const executeDeleteDict = async (targetName) => {
+  const wasBrute = unifiedSelectedType.value === 'brute';
   loading.value = true;
   try {
-    const res = await request.post(`${dictApiBase.value}/delete_file`, {
-      name: targetName
-    });
+    const res = await request.post(`${dictApiBase.value}/delete_file`, { name: targetName });
     if (res.code === 200) {
       message.success(pageText('pages.dictionaryNameDeleted', { name: targetName }));
-      // 重置选中状态
       unifiedSelectedKeys.value = [];
+      unifiedSelectedName.value = '';
+      unifiedSelectedType.value = '';
       selectedDict.value = '';
       previewContent.value = '';
       totalLines.value = 0;
-      
-      // 重新拉取列表
-      if (unifiedSelectedType.value === 'brute') {
-        fetchBruteDictList();
-      } else {
-        fetchDictList();
-      }
-      unifiedSelectedType.value = '';
+
+      if (wasBrute) await fetchBruteDictList();
+      else await fetchDictList();
     } else {
       message.error(res.message || pageText('tasks.deletionFailedLabel'));
     }
@@ -2551,14 +3114,13 @@ const executeDeleteDict = async (targetName) => {
   }
 };
 
-// 公共删除逻辑（自动路由）
 const deleteEntries = async (content) => {
   if (!content || !content.trim()) return false;
   deleteLoading.value = true;
   try {
     const res = await request.post(`${dictApiBase.value}/delete_entries`, {
       name: selectedDict.value,
-      content: content
+      content,
     });
     if (res.code === 200) {
       message.success(pageText('pages.deletionCompletedSubmittedSubmittedDeletedDeleted', { submitted: res.data.total_submitted, deleted: res.data.deleted }));
@@ -2566,10 +3128,9 @@ const deleteEntries = async (content) => {
       fetchBruteDictList();
       fetchPreview(selectedDict.value);
       return true;
-    } else {
-      message.error(res.message || pageText('tasks.deletionFailedLabel'));
-      return false;
     }
+    message.error(res.message || pageText('tasks.deletionFailedLabel'));
+    return false;
   } catch (error) {
     message.error(pageText('pages.deleteRequestFailed'));
     console.error(error);
@@ -2579,10 +3140,56 @@ const deleteEntries = async (content) => {
   }
 };
 
-// ======================= 安全策略管理逻辑 =======================
+// ======================= 安全策略与红线预检逻辑 =======================
 const securityForm = ref({ blackIpsText: '', forbiddenDomainsText: '' });
 const securityLoading = ref(false);
 const securitySaveLoading = ref(false);
+const guardrailDryRunInput = ref('');
+
+const securityAnalysis = computed(() => (
+  analyzeSecurityPolicy(securityForm.value.blackIpsText, securityForm.value.forbiddenDomainsText)
+));
+
+const guardrailDryRunResult = computed(() => (
+  testTargetAgainstGuardrails(
+    guardrailDryRunInput.value,
+    securityForm.value.blackIpsText,
+    securityForm.value.forbiddenDomainsText,
+  )
+));
+
+const guardrailDryRunTagColor = computed(() => {
+  const st = guardrailDryRunResult.value.status;
+  if (st === 'allowed') return 'success';
+  if (st === 'blocked_ip' || st === 'blocked_domain') return 'error';
+  if (st === 'invalid') return 'warning';
+  return 'default';
+});
+
+const guardrailDryRunText = computed(() => {
+  const r = guardrailDryRunResult.value;
+  if (r.status === 'allowed') return pageText('pages.guardrailDryRunAllowed', { target: r.target });
+  if (r.status === 'blocked_ip') return pageText('pages.guardrailDryRunBlockedIp', { rule: r.matchedRule });
+  if (r.status === 'blocked_domain') return pageText('pages.guardrailDryRunBlockedDomain', { rule: r.matchedRule });
+  if (r.status === 'invalid') return pageText('pages.guardrailDryRunInvalid');
+  return '';
+});
+
+const applyGuardrailIpPreset = (mode) => {
+  securityForm.value.blackIpsText = applySecurityPreset(
+    securityForm.value.blackIpsText,
+    SECURITY_IP_PRESETS.rfc1918,
+    mode,
+  );
+};
+
+const applyGuardrailDomainPreset = () => {
+  securityForm.value.forbiddenDomainsText = applySecurityPreset(
+    securityForm.value.forbiddenDomainsText,
+    SECURITY_DOMAIN_PRESETS.govEdu,
+    'add',
+  );
+};
 
 const fetchSecurityPolicy = async () => {
   securityLoading.value = true;
@@ -2594,16 +3201,12 @@ const fetchSecurityPolicy = async () => {
       securityBaseline.value = cloneDeep(securityForm.value);
     } else {
       message.error(res.message || pageText('pages.failedToLoadSecurityPolicy'));
-      if (!isConfigInitialized.value) {
-        securityBaseline.value = cloneDeep(securityForm.value);
-      }
+      if (!isConfigInitialized.value) securityBaseline.value = cloneDeep(securityForm.value);
     }
   } catch (error) {
     message.error(pageText('pages.securityPolicyRequestFailed'));
     console.error(error);
-    if (!isConfigInitialized.value) {
-      securityBaseline.value = cloneDeep(securityForm.value);
-    }
+    if (!isConfigInitialized.value) securityBaseline.value = cloneDeep(securityForm.value);
   } finally {
     securityLoading.value = false;
   }
@@ -2611,35 +3214,31 @@ const fetchSecurityPolicy = async () => {
 
 const resetSecurityForm = ({ silent = false } = {}) => {
   securityForm.value = cloneDeep(securityBaseline.value);
-  if (!silent) {
-    message.info(pageText('pages.sectionChangesReset'));
-  }
+  if (!silent) message.info(pageText('pages.sectionChangesReset'));
 };
 
 const saveSecurityPolicy = async ({ silentSuccess = false } = {}) => {
   securitySaveLoading.value = true;
   try {
-    const black_ips = securityForm.value.blackIpsText.split('\n').map(s => s.trim()).filter(s => s);
-    const forbidden_domains = securityForm.value.forbiddenDomainsText.split('\n').map(s => s.trim()).filter(s => s);
+    const black_ips = securityForm.value.blackIpsText.split('\n').map((s) => s.trim()).filter(Boolean);
+    const forbidden_domains = securityForm.value.forbiddenDomainsText.split('\n').map((s) => s.trim()).filter(Boolean);
 
     const res = await request.post('/api/system_config/security_policy', {
       black_ips,
-      forbidden_domains
+      forbidden_domains,
     });
-    
+
     if (res.code === 200) {
       securityBaseline.value = cloneDeep(securityForm.value);
-      if (!silentSuccess) {
-        message.success(pageText('pages.securityPolicyUpdated'));
-      }
-      fetchSecurityPolicy(); // 重新拉取确认
+      if (!silentSuccess) message.success(pageText('pages.securityPolicyUpdated'));
+      fetchSecurityPolicy();
       return true;
-    } else {
-      message.error(res.message || pageText('pages.failedToSaveLabel2'));
-      return false;
     }
+    message.error(res.message || pageText('pages.failedToSaveLabel2'));
+    return false;
   } catch (error) {
-    message.error(pageText('pages.failedToSaveSecurityPolicy'));
+    const errMsg = error?.response?.data?.message || pageText('pages.failedToSaveSecurityPolicy');
+    message.error(errMsg);
     console.error(error);
     return false;
   } finally {
@@ -2671,12 +3270,12 @@ const pendingConvergenceText = computed(() => {
       return pageText('pages.performanceQueueTargetRuntime', {
         label: item.label || item.queue,
         target: item.target ?? '-',
-        runtime: runtimeLabel
+        runtime: runtimeLabel,
       });
     })
     .join('；');
   return pageText('pages.performanceConvergencePendingAlert', {
-    details: details || pageText('pages.performanceRuntimeOffline')
+    details: details || pageText('pages.performanceRuntimeOffline'),
   });
 });
 
@@ -2697,16 +3296,12 @@ const fetchPerformanceConfig = async () => {
       performanceBaseline.value = cloneDeep(performanceForm.value);
     } else {
       message.error(res.message || pageText('pages.failedToLoadPerformanceSettings'));
-      if (!isConfigInitialized.value) {
-        performanceBaseline.value = cloneDeep(performanceForm.value);
-      }
+      if (!isConfigInitialized.value) performanceBaseline.value = cloneDeep(performanceForm.value);
     }
   } catch (error) {
     message.error(pageText('pages.performanceSettingsRequestFailed'));
     console.error(error);
-    if (!isConfigInitialized.value) {
-      performanceBaseline.value = cloneDeep(performanceForm.value);
-    }
+    if (!isConfigInitialized.value) performanceBaseline.value = cloneDeep(performanceForm.value);
   } finally {
     performanceLoading.value = false;
   }
@@ -2714,9 +3309,7 @@ const fetchPerformanceConfig = async () => {
 
 const resetPerformanceForm = ({ silent = false } = {}) => {
   performanceForm.value = cloneDeep(performanceBaseline.value);
-  if (!silent) {
-    message.info(pageText('pages.sectionChangesReset'));
-  }
+  if (!silent) message.info(pageText('pages.sectionChangesReset'));
 };
 
 const savePerformanceConfig = async ({ silentSuccess = false } = {}) => {
@@ -2726,31 +3319,26 @@ const savePerformanceConfig = async ({ silentSuccess = false } = {}) => {
       celery_heavy_concurrency: performanceForm.value.celery_heavy_concurrency,
       celery_light_concurrency: performanceForm.value.celery_light_concurrency,
       osint_concurrency: performanceForm.value.osint_concurrency,
-      github_concurrency: performanceForm.value.github_concurrency
+      github_concurrency: performanceForm.value.github_concurrency,
     });
-    
+
     if (res.code === 200) {
       const isPending = Boolean(res.pending_convergence || res.data?.pending_convergence);
       if (isPending) {
         pendingConvergence.value = true;
         pendingNodes.value = res.pending_nodes || res.data?.pending_nodes || [];
-        if (!silentSuccess) {
-          message.warning(res.message || pageText('pages.performanceSettingsUpdated'), 6);
-        }
+        if (!silentSuccess) message.warning(res.message || pageText('pages.performanceSettingsUpdated'), 6);
       } else {
         pendingConvergence.value = false;
         pendingNodes.value = [];
-        if (!silentSuccess) {
-          message.success(res.message || pageText('pages.performanceSettingsUpdated'), 5);
-        }
+        if (!silentSuccess) message.success(res.message || pageText('pages.performanceSettingsUpdated'), 5);
       }
       performanceBaseline.value = cloneDeep(performanceForm.value);
       fetchPerformanceConfig();
       return true;
-    } else {
-      message.error(res.message || pageText('pages.failedToSaveLabel2'));
-      return false;
     }
+    message.error(res.message || pageText('pages.failedToSaveLabel2'));
+    return false;
   } catch (error) {
     message.error(pageText('pages.failedToSavePerformanceSettings'));
     console.error(error);
@@ -2759,9 +3347,6 @@ const savePerformanceConfig = async ({ silentSuccess = false } = {}) => {
     performanceSaveLoading.value = false;
   }
 };
-
-// ======================= 弱口令字典管理逻辑 =======================
-// (Moved bruteLoading and bruteDictList to the top to avoid TDZ)
 
 const fetchBruteDictList = async (showLoading = true) => {
   if (showLoading) bruteLoading.value = true;
@@ -2784,64 +3369,107 @@ const probeActiveBackupTask = async () => {
   try {
     const res = await request.get('/api/backup/status');
     if (res.code === 200 && res.data && ['backing_up', 'restoring'].includes(res.data.status)) {
-      activeKey.value = 'system_backup';
+      applyDomainAndSubTab('system_ops', 'backup');
     }
-  } catch (e) {
+  } catch {
     // 页面初始化静默容错
   }
 };
 
+// 全向历史深链路由兼容映射
+const LEGACY_TAB_MAP = {
+  api_config: { tab: 'intel' },
+  intel: { tab: 'intel' },
+  proxy: { tab: 'egress_guardrails', subTab: 'proxy' },
+  security: { tab: 'egress_guardrails', subTab: 'security' },
+  egress_guardrails: { tab: 'egress_guardrails', subTab: 'proxy' },
+  performance: { tab: 'scanning_arsenal', subTab: 'concurrency' },
+  dictionary: { tab: 'scanning_arsenal', subTab: 'dict' },
+  cdn: { tab: 'scanning_arsenal', subTab: 'cdn' },
+  scanning_arsenal: { tab: 'scanning_arsenal', subTab: 'concurrency' },
+  message_push: { tab: 'notifications' },
+  notifications: { tab: 'notifications' },
+  system_backup: { tab: 'system_ops', subTab: 'backup' },
+  system_update: { tab: 'system_ops', subTab: 'update' },
+  system_ops: { tab: 'system_ops', subTab: 'auth_infra' },
+};
+
 const applyRouteDeepLink = (query) => {
   if (!query) return;
-  if (query.tab === 'system_general' && query.focus === 'proxy') {
-    activeKey.value = 'proxy';
-    proxyPanelRef.value?.focusSection?.('proxy');
-    return;
-  }
-  if (query.tab) {
-    if (query.tab === 'cdn') {
-      activeKey.value = 'dictionary';
-      dictSubTab.value = 'cdn';
-    } else if (query.tab === 'security' || query.tab === 'system_general') {
-      // security / system_general 已收敛为「扫描与并发」的子 Tab，深链需同时切换内外两层
-      activeKey.value = 'performance';
-      scanSubTab.value = query.tab;
-    } else {
-      activeKey.value = query.tab;
-    }
-  }
-  // 支持 ?focus=<anchor> 深链：业务页可直接把用户送到具体设置项并高亮
-  if (query.focus) {
-    if (activeKey.value === 'proxy') {
-      proxyPanelRef.value?.focusSection?.(query.focus);
+  const rawTab = query.tab;
+  const rawFocus = query.focus;
+
+  if (rawTab === 'system_general') {
+    if (rawFocus === 'proxy') {
+      applyDomainAndSubTab('egress_guardrails', 'proxy');
+      nextTick(() => proxyPanelRef.value?.focusSection?.('proxy'));
       return;
     }
-    const target = SETTINGS_INDEX.find((i) => i.anchor === query.focus);
-    if (target) {
-      jumpToSetting({ ...target, tab: query.tab || target.tab });
+    if (rawFocus === 'auth' || rawFocus === 'infra') {
+      applyDomainAndSubTab('system_ops', 'auth_infra');
     } else {
-      scrollAndFlashAnchor(`[data-setting-anchor="${query.focus}"]`);
+      applyDomainAndSubTab('scanning_arsenal', 'concurrency');
+    }
+  } else if (rawTab && LEGACY_TAB_MAP[rawTab]) {
+    const mapped = LEGACY_TAB_MAP[rawTab];
+    applyDomainAndSubTab(mapped.tab, query.subTab || mapped.subTab);
+  }
+
+  if (rawFocus) {
+    if (activeKey.value === 'egress_guardrails' && guardrailSubTab.value === 'proxy') {
+      nextTick(() => proxyPanelRef.value?.focusSection?.(rawFocus));
+      return;
+    }
+    const target = SETTINGS_INDEX.find((i) => i.anchor === rawFocus);
+    if (target && !rawTab) {
+      jumpToSetting(target);
+    } else {
+      scrollAndFlashAnchor(`[data-setting-anchor="${rawFocus}"]`);
     }
   }
 };
 
 watch(
-  () => [route.query.tab, route.query.focus],
-  ([tab, focus]) => {
-    if (tab || focus) {
+  () => [route.query.tab, route.query.subTab, route.query.focus],
+  ([tab, subTab, focus]) => {
+    if (tab || subTab || focus) {
       applyRouteDeepLink(route.query);
-      if (activeKey.value === 'proxy') {
+      if (activeKey.value === 'egress_guardrails' && guardrailSubTab.value === 'proxy') {
         proxyPanelRef.value?.fetchProxyConfig?.(false);
       }
     }
-  }
+  },
 );
+
+// 键盘快捷键 `/` 与 `Cmd/Ctrl+K` 聚焦搜索框，点击外部关闭下拉
+const handleGlobalKeydown = (e) => {
+  const tag = (e.target?.tagName || '').toUpperCase();
+  const inEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    searchInputRef.value?.focus?.();
+    return;
+  }
+  if (!inEditable && e.key === '/') {
+    e.preventDefault();
+    searchInputRef.value?.focus?.();
+  }
+};
+
+const handleDocumentClick = (e) => {
+  if (!settingsKeyword.value) return;
+  if (searchBoxWrapRef.value && !searchBoxWrapRef.value.contains(e.target)) {
+    settingsKeyword.value = '';
+  }
+};
 
 onMounted(async () => {
   probeActiveBackupTask();
-
   applyRouteDeepLink(route.query);
   window.addEventListener('beforeunload', handleBeforeUnload);
+  window.addEventListener('keydown', handleGlobalKeydown);
+  document.addEventListener('click', handleDocumentClick);
+
   fetchCapacityProbe();
   fetchDictList();
   fetchBruteDictList();
@@ -2857,9 +3485,7 @@ onMounted(async () => {
 });
 
 const resolveLeaveGuard = (allowLeave) => {
-  if (allowLeave) {
-    allowDirtyDeactivateOnce = true;
-  }
+  if (allowLeave) allowDirtyDeactivateOnce = true;
   leaveConfirmVisible.value = false;
   if (pendingLeaveResolver) {
     const resolve = pendingLeaveResolver;
@@ -2874,7 +3500,6 @@ const handleLeaveSaveAndGo = async () => {
 };
 
 onDeactivated(() => {
-  // 组件被 keep-alive 缓存，切走时改动仍在内存中；若已明确放行放弃则不再重复提醒
   if (hasUnsavedChanges.value && !allowDirtyDeactivateOnce) {
     message.warning(pageText('pages.thereAreCountUnsavedConfigurationChangesSaveThemBefore', { count: unsavedCount.value }), 5);
   }
@@ -2892,13 +3517,14 @@ onDeactivated(() => {
 onUnmounted(() => {
   resolveLeaveGuard(false);
   window.removeEventListener('beforeunload', handleBeforeUnload);
+  window.removeEventListener('keydown', handleGlobalKeydown);
+  document.removeEventListener('click', handleDocumentClick);
   proxyPanelRef.value?.stopTimers?.();
   updatePanelRef.value?.stopUpdateTimers?.();
   clearAllDictPollTimers();
   backupPanelRef.value?.stopProgressTracking?.();
 });
 
-// 路由级离开拦截：三选一防护弹窗（留在当前页 / 放弃改动并离开 / 保存全部并离开）
 onBeforeRouteLeave(() => {
   allowDirtyDeactivateOnce = false;
   if (!hasUnsavedChanges.value) return true;
@@ -2910,30 +3536,50 @@ onBeforeRouteLeave(() => {
 </script>
 
 <style scoped>
-.page-flex-input { flex: 1; }
-.page-full-width-input { width: 100%; }
-/* ================== 设置项搜索样式 (P2) ================== */
-.arl-settings-search {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
+.arl-settings-page {
+  padding-bottom: 32px;
 }
 
-.arl-search-count {
-  font-size: 12px;
-  color: var(--arl-text-color);
-  opacity: 0.55;
+.hero-brand-icon {
+  color: var(--arl-theme-color);
+  margin-right: 6px;
 }
 
-.arl-search-panel {
-  max-width: 760px;
-  margin-bottom: 16px;
+.hero-search-anchor {
+  position: relative;
+}
+
+.hero-search-input {
+  width: 210px;
+}
+
+.arl-hero-search-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(520px, 85vw);
+  z-index: 40;
   border: 1px solid var(--arl-border-color);
   border-radius: 8px;
-  background: var(--arl-bg-white);
+  background: var(--arl-bg-card);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+.arl-search-dropdown-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--arl-text-secondary);
+  background: var(--arl-bg-light);
+  border-bottom: 1px solid var(--arl-border-color);
+}
+
+.arl-search-dropdown-list {
+  max-height: 360px;
+  overflow-y: auto;
 }
 
 .arl-search-item {
@@ -2944,60 +3590,351 @@ onBeforeRouteLeave(() => {
   padding: 10px 14px;
   cursor: pointer;
   border-bottom: 1px solid var(--arl-border-color);
-  transition: background 0.2s;
+  transition: background 0.15s;
 }
-
 .arl-search-item:last-child {
   border-bottom: none;
 }
-
 .arl-search-item:hover {
   background: var(--arl-bg-light);
 }
-
 .arl-search-item-main {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
-
 .arl-search-item-label {
   font-size: 13px;
   font-weight: 600;
   color: var(--arl-text-color);
 }
-
 .arl-search-item-desc {
   font-size: 12px;
-  color: var(--arl-text-color);
-  opacity: 0.5;
+  color: var(--arl-text-secondary);
 }
-
 .arl-search-empty {
   padding: 20px 14px;
   text-align: center;
   font-size: 13px;
-  color: var(--arl-text-color);
-  opacity: 0.55;
+  color: var(--arl-text-secondary);
 }
 
-/* 字段级说明（区分并发语义等易混指标） */
+.hero-subtabs-row {
+  margin-top: 10px;
+}
+
+.settings-hero-tabs :deep(.ant-tabs-nav) {
+  margin-bottom: 0 !important;
+}
+
+.settings-section-container {
+  max-width: 1240px;
+}
+
+.card-title-with-meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.card-title-icon {
+  color: var(--arl-theme-color);
+}
+
+.proxy-route-tag {
+  margin: 0;
+  cursor: pointer;
+}
+
+.plugin-grid-container {
+  background: var(--arl-bg-light);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.plugin-tile-card {
+  border: 1px solid var(--arl-border-color);
+  background: var(--arl-bg-card);
+  padding: 12px;
+  border-radius: 6px;
+  min-height: 92px;
+}
+
+.plugin-tile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.plugin-tile-name {
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--arl-theme-color);
+}
+
+.plugin-tile-pair {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.plugin-tile-stack {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plugin-free-badge {
+  font-size: 12px;
+  color: var(--arl-text-secondary);
+}
+
+/* 禁扫红线工作台 */
+.guardrail-preset-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  border-radius: 6px;
+  background: var(--arl-bg-light);
+  border: 1px solid var(--arl-border-color);
+}
+
+.guardrail-preset-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--arl-text-secondary);
+}
+
+.guardrail-preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.guardrail-editor-box {
+  display: flex;
+  flex-direction: column;
+}
+
+.guardrail-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.guardrail-editor-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--arl-text-color);
+}
+
+.guardrail-mono-textarea {
+  font-family: var(--arl-font-mono);
+  font-size: 12px;
+}
+
+.guardrail-dryrun-box {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: var(--arl-bg-light);
+  border: 1px dashed var(--arl-border-color);
+}
+
+.guardrail-dryrun-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--arl-text-color);
+  margin-bottom: 8px;
+}
+
+.guardrail-dryrun-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* 并发分组标题 */
+.section-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--arl-text-color);
+  margin-bottom: 10px;
+}
+
+/* 字典工作台局部细节 */
+.dict-summary-strip {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--arl-text-secondary);
+  background: var(--arl-bg-light);
+  border-bottom: 1px solid var(--arl-border-color);
+}
+
+.dict-cat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dict-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.dict-item-icon {
+  margin-top: 3px;
+  opacity: 0.78;
+  flex-shrink: 0;
+}
+
+.dict-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.dict-item-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dict-item-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.dict-empty-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.dict-detail-head-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.dict-detail-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--arl-text-color);
+}
+
+.dict-instant-badge {
+  font-size: 12px;
+  color: var(--arl-text-secondary);
+}
+
+.dict-preview-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: var(--arl-bg-card);
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--arl-border-color);
+}
+
+.dict-preview-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--arl-text-color);
+}
+
+/* 通知通道卡片（自适应高度） */
+.notify-channel-card {
+  height: 100%;
+  border-radius: 8px;
+}
+
+.webhook-schema-pre {
+  margin: 0;
+  padding: 8px;
+  border-radius: 4px;
+  font-family: var(--arl-font-mono);
+  font-size: 11px;
+  background: var(--arl-bg-light);
+  border: 1px solid var(--arl-border-color);
+  overflow-x: auto;
+}
+
+/* 公共样式类 */
+.page-flex-input { flex: 1; }
+.page-full-width-input { width: 100%; }
+.page-small-text { font-size: 12px; }
+.page-config-card { margin-bottom: 16px; border-radius: 8px; }
+.page-flush-bottom { margin-bottom: 0; }
+.page-field-spacing { margin-bottom: 12px; }
+.page-rounded { border-radius: 8px; }
+.page-panel-heading { font-weight: 600; font-size: 14px; color: var(--arl-text-color); }
+.page-tiny-tag { margin: 0; font-size: 10px; line-height: 16px; padding: 0 4px; border-radius: 2px; }
+.page-dictionary-summary { color: var(--arl-text-secondary); font-size: 12px; font-family: var(--arl-font-mono); }
+.page-muted-label { font-size: 12px; color: var(--arl-text-secondary); }
+.page-description { margin-bottom: 16px; color: var(--arl-text-color); font-size: 13px; }
+.page-inline-gap { margin-right: 8px; }
+.page-compact-description { margin-bottom: 12px; color: var(--arl-text-color); font-size: 13px; }
+.page-code-preview { font-family: var(--arl-font-mono); font-size: 12px; margin-bottom: 24px; }
+.page-form-section-title { margin-bottom: 8px; font-weight: 500; font-size: 14px; }
+.page-success-detail { margin-bottom: 8px; color: #52c41a; font-size: 13px; }
+.page-error-detail { margin-bottom: 8px; color: #ff4d4f; font-size: 13px; }
+.page-warning-detail { color: #faad14; font-size: 12px; margin-top: 8px; }
+.page-danger-section-title { margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #ff4d4f; }
+.page-empty-detail { margin-bottom: 8px; color: var(--arl-text-secondary); font-size: 12px; }
+.page-code-summary { font-family: var(--arl-font-mono); font-size: 12px; margin-bottom: 16px; }
+.page-warning-emphasis { color: #d46b08; }
+.page-config-card-danger { margin-bottom: 16px; border-radius: 8px; border-left: 4px solid #ff4d4f; }
+.page-choice-gap { margin-left: 8px; font-size: 12px; }
+.page-strong-heading { font-weight: bold; margin-bottom: 8px; }
+.page-config-card-success { margin-bottom: 16px; border-radius: 8px; border-left: 4px solid #52c41a; }
+.page-config-card-info { margin-bottom: 16px; border-radius: 8px; border-left: 4px solid var(--arl-theme-color); }
+.page-config-card-purple { margin-bottom: 16px; border-radius: 8px; border-left: 4px solid #722ed1; }
+.page-config-card-theme { margin-bottom: 16px; border-radius: 8px; border-left: 4px solid var(--arl-theme-color); }
+.page-form-spacing { margin-bottom: 8px; }
+.performance-pending-alert { margin-bottom: 16px; border-radius: 6px; }
+
 .arl-field-hint {
   margin-top: 6px;
   font-size: 12px;
   line-height: 1.7;
-  color: var(--arl-text-color);
-  opacity: 0.5;
+  color: var(--arl-text-secondary);
 }
-
 .arl-field-hint code {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--arl-bg-hover);
   padding: 1px 4px;
   border-radius: 3px;
 }
 
-/* ================== 未保存改动与推荐值提示样式 ================== */
 .arl-recommend-row {
   display: flex;
   justify-content: space-between;
@@ -3009,461 +3946,13 @@ onBeforeRouteLeave(() => {
   border: 1px dashed color-mix(in srgb, var(--arl-theme-color) 30%, transparent);
   font-size: 13px;
 }
-
 .arl-recommend-label {
-  color: var(--arl-text-color);
-  opacity: 0.6;
+  color: var(--arl-text-secondary);
   margin-right: 6px;
 }
-
 .arl-recommend-basis {
-  color: var(--arl-text-color);
-  opacity: 0.5;
-  font-size: 12px;
-}
-
-/* 可以在此处添加自定义样式 */
-
-.cdn-textarea {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  resize: none;
-  padding: 16px;
-  font-family: 'Fira Code', 'Consolas', monospace;
-  font-size: 14px;
-  color: #a6e22e;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-.cdn-textarea::placeholder {
-  color: rgba(255, 255, 255, 0.2);
-}
-.purple-glow:hover {
-  box-shadow: 0 12px 48px rgba(114, 46, 209, 0.25) !important;
-}
-.pulse-btn {
-  animation: btnPulse 2s infinite;
-}
-@keyframes btnPulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--arl-theme-color) 70%, transparent); }
-  70% { box-shadow: 0 0 0 10px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
-}
-
-/* 字典管理现代化升级样式 */
-.custom-list-item {
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid transparent;
-  color: var(--arl-text-color);
-}
-.custom-list-item:hover {
-  background: var(--arl-bg-light);
-  transform: translateX(4px);
-}
-.custom-list-item.is-active {
-  background: var(--arl-theme-color);
-  color: #fff;
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--arl-theme-color) 30%, transparent);
-}
-.custom-list-item.is-active .dict-title,
-.custom-list-item.is-active .dict-subtitle {
-  color: #fff;
-}
-.custom-list-item.is-active .dict-badge {
-  background: rgba(255,255,255,0.2);
-  color: #fff;
-}
-.dict-subtitle {
-  font-size: 12px;
-  opacity: 0.65;
-}
-.dict-badge {
-  font-size: 10px;
-  background: rgba(0,0,0,0.05);
-  padding: 2px 6px;
-  border-radius: 4px;
-  color: var(--arl-text-color);
-  opacity: 0.6;
-}
-.hide-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.hide-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-/* 仪表盘（空状态）样式 */
-.health-dashboard-wrapper {
-  flex: 1;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--arl-bg-white, #f8fafc);
-  overflow: hidden;
-}
-.health-dashboard-bg {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(circle at 50% -20%, color-mix(in srgb, var(--arl-theme-color) 12%, transparent), transparent 60%),
-              radial-gradient(circle at -20% 80%, rgba(114, 46, 209, 0.05), transparent 50%);
-  pointer-events: none;
-}
-.health-content {
-  position: relative;
-  z-index: 1;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-}
-.health-icon-pulse {
-  animation: float 4s ease-in-out infinite;
-  margin-bottom: 8px;
-}
-@keyframes float {
-  0% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
-  100% { transform: translateY(0px); }
-}
-.health-title {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--arl-text-color);
-  margin: 0;
-  letter-spacing: 0.5px;
-}
-.health-stats-container {
-  display: flex;
-  gap: 24px;
-  margin-top: 16px;
-}
-.health-stat-card {
-  background: var(--arl-bg-subcard);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--arl-border-color);
-  border-radius: 16px;
-  padding: 24px 40px;
-  min-width: 180px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.06);
-  transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
-}
-.health-stat-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 32px rgba(0,0,0,0.12);
-  border-color: color-mix(in srgb, var(--arl-theme-color) 35%, var(--arl-border-color));
-}
-.stat-value {
-  font-size: 36px;
-  font-weight: 800;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  line-height: 1.2;
-}
-.primary-stat .stat-value {
-  background-image: linear-gradient(135deg, var(--arl-theme-color) 0%, #36cfc9 100%);
-}
-.warning-stat .stat-value {
-  background-image: linear-gradient(135deg, #fa8c16 0%, #ffc53d 100%);
-}
-.stat-label {
-  font-size: 14px;
   color: var(--arl-text-secondary);
-  margin-top: 8px;
-  font-weight: 500;
-}
-.health-hint {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 32px;
-  color: var(--arl-text-secondary);
-  font-size: 13px;
-  background: var(--arl-bg-subcard);
-  padding: 8px 16px;
-  border-radius: 20px;
-  border: 1px solid var(--arl-border-color, rgba(255,255,255,0.6));
-}
-.pulse-dot {
-  width: 8px;
-  height: 8px;
-  background: #52c41a;
-  border-radius: 50%;
-  box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.7);
-  animation: dotPulse 2s infinite;
-}
-@keyframes dotPulse {
-  0% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.7); }
-  70% { box-shadow: 0 0 0 8px rgba(82, 196, 26, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0); }
-}
-
-/* 代码区还原极简素雅风格 */
-.native-preview-container {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  background: var(--arl-bg-white);
-  position: relative;
-  overflow: hidden;
-}
-.native-toolbar {
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--arl-border-color);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--arl-bg-white);
-  min-height: 64px;
-}
-.native-preview-area {
-  flex: 1;
-  display: flex;
-  overflow-y: auto;
-  padding: 24px;
-  background: var(--arl-bg-light); /* 非常浅的底色区分 */
-}
-.native-code-wrapper {
-  flex: 1;
-  display: flex;
-  background: var(--arl-bg-white);
-  border: 1px solid var(--arl-border-color);
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-  font-family: 'Fira Code', 'SFMono-Regular', Consolas, Menlo, monospace;
-  font-size: 13px;
-  line-height: 1.6;
-}
-.native-line-numbers {
-  display: flex;
-  flex-direction: column;
-  padding-right: 16px;
-  border-right: 1px solid var(--arl-border-color);
-  margin-right: 16px;
-  color: var(--arl-text-color);
-  opacity: 0.35;
-  text-align: right;
-  user-select: none;
-  min-width: 40px;
-}
-.line-number {
-  height: 21px; /* 与 line-height: 1.6 和 font-size: 13px 对应，大致是 20.8px */
-}
-.native-code-content {
-  flex: 1;
-  min-width: 0;
-}
-.code-text {
-  margin: 0;
-  color: var(--arl-text-color);
-  opacity: 0.85;
-  white-space: pre-wrap;
-  word-break: break-all;
-  font-family: inherit;
-}
-.empty-code {
-  color: var(--arl-text-color);
-  opacity: 0.3;
-  font-style: italic;
-  padding-top: 20px;
-  text-align: center;
-}
-.code-limit-hint {
-  color: var(--arl-theme-color);
-  margin-top: 24px;
-  font-style: italic;
-  border-top: 1px dashed var(--arl-border-color);
-  padding-top: 16px;
-  opacity: 0.7;
-}
-
-@keyframes btn-breathing {
-  0% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.4); }
-  70% { box-shadow: 0 0 0 6px rgba(82, 196, 26, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0); }
-}
-.breathing-btn {
-  animation: btn-breathing 2s infinite;
-}
-
-/* ================== 系统更新 Modal 实时态势与分层芯片样式 ================== */
-.update-heartbeat-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(82, 196, 26, 0.12);
-  color: #52c41a;
-  border: 1px solid rgba(82, 196, 26, 0.3);
-  padding: 2px 8px;
-  border-radius: 12px;
   font-size: 12px;
-  font-weight: 500;
-}
-
-.heartbeat-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background-color: #52c41a;
-  animation: pulse-dot 1.5s infinite ease-in-out;
-}
-
-@keyframes pulse-dot {
-  0% { transform: scale(0.8); opacity: 0.5; }
-  50% { transform: scale(1.3); opacity: 1; }
-  100% { transform: scale(0.8); opacity: 0.5; }
-}
-
-.update-layer-box {
-  margin-bottom: 12px;
-  background: var(--arl-theme-soft-bg);
-  border: 1px dashed var(--arl-theme-soft-border);
-  border-radius: 6px;
-  padding: 8px 12px;
-}
-
-.update-layer-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--arl-theme-color);
-  margin-bottom: 6px;
-}
-
-.update-layer-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-height: 80px;
-  overflow-y: auto;
-}
-
-.layer-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--arl-bg-white);
-  border: 1px solid var(--arl-border-color);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-family: monospace;
-}
-
-.layer-id {
-  font-weight: 600;
-  color: var(--arl-theme-color);
-}
-
-.layer-status {
-  color: var(--arl-text-color);
-  opacity: 0.85;
-}
-
-.page-small-text { font-size: 12px; }
-.page-config-card { margin-bottom: 16px; border-radius: 6px; }
-.page-flush-bottom { margin-bottom: 0; }
-.page-config-card-min-height { margin-bottom: 16px; border-radius: 6px; min-height: 190px; }
-.page-field-spacing { margin-bottom: 12px; }
-.page-config-card-fixed { margin-bottom: 16px; border-radius: 6px; height: 190px; }
-.page-rounded { border-radius: 6px; }
-.page-panel-heading { font-weight: 600; font-size: 14px; color: var(--arl-text-color); }
-.page-search-field { flex: 1; border-radius: 4px; }
-.page-icon-padding { padding: 0 8px; }
-.page-label { font-size: 13px; font-weight: 500; }
-.page-quiet-help { font-size: 12px; opacity: 0.7; }
-.page-tiny-tag { margin: 0; font-size: 10px; line-height: 16px; padding: 0 4px; border-radius: 2px; }
-.page-dictionary-summary { color: var(--arl-text-color); opacity: 0.55; font-size: 12px; font-family: 'Fira Code', monospace; }
-.page-icon-gap { margin-right:4px; }
-.page-muted-label { font-size: 12px; opacity: 0.65; color: var(--arl-text-color); }
-.page-small-icon-gap { margin-right:2px; }
-.page-description { margin-bottom: 16px; color: var(--arl-text-color); font-size: 13px; }
-.page-inline-gap { margin-right: 8px; }
-.page-compact-description { margin-bottom: 12px; color: var(--arl-text-color); font-size: 13px; }
-.page-code-preview { font-family: monospace; font-size: 12px; margin-bottom: 24px; }
-.page-form-section-title { margin-bottom: 8px; font-weight: 500; font-size: 14px; }
-.page-success-detail { margin-bottom: 8px; color: #52c41a; font-size: 13px; }
-.page-error-detail { margin-bottom: 8px; color: #ff4d4f; font-size: 13px; }
-.page-warning-detail { color: #faad14; font-size: 12px; margin-top: 8px; }
-.page-danger-section-title { margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #ff4d4f; }
-.page-empty-detail { margin-bottom: 8px; color: var(--arl-text-color); opacity: 0.45; font-size: 12px; }
-.page-code-summary { font-family: monospace; font-size: 12px; margin-bottom: 16px; }
-.page-danger-emphasis { color: #cf1322; }
-.page-flush-tag { margin: 0; }
-.page-secondary-help { color: var(--arl-text-color); opacity: 0.55; font-size: 12px; }
-.page-warning-emphasis { color: #d46b08; }
-.page-config-card-danger { margin-bottom: 16px; border-radius: 6px; border-left: 4px solid #ff4d4f; }
-.page-choice-gap { margin-left: 8px; font-size: 12px; }
-.page-strong-heading { font-weight: bold; margin-bottom: 8px; }
-.page-config-card-success { margin-bottom: 16px; border-radius: 6px; border-left: 4px solid #52c41a; }
-.page-config-card-info { margin-bottom: 16px; border-radius: 6px; border-left: 4px solid var(--arl-theme-color); }
-.page-config-card-purple { margin-bottom: 16px; border-radius: 6px; border-left: 4px solid #722ed1; }
-.page-config-card-theme { margin-bottom: 16px; border-radius: 6px; border-left: 4px solid var(--arl-theme-color); }
-.page-form-spacing { margin-bottom: 8px; }
-.page-config-card-fixed-short { margin-bottom: 16px; border-radius: 6px; height: 180px; }
-.page-config-card-fixed-tall { margin-bottom: 16px; border-radius: 6px; height: 260px; }
-.page-dialog-content { max-width: 800px; }
-.page-sidebar-heading { font-weight: 600; font-size: 15px; color: var(--arl-text-color); }
-.page-small-heading { font-weight: 600; font-size: 12px; }
-.page-primary-action { border-radius: 6px; padding: 0 32px; font-weight: 600; }
-
-.page-wide-text .page-config-card-fixed,
-.page-wide-text .page-config-card-fixed-short,
-.page-wide-text .page-config-card-fixed-tall { height: auto; min-height: 190px; }
-.page-wide-text :deep(.ant-card-head-title) { white-space: normal; line-height: 1.5; padding: 12px 0; }
-.performance-pending-alert { margin-bottom: 16px; border-radius: 6px; }
-
-.arl-settings-page {
-  padding-bottom: 72px;
-}
-
-.arl-dirty-banner-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.arl-dirty-banner-info {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.arl-dirty-section-tag {
-  cursor: pointer;
-  margin: 0;
-}
-
-.arl-dirty-banner-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.arl-floating-dirty-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #faad14;
-  flex-shrink: 0;
 }
 
 .arl-leave-modal-body {
@@ -3471,22 +3960,25 @@ onBeforeRouteLeave(() => {
   align-items: flex-start;
   gap: 12px;
 }
-
 .arl-leave-modal-icon {
   font-size: 20px;
   color: #faad14;
   margin-top: 2px;
   flex-shrink: 0;
 }
-
 .arl-leave-modal-content {
   flex: 1;
   min-width: 0;
 }
-
 .arl-leave-section-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.page-wide-text :deep(.ant-card-head-title) {
+  white-space: normal;
+  line-height: 1.5;
+  padding: 8px 0;
 }
 </style>

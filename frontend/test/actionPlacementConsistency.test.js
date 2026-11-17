@@ -115,6 +115,7 @@ test('多页签页面统一使用顶栏胶囊切换，且主创建按钮固定�
     'views/PlanningTasks.vue',
     'views/PocList.vue',
     'views/McpCenter.vue',
+    'views/SystemSettings.vue',
     'components/NucleiManage.vue',
   ];
 

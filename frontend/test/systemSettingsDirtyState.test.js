@@ -154,7 +154,7 @@ test('SystemSettings: applyRecommended 正确映射字段名并触发脏状态�
   assert.equal(context.performanceForm.value.github_concurrency, 6);
 });
 
-test('SystemSettings: firstDirtyTabKey 与 goToFirstDirty 正确支持外层 Tab 与内层子 Tab 导航', () => {
+test('SystemSettings: firstDirtyTabKey 与 goToFirstDirty 正确支持 5 大主域与二级 Tab 导航', async () => {
   const { read, context } = loadSystemSettings();
 
   read('isConfigInitialized');
@@ -175,9 +175,25 @@ test('SystemSettings: firstDirtyTabKey 与 goToFirstDirty 正确支持外层 Tab
   read('performanceBaseline');
   read('isPerformanceDirty');
 
-  context.activeKey = ref('api_config');
-  context.dictSubTab = ref('dict');
-  context.scanSubTab = ref('performance');
+  context.activeKey = ref('intel');
+  context.guardrailSubTab = ref('proxy');
+  context.arsenalSubTab = ref('concurrency');
+  context.opsSubTab = ref('auth_infra');
+  context.visitedDomains = reactive({
+    intel: true,
+    egress_guardrails: false,
+    scanning_arsenal: true,
+    notifications: true,
+    system_ops: false,
+  });
+  context.visitedSubTabs = reactive({
+    proxy: false,
+    cdn: false,
+    backup: false,
+    update: false,
+  });
+  read('markVisitedState');
+  read('applyDomainAndSubTab');
 
   read('isSectionRefDirty');
   read('SECTION_SPECS');
@@ -188,66 +204,65 @@ test('SystemSettings: firstDirtyTabKey 与 goToFirstDirty 正确支持外层 Tab
 
   context.isConfigInitialized.value = true;
 
-  // 1. 当 performanceDirty 时
+  // 1. 当 performanceDirty 时 -> scanning_arsenal / concurrency
   context.performanceForm.value.celery_heavy_concurrency = 3;
-  assert.equal(context.firstDirtyTabKey.value, 'performance');
+  assert.equal(context.firstDirtyTabKey.value, 'scanning_arsenal');
   context.goToFirstDirty();
-  assert.equal(context.activeKey.value, 'performance');
-  assert.equal(context.scanSubTab.value, 'performance');
+  assert.equal(context.activeKey.value, 'scanning_arsenal');
+  assert.equal(context.arsenalSubTab.value, 'concurrency');
 
   // 还原
   context.performanceForm.value.celery_heavy_concurrency = 1;
 
-  // 2. 当 securityDirty 时
+  // 2. 当 securityDirty 时 -> egress_guardrails / security
   context.securityForm.value.blackIpsText = '10.0.0.1';
-  assert.equal(context.firstDirtyTabKey.value, 'performance');
+  assert.equal(context.firstDirtyTabKey.value, 'egress_guardrails');
   context.goToFirstDirty();
-  assert.equal(context.activeKey.value, 'performance');
-  assert.equal(context.scanSubTab.value, 'security');
+  assert.equal(context.activeKey.value, 'egress_guardrails');
+  assert.equal(context.guardrailSubTab.value, 'security');
 
   // 还原
   context.securityForm.value.blackIpsText = '';
 
-  // 3. 当 system_general 有脏字段时
+  // 3. 当 scan_params (port_top_10) 有脏字段时 -> scanning_arsenal / concurrency
   context.generalForm.value.port_top_10 = '80,443,8443';
-  assert.equal(context.firstDirtyTabKey.value, 'performance');
+  assert.equal(context.firstDirtyTabKey.value, 'scanning_arsenal');
   context.goToFirstDirty();
-  assert.equal(context.activeKey.value, 'performance');
-  assert.equal(context.scanSubTab.value, 'system_general');
+  assert.equal(context.activeKey.value, 'scanning_arsenal');
+  assert.equal(context.arsenalSubTab.value, 'concurrency');
 
   // 还原
   context.generalForm.value.port_top_10 = '';
 
-  // 4. 当 proxy 面板有脏字段时
+  // 4. 当 system_auth (auth/api_key) 有脏字段时 -> system_ops / auth_infra
+  context.generalForm.value.auth = true;
+  assert.equal(context.firstDirtyTabKey.value, 'system_ops');
+  context.goToFirstDirty();
+  assert.equal(context.activeKey.value, 'system_ops');
+  assert.equal(context.opsSubTab.value, 'auth_infra');
+
+  // 还原
+  context.generalForm.value.auth = false;
+
+  // 5. 当 proxy 面板有脏字段时 -> egress_guardrails / proxy
   const focusedAnchors = [];
   context.proxyPanelRef.value = {
     hasUnsavedChanges: () => true,
     focusSection: (anchor) => focusedAnchors.push(anchor),
   };
-  assert.equal(context.firstDirtyTabKey.value, 'proxy');
+  assert.equal(context.firstDirtyTabKey.value, 'egress_guardrails');
   context.goToFirstDirty();
-  assert.equal(context.activeKey.value, 'proxy');
-  assert.deepEqual(focusedAnchors, ['proxy_save']);
+  assert.equal(context.activeKey.value, 'egress_guardrails');
+  assert.equal(context.guardrailSubTab.value, 'proxy');
+  await nextTick();
+  assert.deepEqual(focusedAnchors, ['proxy']);
   context.proxyPanelRef.value = null;
 
-  // 5. 当 cdn 面板有脏字段时
-  const cdnFocused = [];
-  context.cdnPanelRef.value = {
-    hasUnsavedChanges: () => true,
-    focusSection: (anchor) => cdnFocused.push(anchor),
-  };
-  assert.equal(context.firstDirtyTabKey.value, 'dictionary');
-  context.goToFirstDirty();
-  assert.equal(context.activeKey.value, 'dictionary');
-  assert.equal(context.dictSubTab.value, 'cdn');
-  assert.deepEqual(cdnFocused, ['cdn_save']);
-  context.cdnPanelRef.value = null;
-
-  // 6. 当 api_config 有脏字段时
+  // 6. 当 api_config 有脏字段时 -> intel
   context.generalForm.value.fofa_key = 'test_key';
-  assert.equal(context.firstDirtyTabKey.value, 'api_config');
+  assert.equal(context.firstDirtyTabKey.value, 'intel');
   context.goToFirstDirty();
-  assert.equal(context.activeKey.value, 'api_config');
+  assert.equal(context.activeKey.value, 'intel');
 });
 
 test('SystemSettings: 统一分区计数、批量保存部分失败回写成功项与全部重置闭环', async () => {
@@ -275,15 +290,34 @@ test('SystemSettings: 统一分区计数、批量保存部分失败回写成功�
   read('saveGeneralGroup');
   read('saveGeneralConfig');
   read('resetGeneralGroup');
+  read('saveSecurityPolicy');
   read('resetSecurityForm');
+  read('savePerformanceConfig');
   read('resetPerformanceForm');
 
   context.request = {
     post: async (url, payload) => ({ code: 200, data: payload }),
   };
-  context.activeKey = ref('api_config');
-  context.dictSubTab = ref('dict');
-  context.scanSubTab = ref('performance');
+  context.fetchSecurityPolicy = () => {};
+  context.activeKey = ref('intel');
+  context.guardrailSubTab = ref('proxy');
+  context.arsenalSubTab = ref('concurrency');
+  context.opsSubTab = ref('auth_infra');
+  context.visitedDomains = reactive({
+    intel: true,
+    egress_guardrails: false,
+    scanning_arsenal: true,
+    notifications: true,
+    system_ops: false,
+  });
+  context.visitedSubTabs = reactive({
+    proxy: false,
+    cdn: false,
+    backup: false,
+    update: false,
+  });
+  read('markVisitedState');
+  read('applyDomainAndSubTab');
 
   read('isSectionRefDirty');
   read('SECTION_SPECS');
@@ -301,9 +335,8 @@ test('SystemSettings: 统一分区计数、批量保存部分失败回写成功�
   context.generalForm.value.fofa_url = 'https://fofa.example';
   assert.equal(context.unsavedCount.value, 1);
 
-  // 同时修改 proxy 与 cdn（proxy 模拟校验失败返回 false，cdn 模拟成功）
+  // 同时修改 proxy 与 security（proxy 模拟校验失败返回 false，security 提交成功）
   let proxyDirty = true;
-  let cdnDirty = true;
   const focused = [];
   context.proxyPanelRef.value = {
     hasUnsavedChanges: () => proxyDirty,
@@ -311,21 +344,19 @@ test('SystemSettings: 统一分区计数、批量保存部分失败回写成功�
     resetChanges: () => { proxyDirty = false; },
     focusSection: (anchor) => focused.push(anchor),
   };
-  context.cdnPanelRef.value = {
-    hasUnsavedChanges: () => cdnDirty,
-    saveChanges: async () => { cdnDirty = false; return true; },
-    resetChanges: () => { cdnDirty = false; },
-    focusSection: () => {},
-  };
+  context.securityForm.value.forbiddenDomainsText = 'gov.cn';
 
   assert.equal(context.unsavedCount.value, 3);
 
-  // 批量保存：api_config 与 cdn 提交成功且基线回写；proxy 失败后停留 proxy 并定位到 proxy_save
+  // 批量保存：api_config 与 security 提交成功且基线回写；proxy 失败后停留 egress_guardrails/proxy 并定位到 proxy
   const okPartial = await context.saveAllDirtySections();
   assert.equal(okPartial, false);
-  assert.equal(context.activeKey.value, 'proxy');
-  assert.deepEqual(focused, ['proxy_save']);
+  assert.equal(context.activeKey.value, 'egress_guardrails');
+  assert.equal(context.guardrailSubTab.value, 'proxy');
+  await nextTick();
+  assert.deepEqual(focused, ['proxy']);
   assert.deepEqual(plain(context.pendingByGroup.value.api_config), {});
+  assert.equal(context.isSecurityDirty.value, false);
   assert.equal(context.unsavedCount.value, 1);
   assert.equal(notices.at(-1).type, 'warning');
 

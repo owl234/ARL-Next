@@ -1,6 +1,6 @@
 <template>
-  <div class="tab-content" style="padding: 20px;">
-    <a-card data-setting-anchor="update" :title="pageText('pages.systemUpdateManagement')" :bordered="false" class="page-dialog-content">
+  <div class="update-panel-root">
+    <a-card data-setting-anchor="update" :title="pageText('pages.systemUpdateManagement')" size="small" class="page-dialog-content">
       <template #extra>
         <a-button size="small" :loading="checkingVersion" @click="checkVersion(true)">
           <template #icon><ReloadOutlined /></template>
@@ -80,7 +80,7 @@
       <template #title>
         <div style="display: flex; align-items: center; justify-content: space-between; padding-right: 24px;">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 18px;">🚀</span>
+            <RocketOutlined style="font-size: 17px; color: var(--arl-theme-color);" />
             <span class="page-sidebar-heading">{{ pageText('pages.arlNextOnlineSystemUpdate') }}</span>
           </div>
           <div style="display: flex; align-items: center; gap: 12px;">
@@ -107,7 +107,7 @@
       <!-- 实时镜像分层动态传输芯片 -->
       <div v-if="Object.keys(activeLayers).length > 0" class="update-layer-box">
         <div class="update-layer-header">
-          <span style="font-size: 14px;">⚡</span>
+          <ThunderboltOutlined style="font-size: 14px;" />
           <span class="page-small-heading">{{ pageText('pages.transferringImageLayers') }}{{ Object.keys(activeLayers).length }} {{ pageText('pages.activeLayers') }}</span>
         </div>
         <div class="update-layer-list">
@@ -119,7 +119,7 @@
       </div>
 
       <!-- 终端控制台 -->
-      <div style="background-color: #141414; border: 1px solid #333; color: #00ff66; padding: 14px; border-radius: 6px; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; height: 380px; overflow-y: auto; box-shadow: inset 0 2px 8px rgba(0,0,0,0.4);" ref="terminalRef">
+      <div class="arl-mono-terminal" style="height: 380px; overflow-y: auto; box-shadow: inset 0 2px 8px rgba(0,0,0,0.4);" ref="terminalRef">
         <pre style="margin: 0; white-space: pre-wrap; font-family: inherit; color: inherit; background: transparent; border: none; padding: 0; font-size: 12px; line-height: 1.6;">{{ updateLogs }}</pre>
       </div>
 
@@ -135,7 +135,7 @@
 import { ref, computed, watch, onMounted, onActivated, onDeactivated, onUnmounted, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { message, Modal } from 'ant-design-vue';
-import { GithubOutlined, ReloadOutlined } from '@ant-design/icons-vue';
+import { GithubOutlined, ReloadOutlined, RocketOutlined, ThunderboltOutlined } from '@ant-design/icons-vue';
 import request from '@/utils/request';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
@@ -508,7 +508,8 @@ defineExpose({
 </script>
 
 <style scoped>
-.page-dialog-content { max-width: 800px; }
+.update-panel-root { max-width: 1240px; }
+.page-dialog-content { max-width: 100%; }
 .page-dialog-content :deep(.ant-descriptions-item-label) { width: 150px; min-width: 130px; }
 .page-sidebar-heading { font-weight: 600; font-size: 15px; color: var(--arl-text-color); }
 .page-small-heading { font-weight: 600; font-size: 12px; }

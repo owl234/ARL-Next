@@ -1,9 +1,9 @@
 <template>
-  <div class="tab-content" style="padding: 20px;">
+  <div class="backup-panel-root">
     <!-- 顶层操作看板 -->
-    <a-card data-setting-anchor="backup" :title="pageText('pages.backupTitle')" :bordered="false" style="max-width: 1050px; margin-bottom: 20px;">
+    <a-card data-setting-anchor="backup" :title="pageText('pages.backupTitle')" size="small" style="margin-bottom: 16px;">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
-        <div style="max-width: 620px;">
+        <div style="max-width: 680px;">
           <div style="font-size: 14px; font-weight: 500; margin-bottom: 6px; color: var(--arl-text-color);">{{ pageText('pages.backupSnapshot') }}</div>
           <div style="font-size: 13px; color: var(--arl-text-color); opacity: 0.65; line-height: 1.6;">{{ pageText('pages.backupDescription') }}</div>
         </div>
@@ -30,7 +30,7 @@
     </a-card>
 
     <!-- 现存备份归档表格 -->
-    <a-card :title="pageText('pages.backupArchives')" :bordered="false" style="max-width: 1050px;">
+    <a-card :title="pageText('pages.backupArchives')" size="small">
       <a-table
         :dataSource="backupList"
         :columns="backupColumns"
@@ -52,8 +52,8 @@
             <div style="font-family: monospace; font-weight: 600; color: var(--arl-text-color);">
               {{ record.filename }}
             </div>
-            <div v-if="record.note" style="font-size: 12px; color: var(--arl-text-color); opacity: 0.6; margin-top: 2px;">
-              📝 {{ record.note }}
+            <div v-if="record.note" style="font-size: 12px; color: var(--arl-text-color); opacity: 0.65; margin-top: 2px; display: flex; align-items: center; gap: 4px;">
+              <FileTextOutlined /> {{ record.note }}
             </div>
           </template>
 
@@ -234,7 +234,8 @@
       <template #title>
         <div style="display: flex; align-items: center; justify-content: space-between; padding-right: 24px;">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 18px;">{{ progressAction === 'backup' ? '📦' : '🔄' }}</span>
+            <DatabaseOutlined v-if="progressAction === 'backup'" style="font-size: 17px; color: var(--arl-theme-color);" />
+            <SyncOutlined v-else style="font-size: 17px; color: var(--arl-theme-color);" />
             <span style="font-weight: 600; font-size: 15px; color: var(--arl-text-color);">
               {{ progressAction === 'backup' ? pageText('pages.backupProgressTitle') : pageText('pages.backupRestoreProgressTitle') }}
             </span>
@@ -303,7 +304,8 @@ import { useI18n } from 'vue-i18n';
 import { message } from 'ant-design-vue';
 import {
   CloudUploadOutlined, CloudDownloadOutlined, DownloadOutlined,
-  UploadOutlined, DeleteOutlined, ReloadOutlined, InboxOutlined
+  UploadOutlined, DeleteOutlined, ReloadOutlined, InboxOutlined,
+  FileTextOutlined, DatabaseOutlined, SyncOutlined
 } from '@ant-design/icons-vue';
 import request from '@/utils/request';
 import { useGlobalPageSize } from '@/utils/useGlobalPageSize';
@@ -644,6 +646,10 @@ defineExpose({
 </script>
 
 <style scoped>
+.backup-panel-root {
+  max-width: 1240px;
+}
+
 .update-heartbeat-badge {
   display: inline-flex;
   align-items: center;

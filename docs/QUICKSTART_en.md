@@ -7,7 +7,7 @@
 
 ## What changed in this release (v1.4.3)
 
-- **Full-system data backup & restore**: "System Settings → Backup and restore" and the host CLI `python3 tools/arl_backup.py` support one-click full database & environment snapshot export/restore, guarded by a full-stack maintenance lock and automatic rollback on failure.
+- **Full-system data backup & restore**: "System Settings → System Ops → Backup & Restore" and the host CLI `python3 tools/arl_backup.py` support one-click full database & environment snapshot export/restore, guarded by a full-stack maintenance lock and automatic rollback on failure.
 - **Trilingual UI & MCP Governance Center**: switch between 简体中文 / English / Русский from the top navigation bar; the new sidebar "MCP Center" manages fine-grained scoped keys, tool-level permission switches, rate quotas, and invocation audit logs.
 - **WIH API endpoint probing & group workflow**: site details now extract static API endpoint candidates from JS assets and probe same-origin reachability; "New Asset Group" supports automated enterprise panorama recon filing and task-to-group linking.
 - Full changes: [`CHANGELOG_en.md`](../CHANGELOG_en.md).
@@ -114,7 +114,7 @@ Pick "🏢 Enterprise panorama recon → group" and paste a Tianyancha link (e.g
 
 <p align="center"><img src="../img/quickstart-group-wizard.png" alt="Enterprise panorama recon" width="420"></p>
 
-- **GID / Tianyancha link**: configure the commercial Tianyancha credential first under "System Settings → Asset recon & intel", otherwise a dialog prompts you to configure it.
+- **GID / Tianyancha link**: configure the commercial Tianyancha credential first under "System Settings → Intel & APIs", otherwise a dialog prompts you to configure it.
 - **Registered company name**: goes through the official MIIT ICP filing lookup with no commercial credential; the backend auto-upgrades to dual-track panorama recon when it matches a Tianyancha entity.
 - Leave "Group name" empty to auto-name it from the official company name; keep auto-filing enabled, then the backend files the group without keeping the page open.
 
@@ -164,14 +164,14 @@ Open "Task Management" → click "Asset Recon Tasks" to switch views → "New re
 ## Step 5: Next steps
 
 - For recurring runs: open "Planning & Scheduling", which separates one-shot plans from continuous monitoring.
-- For concurrency: open "System Settings → Scan & Concurrency → Task queue concurrency"; the three values are Worker process counts. Per-task blasting concurrency lives under "Advanced scan & environment" — they are different magnitudes.
+- For concurrency: open "System Settings → Scan & Arsenal → Concurrency & Defaults"; "Process-Level Queue Concurrency" configures Worker process counts, while "Per-Task Packet Concurrency & Scan Defaults" below configures per-task packet concurrency — they are different magnitudes.
 - For automation: open `https://<your-server-ip>:5173/api/doc` with `docs/API_GUIDE_en.md`; for AI agents see `mcp-server/README_en.md`.
 
 ---
 
 ## Upgrade notes
 
-- Prefer idle windows: triggering an update from "System Settings → System version & update" (button labeled "One-Click System Update") restarts background Workers and interrupts running scan tasks.
+- Prefer idle windows: triggering an update from "System Settings → System Ops → Updates & Version" (button labeled "One-Click System Update") restarts background Workers and interrupts running scan tasks.
 - Data compatibility: upgrades run incremental migrations and backfill missing fields without overwriting saved config; persistent volume names stay unchanged.
 
 ---

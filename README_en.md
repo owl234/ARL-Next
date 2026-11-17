@@ -369,7 +369,7 @@ ARL-Next offers two upgrade paths: **Web Console Online Update** (recommended, n
 
 #### Option 1: Web Console Online Update (Recommended)
 
-Log in to ARL-Next ➔ Navigate to **"System Settings"** ➔ Click **"One-Click System Update"**.<br/>
+Log in to ARL-Next ➔ Navigate to **"System Settings"** ➔ **"System Ops"** ➔ **"Updates & Version"** tab ➔ Click **"One-Click System Update"**.<br/>
 The host update daemon pulls the latest images, synchronizes orchestration scripts, and performs service health checks in the background without requiring SSH access.
 
 > [!WARNING]
@@ -408,7 +408,7 @@ Navigate to your ARL-Next installation directory and run the commands matching y
 
 Before cross-host migration or major upgrades, you can package and export all MongoDB collections, site screenshots, custom wordlists, and PoC plugins, or perform a `--drop` full overwrite restore:
 
-- **Web Console Visual Operations**: Go to **"System Settings" ➔ "Backup and restore"** to create backups online (optionally excluding screenshots to reduce archive size), download archives, upload external archives, and trigger a confirmed (`RESTORE`) overwrite restore.
+- **Web Console Visual Operations**: Go to **"System Settings" ➔ "System Ops" ➔ "Backup & Restore"** to create backups online (optionally excluding screenshots to reduce archive size), download archives, upload external archives, and trigger a confirmed (`RESTORE`) overwrite restore.
 - **Terminal CLI Utility** (automatically forwarded to the container when run on the host):
   ```bash
   # Create a full backup (or append --no-screenshots for a compact archive)
@@ -478,10 +478,10 @@ ARL-Next provides standardized RESTful APIs for automation scripts, CI/CD pipeli
 <br/>
 
 **A:** ARL-Next supports **dynamic live concurrency tuning** without restarting containers:
-- Log in to the web console ➔ **"System Settings"** ➔ **"Scanning & Concurrency"** ➔ **"Task Queue Concurrency"** tab;
+- Log in to the web console ➔ **"System Settings"** ➔ **"Scan & Arsenal"** ➔ **"Concurrency & Defaults"** tab;
 - Adjust **Heavy Task Queue Concurrency** (Domain/IP port scanning, risk cruising, Nuclei / PoC pipelines), **Light Task Queue Concurrency** (Space reconnaissance, single asset updates, WIH leak extraction, data synchronization) and **OSINT Concurrency**; save changes for instant application;
 - All three values are **Worker process counts** (typically 1–128) bounded by host memory. The UI derives a recommendation from detected memory and offers one-click fill.
-- ⚠️ To tune the **intra-task DNS brute-force send concurrency** (typically hundreds to thousands), go to **"Scanning & Concurrency"** ➔ **"Advanced Scanning & Environment"**. The two are different metrics — do not use the same magnitude for both.
+- ⚠️ To tune the **intra-task DNS brute-force send concurrency** (typically hundreds to thousands), adjust it under **"Per-Task Packet Concurrency & Scan Defaults"** in the same tab. The two are different metrics — do not use the same magnitude for both.
 </details>
 
 <details>

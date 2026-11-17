@@ -251,17 +251,20 @@ test('ProxyManagePanel 移除顶栏测活下拉并升级为行内复合探针、
   ]);
 });
 
-test('ProxyManagePanel 使用共享 SettingsActionBar 并由 SystemSettings 统一接管悬浮条', () => {
+test('ProxyManagePanel 与 CdnRulePanel 移除局部操作条并由 SystemSettings 吸顶 Hero 统一接管', () => {
   const panelRaw = fs.readFileSync(new URL('../src/components/settings/ProxyManagePanel.vue', import.meta.url), 'utf8');
   const sysRaw = fs.readFileSync(new URL('../src/views/SystemSettings.vue', import.meta.url), 'utf8');
   const cdnRaw = fs.readFileSync(new URL('../src/components/settings/CdnRulePanel.vue', import.meta.url), 'utf8');
   const styleRaw = fs.readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
 
-  assert.match(panelRaw, /<SettingsActionBar[\s\S]*anchor="proxy_save"/);
+  assert.doesNotMatch(panelRaw, /<SettingsActionBar/);
   assert.doesNotMatch(panelRaw, /arl-floating-action-bar/);
-  assert.match(cdnRaw, /<SettingsActionBar[\s\S]*anchor="cdn_save"/);
+  assert.match(panelRaw, /handleParseQuickUri/);
+  assert.match(panelRaw, /handleBatchProbeNodes/);
+  assert.doesNotMatch(cdnRaw, /<SettingsActionBar/);
   assert.doesNotMatch(cdnRaw, /breathing-btn/);
-  assert.match(sysRaw, /<div v-if="activeSectionDirty" class="arl-floating-action-bar">[\s\S]*saveAllDirtySections/);
+  assert.doesNotMatch(sysRaw, /arl-floating-action-bar/);
+  assert.match(sysRaw, /class="arl-hero-card"[\s\S]*class="arl-capsule-switcher"[\s\S]*saveAllDirtySections/);
   assert.match(styleRaw, /\.arl-anchor-flash\b/);
   assert.match(styleRaw, /\.arl-dirty-btn\b/);
 });
