@@ -322,12 +322,17 @@ ARL-Next 集成了 Model Context Protocol (MCP 2024-11-05 规范)，支持 AI �
 | :--- | :--- | :--- | :--- |
 | `/mcp/sse` | HTTP GET (`text/event-stream`) | 远程 MCP SSE 握手端点，维持长连接并推送 `endpoint` 与消息事件 | `Authorization: Bearer <TOKEN>`、`Token: <TOKEN>` 或 `?token=<TOKEN>` |
 | `/mcp/message` | HTTP POST (`application/json`) | 远程 MCP 消息上行端点，接收 JSON-RPC 2.0 请求（需携带 `?sessionId=`） | 同上 |
-| `/api/mcp/asset_profile` | HTTP GET (`application/json`) | 原生多维资产画像聚合接口，跨集合提取网络/Web/证书/漏洞/泄露情报 | `Token: <TOKEN>` |
-| `/api/mcp/enterprise_profile` | HTTP GET (`application/json`) | 原生企业生态资产画像聚合接口，自适应解析企业、提供概览统计与分维度下钻 | `Token: <TOKEN>` |
+| `/api/mcp/tools` | HTTP GET (`application/json`) | 按当前凭据 Scope 与全局开关交集返回可用 MCP 工具列表与参数 Schema | `Token: <TOKEN>` 或 `Authorization: Bearer <TOKEN>` |
+| `/api/mcp/asset_profile` | HTTP GET (`application/json`) | 原生多维资产画像聚合接口，跨集合提取网络/Web/证书/漏洞/泄露情报 | `Token: <TOKEN>` 或 `Authorization: Bearer <TOKEN>` |
+| `/api/mcp/enterprise_profile` | HTTP GET (`application/json`) | 原生企业生态资产画像聚合接口，自适应解析企业、提供概览统计与分维度下钻 | `Token: <TOKEN>` 或 `Authorization: Bearer <TOKEN>` |
+| `/api/mcp/search_assets` | HTTP GET (`application/json`) | 多维资产条件检索接口（支持 `site`/`domain`/`ip`/`vuln`，受 `max_search_limit` 约束） | `Token: <TOKEN>` 或 `Authorization: Bearer <TOKEN>` |
+| `/api/mcp/task_status` | HTTP GET (`application/json`) | 查询指定 24 位扫描任务执行进度、状态与资产发现统计摘要 | `Token: <TOKEN>` 或 `Authorization: Bearer <TOKEN>` |
+| `/api/mcp/create_scan_task` | HTTP POST (`application/json`) | 受控创建资产扫描任务（需 `task:dispatch` Scope 且全局工具开关启用） | `Token: <TOKEN>` 或 `Authorization: Bearer <TOKEN>` |
+| `/api/mcp/stop_scan_task` | HTTP POST (`application/json`) | 受控终止排队中或进行中的资产扫描任务（需 `task:dispatch` Scope 且全局工具开关启用） | `Token: <TOKEN>` 或 `Authorization: Bearer <TOKEN>` |
 | `/api/mcp/export_server` | HTTP GET / POST (`text/x-python`) | 导出客户端脚本；专用 Key 使用 POST JSON 的 `raw_key`，GET 仅使用当前登录凭据 | 登录 Token 或系统 API Key |
 | `/api/mcp/task_detail_export`| HTTP GET (`text/csv`) | 任务详情分维度安全 CSV 数据导出（内置公式注入防御） | `Token: <TOKEN>` |
-| `/api/mcp/overview` | HTTP GET (`application/json`) | MCP 治理中心大盘与调用统计概览（调用量、活跃 Key、异常数） | `Token: <TOKEN>` |
-| `/api/mcp/keys` | HTTP GET / POST (`application/json`) | MCP 专用 API Key 列表查询与签发（支持细粒度 Scope 授权） | `Token: <TOKEN>` |
+| `/api/mcp/overview` | HTTP GET (`application/json`) | MCP 治理中心大盘与调用统计概览（调用量、活跃 Key、异常数、SSE 实时连通探活 `sse_status`/`sse_sessions`） | `Token: <TOKEN>` |
+| `/api/mcp/keys` | HTTP GET / POST (`application/json`) | MCP 专用 API Key 列表查询（支持 `keyword` 与 `status`: active/expired/revoked 筛选及 `is_expired` 状态计算）与签发 | `Token: <TOKEN>` |
 | `/api/mcp/logs` | HTTP GET (`application/json`) | MCP 调用审计日志分页查询（支持 `time_range`：today/24h/7d，`status`：success/error/denied/abnormal） | `Token: <TOKEN>` |
 | `/api/mcp/logs/export` | HTTP GET (`text/csv`) | 导出符合筛选条件的审计日志 CSV 文件 | `Token: <TOKEN>` |
 | `/api/mcp/config` | HTTP GET / POST (`application/json`) | 获取与保存 MCP 全局工具开关与频控配额策略 | `Token: <TOKEN>` |
@@ -345,7 +350,7 @@ ARL-Next 集成了 Model Context Protocol (MCP 2024-11-05 规范)，支持 AI �
 
 - `tools/list` 和执行入口使用相同的全局开关及 Key Scope。数据库中的显式开关优先；没有保存开关时，`ARL_MCP_ENABLE_DISPATCH` 作为写工具的默认值。
 - SSE 每条上行消息重新校验握手凭据；吊销、删除、到期或轮换凭据后，旧 `sessionId` 不能继续调用。显式请求头必须与握手凭据一致。有效期统一按 UTC 判断。
-- Stdio 专用 Key 可访问只读 `/api/mcp/asset_profile` 和 `/api/mcp/enterprise_profile`，需要 `asset:read`，不具备其他管理 REST 接口权限。SSE 和两个只读接口共用每个凭据的固定分钟限额；被权限或开关拒绝的调用同样计入限额；超限返回 HTTP `429` 和 `Retry-After`，每分钟仅记录首次超限审计，配额存储不可用时返回 `503`。
+- Stdio 专用 Key 可通过 `/api/mcp/tools` 动态发现可用工具，并按 Scope 与全局开关访问对应工具端点（只读 `asset:read` 对应 `/api/mcp/asset_profile`、`/api/mcp/enterprise_profile`、`/api/mcp/search_assets`、`/api/mcp/task_status`；受控调度 `task:dispatch` 对应 `/api/mcp/create_scan_task`、`/api/mcp/stop_scan_task`），不具备其他管理 REST 接口权限。SSE 和上述 6 个 REST 工具端点共用每个凭据的固定分钟限额；被权限或开关拒绝的调用同样计入限额；超限返回 HTTP `429` 和 `Retry-After`，每分钟仅记录首次超限审计，配额存储不可用时返回 `503`。
 - 管理台生成配置需要完整 Key。新建 Key 的明文仅保留在当前页面；再次打开页面时需粘贴先前保存的完整值，不能使用列表中的脱敏前缀。导出脚本使用 `POST /api/mcp/export_server`，JSON 为 `{"host":"https://arl.example","raw_key":"<完整 MCP Key>"}`；账号凭据仍放在 `Token` 请求头。GET 不接受 `raw_key`。
 - `create_scan_task` 对混合目标可能创建多个任务，响应通过 `task_ids` 返回全部 ID，兼容字段 `task_id` 为第一个 ID。策略绑定的资产范围仍在提交前统一校验。
 

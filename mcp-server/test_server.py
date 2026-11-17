@@ -292,6 +292,50 @@ class MCPTests(unittest.TestCase):
             with patch.dict(os.environ, {'ARL_TLS_VERIFY': 'false'}):
                 self.assertEqual(server._request_api('/site/')[0], 200)
 
+    def test_tools_list_syncs_from_remote_and_falls_back_on_404(self):
+        remote_tools = [server.TOOL_GET_ASSET_PROFILE, server.TOOL_SEARCH_ASSETS]
+        with patch.object(server, '_request_api', return_value=(200, {'code': 200, 'tools': remote_tools})):
+            resp = server.handle_request({'jsonrpc': '2.0', 'id': 11, 'method': 'tools/list'})
+            self.assertEqual([t['name'] for t in resp['result']['tools']], ['get_asset_profile', 'search_assets'])
+
+        with patch.object(server, '_request_api', return_value=(404, {})):
+            resp = server.handle_request({'jsonrpc': '2.0', 'id': 12, 'method': 'tools/list'})
+            self.assertEqual([t['name'] for t in resp['result']['tools']], ['get_asset_profile', 'get_enterprise_profile'])
+
+    def test_stdio_supports_search_task_status_and_dispatch_tools(self):
+        with patch.object(server, '_request_api', return_value=(200, {'items': [{'site': 'https://a.test'}], 'total': 1, 'type': 'site'})) as mock_get:
+            res = server.handle_request({
+                'jsonrpc': '2.0', 'id': 21, 'method': 'tools/call',
+                'params': {'name': 'search_assets', 'arguments': {'query': 'a.test', 'asset_type': 'site', 'limit': 5}}
+            })['result']
+            self.assertFalse(res['isError'])
+            mock_get.assert_called_with('/mcp/search_assets', {'query': 'a.test', 'asset_type': 'site', 'limit': 5})
+
+        tid = '670000000000000000000001'
+        with patch.object(server, '_request_api', return_value=(200, {'task_id': tid, 'status': 'done'})) as mock_get:
+            res = server.handle_request({
+                'jsonrpc': '2.0', 'id': 22, 'method': 'tools/call',
+                'params': {'name': 'get_task_status', 'arguments': {'task_id': tid}}
+            })['result']
+            self.assertFalse(res['isError'])
+            mock_get.assert_called_with('/mcp/task_status', {'task_id': tid})
+
+        with patch.object(server, '_post_api', return_value=(200, {'status': 'success', 'task_id': tid})) as mock_post:
+            res = server.handle_request({
+                'jsonrpc': '2.0', 'id': 23, 'method': 'tools/call',
+                'params': {'name': 'create_scan_task', 'arguments': {'name': 'recon', 'target': 'example.com'}}
+            })['result']
+            self.assertFalse(res['isError'])
+            mock_post.assert_called_with('/mcp/create_scan_task', {'name': 'recon', 'target': 'example.com'})
+
+        with patch.object(server, '_post_api', return_value=(403, {'code': 403, 'status': 'denied', 'message': 'Permission denied'})):
+            res = server.handle_request({
+                'jsonrpc': '2.0', 'id': 24, 'method': 'tools/call',
+                'params': {'name': 'stop_scan_task', 'arguments': {'task_id': tid}}
+            })['result']
+            self.assertTrue(res['isError'])
+            self.assertEqual(json.loads(res['content'][0]['text'])['status'], 'denied')
+
 
 if __name__ == '__main__':
     unittest.main()

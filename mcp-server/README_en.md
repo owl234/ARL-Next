@@ -167,7 +167,7 @@ Once connected, interact with your AI Agent using natural language (see [`docs/M
 ### Q2: Requests return `401 Unauthorized` or `Invalid or expired token`
 - **🔴 Symptom**: Tool calls fail with authentication errors.
 - **🔍 Root Cause**: Missing Authorization header, or an administrator clicked "Refresh Token" in the Web Console, immediately revoking previous credentials.
-- **⚡ Solution**: Open the "MCP" modal in the ARL-Next top navigation bar, copy the latest token, and update your client configuration.
+- **⚡ Solution**: Open **「MCP Center」** from the ARL-Next left sidebar (or click **「MCP」** in the top navigation bar), issue or copy an active key, and update your client configuration.
 
 ### Q3: Task dispatch returns `Task dispatching is disabled on this MCP server`
 - **🔴 Symptom**: Calling `create_scan_task` or `stop_scan_task` is rejected.

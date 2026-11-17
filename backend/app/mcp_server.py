@@ -24,13 +24,41 @@ from typing import Dict, Optional, Tuple
 try:
     from app import utils
     from app.config import Config
-    from app.mcp_asset import build_asset_profile, build_enterprise_profile, _clean_empty
+    from app.mcp_asset import (
+        MCP_TOOL_DEFINITIONS,
+        TOOL_CREATE_SCAN_TASK,
+        TOOL_GET_ASSET_PROFILE,
+        TOOL_GET_ENTERPRISE_PROFILE,
+        TOOL_GET_TASK_STATUS,
+        TOOL_SEARCH_ASSETS,
+        TOOL_STOP_SCAN_TASK,
+        build_asset_profile,
+        build_enterprise_profile,
+        create_mcp_scan_task,
+        get_mcp_task_status,
+        search_mcp_assets,
+        stop_mcp_scan_task,
+    )
 except ImportError:
     # 允许作为单脚本在不同路径下启动加载
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     from app import utils
     from app.config import Config
-    from app.mcp_asset import build_asset_profile, build_enterprise_profile, _clean_empty
+    from app.mcp_asset import (
+        MCP_TOOL_DEFINITIONS,
+        TOOL_CREATE_SCAN_TASK,
+        TOOL_GET_ASSET_PROFILE,
+        TOOL_GET_ENTERPRISE_PROFILE,
+        TOOL_GET_TASK_STATUS,
+        TOOL_SEARCH_ASSETS,
+        TOOL_STOP_SCAN_TASK,
+        build_asset_profile,
+        build_enterprise_profile,
+        create_mcp_scan_task,
+        get_mcp_task_status,
+        search_mcp_assets,
+        stop_mcp_scan_task,
+    )
 
 from app.mcp_security import (
     MCPRequestError, authenticate_mcp_token, authorize_tool,
@@ -60,138 +88,6 @@ def json_value(value):
     if isinstance(value, ObjectId):
         return str(value)
     raise TypeError(f'Unsupported MCP result type: {type(value).__name__}')
-
-# 工具定义集
-TOOL_GET_ASSET_PROFILE = {
-    "name": "get_asset_profile",
-    "description": "获取指定目标（站点URL/IP/子域名）的综合资产画像，包括解析IP、开放端口与服务、Web指纹与标题、SSL证书、已知漏洞及敏感泄露等关联情报。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "target": {
-                "type": "string",
-                "description": "资产标的，支持域名 (如 test.com)、IP (如 1.2.3.4) 或站点 URL (如 https://test.com:8443)"
-            },
-            "task_id": {
-                "type": "string",
-                "description": "可选。24位任务 ID。若指定则锁定该任务上下文，未指定则智能匹配最新任务或全局资产"
-            }
-        },
-        "required": ["target"]
-    }
-}
-
-TOOL_GET_ENTERPRISE_PROFILE = {
-    "name": "get_enterprise_profile",
-    "description": "获取指定企业标的（企业全称、简称、备案域名如 qq.com 或备案号）的全景生态资产画像与组织架构（包括工商背景、ICP备案网站、移动APP、微信小程序、公众号、企业微博、快应用及投资控股关系）。支持按资产分类下钻分页查询。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "target": {
-                "type": "string",
-                "description": "企业标的，支持企业工商全称（如'深圳市腾讯计算机系统有限公司'）、企业商业简称（如'腾讯'）、根域名（如'qq.com'，自动反查所属企业）或 ICP 备案主体/备案号"
-            },
-            "category": {
-                "type": "string",
-                "enum": ["all", "web", "app", "mapp", "wechat", "weibo", "kapp", "invest"],
-                "default": "all",
-                "description": "查询维度：'all'（默认总览画像与各维度统计指标）；'web'（网站备案域名）；'app'（移动应用）；'mapp'（微信小程序）；'wechat'（微信公众号）；'weibo'（企业微博）；'kapp'（快应用）；'invest'（对外投资与控股子公司）"
-            },
-            "page": {
-                "type": "integer",
-                "default": 1,
-                "description": "下钻指定 category 时的页码（从 1 开始）"
-            },
-            "size": {
-                "type": "integer",
-                "default": 20,
-                "description": "下钻指定 category 时每页记录条数（默认 20，最大 100）"
-            },
-            "task_id": {
-                "type": "string",
-                "description": "可选。24位企业测绘任务 ID。若指定则直接锁定该任务历史数据"
-            }
-        },
-        "required": ["target"]
-    }
-}
-
-TOOL_SEARCH_ASSETS = {
-    "name": "search_assets",
-    "description": "按条件检索 ARL 资产库中的站点、IP、域名或漏洞记录。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "检索关键字（如域名关键词、服务名称、Web指纹或端口号）"
-            },
-            "asset_type": {
-                "type": "string",
-                "enum": ["site", "domain", "ip", "vuln"],
-                "description": "资产类别，默认为 site（可选 site, domain, ip, vuln）"
-            },
-            "limit": {
-                "type": "integer",
-                "description": "返回条目上限（1-50，默认 10）"
-            }
-        },
-        "required": ["query"]
-    }
-}
-
-TOOL_GET_TASK_STATUS = {
-    "name": "get_task_status",
-    "description": "查询指定 24 位任务 ID 的扫描进度、运行状态与资产统计摘要。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "task_id": {
-                "type": "string",
-                "description": "24 位 ARL 扫描任务 ID"
-            }
-        },
-        "required": ["task_id"]
-    }
-}
-
-TOOL_CREATE_SCAN_TASK = {
-    "name": "create_scan_task",
-    "description": "【受控调度】向 ARL 调度队列提交新的资产扫描任务（需启用工具开关并具备 task:dispatch 权限）。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "name": {
-                "type": "string",
-                "description": "扫描任务名称"
-            },
-            "target": {
-                "type": "string",
-                "description": "扫描目标（多个目标以换行或逗号分隔）"
-            },
-            "policy_id": {
-                "type": "string",
-                "description": "可选。24位扫描策略模板 ID；未传则使用系统默认策略"
-            }
-        },
-        "required": ["name", "target"]
-    }
-}
-
-TOOL_STOP_SCAN_TASK = {
-    "name": "stop_scan_task",
-    "description": "【受控调度】紧急终止正在排队或进行中的 ARL 扫描任务。",
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "task_id": {
-                "type": "string",
-                "description": "24 位 ARL 扫描任务 ID"
-            }
-        },
-        "required": ["task_id"]
-    }
-}
 
 
 class MCPSession:
@@ -229,8 +125,7 @@ class MCPServer:
         policy = load_mcp_policy(self._dispatch_enabled)
         user_info = user_info or {'scopes': ['asset:read', 'task:dispatch']}
         tools = []
-        for tool in (TOOL_GET_ASSET_PROFILE, TOOL_GET_ENTERPRISE_PROFILE, TOOL_SEARCH_ASSETS, TOOL_GET_TASK_STATUS,
-                     TOOL_CREATE_SCAN_TASK, TOOL_STOP_SCAN_TASK):
+        for tool in MCP_TOOL_DEFINITIONS:
             try:
                 authorize_tool(user_info, tool['name'], policy)
             except MCPRequestError:
@@ -304,115 +199,30 @@ class MCPServer:
                 return result, is_err
 
             elif name == "search_assets":
-                query = re.escape(str(args.get("query", "")).strip())
-                asset_type = str(args.get("asset_type", "site")).strip().lower()
-                requested_limit = int(args.get("limit", 10))
-                limit = min(max(requested_limit, 1), max_search_limit)
-                if not query:
-                    result, is_err = {"status": "error", "message": "Missing required parameter: query"}, True
-                    return result, is_err
-
-                def _query_db():
-                    coll_name = asset_type if asset_type in ("site", "domain", "ip", "vuln") else "site"
-                    filter_cond: dict[str, object] = {}
-                    if coll_name == "site":
-                        filter_cond = {"$or": [{"site": {"$regex": query, "$options": "i"}}, {"title": {"$regex": query, "$options": "i"}}]}
-                        proj = {"favicon.data": 0, "body": 0, "header": 0}
-                    elif coll_name == "domain":
-                        filter_cond = {"domain": {"$regex": query, "$options": "i"}}
-                        proj = None
-                    elif coll_name == "ip":
-                        filter_cond = {"ip": {"$regex": query, "$options": "i"}}
-                        proj = None
-                    else: # vuln
-                        filter_cond = {"$or": [{"target": {"$regex": query, "$options": "i"}}, {"vul_name": {"$regex": query, "$options": "i"}}]}
-                        proj = None
-                    cursor = utils.conn_db(coll_name).find(filter_cond, proj).sort("_id", -1).limit(limit)
-                    items = list(cursor)
-                    # 转换 ObjectId 并精简空字段
-                    for it in items:
-                        if "_id" in it:
-                            it["_id"] = str(it["_id"])
-                    return _clean_empty({"items": items, "total": len(items), "type": coll_name})
-
-                res = await asyncio.to_thread(_query_db)
-                result, is_err = res, False
+                result, is_err = await asyncio.to_thread(
+                    search_mcp_assets,
+                    args.get("query", ""),
+                    args.get("asset_type", "site"),
+                    args.get("limit", 10),
+                    max_search_limit,
+                )
                 return result, is_err
 
             elif name == "get_task_status":
-                task_id = str(args.get("task_id", "")).strip()
-                if not task_id or len(task_id) != 24:
-                    result, is_err = {"status": "error", "message": "Invalid 24-character task_id"}, True
-                    return result, is_err
-
-                def _get_status():
-                    from bson import ObjectId
-                    t_doc = utils.conn_db('task').find_one({"_id": ObjectId(task_id)})
-                    if not t_doc:
-                        return {"status": "not_found", "message": f"Task {task_id} not found"}
-                    return _clean_empty({
-                        "task_id": str(t_doc.get("_id")),
-                        "name": t_doc.get("name"),
-                        "status": t_doc.get("status"),
-                        "target": t_doc.get("target"),
-                        "start_time": str(t_doc.get("start_time", "")),
-                        "end_time": str(t_doc.get("end_time", "")),
-                        "progress": t_doc.get("statistic", {})
-                    })
-
-                res = await asyncio.to_thread(_get_status)
-                result, is_err = res, False
+                result, is_err = await asyncio.to_thread(get_mcp_task_status, args.get("task_id", ""))
                 return result, is_err
 
             elif name == "create_scan_task":
-                task_name = str(args.get("name", "")).strip()
-                target_str = str(args.get("target", "")).strip()
-                policy_id = str(args.get("policy_id", "")).strip()
-                if not task_name or not target_str:
-                    result, is_err = {"status": "error", "message": "Both name and target are required"}, True
-                    return result, is_err
-
-                def _dispatch_task():
-                    from app.helpers.policy import get_options_by_policy_id
-                    from app.helpers.task import submit_task_task
-                    from app.modules import TaskTag
-                    # 查找默认策略
-                    pol_id = policy_id
-                    if not pol_id:
-                        p_doc = utils.conn_db('policy').find_one({"is_default": True}) or utils.conn_db('policy').find_one({})
-                        if p_doc:
-                            pol_id = str(p_doc["_id"])
-                    if not pol_id:
-                        return {"status": "error", "message": "No scan policy available to submit task"}
-
-                    options = get_options_by_policy_id(pol_id, TaskTag.TASK)
-                    if not options:
-                        return {"status": "error", "message": "Scan policy not found"}
-                    tasks = submit_task_task(target=target_str, name=task_name, options=options)
-                    if not tasks:
-                        return {"status": "error", "message": "No valid scan targets"}
-                    task_ids = [str(task['task_id']) for task in tasks]
-                    return {"status": "success", "task_id": task_ids[0], "task_ids": task_ids,
-                            "message": "Tasks submitted to queue"}
-
-                res = await asyncio.to_thread(_dispatch_task)
-                result, is_err = res, res.get('status') != 'success'
+                result, is_err = await asyncio.to_thread(
+                    create_mcp_scan_task,
+                    args.get("name", ""),
+                    args.get("target", ""),
+                    args.get("policy_id", ""),
+                )
                 return result, is_err
 
             elif name == "stop_scan_task":
-                task_id = str(args.get("task_id", "")).strip()
-                if not task_id or len(task_id) != 24:
-                    result, is_err = {"status": "error", "message": "Invalid 24-character task_id"}, True
-                    return result, is_err
-
-                def _stop_task():
-                    from app.routes.task import stop_task
-                    response = stop_task(task_id)
-                    return {"status": "success" if response.get('code') == 200 else "error",
-                            "task_id": task_id, "message": response.get('message', '')}
-
-                res = await asyncio.to_thread(_stop_task)
-                result, is_err = res, res.get('status') != 'success'
+                result, is_err = await asyncio.to_thread(stop_mcp_scan_task, args.get("task_id", ""))
                 return result, is_err
 
             result, is_err = {"status": "error", "message": f"Tool '{name}' not found"}, True
@@ -558,6 +368,24 @@ class MCPServer:
             parsed_url = urllib.parse.urlparse(path_raw)
             path = parsed_url.path
             query_params = urllib.parse.parse_qs(parsed_url.query)
+
+            if method == "GET" and path in ("/health", "/mcp/health"):
+                health_body = json.dumps({
+                    "status": "running",
+                    "server": SERVER_NAME,
+                    "version": SERVER_VERSION,
+                    "sessions": len(self.sessions),
+                }, ensure_ascii=False).encode("utf-8")
+                writer.write(
+                    f"HTTP/1.1 200 OK\r\n"
+                    f"Content-Type: application/json; charset=utf-8\r\n"
+                    f"Content-Length: {len(health_body)}\r\n"
+                    f"Connection: close\r\n\r\n".encode("utf-8") + health_body
+                )
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
 
             token = self._extract_token_from_request(headers, query_params)
             sid = (query_params.get('sessionid') or query_params.get('sessionId')

@@ -220,6 +220,9 @@
         💡 <b>{{ pageText('pages.noEnvironmentSetupNeeded') }}</b>{{ pageText('pages.theScriptIncludesAccessCredentialsAndAssumesItIs') }} <code>~/Downloads/arl_mcp.py</code>{{ pageText('pages.ifItIsSavedElsewhereUpdate') }} <code>args</code> {{ pageText('pages.toTheActualAbsolutePathOnWindowsUse') }} <code>python</code> {{ pageText('pages.message') }}<br/>
       </template>
       🔒 <b>{{ pageText('pages.credentialSecurity') }}</b>{{ pageText('pages.theExportedScriptContainsAPrivilegedApiTokenFor') }}
+      <div style="margin-top: 8px; padding: 8px 10px; border-radius: 6px; background: var(--arl-bg-light); border: 1px solid var(--arl-border-color);">
+        {{ pageText('pages.mcpModalCenterTip') }}
+      </div>
       <div style="margin-top: 12px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--arl-border-color); padding-top: 10px;">
         <a-button type="link" size="small" @click="goToMcpCenter" style="padding: 0; font-weight: 500;">
           <RobotOutlined style="margin-right: 4px;" />

@@ -241,3 +241,60 @@ def test_stdio_audits_usage_without_recording_credentials(app_env, mcp):
     assert entry['key_id'] == str(key_id) and entry['status'] == 'success'
     assert token not in repr(entry)
     assert app_env.db.mcp_key.find_one({'_id': key_id})['last_used_at']
+
+
+def test_sse_health_endpoint_and_overview_probe(app_env, mcp):
+    _, server = mcp
+    async def scenario():
+        reader = asyncio.StreamReader()
+        reader.feed_data(b'GET /health HTTP/1.1\r\nHost: fixture\r\n\r\n')
+        reader.feed_eof()
+        writer = MemoryWriter()
+        await server.handle_client(reader, writer)
+        return bytes(writer.output).decode('utf-8')
+    raw = asyncio.run(scenario())
+    assert '200 OK' in raw
+    payload = json.loads(raw.split('\r\n\r\n', 1)[1])
+    assert payload['status'] == 'running'
+    assert payload['sessions'] == 0
+
+    route = load_source(app_env.monkeypatch, 'app.routes.mcp', 'app/routes/mcp.py')
+    app_env.monkeypatch.setattr(route, '_probe_sse_service', lambda: {'sse_status': 'online', 'sse_sessions': 2})
+    client = make_client(app_env, route.ns)
+    ov = client.get('/api/mcp/overview', headers={'Token': 'fixture-api-key'}).get_json()['data']
+    assert ov['service_status'] == 'running'
+    assert ov['sse_status'] == 'online'
+    assert ov['sse_sessions'] == 2
+
+
+def test_stdio_rest_endpoints_enforce_policy_and_scopes(app_env, mcp):
+    route = load_source(app_env.monkeypatch, 'app.routes.mcp', 'app/routes/mcp.py')
+    ro_token, _ = create_key(app_env, scopes=['asset:read'])
+    exp_token, _ = create_key(app_env, suffix='e', expires=datetime.now(UTC) - timedelta(hours=1))
+    assert exp_token
+    app_env.db.site.insert_one({'site': 'https://target.example', 'title': 'Portal'})
+    app_env.db.mcp_config.insert_one({'_id': 'global', 'tool_switches': {
+        'get_asset_profile': True, 'get_enterprise_profile': True,
+        'search_assets': True, 'get_task_status': True,
+        'create_scan_task': True, 'stop_scan_task': False,
+    }})
+
+    client = make_client(app_env, route.ns)
+    tools_res = client.get('/api/mcp/tools', headers={'Token': ro_token})
+    assert tools_res.status_code == 200
+    assert {t['name'] for t in tools_res.get_json()['tools']} == {
+        'get_asset_profile', 'get_enterprise_profile', 'search_assets', 'get_task_status'
+    }
+
+    search_res = client.get('/api/mcp/search_assets?query=target.example&asset_type=site', headers={'Token': ro_token})
+    assert search_res.status_code == 200
+    assert search_res.get_json()['total'] == 1
+
+    denied_res = client.post('/api/mcp/create_scan_task', headers={'Token': ro_token},
+                             json={'name': 'test', 'target': 'example.com'})
+    assert denied_res.status_code == 403
+
+    keys_res = client.get('/api/mcp/keys?status=expired', headers={'Token': 'fixture-api-key'})
+    assert keys_res.status_code == 200
+    items = keys_res.get_json()['data']['items']
+    assert len(items) == 1 and items[0]['is_expired'] is True

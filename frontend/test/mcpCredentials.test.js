@@ -7,7 +7,15 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { computed, reactive, ref } from 'vue';
 import { parse, compileScript } from 'vue/compiler-sfc';
-import { isCompleteMcpKey, resolveMcpCredential, createStdioServerConfig } from '../src/utils/mcpCredentials.js';
+import {
+  isCompleteMcpKey,
+  resolveMcpCredential,
+  createStdioServerConfig,
+  buildClientConfigSnippet,
+  evaluateToolAccess,
+  summarizeToolCapabilities,
+  extractAuditPivot,
+} from '../src/utils/mcpCredentials.js';
 
 const key = `arl_mcp_${'a'.repeat(32)}`;
 const { descriptor } = parse(fs.readFileSync(new URL('../src/views/McpCenter.vue', import.meta.url), 'utf8'));
@@ -106,4 +114,90 @@ test('Stdio starts without shell expansion, including a home path with spaces', 
   } finally {
     fs.rmSync(directory, { recursive: true });
   }
+});
+
+test('buildClientConfigSnippet generates client-tailored SSE, Claude Code CLI, and custom Stdio snippets', () => {
+  const cliSse = buildClientConfigSnippet({
+    client: 'claude_code',
+    mode: 'sse',
+    host: 'https://arl.example.test:5173',
+    token: key,
+  });
+  assert.match(cliSse, /^claude mcp add -s user --transport sse arl-next /);
+  assert.ok(cliSse.includes(`Bearer ${key}`));
+
+  const cliStdio = buildClientConfigSnippet({
+    client: 'claude_code',
+    mode: 'stdio',
+    scriptPath: '~/tools/arl_mcp.py',
+    pythonBin: 'python',
+  });
+  assert.match(cliStdio, /^claude mcp add -s user arl-next -- python -c /);
+  assert.ok(cliStdio.includes('~/tools/arl_mcp.py'));
+
+  const sdkEnv = buildClientConfigSnippet({
+    client: 'sdk_env',
+    host: 'https://arl.example.test:5173/',
+    token: key,
+  });
+  assert.ok(sdkEnv.includes('ARL_HOST=https://arl.example.test:5173'));
+  assert.ok(sdkEnv.includes(`ARL_TOKEN=${key}`));
+});
+
+test('evaluateToolAccess computes effective availability across global switches and key scopes', () => {
+  const switches = {
+    get_asset_profile: true,
+    get_enterprise_profile: true,
+    search_assets: false,
+    get_task_status: true,
+    create_scan_task: true,
+    stop_scan_task: false,
+  };
+  const roMatrix = Object.fromEntries(
+    evaluateToolAccess({ toolSwitches: switches, keyScopes: ['asset:read'], isSessionToken: false })
+      .map(item => [item.name, item])
+  );
+  assert.equal(roMatrix.get_asset_profile.allowed, true);
+  assert.equal(roMatrix.search_assets.reason, 'policy_disabled');
+  assert.equal(roMatrix.create_scan_task.reason, 'missing_scope');
+  assert.equal(roMatrix.stop_scan_task.reason, 'policy_disabled');
+
+  const dispatchMatrix = Object.fromEntries(
+    evaluateToolAccess({ toolSwitches: switches, keyScopes: ['asset:read', 'task:dispatch'], isSessionToken: false })
+      .map(item => [item.name, item])
+  );
+  assert.equal(dispatchMatrix.create_scan_task.allowed, true);
+  assert.equal(dispatchMatrix.stop_scan_task.allowed, false);
+
+  const roSummary = summarizeToolCapabilities(Object.values(roMatrix));
+  assert.equal(roSummary.readAllowed, 3);
+  assert.equal(roSummary.readTotal, 4);
+  assert.equal(roSummary.writeAllowed, 0);
+  assert.equal(roSummary.writeTotal, 2);
+  assert.equal(roSummary.hasMissingScope, true);
+  assert.deepEqual(roSummary.missingScopes, ['task:dispatch']);
+  assert.equal(roSummary.hasPolicyDisabled, true);
+});
+
+test('extractAuditPivot extracts task_id and asset search routes for one-click drilldown', () => {
+  const tid = '670000000000000000000001';
+  const createPivot = extractAuditPivot({
+    tool_name: 'create_scan_task',
+    target: 'example.com',
+    summary: `新任务 ID: ${tid}`,
+  });
+  assert.deepEqual(createPivot.taskRoute, { path: '/taskList/taskDetail', query: { task_id: tid } });
+
+  const ipPivot = extractAuditPivot({
+    tool_name: 'get_asset_profile',
+    target: '192.0.2.10',
+  });
+  assert.deepEqual(ipPivot.assetRoute, { path: '/asset-search', query: { tab: 'ip', ip: '192.0.2.10' } });
+
+  const searchVulnPivot = extractAuditPivot({
+    tool_name: 'search_assets',
+    target: 'shiro',
+    params_summary: '{"query": "shiro", "asset_type": "vuln"}',
+  });
+  assert.deepEqual(searchVulnPivot.assetRoute, { path: '/asset-search', query: { tab: 'vuln', vul_name: 'shiro' } });
 });

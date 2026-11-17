@@ -763,3 +763,248 @@ def build_enterprise_profile(target: str, category: str = "all", page: int = 1, 
         "tip": f"已返回第 {page} 页数据（共 {total} 条）。若需探测特定资产技术暴露面，可调用 get_asset_profile(target='...')"
     }
     return _clean_empty(detail_result)
+
+
+TOOL_GET_ASSET_PROFILE = {
+    "name": "get_asset_profile",
+    "description": "获取指定目标（站点URL/IP/子域名）的综合资产画像，包括解析IP、开放端口与服务、Web指纹与标题、SSL证书、已知漏洞及敏感泄露等关联情报。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "target": {
+                "type": "string",
+                "description": "资产标的，支持域名 (如 example.com)、IP (如 192.0.2.1) 或站点 URL (如 https://example.com:8443)"
+            },
+            "task_id": {
+                "type": "string",
+                "description": "可选。24位任务 ID。若指定则锁定该任务上下文，未指定则智能匹配最新任务或全局资产"
+            }
+        },
+        "required": ["target"]
+    }
+}
+
+TOOL_GET_ENTERPRISE_PROFILE = {
+    "name": "get_enterprise_profile",
+    "description": "获取指定企业标的（企业全称、简称、备案域名如 qq.com 或备案号）的全景生态资产画像与组织架构（包括工商背景、ICP备案网站、移动APP、微信小程序、公众号、企业微博、快应用及投资控股关系）。支持按资产分类下钻分页查询。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "target": {
+                "type": "string",
+                "description": "企业标的，支持企业工商全称（如'深圳市腾讯计算机系统有限公司'）、企业商业简称（如'腾讯'）、根域名（如'qq.com'，自动反查所属企业）或 ICP 备案主体/备案号"
+            },
+            "category": {
+                "type": "string",
+                "enum": ["all", "web", "app", "mapp", "wechat", "weibo", "kapp", "invest"],
+                "default": "all",
+                "description": "查询维度：'all'（默认总览画像与各维度统计指标）；'web'（网站备案域名）；'app'（移动应用）；'mapp'（微信小程序）；'wechat'（微信公众号）；'weibo'（企业微博）；'kapp'（快应用）；'invest'（对外投资与控股子公司）"
+            },
+            "page": {
+                "type": "integer",
+                "default": 1,
+                "description": "下钻指定 category 时的页码（从 1 开始）"
+            },
+            "size": {
+                "type": "integer",
+                "default": 20,
+                "description": "下钻指定 category 时每页记录条数（默认 20，最大 100）"
+            },
+            "task_id": {
+                "type": "string",
+                "description": "可选。24位企业测绘任务 ID。若指定则直接锁定该任务历史数据"
+            }
+        },
+        "required": ["target"]
+    }
+}
+
+TOOL_SEARCH_ASSETS = {
+    "name": "search_assets",
+    "description": "按条件检索 ARL 资产库中的站点、IP、域名或漏洞记录。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "检索关键字（如域名关键词、服务名称、Web指纹或端口号）"
+            },
+            "asset_type": {
+                "type": "string",
+                "enum": ["site", "domain", "ip", "vuln"],
+                "description": "资产类别，默认为 site（可选 site, domain, ip, vuln）"
+            },
+            "limit": {
+                "type": "integer",
+                "description": "返回条目上限（1-50，默认 10）"
+            }
+        },
+        "required": ["query"]
+    }
+}
+
+TOOL_GET_TASK_STATUS = {
+    "name": "get_task_status",
+    "description": "查询指定 24 位任务 ID 的扫描进度、运行状态与资产统计摘要。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "24 位 ARL 扫描任务 ID"
+            }
+        },
+        "required": ["task_id"]
+    }
+}
+
+TOOL_CREATE_SCAN_TASK = {
+    "name": "create_scan_task",
+    "description": "【受控调度】向 ARL 调度队列提交新的资产扫描任务（需启用工具开关并具备 task:dispatch 权限）。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "扫描任务名称"
+            },
+            "target": {
+                "type": "string",
+                "description": "扫描目标（多个目标以换行或逗号分隔）"
+            },
+            "policy_id": {
+                "type": "string",
+                "description": "可选。24位扫描策略模板 ID；未传则使用系统默认策略"
+            }
+        },
+        "required": ["name", "target"]
+    }
+}
+
+TOOL_STOP_SCAN_TASK = {
+    "name": "stop_scan_task",
+    "description": "【受控调度】紧急终止正在排队或进行中的 ARL 扫描任务。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "24 位 ARL 扫描任务 ID"
+            }
+        },
+        "required": ["task_id"]
+    }
+}
+
+MCP_TOOL_DEFINITIONS = (
+    TOOL_GET_ASSET_PROFILE,
+    TOOL_GET_ENTERPRISE_PROFILE,
+    TOOL_SEARCH_ASSETS,
+    TOOL_GET_TASK_STATUS,
+    TOOL_CREATE_SCAN_TASK,
+    TOOL_STOP_SCAN_TASK,
+)
+
+
+def search_mcp_assets(query: str, asset_type: str = "site", limit: int = 10, max_search_limit: int = 50):
+    """按关键词跨资产集合受限检索，供 SSE 与 REST 通道共用"""
+    raw_query = str(query or "").strip()
+    if not raw_query:
+        return {"status": "error", "message": "Missing required parameter: query"}, True
+    escaped = re.escape(raw_query)
+    coll_name = str(asset_type or "site").strip().lower()
+    if coll_name not in ("site", "domain", "ip", "vuln"):
+        coll_name = "site"
+    try:
+        requested_limit = int(limit if limit is not None else 10)
+    except (TypeError, ValueError):
+        return {"status": "error", "message": "Invalid integer parameter: limit"}, True
+    bounded_limit = min(max(requested_limit, 1), max(1, int(max_search_limit)))
+
+    if coll_name == "site":
+        filter_cond = {"$or": [{"site": {"$regex": escaped, "$options": "i"}}, {"title": {"$regex": escaped, "$options": "i"}}]}
+        proj = {"favicon.data": 0, "body": 0, "header": 0}
+    elif coll_name == "domain":
+        filter_cond = {"domain": {"$regex": escaped, "$options": "i"}}
+        proj = None
+    elif coll_name == "ip":
+        filter_cond = {"ip": {"$regex": escaped, "$options": "i"}}
+        proj = None
+    else:
+        filter_cond = {"$or": [{"target": {"$regex": escaped, "$options": "i"}}, {"vul_name": {"$regex": escaped, "$options": "i"}}]}
+        proj = None
+
+    cursor = utils.conn_db(coll_name).find(filter_cond, proj).sort("_id", -1).limit(bounded_limit)
+    items = list(cursor)
+    for it in items:
+        if "_id" in it:
+            it["_id"] = str(it["_id"])
+    return _clean_empty({"items": items, "total": len(items), "type": coll_name}), False
+
+
+def get_mcp_task_status(task_id: str):
+    """查询指定 24 位扫描任务的状态与统计进度"""
+    tid = str(task_id or "").strip()
+    if not tid or len(tid) != 24 or not ObjectId.is_valid(tid):
+        return {"status": "error", "message": "Invalid 24-character task_id"}, True
+    t_doc = utils.conn_db('task').find_one({"_id": ObjectId(tid)})
+    if not t_doc:
+        return {"status": "not_found", "message": f"Task {tid} not found"}, False
+    return _clean_empty({
+        "task_id": str(t_doc.get("_id")),
+        "name": t_doc.get("name"),
+        "status": t_doc.get("status"),
+        "target": t_doc.get("target"),
+        "start_time": str(t_doc.get("start_time", "")),
+        "end_time": str(t_doc.get("end_time", "")),
+        "progress": t_doc.get("statistic", {})
+    }), False
+
+
+def create_mcp_scan_task(name: str, target: str, policy_id: str = ""):
+    """通过标准策略与队列校验提交扫描任务"""
+    task_name = str(name or "").strip()
+    target_str = str(target or "").strip()
+    pol_id = str(policy_id or "").strip()
+    if not task_name or not target_str:
+        return {"status": "error", "message": "Both name and target are required"}, True
+
+    from app.helpers.policy import get_options_by_policy_id
+    from app.helpers.task import submit_task_task
+    from app.modules import TaskTag
+
+    if not pol_id:
+        p_doc = utils.conn_db('policy').find_one({"is_default": True}) or utils.conn_db('policy').find_one({})
+        if p_doc:
+            pol_id = str(p_doc["_id"])
+    if not pol_id:
+        return {"status": "error", "message": "No scan policy available to submit task"}, True
+
+    options = get_options_by_policy_id(pol_id, TaskTag.TASK)
+    if not options:
+        return {"status": "error", "message": "Scan policy not found"}, True
+    tasks = submit_task_task(target=target_str, name=task_name, options=options)
+    if not tasks:
+        return {"status": "error", "message": "No valid scan targets"}, True
+    task_ids = [str(task['task_id']) for task in tasks]
+    return {
+        "status": "success",
+        "task_id": task_ids[0],
+        "task_ids": task_ids,
+        "message": "Tasks submitted to queue"
+    }, False
+
+
+def stop_mcp_scan_task(task_id: str):
+    """请求停止排队或运行中的扫描任务"""
+    tid = str(task_id or "").strip()
+    if not tid or len(tid) != 24 or not ObjectId.is_valid(tid):
+        return {"status": "error", "message": "Invalid 24-character task_id"}, True
+    from app.routes.task import stop_task
+    response = stop_task(tid)
+    ok = response.get('code') == 200
+    return {
+        "status": "success" if ok else "error",
+        "task_id": tid,
+        "message": response.get('message', '')
+    }, not ok

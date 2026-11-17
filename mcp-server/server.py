@@ -3,9 +3,9 @@
 ARL-Next Zero-Dependency MCP Server (JSON-RPC 2.0 over Stdio)
 - 标准库实现：纯 Python 3 标准库（sys, json, urllib, ssl, concurrent.futures），无需 pip 安装额外依赖
 - 轻量冷启动：跨平台（Mac/Linux/Windows）即插即用，低资源开销
-- 聚焦资产画像：提供核心工具 `get_asset_profile`，收敛上下文 Token 开销
-- 双阶引擎保障：优先调用后端原生 `/api/mcp/asset_profile` 聚合接口；若远端尚未就绪则自动降级到标准 REST 聚合，保障高可用
-- 广泛客户端兼容：支持 Antigravity, Claude Code, OpenAI Codex, DeepSeek Harness, ZCode, WorkBuddy 等标准客户端
+- 能力与 SSE 对齐：支持资产画像、企业生态、全库检索、任务状态及受控调度共 6 项标准工具，并与后端权限策略及审计落盘保持一致
+- 双阶引擎保障：优先调用后端原生 `/api/mcp/*` 聚合接口；画像工具在远端未就绪时可自动降级到标准 REST 聚合，保障高可用
+- 广泛客户端兼容：支持 Antigravity, Claude Code, OpenAI Codex, Cursor, Windsurf 等标准客户端
 """
 
 import os
@@ -77,8 +77,91 @@ TOOL_GET_ENTERPRISE_PROFILE = {
     }
 }
 
+TOOL_SEARCH_ASSETS = {
+    "name": "search_assets",
+    "description": "按条件检索 ARL 资产库中的站点、IP、域名或漏洞记录。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "检索关键字（如域名关键词、服务名称、Web指纹或端口号）"
+            },
+            "asset_type": {
+                "type": "string",
+                "enum": ["site", "domain", "ip", "vuln"],
+                "description": "资产类别，默认为 site（可选 site, domain, ip, vuln）"
+            },
+            "limit": {
+                "type": "integer",
+                "description": "返回条目上限（1-50，默认 10）"
+            }
+        },
+        "required": ["query"]
+    }
+}
 
-# 默认预置凭据占位符（支持从 Web 端导出单文件客户端时动态预填充；优先级低于环境变量与 ARL_auth.md）
+TOOL_GET_TASK_STATUS = {
+    "name": "get_task_status",
+    "description": "查询指定 24 位任务 ID 的扫描进度、运行状态与资产统计摘要。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "24 位 ARL 扫描任务 ID"
+            }
+        },
+        "required": ["task_id"]
+    }
+}
+
+TOOL_CREATE_SCAN_TASK = {
+    "name": "create_scan_task",
+    "description": "【受控调度】向 ARL 调度队列提交新的资产扫描任务（需启用工具开关并具备 task:dispatch 权限）。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "扫描任务名称"
+            },
+            "target": {
+                "type": "string",
+                "description": "扫描目标（多个目标以换行或逗号分隔）"
+            },
+            "policy_id": {
+                "type": "string",
+                "description": "可选。24位扫描策略模板 ID；未传则使用系统默认策略"
+            }
+        },
+        "required": ["name", "target"]
+    }
+}
+
+TOOL_STOP_SCAN_TASK = {
+    "name": "stop_scan_task",
+    "description": "【受控调度】紧急终止正在排队或进行中的 ARL 扫描任务。",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "string",
+                "description": "24 位 ARL 扫描任务 ID"
+            }
+        },
+        "required": ["task_id"]
+    }
+}
+
+ALL_TOOLS = (
+    TOOL_GET_ASSET_PROFILE,
+    TOOL_GET_ENTERPRISE_PROFILE,
+    TOOL_SEARCH_ASSETS,
+    TOOL_GET_TASK_STATUS,
+    TOOL_CREATE_SCAN_TASK,
+    TOOL_STOP_SCAN_TASK,
+)
 DEFAULT_HOST = ""
 DEFAULT_TOKEN = ""
 
@@ -296,8 +379,8 @@ def _verify_peer_instead(url, ca_bundle_path):
     return check
 
 
-def _request_api(endpoint: str, params: dict = None) -> tuple:
-    """向 ARL 后端发送统一 HTTP GET 请求 (返回 status_code, data)，支持快速超时控制"""
+def _http_request(method: str, endpoint: str, params: dict = None, body: dict = None) -> tuple:
+    """向 ARL 后端发送统一 HTTP 请求 (支持 GET/POST JSON 与快速超时控制)"""
     host, token = _get_auth()
     if not token:
         return 401, {"status": "error", "message": "ARL API token not configured"}
@@ -312,8 +395,12 @@ def _request_api(endpoint: str, params: dict = None) -> tuple:
         "Accept": "application/json",
         "User-Agent": "ARL-Next-MCP/2.0"
     }
+    raw_body = None
+    if body is not None:
+        headers["Content-Type"] = "application/json; charset=utf-8"
+        raw_body = json.dumps(body, ensure_ascii=False).encode("utf-8")
 
-    req = urllib.request.Request(url, headers=headers, method="GET")
+    req = urllib.request.Request(url, data=raw_body, headers=headers, method=method)
 
     try:
         ctx, peer_check, insecure = _build_ssl_context(url)
@@ -342,6 +429,16 @@ def _request_api(endpoint: str, params: dict = None) -> tuple:
             file=sys.stderr,
         )
     return result
+
+
+def _request_api(endpoint: str, params: dict = None) -> tuple:
+    """向 ARL 后端发送统一 HTTP GET 请求 (返回 status_code, data)"""
+    return _http_request("GET", endpoint, params=params)
+
+
+def _post_api(endpoint: str, body: dict = None) -> tuple:
+    """向 ARL 后端发送统一 HTTP POST JSON 请求 (返回 status_code, data)"""
+    return _http_request("POST", endpoint, body=body if body is not None else {})
 
 
 def _clean_empty(val, depth=0, max_depth=10):
@@ -746,6 +843,71 @@ def _fetch_enterprise_profile(target: str, category: str = "all", page: int = 1,
     }
 
 
+def _fetch_remote_tools() -> list:
+    """从后端 /api/mcp/tools 获取按策略与 Key 权限裁剪后的可用工具清单"""
+    if os.environ.get("ARL_MCP_SYNC_TOOLS", "1").strip() == "0":
+        return list(ALL_TOOLS)
+    _, token = _get_auth()
+    if not token:
+        return list(ALL_TOOLS)
+    code, data = _request_api("/mcp/tools")
+    if code == 200 and isinstance(data, dict) and isinstance(data.get("tools"), list):
+        return data["tools"]
+    if code in (404, 405):
+        return [TOOL_GET_ASSET_PROFILE, TOOL_GET_ENTERPRISE_PROFILE]
+    return list(ALL_TOOLS)
+
+
+def _execute_remote_tool(method: str, endpoint: str, payload: dict) -> tuple:
+    """统一转发 Stdio 工具调用至后端 /api/mcp/* 并规范化权限与限流错误"""
+    if method == "POST":
+        code, resp_data = _post_api(endpoint, payload)
+    else:
+        code, resp_data = _request_api(endpoint, payload)
+
+    if code == 200 and isinstance(resp_data, dict):
+        is_err = resp_data.get("status") in ("auth_error", "error", "denied")
+        return resp_data, is_err
+
+    if code == 401 or (isinstance(resp_data, dict) and resp_data.get("code") == 401):
+        return {
+            "status": "auth_error",
+            "message": "ARL 鉴权失败：Token 无效或已过期，请检查 ARL_TOKEN 配置"
+        }, True
+
+    if code == 403 or (isinstance(resp_data, dict) and resp_data.get("code") == 403):
+        msg = resp_data.get("message") if isinstance(resp_data, dict) else "Permission denied"
+        return {"status": "denied", "code": 403, "message": msg}, True
+
+    if code == 429:
+        msg = resp_data.get("message") if isinstance(resp_data, dict) else "Rate limit exceeded"
+        return {"status": "denied", "code": 429, "message": msg}, True
+
+    if code in (404, 405):
+        return {
+            "status": "error",
+            "message": f"当前 ARL 服务端暂不支持 {endpoint} 接口，请升级服务端版本或改用 Remote SSE 通道"
+        }, True
+
+    if isinstance(resp_data, dict) and resp_data.get("message"):
+        return {"status": "error", "message": resp_data["message"]}, True
+
+    return {"status": "error", "message": f"ARL 服务端响应异常 (HTTP {code})"}, True
+
+
+def _tool_response(req_id, payload: dict, is_error: bool) -> dict:
+    """构造紧凑 JSON-RPC 2.0 工具返回结构"""
+    compact_json_str = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "result": {
+            "content": [{"type": "text", "text": compact_json_str}],
+            "isError": is_error,
+        }
+    }
+
+
 def handle_request(req: dict) -> dict:
     """处理 JSON-RPC 2.0 协议请求"""
     req_id = req.get("id")
@@ -789,49 +951,23 @@ def handle_request(req: dict) -> dict:
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
-                "tools": [TOOL_GET_ASSET_PROFILE, TOOL_GET_ENTERPRISE_PROFILE]
+                "tools": _fetch_remote_tools()
             }
         }
 
     # 5. 调用工具
     if method == "tools/call":
         tool_name = params.get("name", "")
-        args = params.get("arguments", {})
+        args = params.get("arguments", {}) or {}
 
         if tool_name == "get_asset_profile":
             target = str(args.get("target", "")).strip()
             task_id = str(args.get("task_id", "")).strip()
-
             if not target:
-                return {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": {
-                        "content": [
-                            {"type": "text", "text": json.dumps({"status": "error", "message": "Missing required parameter: target"}, ensure_ascii=False)}
-                        ],
-                        "isError": True
-                    }
-                }
-
+                return _tool_response(req_id, {"status": "error", "message": "Missing required parameter: target"}, True)
             profile_data = _fetch_asset_profile(target=target, task_id=task_id)
-            is_error = isinstance(profile_data, dict) and profile_data.get("status") in ("auth_error", "error")
-            # 采用紧凑 JSON 序列化（消除多余空格与缩进，节省上下文 Token）
-            compact_json_str = json.dumps(profile_data, ensure_ascii=False, separators=(",", ":"))
-
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": compact_json_str
-                        }
-                    ],
-                    "isError": is_error
-                }
-            }
+            is_error = isinstance(profile_data, dict) and profile_data.get("status") in ("auth_error", "error", "denied")
+            return _tool_response(req_id, profile_data, is_error)
 
         elif tool_name == "get_enterprise_profile":
             target = str(args.get("target", "")).strip()
@@ -839,36 +975,49 @@ def handle_request(req: dict) -> dict:
             page = args.get("page", 1)
             size = args.get("size", 20)
             task_id = str(args.get("task_id", "")).strip()
-
             if not target and not task_id:
-                return {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": {
-                        "content": [
-                            {"type": "text", "text": json.dumps({"status": "error", "message": "Missing required parameter: target"}, ensure_ascii=False)}
-                        ],
-                        "isError": True
-                    }
-                }
-
+                return _tool_response(req_id, {"status": "error", "message": "Missing required parameter: target"}, True)
             profile_data = _fetch_enterprise_profile(target=target, category=category, page=page, size=size, task_id=task_id)
-            is_error = isinstance(profile_data, dict) and profile_data.get("status") in ("auth_error", "error")
-            compact_json_str = json.dumps(profile_data, ensure_ascii=False, separators=(",", ":"))
+            is_error = isinstance(profile_data, dict) and profile_data.get("status") in ("auth_error", "error", "denied")
+            return _tool_response(req_id, profile_data, is_error)
 
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": compact_json_str
-                        }
-                    ],
-                    "isError": is_error
-                }
+        elif tool_name == "search_assets":
+            query = str(args.get("query", "")).strip()
+            if not query:
+                return _tool_response(req_id, {"status": "error", "message": "Missing required parameter: query"}, True)
+            payload = {
+                "query": query,
+                "asset_type": str(args.get("asset_type", "site")).strip().lower(),
+                "limit": args.get("limit", 10),
             }
+            data, is_error = _execute_remote_tool("GET", "/mcp/search_assets", payload)
+            return _tool_response(req_id, data, is_error)
+
+        elif tool_name == "get_task_status":
+            task_id = str(args.get("task_id", "")).strip()
+            if not task_id or len(task_id) != 24:
+                return _tool_response(req_id, {"status": "error", "message": "Invalid 24-character task_id"}, True)
+            data, is_error = _execute_remote_tool("GET", "/mcp/task_status", {"task_id": task_id})
+            return _tool_response(req_id, data, is_error)
+
+        elif tool_name == "create_scan_task":
+            task_name = str(args.get("name", "")).strip()
+            target = str(args.get("target", "")).strip()
+            policy_id = str(args.get("policy_id", "")).strip()
+            if not task_name or not target:
+                return _tool_response(req_id, {"status": "error", "message": "Both name and target are required"}, True)
+            payload = {"name": task_name, "target": target}
+            if policy_id:
+                payload["policy_id"] = policy_id
+            data, is_error = _execute_remote_tool("POST", "/mcp/create_scan_task", payload)
+            return _tool_response(req_id, data, is_error)
+
+        elif tool_name == "stop_scan_task":
+            task_id = str(args.get("task_id", "")).strip()
+            if not task_id or len(task_id) != 24:
+                return _tool_response(req_id, {"status": "error", "message": "Invalid 24-character task_id"}, True)
+            data, is_error = _execute_remote_tool("POST", "/mcp/stop_scan_task", {"task_id": task_id})
+            return _tool_response(req_id, data, is_error)
 
         return {
             "jsonrpc": "2.0",

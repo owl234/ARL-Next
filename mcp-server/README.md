@@ -167,7 +167,7 @@ ARL-Next MCP 注册了 6 项核心标准化工具，默认开启只读情报查�
 ### Q2: 接口调用返回 `401 Unauthorized` 或 `Invalid or expired token`
 - **🔴 症状**：客户端所有工具调用均提示鉴权失败。
 - **🔍 根因**：未配置正确的 Authorization 请求头，或管理员在 Web 端点击了「刷新 Token」使旧凭据立即作废。
-- **⚡ 解决**：在 ARL-Next 顶部导航栏打开「MCP」，一键复制最新有效 Token 并同步更新配置文件中的凭据字段。
+- **⚡ 解决**：在 ARL-Next 左侧菜单进入 **「MCP 中心」**（或点击顶部导航栏 **「MCP」**），签发或复制有效密钥并同步更新客户端配置中的凭据字段。
 
 ### Q3: 执行任务下发提示 `Task dispatching is disabled on this MCP server`
 - **🔴 症状**：调用 `create_scan_task` 或 `stop_scan_task` 时被拒绝。

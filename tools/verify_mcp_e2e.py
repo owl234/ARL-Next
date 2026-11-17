@@ -15,6 +15,8 @@ import sys
 import json
 import re
 import ssl
+import subprocess
+import tempfile
 import time
 import urllib.request
 import urllib.error
@@ -78,7 +80,7 @@ def run_tests():
     # -------------------------------------------------------------
     # Step 1: 验证前端静态路由与客户端直链下载
     # -------------------------------------------------------------
-    print("\n[1/5] 验证前端静态资产与直链分发...")
+    print("\n[1/6] 验证前端静态资产与直链分发...")
     
     # 1.1 /mcpCenter 路由检查
     req = urllib.request.Request(f"{host}/mcpCenter", headers=auth_headers({
@@ -113,7 +115,7 @@ def run_tests():
     # -------------------------------------------------------------
     # Step 2: 验证后端 REST 治理 API
     # -------------------------------------------------------------
-    print("\n[2/5] 验证 REST 治理 API 与权限矩阵...")
+    print("\n[2/6] 验证 REST 治理 API 与权限矩阵...")
 
     # 2.1 /api/mcp/overview
     req = urllib.request.Request(f"{host}/api/mcp/overview", headers=auth_headers({
@@ -126,8 +128,11 @@ def run_tests():
             assert data.get("code") == 200, f"API error: {data}"
             overview = data.get("data", {})
             service_status = overview.get("service_status")
+            sse_status = overview.get("sse_status")
             today_calls = overview.get("today_calls")
-            print(f"  ✓ /api/mcp/overview 响应正常: 今日调用={today_calls}, 服务状态={service_status}")
+            assert service_status == "running", f"Unexpected service_status: {service_status}"
+            assert sse_status == "online", f"Expected live SSE probe online, got: {sse_status}"
+            print(f"  ✓ /api/mcp/overview 响应正常: 今日调用={today_calls}, 服务={service_status}, SSE={sse_status} (sessions={overview.get('sse_sessions', 0)})")
     except Exception as e:
         print(f"  ✗ /api/mcp/overview 失败: {e}")
         return False
@@ -147,9 +152,13 @@ def run_tests():
         print(f"  ✗ /api/mcp/config 失败: {e}")
         return False
 
-    # 2.3 生成临时 MCP Key
+    # 2.3 生成临时只读 MCP Key（1天短效 + asset:read）
     test_key_name = f"e2e_probe_{int(time.time())}"
-    create_payload = json.dumps({"name": test_key_name, "rate_limit": 60}).encode("utf-8")
+    create_payload = json.dumps({
+        "name": test_key_name,
+        "scopes": ["asset:read"],
+        "expire_days": 1,
+    }).encode("utf-8")
     req = urllib.request.Request(f"{host}/api/mcp/keys", data=create_payload, headers=auth_headers({
         "Token": token,
         "Content-Type": "application/json"
@@ -169,11 +178,54 @@ def run_tests():
         print(f"  ✗ 动态生成 MCP Key 失败: {e}")
         return False
 
-    # -------------------------------------------------------------
-    # Step 3: 验证远程原生 MCP SSE 协议握手与双向交互
-    # -------------------------------------------------------------
-    print("\n[3/5] 验证远程 MCP SSE 协议握手与双向 JSON-RPC 通信...")
     try:
+        # 2.4 验证新增 REST 工具目录、只读检索与越权拦截
+        req = urllib.request.Request(f"{host}/api/mcp/tools", headers=auth_headers({
+            "Token": raw_key,
+            "Accept": "application/json"
+        }))
+        with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as resp:
+            tools_payload = json.loads(resp.read().decode("utf-8"))
+            rest_tool_names = [t.get("name") for t in tools_payload.get("tools", [])]
+            assert "get_asset_profile" in rest_tool_names, f"Missing tool in /api/mcp/tools: {rest_tool_names}"
+            assert "create_scan_task" not in rest_tool_names, "Read-only key must not advertise dispatch tool"
+            print(f"  ✓ /api/mcp/tools 权限裁剪正常: {rest_tool_names}")
+
+        req = urllib.request.Request(
+            f"{host}/api/mcp/search_assets?query=example&asset_type=site&limit=2",
+            headers=auth_headers({"Token": raw_key, "Accept": "application/json"})
+        )
+        with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as resp:
+            search_payload = json.loads(resp.read().decode("utf-8"))
+            assert search_payload.get("type") == "site", f"Unexpected search payload: {search_payload}"
+            print(f"  ✓ /api/mcp/search_assets 只读检索正常 (命中 {search_payload.get('total', 0)} 条)")
+
+        req = urllib.request.Request(
+            f"{host}/api/mcp/task_status?task_id=000000000000000000000000",
+            headers=auth_headers({"Token": raw_key, "Accept": "application/json"})
+        )
+        with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as resp:
+            task_payload = json.loads(resp.read().decode("utf-8"))
+            assert task_payload.get("status") == "not_found", f"Unexpected task_status payload: {task_payload}"
+            print("  ✓ /api/mcp/task_status 查询接口正常")
+
+        deny_req = urllib.request.Request(
+            f"{host}/api/mcp/create_scan_task",
+            data=json.dumps({"name": "e2e_denied_probe", "target": "127.0.0.1"}).encode("utf-8"),
+            headers=auth_headers({"Token": raw_key, "Content-Type": "application/json"}),
+            method="POST"
+        )
+        try:
+            urllib.request.urlopen(deny_req, context=ssl_ctx, timeout=10)
+            raise AssertionError("Expected HTTP 403 for read-only key dispatching scan task")
+        except urllib.error.HTTPError as err:
+            assert err.code == 403, f"Expected 403, got {err.code}"
+            print("  ✓ /api/mcp/create_scan_task 只读越权拦截正常 (HTTP 403)")
+
+        # -------------------------------------------------------------
+        # Step 3: 验证远程原生 MCP SSE 协议握手与双向交互
+        # -------------------------------------------------------------
+        print("\n[3/6] 验证远程 MCP SSE 协议握手与双向 JSON-RPC 通信...")
         # 3.1 握手 GET /mcp/sse?token=<raw_key> (长连接)
         sse_url = f"{host}/mcp/sse?token={raw_key}"
         sse_req = urllib.request.Request(sse_url, headers={
@@ -181,14 +233,12 @@ def run_tests():
             "Cache-Control": "no-cache",
             "User-Agent": "ARL-E2E-Verifier/1.0"
         })
-        
-        # 打开长连接并读取 endpoint 事件
+
         sse_conn = urllib.request.urlopen(sse_req, context=ssl_ctx, timeout=15)
         content_type = sse_conn.headers.get("Content-Type", "")
         assert "text/event-stream" in content_type, f"Invalid Content-Type: {content_type}"
         print("  ✓ SSE 流式通道握手成功 (HTTP 200 text/event-stream)")
 
-        # 读取前几行获取 endpoint 事件
         endpoint_line = None
         session_id = None
         for _ in range(10):
@@ -196,11 +246,10 @@ def run_tests():
             if line.startswith("data:"):
                 endpoint_line = line[len("data:"):].strip()
                 break
-        
+
         assert endpoint_line, "Failed to read endpoint event from SSE"
         print(f"  ✓ 收到服务端 endpoint 事件: {endpoint_line}")
-        
-        # 提取 sessionId
+
         if "sessionId=" in endpoint_line:
             session_id = endpoint_line.split("sessionId=")[1].split("&")[0]
         elif "session_id=" in endpoint_line:
@@ -228,7 +277,6 @@ def run_tests():
         with urllib.request.urlopen(post_req, context=ssl_ctx, timeout=10) as post_resp:
             assert post_resp.status in (200, 202), f"Post init failed: {post_resp.status}"
 
-        # 从 SSE 读取服务端 initialize 响应
         init_resp_data = None
         for _ in range(15):
             line = sse_conn.readline().decode("utf-8").strip()
@@ -269,7 +317,8 @@ def run_tests():
         tool_names = [t.get("name") for t in tools_resp_data.get("result", {}).get("tools", [])]
         print(f"  ✓ 成功检索到可用 MCP 工具集 ({len(tool_names)} 个): {tool_names}")
         assert "get_asset_profile" in tool_names, "Missing core tool: get_asset_profile"
-        assert "search_assets" in tool_names, "Missing core tool: search_assets"
+        if cfg.get("tool_switches", {}).get("search_assets", True):
+            assert "search_assets" in tool_names, "Missing core tool: search_assets"
 
         # 3.4 tools/call 调度调用
         call_body = json.dumps({
@@ -304,51 +353,97 @@ def run_tests():
         print(f"  ✓ tools/call (get_asset_profile) 执行成功: target={profile_result.get('target', '127.0.0.1')}, 状态={profile_result.get('status', 'ok')}")
 
         sse_conn.close()
-    except Exception as e:
-        print(f"  ✗ 远程 MCP SSE 协议通信失败: {e}")
-        return False
 
-    # -------------------------------------------------------------
-    # Step 4: 验证调用审计日志与落盘
-    # -------------------------------------------------------------
-    print("\n[4/5] 验证调用审计日志实时记录...")
-    time.sleep(1) # 容纳异步落盘延迟
-    req = urllib.request.Request(f"{host}/api/mcp/logs?page=1&size=5", headers=auth_headers({
-        "Token": token,
-        "Content-Type": "application/json"
-    }))
-    try:
+        # -------------------------------------------------------------
+        # Step 4: 导出 Stdio arl_mcp.py 并验证真实 Stdio 协议与 6 工具对齐
+        # -------------------------------------------------------------
+        print("\n[4/6] 导出 arl_mcp.py 并验证真实 Stdio 通信...")
+        export_req = urllib.request.Request(
+            f"{host}/api/mcp/export_server",
+            data=json.dumps({"host": host, "raw_key": raw_key}).encode("utf-8"),
+            headers=auth_headers({"Token": token, "Content-Type": "application/json"}),
+            method="POST"
+        )
+        with urllib.request.urlopen(export_req, context=ssl_ctx, timeout=10) as exp_resp:
+            assert exp_resp.status == 200
+            exported_script = exp_resp.read().decode("utf-8")
+
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as tmp_py:
+            tmp_py.write(exported_script)
+            tmp_script_path = tmp_py.name
+
+        try:
+            stdio_msgs = "\n".join([
+                json.dumps({"jsonrpc": "2.0", "id": 10, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}}),
+                json.dumps({"jsonrpc": "2.0", "id": 11, "method": "tools/list", "params": {}}),
+                json.dumps({"jsonrpc": "2.0", "id": 12, "method": "tools/call", "params": {"name": "search_assets", "arguments": {"query": "example", "asset_type": "site", "limit": 2}}}),
+                json.dumps({"jsonrpc": "2.0", "id": 13, "method": "tools/call", "params": {"name": "create_scan_task", "arguments": {"name": "e2e_stdio_deny", "target": "127.0.0.1"}}}),
+            ]) + "\n"
+            stdio_env = os.environ.copy()
+            # 远端测试机为自签 IP 部署，临时在本地探活进程放行校验并绕过本机代理
+            stdio_env["ARL_TLS_VERIFY"] = "false"
+            proc = subprocess.run(
+                [sys.executable, tmp_script_path],
+                input=stdio_msgs,
+                text=True,
+                capture_output=True,
+                env=stdio_env,
+                timeout=20,
+            )
+            assert proc.returncode == 0, f"Stdio process failed: {proc.stderr}"
+            lines = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+            by_id = {item.get("id"): item for item in lines}
+            stdio_tools = [t.get("name") for t in by_id[11]["result"]["tools"]]
+            assert stdio_tools == rest_tool_names, f"Stdio tools mismatch: {stdio_tools} vs {rest_tool_names}"
+            assert not by_id[12]["result"]["isError"], f"Stdio search_assets failed: {by_id[12]}"
+            assert by_id[13]["result"]["isError"], "Expected Stdio create_scan_task to be denied for read-only key"
+            assert json.loads(by_id[13]["result"]["content"][0]["text"])["status"] == "denied"
+            print(f"  ✓ 导出 Stdio 协议与 REST/SSE 权限完全一致 ({len(stdio_tools)} 个工具, 越权拦截生效)")
+        finally:
+            if os.path.exists(tmp_script_path):
+                os.unlink(tmp_script_path)
+
+        # -------------------------------------------------------------
+        # Step 5: 验证调用审计日志与落盘
+        # -------------------------------------------------------------
+        print("\n[5/6] 验证调用审计日志实时记录（含 key_id 过滤）...")
+        time.sleep(1)  # 容纳异步落盘延迟
+        req = urllib.request.Request(
+            f"{host}/api/mcp/logs?page=1&size=10&key_id={urllib.parse.quote(key_id)}",
+            headers=auth_headers({"Token": token, "Content-Type": "application/json"})
+        )
         with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             assert data.get("code") == 200, f"Log query error: {data}"
             logs = data.get("data", {}).get("items", [])
-            assert len(logs) > 0, "No logs recorded"
-            latest = logs[0]
-            assert latest.get("tool_name") == "get_asset_profile", f"Unexpected latest tool: {latest}"
-            print(f"  ✓ 审计日志正确落盘: 工具={latest.get('tool_name')}, 状态={latest.get('status')}, 耗时={latest.get('duration_ms')}ms")
-    except Exception as e:
-        print(f"  ✗ 审计日志校验失败: {e}")
-        return False
+            assert len(logs) >= 4, f"Expected >= 4 audit logs for test key, got {len(logs)}"
+            recorded_tools = {item.get("tool_name") for item in logs}
+            assert {"get_asset_profile", "search_assets", "get_task_status", "create_scan_task"}.issubset(recorded_tools), recorded_tools
+            print(f"  ✓ 审计日志按 key_id 精确落盘 {len(logs)} 条: 工具覆盖={sorted(recorded_tools)}")
 
-    # -------------------------------------------------------------
-    # Step 5: 清理临时测试密钥
-    # -------------------------------------------------------------
-    print("\n[5/5] 执行临时测试凭据闭环自愈清理...")
-    if key_id:
-        req = urllib.request.Request(f"{host}/api/mcp/keys/{key_id}", headers=auth_headers({
-            "Token": token,
-            "Content-Type": "application/json"
-        }), method="DELETE")
-        try:
-            with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                assert data.get("code") == 200
-                print(f"  ✓ 临时测试密钥 {key_id} 已安全注销")
-        except Exception as e:
-            print(f"  ✗ 清理临时密钥失败: {e}")
+    except Exception as e:
+        print(f"  ✗ E2E 链路验证失败: {e}")
+        return False
+    finally:
+        # -------------------------------------------------------------
+        # Step 6: 清理临时测试密钥
+        # -------------------------------------------------------------
+        print("\n[6/6] 执行临时测试凭据闭环自愈清理...")
+        if key_id:
+            req = urllib.request.Request(f"{host}/api/mcp/keys/{key_id}", headers=auth_headers({
+                "Token": token,
+                "Content-Type": "application/json"
+            }), method="DELETE")
+            try:
+                with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    assert data.get("code") == 200
+                    print(f"  ✓ 临时测试密钥 {key_id} 已安全注销")
+            except Exception as e:
+                print(f"  ✗ 清理临时密钥失败: {e}")
 
     print("\n" + "=" * 60)
-    print("🎉 ARL-Next MCP 生产全链路所有 5 项探活验证全部通过！")
+    print("🎉 ARL-Next MCP 生产全链路所有 6 项探活验证全部通过！")
     print("=" * 60)
     return True
 

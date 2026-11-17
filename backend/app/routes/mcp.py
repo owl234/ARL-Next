@@ -1,6 +1,6 @@
 #coding: utf-8
 
-from flask import make_response, request
+from flask import g, make_response, request
 from flask_restx import Resource, Namespace
 from bson import ObjectId
 from datetime import datetime, timedelta, timezone
@@ -8,9 +8,11 @@ import csv
 from functools import wraps
 import io
 import json
+import os
 import time
 import math
 import re
+import urllib.request
 from urllib.parse import urlsplit
 
 from app.utils import get_logger, auth
@@ -147,11 +149,20 @@ class MCPTaskDetailExport(Resource):
         return response
 
 
-from app.mcp_asset import build_asset_profile, build_enterprise_profile, _clean_empty
+from app.mcp_asset import (
+    MCP_TOOL_DEFINITIONS,
+    build_asset_profile,
+    build_enterprise_profile,
+    create_mcp_scan_task,
+    get_mcp_task_status,
+    search_mcp_assets,
+    stop_mcp_scan_task,
+    _clean_empty,
+)
 
 
-def mcp_readonly(tool_name):
-    """Apply the same credential, policy, quota and audit checks to both profiles."""
+def mcp_tool_guard(tool_name):
+    """Apply uniform credential, policy, quota and audit checks across MCP HTTP tools."""
     def decorate(func):
         @wraps(func)
         def wrapped(*args, **kwargs):
@@ -160,13 +171,23 @@ def mcp_readonly(tool_name):
             if not user:
                 return {'code': 401, 'message': 'Invalid or expired MCP credential'}, 401
             user['client_ip'] = request.headers.get('X-Real-IP') or request.remote_addr or ''
-            arguments = request.args.to_dict()
-            target = arguments.get('target', '').strip() or arguments.get('task_id', '').strip()
+            if request.method == 'POST':
+                body = request.get_json(silent=True)
+                arguments = body if isinstance(body, dict) else {}
+            else:
+                arguments = request.args.to_dict()
+            target = (
+                str(arguments.get('target', '')).strip()
+                or str(arguments.get('query', '')).strip()
+                or str(arguments.get('task_id', '')).strip()
+                or str(arguments.get('name', '')).strip()
+            )
             started = time.monotonic()
             result, is_error = {}, True
             audit_call = True
             try:
                 policy = load_mcp_policy()
+                g.mcp_policy = policy
                 consume_mcp_quota(user, policy)
                 authorize_tool(user, tool_name, policy)
                 response = func(*args, **kwargs)
@@ -179,7 +200,7 @@ def mcp_readonly(tool_name):
                 result = {'code': error.status, 'status': 'denied', 'message': str(error)}
                 return result, error.status, headers
             except Exception:
-                result = {'code': 500, 'message': 'MCP profile lookup failed'}
+                result = {'code': 500, 'message': 'MCP tool execution failed'}
                 raise
             finally:
                 if audit_call:
@@ -189,9 +210,59 @@ def mcp_readonly(tool_name):
     return decorate
 
 
+mcp_readonly = mcp_tool_guard
+
+
+def _probe_sse_service():
+    """探测内部 arl-mcp SSE 微服务连通性与活跃会话数（绕过外发代理）"""
+    env_url = os.environ.get('ARL_MCP_HEALTH_URL', '').strip()
+    candidates = [env_url] if env_url else [
+        'http://arl-mcp:5005/health',
+        'http://127.0.0.1:5005/health',
+    ]
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    for url in candidates:
+        if not url:
+            continue
+        try:
+            with opener.open(url, timeout=0.35) as resp:
+                if resp.status == 200:
+                    payload = json.loads(resp.read().decode('utf-8'))
+                    return {
+                        'sse_status': 'online',
+                        'sse_sessions': int(payload.get('sessions', 0) or 0),
+                    }
+        except Exception:
+            continue
+    return {'sse_status': 'offline', 'sse_sessions': 0}
+
+
+@ns.route('/tools')
+class MCPToolsCatalog(Resource):
+    def get(self):
+        """按当前凭据权限与全局工具开关返回可用 MCP 工具列表（供 Stdio 与在线能力校验共用）"""
+        token = request.headers.get('Token') or request.headers.get('Authorization', '')
+        user = authenticate_mcp_token(token)
+        if not user:
+            return {'code': 401, 'message': 'Invalid or expired MCP credential'}, 401
+        try:
+            policy = load_mcp_policy()
+        except MCPRequestError as error:
+            return {'code': error.status, 'message': str(error)}, error.status
+
+        tools = []
+        for tool in MCP_TOOL_DEFINITIONS:
+            try:
+                authorize_tool(user, tool['name'], policy)
+            except MCPRequestError:
+                continue
+            tools.append(tool)
+        return {'code': 200, 'tools': tools}
+
+
 @ns.route('/asset_profile')
 class MCPAssetProfile(Resource):
-    @mcp_readonly('get_asset_profile')
+    @mcp_tool_guard('get_asset_profile')
     def get(self):
         target = request.args.get('target', '').strip()
         task_id = request.args.get('task_id', '').strip()
@@ -202,7 +273,7 @@ class MCPAssetProfile(Resource):
 
 @ns.route('/enterprise_profile')
 class MCPEnterpriseProfile(Resource):
-    @mcp_readonly('get_enterprise_profile')
+    @mcp_tool_guard('get_enterprise_profile')
     def get(self):
         """
         MCP 企业生态资产画像接口（自适应识别企业、总览指标、核心样本与分维度下钻）
@@ -218,6 +289,62 @@ class MCPEnterpriseProfile(Resource):
 
         data = build_enterprise_profile(target=target, category=category, page=page, size=size, task_id=task_id)
         return data
+
+
+@ns.route('/search_assets')
+class MCPSearchAssets(Resource):
+    @mcp_tool_guard('search_assets')
+    def get(self):
+        """MCP 多维资产检索接口"""
+        query = request.args.get('query', '').strip()
+        asset_type = request.args.get('asset_type', 'site').strip()
+        limit = request.args.get('limit', 10)
+        policy = getattr(g, 'mcp_policy', None) or load_mcp_policy()
+        result, is_err = search_mcp_assets(
+            query=query,
+            asset_type=asset_type,
+            limit=limit,
+            max_search_limit=policy.get('max_search_limit', 50),
+        )
+        return (result, 400) if is_err else result
+
+
+@ns.route('/task_status')
+class MCPTaskStatus(Resource):
+    @mcp_tool_guard('get_task_status')
+    def get(self):
+        """MCP 任务执行进度与状态摘要查询接口"""
+        task_id = request.args.get('task_id', '').strip()
+        result, is_err = get_mcp_task_status(task_id)
+        return (result, 400) if is_err else result
+
+
+@ns.route('/create_scan_task')
+class MCPCreateScanTask(Resource):
+    @mcp_tool_guard('create_scan_task')
+    def post(self):
+        """MCP 受控扫描任务下发接口"""
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return {'status': 'error', 'message': 'Expected a JSON object'}, 400
+        result, is_err = create_mcp_scan_task(
+            name=data.get('name', ''),
+            target=data.get('target', ''),
+            policy_id=data.get('policy_id', ''),
+        )
+        return (result, 400) if is_err else result
+
+
+@ns.route('/stop_scan_task')
+class MCPStopScanTask(Resource):
+    @mcp_tool_guard('stop_scan_task')
+    def post(self):
+        """MCP 受控扫描任务终止接口"""
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return {'status': 'error', 'message': 'Expected a JSON object'}, 400
+        result, is_err = stop_mcp_scan_task(data.get('task_id', ''))
+        return (result, 400) if is_err else result
 
 
 @ns.route('/export_server')
@@ -331,9 +458,12 @@ class MCPOverview(Resource):
             today_calls = utils.conn_db('mcp_log').count_documents({"created_at": {"$gte": today_start}})
             # 7日累计调用量
             week_calls = utils.conn_db('mcp_log').count_documents({"created_at": {"$gte": seven_days_ago}})
-            # 总 Key 数与活跃 Key 数
+            # 总 Key 数与未过期活跃 Key 数
             total_keys = utils.conn_db('mcp_key').count_documents({})
-            active_keys = utils.conn_db('mcp_key').count_documents({"status": "active"})
+            active_keys = utils.conn_db('mcp_key').count_documents({
+                "status": "active",
+                "$or": [{"expire_at": None}, {"expire_at": {"$gt": now}}]
+            })
             # 24小时内异常数
             yesterday = now - timedelta(days=1)
             error_calls = utils.conn_db('mcp_log').count_documents({"created_at": {"$gte": yesterday}, "status": {"$ne": "success"}})
@@ -366,6 +496,8 @@ class MCPOverview(Resource):
             ]
             top_tools = [{"tool": item["_id"], "count": item["count"]} for item in utils.conn_db('mcp_log').aggregate(pipeline_tools) if item.get("_id")]
 
+            sse_health = _probe_sse_service()
+
             return {
                 "code": 200,
                 "message": "success",
@@ -377,7 +509,9 @@ class MCPOverview(Resource):
                     "error_calls_24h": error_calls,
                     "trend": trend_dates,
                     "top_tools": top_tools,
-                    "service_status": "running"
+                    "service_status": "running",
+                    "sse_status": sse_health["sse_status"],
+                    "sse_sessions": sse_health["sse_sessions"]
                 }
             }
         except Exception as e:
@@ -394,30 +528,45 @@ class MCPKeys(Resource):
             page = int(request.args.get('page', 1))
             size = int(request.args.get('size', 10))
             keyword = request.args.get('keyword', '').strip()
+            status_filter = request.args.get('status', '').strip()
         except ValueError:
             page = 1
             size = 10
             keyword = ''
+            status_filter = ''
         page, size = min(2_147_483_647, max(1, page)), min(100, max(1, size))
 
-        query = {}
+        now_utc = datetime.now(timezone.utc)
+        conditions = []
         if keyword:
-            query["$or"] = [
+            conditions.append({"$or": [
                 {"name": {"$regex": re.escape(keyword), "$options": "i"}},
                 {"key_prefix": {"$regex": re.escape(keyword), "$options": "i"}}
-            ]
+            ]})
+        if status_filter == 'revoked':
+            conditions.append({"status": "revoked"})
+        elif status_filter == 'expired':
+            conditions.append({"status": "active", "expire_at": {"$ne": None, "$lte": now_utc}})
+        elif status_filter == 'active':
+            conditions.append({"status": "active", "$or": [{"expire_at": None}, {"expire_at": {"$gt": now_utc}}]})
+
+        query = {"$and": conditions} if len(conditions) > 1 else (conditions[0] if conditions else {})
 
         total = utils.conn_db('mcp_key').count_documents(query)
         cursor = utils.conn_db('mcp_key').find(query, {"key_hash": 0}).sort("created_at", -1).skip((page - 1) * size).limit(size)
         items = []
-        from datetime import datetime
         for doc in cursor:
             created_at = doc.get("created_at")
             if isinstance(created_at, datetime):
                 created_at = created_at.strftime('%Y-%m-%d %H:%M:%S')
-            expire_at = doc.get("expire_at")
-            if isinstance(expire_at, datetime):
-                expire_at = expire_at.strftime('%Y-%m-%d %H:%M:%S')
+            expire_raw = doc.get("expire_at")
+            is_expired = False
+            if isinstance(expire_raw, datetime):
+                exp_utc = expire_raw.replace(tzinfo=timezone.utc) if expire_raw.tzinfo is None else expire_raw
+                is_expired = exp_utc <= now_utc
+                expire_at = expire_raw.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                expire_at = expire_raw
             last_used_at = doc.get("last_used_at")
             if isinstance(last_used_at, datetime):
                 last_used_at = last_used_at.strftime('%Y-%m-%d %H:%M:%S')
@@ -428,6 +577,7 @@ class MCPKeys(Resource):
                 "key_prefix": doc.get("key_prefix", ""),
                 "scopes": doc.get("scopes", ["asset:read"]),
                 "status": doc.get("status", "active"),
+                "is_expired": is_expired,
                 "expire_at": expire_at,
                 "created_at": created_at,
                 "created_by": doc.get("created_by", "admin"),
@@ -665,29 +815,26 @@ class MCPLogsExport(Resource):
 class MCPConfig(Resource):
     @auth
     def get(self):
-        """获取 MCP 全局配置与工具开关"""
-        cfg = utils.conn_db('mcp_config').find_one({"_id": "global"})
-        if not cfg:
-            cfg = {
+        """获取 MCP 全局配置与工具开关（返回与运行期鉴权完全一致的合并结果）"""
+        try:
+            policy = load_mcp_policy()
+        except MCPRequestError:
+            policy = {
                 "tool_switches": {
                     "get_asset_profile": True,
                     "get_enterprise_profile": True,
                     "search_assets": True,
                     "get_task_status": True,
                     "create_scan_task": False,
-                    "stop_scan_task": False
+                    "stop_scan_task": False,
                 },
                 "max_search_limit": 50,
-                "rate_limit_per_min": 120
+                "rate_limit_per_min": 120,
             }
         return {
             "code": 200,
             "message": "success",
-            "data": {
-                "tool_switches": cfg.get("tool_switches", {}),
-                "max_search_limit": cfg.get("max_search_limit", 50),
-                "rate_limit_per_min": cfg.get("rate_limit_per_min", 120)
-            }
+            "data": policy,
         }
 
     @auth
