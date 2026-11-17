@@ -278,6 +278,10 @@ body.dark-mode .ant-table-tbody > tr.ant-table-row-selected > td.ant-table-cell-
     gap: 12px;
 }
 
+.arl-hero-sub-row {
+    margin-top: 10px;
+}
+
 .arl-filter-group {
     display: flex;
     align-items: center;

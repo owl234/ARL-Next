@@ -1,10 +1,49 @@
 <template>
   <div class="arl-page-container">
-    <a-tabs v-model:activeKey="mainTab" size="large" style="margin-bottom: 12px;">
-      <a-tab-pane key="arl" :tab="pageText('pages.arlPluginsPython')">
-        <!-- 吸顶 Hero 操作卡片 -->
-        <div ref="actionBarRef" class="arl-hero-card">
-          <div class="arl-toolbar-row">
+    <div v-show="mainTab === 'arl'">
+      <!-- 吸顶 Hero 操作卡片 -->
+      <div ref="actionBarRef" class="arl-hero-card">
+        <div class="arl-hero-unified-bar">
+          <div class="arl-hero-left">
+            <div class="arl-hero-title">
+              <span class="title-text">{{ pageText('navigation.pocs') }}</span>
+            </div>
+            <div class="arl-capsule-switcher">
+              <button
+                type="button"
+                class="arl-capsule-item"
+                :class="{ 'is-active': mainTab === 'arl' }"
+                @click="switchMainTab('arl')"
+              >
+                <span>{{ pageText('pages.arlPluginsPython') }}</span>
+              </button>
+              <button
+                type="button"
+                class="arl-capsule-item"
+                :class="{ 'is-active': mainTab === 'nuclei' }"
+                @click="switchMainTab('nuclei')"
+              >
+                <span>{{ pageText('pages.nucleiTemplatesYaml') }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="arl-hero-right">
+            <a-tooltip :title="pageText('pages.scanDiskAndSynchronizePocPluginsToTheDatabase')">
+              <a-button size="small" :loading="syncLoading" @click="handleSync">
+                <template #icon><sync-outlined /></template>
+                {{ pageText('pages.syncPlugins') }}
+              </a-button>
+            </a-tooltip>
+            <div class="arl-hero-v-divider"></div>
+            <a-button type="primary" size="small" @click="openCreateModal">
+              <template #icon><plus-outlined /></template>
+              {{ pageText('pages.newPoc') }}
+            </a-button>
+          </div>
+        </div>
+
+        <div class="arl-toolbar-row arl-hero-sub-row">
             <!-- 左侧：紧凑搜索条件与重置 -->
             <div class="arl-filter-group">
               <div class="arl-filter-item">
@@ -66,13 +105,8 @@
               </a-button>
             </div>
 
-            <!-- 右侧：单一主要操作 + 次要操作组 + 批量动作 -->
+            <!-- 右侧：导入、模板下载与批量删除 -->
             <div class="arl-actions-group">
-              <a-button type="primary" size="small" @click="openCreateModal">
-                <template #icon><plus-outlined /></template>
-                {{ pageText('pages.newPoc') }}
-              </a-button>
-
               <a-button size="small" @click="isImportModalVisible = true">
                 <template #icon><upload-outlined /></template>
                 {{ pageText('pages.importPocs') }}
@@ -82,13 +116,6 @@
                 <template #icon><download-outlined /></template>
                 {{ pageText('pages.downloadTemplate') }}
               </a-button>
-
-              <a-tooltip :title="pageText('pages.scanDiskAndSynchronizePocPluginsToTheDatabase')">
-                <a-button size="small" :loading="syncLoading" @click="handleSync">
-                  <template #icon><sync-outlined /></template>
-                  {{ pageText('pages.syncPlugins') }}
-                </a-button>
-              </a-tooltip>
 
               <a-popconfirm
                 :title="pageText('pages.deleteTheSelectedPocs')"
@@ -272,13 +299,14 @@
         />
       </div>
     </a-modal>
-      </a-tab-pane>
+    </div>
 
-      <!-- Nuclei 模板中心 -->
-      <a-tab-pane key="nuclei" :tab="pageText('pages.nucleiTemplatesYaml')">
-        <NucleiManage />
-      </a-tab-pane>
-    </a-tabs>
+    <!-- Nuclei 模板中心 -->
+    <NucleiManage
+      v-if="hasVisitedNuclei"
+      v-show="mainTab === 'nuclei'"
+      @switch-main-tab="switchMainTab"
+    />
   </div>
 </template>
 
@@ -287,18 +315,31 @@ import { useI18n } from 'vue-i18n';
 defineOptions({ name: 'PocList' });
 
 import { ref, reactive, onMounted, onDeactivated, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import NucleiManage from '../components/NucleiManage.vue';
 import { useSticky } from '../utils/useSticky';
 const actionBarRef = ref(null);
 const { stickyConfig } = useSticky(actionBarRef);
 
 const route = useRoute();
+const router = useRouter();
 const mainTab = ref(route.query.tab === 'nuclei' ? 'nuclei' : 'arl');
+const hasVisitedNuclei = ref(mainTab.value === 'nuclei');
+
+const switchMainTab = (tab) => {
+  mainTab.value = tab;
+  if (tab === 'nuclei') {
+    hasVisitedNuclei.value = true;
+  }
+  router.replace({ query: { ...route.query, tab } });
+};
 
 watch(() => route.query.tab, (newTab) => {
   if (newTab === 'nuclei' || newTab === 'arl') {
     mainTab.value = newTab;
+    if (newTab === 'nuclei') {
+      hasVisitedNuclei.value = true;
+    }
   }
 });
 

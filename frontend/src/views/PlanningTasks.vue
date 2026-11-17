@@ -1,14 +1,51 @@
 <template>
   <div class="arl-page-container">
     <div ref="actionBarRef" class="arl-hero-card">
-      <a-tabs v-model:activeKey="activeTab" type="card" class="arl-detail-tabs" style="margin-bottom: 12px;" @change="onTabChange">
-        <a-tab-pane key="planning" :tab="taskText('tasks.scheduledScans')"></a-tab-pane>
-        <a-tab-pane key="monitor" :tab="taskText('tasks.continuousAssetMonitoring')"></a-tab-pane>
-      </a-tabs>
+      <div class="arl-hero-unified-bar">
+        <div class="arl-hero-left">
+          <div class="arl-hero-title">
+            <span class="title-text">{{ taskText('navigation.schedules') }}</span>
+          </div>
+          <div class="arl-capsule-switcher">
+            <button
+              type="button"
+              class="arl-capsule-item"
+              :class="{ 'is-active': activeTab === 'planning' }"
+              @click="onTabChange('planning')"
+            >
+              <clock-circle-outlined />
+              <span>{{ taskText('tasks.scheduledScans') }}</span>
+            </button>
+            <button
+              type="button"
+              class="arl-capsule-item"
+              :class="{ 'is-active': activeTab === 'monitor' }"
+              @click="onTabChange('monitor')"
+            >
+              <radar-chart-outlined />
+              <span>{{ taskText('tasks.continuousAssetMonitoring') }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="arl-hero-right">
+          <a-button size="small" :loading="activeTab === 'planning' ? loading : monitorLoading" @click="refreshActiveTab">
+            <template #icon><reload-outlined /></template>
+            {{ taskText('tasks.refresh') }}
+          </a-button>
+          <template v-if="activeTab === 'planning'">
+            <div class="arl-hero-v-divider"></div>
+            <a-button type="primary" size="small" @click="openAddModal">
+              <template #icon><plus-outlined /></template>
+              {{ taskText('tasks.addScheduledTask') }}
+            </a-button>
+          </template>
+        </div>
+      </div>
 
       <!-- 扫描计划任务 操作栏 -->
       <template v-if="activeTab === 'planning'">
-        <div class="arl-toolbar-row">
+        <div class="arl-toolbar-row arl-hero-sub-row">
           <!-- 左侧：紧凑搜索条件 -->
           <div class="arl-filter-group">
             <div class="arl-filter-item">
@@ -52,13 +89,8 @@
             </a-button>
           </div>
 
-          <!-- 右侧：单一主要操作 + 批量动作 -->
+          <!-- 右侧：批量动作 -->
           <div class="arl-actions-group">
-            <a-button type="primary" size="small" @click="openAddModal">
-              <template #icon><plus-outlined /></template>
-              {{ taskText('tasks.addScheduledTask') }}
-            </a-button>
-
             <a-popconfirm :title="taskText('tasks.stopTheSelectedScheduledTasks')" :ok-text="taskText('tasks.confirm')" :cancel-text="taskText('tasks.cancel')" @confirm="handleBatchStop">
               <a-button size="small" :disabled="!hasPlanSelected">
                 <template #icon><pause-circle-outlined /></template>
@@ -76,7 +108,7 @@
 
       <!-- 资产持续监控 操作栏 -->
       <template v-else-if="activeTab === 'monitor'">
-        <div class="arl-toolbar-row">
+        <div class="arl-toolbar-row arl-hero-sub-row">
           <!-- 左侧：检索条件 -->
           <div class="arl-filter-group">
             <div class="arl-filter-item">
@@ -362,7 +394,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useSticky } from '../utils/useSticky';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
-import { SearchOutlined, ExclamationCircleOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, PauseCircleOutlined, PlayCircleOutlined, SendOutlined } from '@ant-design/icons-vue';
+import { SearchOutlined, ExclamationCircleOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, PauseCircleOutlined, PlayCircleOutlined, SendOutlined, ReloadOutlined, ClockCircleOutlined, RadarChartOutlined } from '@ant-design/icons-vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import dayjs from 'dayjs';
 
@@ -377,6 +409,7 @@ const { stickyConfig } = useSticky(actionBarRef);
 const activeTab = ref(route.query.tab === 'monitor' ? 'monitor' : 'planning');
 
 const onTabChange = (key) => {
+  activeTab.value = key;
   router.replace({
     query: { ...route.query, tab: key }
   });
@@ -384,6 +417,14 @@ const onTabChange = (key) => {
     fetchMonitorData();
   } else if (key === 'planning' && dataSource.value.length === 0) {
     fetchPlanData();
+  }
+};
+
+const refreshActiveTab = () => {
+  if (activeTab.value === 'planning') {
+    fetchPlanData();
+  } else {
+    fetchMonitorData();
   }
 };
 

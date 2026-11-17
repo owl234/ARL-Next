@@ -39,13 +39,8 @@
           </a-button>
         </div>
 
-        <!-- 右侧：单一主要操作 + 次要操作组 + 批量动作 -->
+        <!-- 右侧：辅助/批量操作与最右端主创建按钮 -->
         <div class="arl-actions-group">
-          <a-button type="primary" size="small" @click="openAddModal">
-            <template #icon><plus-outlined /></template>
-            {{ pageText('pages.addFingerprint') }}
-          </a-button>
-
           <a-upload
             name="file"
             :show-upload-list="false"
@@ -75,6 +70,11 @@
               {{ pageText('tasks.deleteSelected') }}
             </a-button>
           </a-popconfirm>
+
+          <a-button type="primary" size="small" @click="openAddModal">
+            <template #icon><plus-outlined /></template>
+            {{ pageText('pages.addFingerprint') }}
+          </a-button>
         </div>
       </div>
     </div>

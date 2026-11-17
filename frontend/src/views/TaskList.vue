@@ -78,17 +78,17 @@
 
           <!-- 资产侦查专属操作 -->
           <template v-else-if="activeMainTab === 'task'">
-            <a-button type="primary" size="small" class="primary-action-btn" @click="showModal">
-              <template #icon><plus-outlined /></template>
-              {{ taskText('tasks.newDiscoveryTask') }}
+            <a-button size="small" @click="goToGlobalView">
+              <template #icon><compass-outlined /></template>
+              {{ taskText('tasks.globalView') }}
             </a-button>
             <a-button size="small" @click="openFofaModal">
               <template #icon><thunderbolt-outlined /></template>
               {{ taskText('tasks.createFofaTask') }}
             </a-button>
-            <a-button size="small" @click="goToGlobalView">
-              <template #icon><compass-outlined /></template>
-              {{ taskText('tasks.globalView') }}
+            <a-button type="primary" size="small" class="primary-action-btn" @click="showModal">
+              <template #icon><plus-outlined /></template>
+              {{ taskText('tasks.newDiscoveryTask') }}
             </a-button>
           </template>
         </div>

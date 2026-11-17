@@ -1,36 +1,26 @@
 <template>
   <div class="nuclei-manage-container" :class="{ 'page-wide-text': pageLocale !== 'zh-CN' }">
-    <!-- 吸顶 Hero 控制卡片：胶囊子视角 + 版本状态 + 对应子视角工具栏 -->
+    <!-- 吸顶 Hero 控制卡片：标题 + POC 域切换胶囊 + 元数据与远端主操作 + 子视角标签 + 工具栏 -->
     <div ref="nucleiActionBarRef" class="arl-hero-card">
       <div class="arl-hero-unified-bar">
         <div class="arl-hero-left">
+          <div class="arl-hero-title">
+            <span class="title-text">{{ pageText('navigation.pocs') }}</span>
+          </div>
           <div class="arl-capsule-switcher">
             <button
               type="button"
               class="arl-capsule-item"
-              :class="{ 'is-active': innerTab === 'community' }"
-              @click="innerTab = 'community'"
+              @click="emit('switch-main-tab', 'arl')"
             >
-              <span>{{ pageText('pages.communityTemplatesReadOnlySearch') }}</span>
-              <span class="arl-capsule-count">{{ stats.community_total ? stats.community_total.toLocaleString() : pageText('pages.scanning') }}</span>
+              <span>{{ pageText('pages.arlPluginsPython') }}</span>
             </button>
             <button
               type="button"
-              class="arl-capsule-item"
-              :class="{ 'is-active': innerTab === 'blacklist' }"
-              @click="innerTab = 'blacklist'"
+              class="arl-capsule-item is-active"
+              @click="emit('switch-main-tab', 'nuclei')"
             >
-              <span>{{ pageText('pages.falsePositiveBlocklist') }}</span>
-              <span class="arl-capsule-count">{{ stats.blacklist_total || 0 }}</span>
-            </button>
-            <button
-              type="button"
-              class="arl-capsule-item"
-              :class="{ 'is-active': innerTab === 'custom' }"
-              @click="innerTab = 'custom'"
-            >
-              <span>{{ pageText('pages.customTemplateWorkspace') }}</span>
-              <span class="arl-capsule-count">{{ stats.custom_total }}</span>
+              <span>{{ pageText('pages.nucleiTemplatesYaml') }}</span>
             </button>
           </div>
         </div>
@@ -53,8 +43,56 @@
               {{ formatTemplateVersion(stats.nuclei_version) }}
             </a-tag>
           </span>
+          <div class="arl-hero-v-divider"></div>
+          <a-button v-if="innerTab === 'custom'" type="primary" size="small" @click="openCreateModal">
+            <template #icon><plus-outlined /></template>
+            {{ pageText('pages.newTemplate') }}
+          </a-button>
+          <a-button v-else-if="innerTab === 'blacklist'" type="primary" size="small" @click="openAddBlacklistModal">
+            <template #icon><plus-outlined /></template>
+            {{ pageText('pages.addAFalsePositive') }}
+          </a-button>
+          <a-popconfirm
+            v-else
+            :title="pageText('pages.synchronizeTheCommunityTemplateLibraryTheSystemWillUse')"
+            :ok-text="pageText('pages.confirmSynchronization')"
+            :cancel-text="pageText('tasks.cancel')"
+            @confirm="handleSyncCommunity"
+          >
+            <a-button type="primary" size="small" :loading="syncStatus.status === 'syncing'">
+              <template #icon><sync-outlined /></template>
+              {{ pageText('pages.syncLatestCommunityVersion') }}
+            </a-button>
+          </a-popconfirm>
         </div>
       </div>
+
+      <a-tabs v-model:activeKey="innerTab" type="card" size="small" class="arl-detail-tabs nuclei-sub-tabs">
+        <a-tab-pane key="community">
+          <template #tab>
+            <span class="nuclei-tab-label">
+              <span>{{ pageText('pages.communityTemplatesReadOnlySearch') }}</span>
+              <span class="nuclei-tab-badge">{{ stats.community_total ? stats.community_total.toLocaleString() : pageText('pages.scanning') }}</span>
+            </span>
+          </template>
+        </a-tab-pane>
+        <a-tab-pane key="blacklist">
+          <template #tab>
+            <span class="nuclei-tab-label">
+              <span>{{ pageText('pages.falsePositiveBlocklist') }}</span>
+              <span class="nuclei-tab-badge">{{ stats.blacklist_total || 0 }}</span>
+            </span>
+          </template>
+        </a-tab-pane>
+        <a-tab-pane key="custom">
+          <template #tab>
+            <span class="nuclei-tab-label">
+              <span>{{ pageText('pages.customTemplateWorkspace') }}</span>
+              <span class="nuclei-tab-badge">{{ stats.custom_total }}</span>
+            </span>
+          </template>
+        </a-tab-pane>
+      </a-tabs>
 
       <!-- 1. 社区模板库工具栏 -->
       <div v-if="innerTab === 'community'" class="arl-toolbar-row nuclei-sub-toolbar">
@@ -127,18 +165,6 @@
             {{ pageText('pages.viewSynchronizationLogs') }}
           </a-button>
 
-          <a-popconfirm
-            :title="pageText('pages.synchronizeTheCommunityTemplateLibraryTheSystemWillUse')"
-            :ok-text="pageText('pages.confirmSynchronization')"
-            :cancel-text="pageText('tasks.cancel')"
-            @confirm="handleSyncCommunity"
-          >
-            <a-button type="primary" size="small" :loading="syncStatus.status === 'syncing'">
-              <template #icon><sync-outlined /></template>
-              {{ pageText('pages.syncLatestCommunityVersion') }}
-            </a-button>
-          </a-popconfirm>
-
           <a-button size="small" @click="isOfflineModalVisible = true">
             <template #icon><cloud-upload-outlined /></template>
             {{ pageText('pages.offlineUpdatePackage') }}
@@ -188,10 +214,6 @@
           <span class="page-secondary-label" style="font-size: 12px;">
             {{ pageText('pages.blockedTemplatesAreExcludedFromAllSubsequentNucleiScans') }}
           </span>
-          <a-button type="primary" size="small" @click="openAddBlacklistModal">
-            <template #icon><plus-outlined /></template>
-            {{ pageText('pages.addAFalsePositive') }}
-          </a-button>
           <a-popconfirm
             :title="pageText('pages.removeTheSelectedTemplatesFromTheFalsePositiveBlocklist')"
             :ok-text="pageText('pages.confirmRemoval')"
@@ -268,10 +290,6 @@
         </div>
 
         <div class="arl-actions-group">
-          <a-button type="primary" size="small" @click="openCreateModal">
-            <template #icon><plus-outlined /></template>
-            {{ pageText('pages.newTemplate') }}
-          </a-button>
           <a-button size="small" @click="isImportModalVisible = true">
             <template #icon><cloud-upload-outlined /></template>
             {{ pageText('pages.importTemplates') }}
@@ -832,6 +850,7 @@
 <script setup>
 import { useI18n } from 'vue-i18n';
 import { ref, reactive, onMounted, onBeforeUnmount, computed, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { message, notification } from 'ant-design-vue';
 import {
   PlusOutlined,
@@ -859,6 +878,8 @@ import { useSticky } from '../utils/useSticky';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
+const route = useRoute();
+const emit = defineEmits(['switch-main-tab']);
 
 const nucleiActionBarRef = ref(null);
 const { stickyConfig } = useSticky(nucleiActionBarRef);
@@ -1748,7 +1769,20 @@ watch(innerTab, (newTab) => {
   }
 });
 
+watch(() => route.query.search, (newSearch) => {
+  if (typeof newSearch === 'string' && newSearch.trim()) {
+    innerTab.value = 'community';
+    communitySearch.search = newSearch.trim();
+    communityPagination.current = 1;
+    fetchCommunityTemplates();
+  }
+});
+
 onMounted(() => {
+  if (typeof route.query.search === 'string' && route.query.search.trim()) {
+    innerTab.value = 'community';
+    communitySearch.search = route.query.search.trim();
+  }
   fetchStats();
   fetchCustomTemplates();
   fetchCommunityTemplates();
@@ -1783,10 +1817,27 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-.nuclei-sub-toolbar {
+.nuclei-sub-tabs {
   margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--arl-border-color);
+}
+
+.nuclei-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nuclei-tab-badge {
+  font-family: var(--arl-font-mono);
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--arl-bg-hover);
+  color: var(--arl-text-secondary);
+}
+
+.nuclei-sub-toolbar {
+  margin-top: 0;
 }
 
 .dryrun-panel {

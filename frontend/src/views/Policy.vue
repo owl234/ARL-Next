@@ -24,12 +24,8 @@
           </a-button>
         </div>
 
-        <!-- 右侧：主操作与批量删除 -->
+        <!-- 右侧：批量删除与主操作（最右端固定为主创建按钮） -->
         <div class="arl-actions-group">
-          <a-button type="primary" size="small" @click="goToDetail">
-            <template #icon><plus-outlined /></template>
-            {{ pageText('pages.newPolicy') }}
-          </a-button>
           <a-popconfirm
             :title="pageText('pages.deleteTheSelectedPoliciesLabel2')"
             :ok-text="pageText('assets.confirm')"
@@ -42,6 +38,10 @@
               {{ pageText('tasks.deleteSelected') }}
             </a-button>
           </a-popconfirm>
+          <a-button type="primary" size="small" @click="goToDetail">
+            <template #icon><plus-outlined /></template>
+            {{ pageText('pages.newPolicy') }}
+          </a-button>
         </div>
       </div>
     </div>
