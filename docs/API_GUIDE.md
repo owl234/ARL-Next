@@ -388,3 +388,20 @@ Worker 不可达、控制指令没有完整确认或停止超时，均中止恢�
   - `GET /api/dashboard/sysinfo`（`data.proxy`）与 `GET /api/icp/tyc_check`（`data.proxy_status`）均复用同一 `runtime` 运行态势模型，核心 `state` 枚举为 `direct_ok`、`backup_active`、`proxy_active`、`degraded_blocked`、`proxy_unavailable`。
   - 当 `scan` 域启用 `apply_to_puppeteer` 且绑定了含账号密码的代理节点时，由于 Chromium `--proxy-server` 原生不支持带鉴权代理，Puppeteer 会自动降级直连并在 `runtime.puppeteer_compat_warning` 中返回提示。
   - 旧版 `POST /api/system_config/general` 传入 `proxy_url` 时仍会兼容同步至 `legacy-default` 节点。
+
+## 9. GitHub 监控与泄露研判接口
+
+代码泄露命中统一按文件指纹（`hash_md5`）跨单次任务（`github_result`）与周期策略（`github_monitor_result`）合并去重，研判状态持久化于 `github_triage`，屏蔽仓库持久化于 `github_ignored_repo`；以下接口均需携带管理员 `Token` 请求头。
+
+| 方法 | 路径 | 用途 |
+| :--- | :--- | :--- |
+| `GET` | `/api/github_result/overview/` | 分页查询跨任务去重后的代码泄露命中；支持 `source_type`（`all`/`task`/`scheduler`）、`triage_status`、`group_by`（`flat`/`repo`）、`only_ignored` 与关键词筛选 |
+| `GET` | `/api/github_result/stats/` | 获取去重后的研判口径统计（`pending`、`confirmed`、`false_positive`、`total`、`ignored_repos`、`running_tasks`、`running_schedulers`） |
+| `POST` | `/api/github_result/triage/` | 按 `hash_md5s` 批量更新研判状态（`pending` / `confirmed` / `false_positive`）与备注 `note`，同步回写存量结果并供后续任务自动继承 |
+| `GET` / `POST` | `/api/github_result/ignored_repos/` | 读取、新增或移出噪声仓库屏蔽列表（`action`: `add` / `remove`，`repo_full_names`）；已屏蔽仓库默认从待研判视图隐去且不触发周期告警推送 |
+| `GET` | `/api/github_result/export/` | 按当前筛选条件导出去重命中结果（`format`: `csv` / `json`，单次上限 50,000 条，CSV 对公式前缀做字面转义） |
+| `POST` | `/api/github_scheduler/run/` | 传入 `_id` 列表，立即触发指定周期监控策略执行一次 |
+| `GET` | `/api/github_threat/token_status` | 经 `intel` 代理域探测 GitHub API 连通性与双维度额度（同时返回 `core` 与 `search` 剩余限额） |
+| `GET` | `/api/github_threat/hackers_history` | 查询监控研究员开源工具发现记录，支持可选 `github_id` 与 `q`（仓库名/简介/语言）过滤 |
+
+- **仪表盘统计口径同步**：`GET /api/dashboard/stats` 中的 `github_monitors` 统计 `github_scheduler` 集合记录数；`POST /api/github_threat/tools_target` 与 `POST /api/github_threat/hackers_target` 均同时兼容单条提交与批量数组（`repo_urls` / `github_ids`）。

@@ -1,4 +1,5 @@
 from flask_restx import fields, Namespace
+from app.services import github_triage
 from app.utils import get_logger, auth
 from . import base_query_fields, ARLResource, get_arl_parser
 
@@ -30,7 +31,21 @@ class ARLGithubMonitorResult(ARLResource):
         """
         args = self.parser.parse_args()
         data = self.build_data(args=args, collection='github_monitor_result')
+        items = data.get("items") or []
+        if items:
+            triage_map = github_triage.get_triage_status_map(
+                [item.get("hash_md5") for item in items if item.get("hash_md5")]
+            )
+            ignored_set = set(github_triage.get_ignored_repo_names())
+            for item in items:
+                h = item.get("hash_md5")
+                persisted = triage_map.get(h) if h else None
+                if persisted:
+                    item["triage_status"] = persisted["triage_status"]
+                    item["triage_note"] = persisted["note"]
+                    item["triage_updated_at"] = persisted["updated_at"]
+                else:
+                    item["triage_status"] = item.get("triage_status") or github_triage.TRIAGE_PENDING
+                item["is_repo_ignored"] = item.get("repo_full_name", "") in ignored_set
 
         return data
-
-

@@ -71,11 +71,11 @@ class DashboardStats(ARLResource):
             for sev in nuclei_counts:
                 nuclei_counts[sev] = conn('nuclei_result').count_documents({"vuln_severity": sev})
         
-        # 4. GitHub 监控数
+        # 4. GitHub 监控策略数
         try:
-            github_monitors = conn('github_monitor_task').estimated_document_count()
+            github_monitors = conn('github_scheduler').estimated_document_count()
         except Exception:
-            github_monitors = conn('github_monitor_task').count_documents({})
+            github_monitors = conn('github_scheduler').count_documents({})
         
         data = {
             "total_assets": total_assets,

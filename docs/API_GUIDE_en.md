@@ -386,3 +386,20 @@ The proxy node pool, three traffic-domain policies (`osint` / `scan` / `intel`),
   - `GET /api/dashboard/sysinfo` (`data.proxy`) and `GET /api/icp/tyc_check` (`data.proxy_status`) expose the same runtime model (`state`: `direct_ok`, `backup_active`, `proxy_active`, `degraded_blocked`, or `proxy_unavailable`).
   - When `scan.apply_to_puppeteer` is enabled with credentialed nodes, Puppeteer falls back to direct egress (Chromium `--proxy-server` does not natively support proxy authentication) and reports the notice in `runtime.puppeteer_compat_warning`.
   - Legacy `proxy_url` updates via `POST /api/system_config/general` remain synchronized to the `legacy-default` node.
+
+## 9. GitHub Monitoring & Leak Triage Endpoints
+
+Code leak findings are deduplicated across one-time scans (`github_result`) and recurring policies (`github_monitor_result`) by `hash_md5`. Triage state persists in `github_triage`, and ignored repositories persist in `github_ignored_repo`. All endpoints require the administrator `Token` header.
+
+| Method | Endpoint | Purpose |
+| :--- | :--- | :--- |
+| `GET` | `/api/github_result/overview/` | Query deduplicated leak findings with pagination; supports `source_type` (`all`/`task`/`scheduler`), `triage_status`, `group_by` (`flat`/`repo`), `only_ignored`, and field filters |
+| `GET` | `/api/github_result/stats/` | Return deduplicated triage counters (`pending`, `confirmed`, `false_positive`, `total`, `ignored_repos`, `running_tasks`, `running_schedulers`) |
+| `POST` | `/api/github_result/triage/` | Update triage status (`pending` / `confirmed` / `false_positive`) and `note` by `hash_md5s`, propagating to existing hits and future scans |
+| `GET` / `POST` | `/api/github_result/ignored_repos/` | List, add, or remove ignored repositories (`action`: `add` / `remove`, `repo_full_names`); ignored repos are hidden from default triage and muted from recurring alerts |
+| `GET` | `/api/github_result/export/` | Export filtered deduplicated findings (`format`: `csv` / `json`, capped at 50,000 rows, with CSV formula prefix neutralization) |
+| `POST` | `/api/github_scheduler/run/` | Trigger immediate execution for one or more recurring policies (`_id` list) |
+| `GET` | `/api/github_threat/token_status` | Probe GitHub API via the `intel` proxy domain and return both `core` and `search` rate-limit quotas |
+| `GET` | `/api/github_threat/hackers_history` | Query tools discovered from tracked researchers with optional `github_id` and `q` (repo/description/language) filters |
+
+- **Dashboard & Batch Alignment**: `github_monitors` in `GET /api/dashboard/stats` counts `github_scheduler` documents; `POST /api/github_threat/tools_target` and `POST /api/github_threat/hackers_target` accept both single items and batch lists (`repo_urls` / `github_ids`).

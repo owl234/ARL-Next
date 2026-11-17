@@ -38,6 +38,22 @@ class ARLGithubScheduler(ARLResource):
         """
         args = self.parser.parse_args()
         data = self.build_data(args=args, collection='github_scheduler')
+        items = data.get("items") or []
+        if items:
+            sids = [str(it.get("_id", "")) for it in items if it.get("_id")]
+            cnt_map = {}
+            if sids:
+                try:
+                    pipeline = [
+                        {"$match": {"github_scheduler_id": {"$in": sids}}},
+                        {"$group": {"_id": "$github_scheduler_id", "count": {"$sum": 1}}},
+                    ]
+                    for row in utils.conn_db("github_monitor_result").aggregate(pipeline):
+                        cnt_map[row["_id"]] = row.get("count", 0)
+                except Exception:
+                    pass
+            for it in items:
+                it["result_count"] = cnt_map.get(str(it.get("_id", "")), 0)
 
         return data
 
@@ -228,3 +244,40 @@ class StopGithubScheduler(ARLResource):
             github_task.stop_task(_id=scheduler_id)
 
         return utils.build_ret(ErrorMsg.Success, {"job_id_list": job_id_list})
+
+
+run_github_scheduler_fields = ns.model('runGithubScheduler', {
+    "_id": fields.List(fields.String(required=True, description="Github 监控任务ID"))
+})
+
+
+@ns.route('/run/')
+class RunGithubScheduler(ARLResource):
+
+    @auth
+    @ns.expect(run_github_scheduler_fields)
+    def post(self):
+        """
+        立即运行一次 Github 监控周期策略
+        """
+        args = self.parse_args(run_github_scheduler_fields)
+        job_id_list = args.get("_id") or []
+        if not job_id_list:
+            return utils.build_ret(ErrorMsg.Error, {"error": "请至少选择一个监控策略"})
+
+        items_to_run = []
+        for scheduler_id in job_id_list:
+            item = github_task.find_github_scheduler(scheduler_id)
+            if not item:
+                return utils.build_ret(ErrorMsg.JobNotFound, {"_id": scheduler_id})
+            items_to_run.append(item)
+
+        task_id_list = []
+        for item in items_to_run:
+            res = github_task.github_cron_run(item)
+            if isinstance(res, str):
+                return utils.build_ret(ErrorMsg.Error, {"error": res, "_id": str(item["_id"])})
+            if isinstance(res, dict) and res.get("task_id"):
+                task_id_list.append(res["task_id"])
+
+        return utils.build_ret(ErrorMsg.Success, {"job_id_list": job_id_list, "task_id_list": task_id_list})

@@ -22,6 +22,10 @@ class GithubTaskTask(object):
 
     def save_content(self):
         self.update_status("fetch content-{}".format(len(self.results)))
+        from app.services.github_triage import get_triage_status_map, TRIAGE_PENDING
+        triage_map = get_triage_status_map([
+            r.hash_md5 for r in self.results if isinstance(r, GithubResult)
+        ])
         for result in self.results:
             if not isinstance(result, GithubResult):
                 continue
@@ -30,6 +34,10 @@ class GithubTaskTask(object):
                 continue
 
             item = self.result_to_dict(result)
+            persisted = triage_map.get(result.hash_md5)
+            item["triage_status"] = persisted["triage_status"] if persisted else TRIAGE_PENDING
+            if persisted and persisted.get("note"):
+                item["triage_note"] = persisted["note"]
 
             utils.conn_db("github_result").insert_one(item)
 
@@ -115,6 +123,17 @@ class GithubTaskMonitor(GithubTaskTask):
     def save_mongo(self):
         cnt = 0
         self.update_status("fetch content")
+        from app.services.github_triage import (
+            get_ignored_repo_names,
+            get_triage_status_map,
+            TRIAGE_FALSE_POSITIVE,
+            TRIAGE_PENDING,
+        )
+        triage_map = get_triage_status_map([
+            r.hash_md5 for r in self.results if isinstance(r, GithubResult)
+        ])
+        ignored_set = set(get_ignored_repo_names())
+        self.alert_results = []
         for result in self.results:
             if not isinstance(result, GithubResult):
                 continue
@@ -133,15 +152,24 @@ class GithubTaskMonitor(GithubTaskTask):
             item = self.result_to_dict(result)
             item["github_scheduler_id"] = self.scheduler_id
             item["update_date"] = utils.curr_date_obj()
+            persisted = triage_map.get(result.hash_md5)
+            triage_status = persisted["triage_status"] if persisted else TRIAGE_PENDING
+            item["triage_status"] = triage_status
+            if persisted and persisted.get("note"):
+                item["triage_note"] = persisted["note"]
+
             cnt += 1
             self.new_results.append(result)
+            if triage_status != TRIAGE_FALSE_POSITIVE and result.repo_full_name not in ignored_set:
+                self.alert_results.append(result)
             utils.conn_db("github_monitor_result").insert_one(item)
 
         logger.info("github_monitor save {} {}".format(self.keyword, cnt))
 
-    def build_repo_map(self):
+    def build_repo_map(self, results=None):
         repo_map = dict()
-        for result in self.new_results:
+        target_results = self.new_results if results is None else results
+        for result in target_results:
             repo_name = result.repo_full_name
             if repo_map.get(repo_name) is None:
                 repo_map[repo_name] = [result]
@@ -204,11 +232,12 @@ class GithubTaskMonitor(GithubTaskTask):
 
         return html
 
-    def build_markdown_report(self):
-        repo_map = self.build_repo_map()
+    def build_markdown_report(self, results=None):
+        target_results = self.new_results if results is None else results
+        repo_map = self.build_repo_map(target_results)
 
         markdown = "[监控-Github-{}] \n 仓库数:{}  结果数:{} \n --- \n".format(self.keyword,
-                                                                        len(repo_map.keys()), len(self.new_results))
+                                                                        len(repo_map.keys()), len(target_results))
 
         global_cnt = 0
         repo_cnt = 0
@@ -231,16 +260,18 @@ class GithubTaskMonitor(GithubTaskTask):
 
     # 消息推送
     def push_msg(self):
-        if not self.new_results:
+        alert_items = getattr(self, "alert_results", None)
+        target_results = self.new_results if alert_items is None else alert_items
+        if not target_results:
             return
 
-        logger.info("found new result {} {}".format(self.keyword, len(self.new_results)))
+        logger.info("found new result {} {}".format(self.keyword, len(target_results)))
 
         from app.utils.push import unified_push
         unified_push(
             push_type="github_leak",
             title=f"GitHub 关键字特征监控告警 [{self.keyword}]",
-            content=self.build_markdown_report()
+            content=self.build_markdown_report(target_results)
         )
 
     def run(self):

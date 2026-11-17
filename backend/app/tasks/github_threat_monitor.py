@@ -174,22 +174,35 @@ class GithubToolsMonitorTask:
                             new_pushed_at = ""
                         
                         old_tag = target.get('last_tag', '')
-                        if new_tag != old_tag:
-                            # Atomically update to ensure only one thread pushes the notification
-                            result = db.update_one(
-                                {"_id": target["_id"], "last_tag": old_tag},
-                                {"$set": {"last_tag": new_tag, "last_commit_time": new_pushed_at}}
-                            )
-                            
-                            if result.modified_count > 0 and old_tag != '':
-                                update_log = latest.get('body', 'No update log provided.')
-                                download_url = latest.get('html_url')
-                                tool_name = repo_url.split('/')[-1]
-                                
-                                title = f"🛠️ 工具 [{tool_name}] 发布了新版本: {new_tag}"
-                                body = f"**地址**: {download_url}\n**更新日志**:\n{update_log}"
-                                
-                                ThreatIntelligencePush.push_msg(title, body)
+                        release_notes = (latest.get('body') or '')[:4000]
+                        release_url = latest.get('html_url') or ''
+                        release_name = latest.get('name') or ''
+                        needs_backfill = 'release_notes' not in target or 'release_url' not in target
+                        if new_tag != old_tag or needs_backfill:
+                            # Atomically update release metadata; push only on actual version bump
+                            update_fields = {
+                                "last_tag": new_tag,
+                                "last_commit_time": new_pushed_at,
+                                "release_url": release_url,
+                                "release_name": release_name,
+                                "release_notes": release_notes,
+                            }
+                            if new_tag != old_tag:
+                                result = db.update_one(
+                                    {"_id": target["_id"], "last_tag": old_tag},
+                                    {"$set": update_fields}
+                                )
+                                if result.modified_count > 0 and old_tag != '':
+                                    update_log = release_notes or 'No update log provided.'
+                                    download_url = release_url
+                                    tool_name = repo_url.split('/')[-1]
+                                    
+                                    title = f"🛠️ 工具 [{tool_name}] 发布了新版本: {new_tag}"
+                                    body = f"**地址**: {download_url}\n**更新日志**:\n{update_log}"
+                                    
+                                    ThreatIntelligencePush.push_msg(title, body)
+                            else:
+                                db.update_one({"_id": target["_id"]}, {"$set": update_fields})
             except Exception as e:
                 logger.error(f"Failed to check tool {repo_url}: {e}")
 
@@ -246,11 +259,23 @@ class GithubHackersMonitorTask:
                         
                         if is_recent and not fork:
                             full_name = repo.get('full_name')
+                            description = (repo.get('description') or '').strip()
+                            download_url = repo.get('html_url') or f"https://github.com/{full_name}"
+                            language = repo.get('language') or ''
+                            stargazers_count = int(repo.get('stargazers_count') or 0)
+                            created_local_str = (created_at_dt + datetime.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+
                             # 检查是否已推送并原子插入
                             result = history_db.update_one(
                                 {"full_name": full_name},
                                 {"$setOnInsert": {
                                     "full_name": full_name,
+                                    "owner": github_id,
+                                    "html_url": download_url,
+                                    "description": description,
+                                    "language": language,
+                                    "stargazers_count": stargazers_count,
+                                    "created_at": created_local_str,
                                     "insert_time": utils.curr_date()
                                 }},
                                 upsert=True
@@ -258,14 +283,13 @@ class GithubHackersMonitorTask:
                             
                             if result.upserted_id is not None:
                                 name = repo.get('name')
-                                description = repo.get('description') or "作者未写描述"
-                                download_url = repo.get('html_url')
+                                push_desc = description or "作者未写描述"
                                 
                                 title = f"👨‍💻 大佬 [{github_id}] 分享了一款新工具!"
                                 body = (
                                     f"**工具名称**: {name}\n"
                                     f"**项目地址**: {download_url}\n"
-                                    f"**工具描述**: {description}\n"
+                                    f"**工具描述**: {push_desc}\n"
                                 )
                                 ThreatIntelligencePush.push_msg(title, body)
             except Exception as e:

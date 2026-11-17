@@ -57,12 +57,28 @@ export const PLUGIN_NAME_MAP = {
   get web_info_hunter() { return taskText('tasks.stageWebInfoHunter'); }
 };
 
+/** GitHub 扫描阶段字典（独立于任务状态字典） */
+export const GITHUB_STAGE_MAP = {
+  get search() { return taskText('tasks.stageGithubSearch'); },
+  get 'fetch content'() { return taskText('tasks.stageGithubFetchContent'); }
+};
+
 /**
  * 是否为已知的任务状态值。
  * @param {string} status 后端返回的状态值
  * @returns {boolean}
  */
 export const isKnownTaskStatus = (status) => !!status && status in TASK_STATUS_LABEL;
+
+/**
+ * 是否为 GitHub 扫描阶段状态（如 search / fetch content / fetch content-32）。
+ * @param {string} status 后端返回的状态值
+ * @returns {boolean}
+ */
+export const isGithubStageStatus = (status) => {
+  if (!status) return false;
+  return status in GITHUB_STAGE_MAP || String(status).startsWith('fetch content-');
+};
 
 /**
  * 是否为阶段状态（后端返回插件/阶段标识，表示任务正在该阶段执行）。
@@ -79,6 +95,14 @@ export const isStageStatus = (status) => !!status && !isKnownTaskStatus(status);
  */
 export const formatTaskStatus = (status) => {
   if (TASK_STATUS_LABEL[status]) return TASK_STATUS_LABEL[status];
+  if (status && GITHUB_STAGE_MAP[status]) {
+    return taskText('tasks.statusWithStage', { stage: GITHUB_STAGE_MAP[status] });
+  }
+  if (status && String(status).startsWith('fetch content-')) {
+    const count = String(status).slice('fetch content-'.length).trim();
+    const stage = count ? `${GITHUB_STAGE_MAP['fetch content']} (${count})` : GITHUB_STAGE_MAP['fetch content'];
+    return taskText('tasks.statusWithStage', { stage });
+  }
   const stageName = PLUGIN_NAME_MAP[status] || status;
   return stageName ? taskText('tasks.statusWithStage', { stage: stageName }) : TASK_STATUS_LABEL.running;
 };

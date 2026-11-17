@@ -32,8 +32,10 @@ def create_index():
         "asset_ip": "scope_id",
         "asset_site": ["scope_id", "tag", "is_catch_all"],
         "asset_domain": ["scope_id", "domain"],
-        "github_result": "github_task_id",
-        "github_monitor_result": "github_scheduler_id",
+        "github_result": ["github_task_id", "hash_md5", "repo_full_name", "triage_status"],
+        "github_monitor_result": ["github_scheduler_id", "hash_md5", "repo_full_name", "triage_status"],
+        "github_hackers_history": "insert_time",
+        "github_cve_history": "insert_time",
         "wih": ["task_id", "record_type", "fnv_hash"],
         "asset_cert": ["scope_id", "ip"],
         "asset_service": "scope_id",
@@ -142,6 +144,8 @@ def create_index():
         "asset_group": [("name", 1)],
         "nuclei_template": [("template_id", 1)],
         "nuclei_blacklist": [("template_id", 1)],
+        "github_triage": [("hash_md5", 1)],
+        "github_ignored_repo": [("repo_full_name", 1)],
     }
 
     def _deduplicate_and_create_unique(col, keys, drop_idx=None):

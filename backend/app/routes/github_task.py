@@ -16,7 +16,8 @@ base_search_fields = {
     'name': fields.String(required=False, description="任务名"),
     'keyword': fields.String(description="关键字"),
     'status': fields.String(description="任务状态"),
-    '_id': fields.String(description="任务ID")
+    '_id': fields.String(description="任务ID"),
+    'source_type': fields.String(description="任务来源: task | scheduler")
 }
 
 base_search_fields.update(base_query_fields)
@@ -39,7 +40,34 @@ class ARLGithubTask(ARLResource):
         Github 任务信息查询
         """
         args = self.parser.parse_args()
-        data = self.build_data(args=args, collection='github_task')
+        source_type = (args.pop('source_type', None) or '').strip().lower()
+        if source_type in ('task', 'scheduler'):
+            default_field = self.get_default_field(args)
+            page = default_field.get("page", 1)
+            size = default_field.get("size", 10)
+            orderby_list = default_field.get("order", [("_id", -1)])
+            query = self.build_db_query(args)
+            if source_type == 'task':
+                source_cond = {"$or": [
+                    {"github_scheduler_id": {"$exists": False}},
+                    {"github_scheduler_id": ""},
+                    {"github_scheduler_id": None},
+                ]}
+                query = {"$and": [query, source_cond]} if query else source_cond
+            else:
+                query["github_scheduler_id"] = {"$exists": True, "$nin": ["", None]}
+
+            col = utils.conn_db('github_task')
+            items = self.build_return_items(
+                col.find(query).sort(orderby_list).skip(size * (page - 1)).limit(size)
+            )
+            count = col.count_documents(query)
+            data = {"page": page, "size": size, "total": count, "items": items, "query": {}, "code": 200}
+        else:
+            data = self.build_data(args=args, collection='github_task')
+
+        for item in data.get("items") or []:
+            item["source_type"] = "scheduler" if item.get("github_scheduler_id") else "task"
 
         return data
 

@@ -58,7 +58,9 @@ def github_cron_run(item):
         "status": TaskStatus.WAITING,
     }
     # 下发周期运行任务
-    submit_github_task(task_data=task_data, action=CeleryAction.GITHUB_TASK_MONITOR)
+    dispatched = submit_github_task(task_data=task_data, action=CeleryAction.GITHUB_TASK_MONITOR)
+    if isinstance(dispatched, str):
+        return dispatched
 
     item["run_number"] = item["run_number"] + 1
     item["last_run_date"] = utils.curr_date()
@@ -72,6 +74,7 @@ def github_cron_run(item):
         "_id": item["_id"]
     }
     utils.conn_db('github_scheduler').find_one_and_replace(query, item)
+    return dispatched
 
 
 # Github 监控任务调度，有个循环
