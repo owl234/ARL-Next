@@ -359,12 +359,12 @@
           <!-- 域名可点击外链与快捷复制 -->
           <template v-else-if="column.key === 'domain'">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
-              <a v-if="record.domain || record.ym" :href="(record.domain || record.ym).startsWith('http') ? (record.domain || record.ym) : ('http://' + (record.domain || record.ym))" target="_blank" rel="noopener noreferrer" style="color: var(--arl-theme-color); word-break: break-all;">
-                {{ record.domain || record.ym }} <export-outlined style="font-size: 11px;" />
+              <a v-if="getOsintDomain(record)" :href="getOsintDomain(record).startsWith('http') ? getOsintDomain(record) : ('http://' + getOsintDomain(record))" target="_blank" rel="noopener noreferrer" style="color: var(--arl-theme-color); word-break: break-all;">
+                {{ getOsintDomain(record) }} <export-outlined style="font-size: 11px;" />
               </a>
               <span v-else>-</span>
-              <a-tooltip :title="assetText('assets.copyDomain')" v-if="record.domain || record.ym">
-                <a-button type="text" size="small" style="padding: 0 4px; height: 22px;" @click.stop="handleCopyText(record.domain || record.ym)">
+              <a-tooltip :title="assetText('assets.copyDomain')" v-if="getOsintDomain(record)">
+                <a-button type="text" size="small" style="padding: 0 4px; height: 22px;" @click.stop="handleCopyText(getOsintDomain(record))">
                   <copy-outlined style="font-size: 12px; opacity: 0.65;" />
                 </a-button>
               </a-tooltip>
@@ -399,7 +399,7 @@
 
           <!-- 微博主页外链 -->
           <template v-else-if="column.key === 'href'">
-            <a v-if="record.href" :href="record.href" target="_blank" rel="noopener noreferrer" style="color: var(--arl-theme-color);">
+            <a v-if="record.href || record.homeUrl" :href="record.href || record.homeUrl" target="_blank" rel="noopener noreferrer" style="color: var(--arl-theme-color);">
               {{ assetText('assets.openWeibo') }} <export-outlined class="asset-small-label" />
             </a>
             <span v-else>-</span>
@@ -421,21 +421,21 @@
 
           <!-- 企业状态 Tag 渲染 -->
           <template v-else-if="column.key === 'status'">
-            <a-tag v-if="['存续', '在业', '正常'].includes(record.status || record.regStatus)" color="success">
-              {{ record.status || record.regStatus }}
+            <a-tag v-if="['存续', '在业', '正常'].includes(getOsintStatus(record))" color="success">
+              {{ getOsintStatus(record) }}
             </a-tag>
-            <a-tag v-else-if="['注销', '吊销', '撤销', '迁出'].includes(record.status || record.regStatus)" color="error">
-              {{ record.status || record.regStatus }}
+            <a-tag v-else-if="['注销', '吊销', '撤销', '迁出'].includes(getOsintStatus(record))" color="error">
+              {{ getOsintStatus(record) }}
             </a-tag>
-            <a-tag v-else-if="record.status || record.regStatus">
-              {{ record.status || record.regStatus }}
+            <a-tag v-else-if="getOsintStatus(record)">
+              {{ getOsintStatus(record) }}
             </a-tag>
             <span v-else style="color: #bfbfbf;">-</span>
           </template>
 
           <!-- 地区展示 -->
           <template v-else-if="column.key === 'region'">
-            {{ record.region || [record.province, record.city].filter(Boolean).join(' ') || '-' }}
+            {{ getOsintRegion(record) || '-' }}
           </template>
 
           <!-- 成立时间 -->
@@ -445,23 +445,28 @@
 
           <!-- 单位性质 -->
           <template v-else-if="column.key === 'companyType'">
-            {{ record.companyType || record.natureName || '-' }}
+            {{ getOsintCompanyType(record) || '-' }}
           </template>
 
           <!-- 服务备案号/服务许可 -->
           <template v-else-if="column.key === 'serviceLicence'">
-            {{ record.serviceLicence || record.liscense || record.serviceFilingNumber || record.mainLicence || '-' }}
+            {{ getOsintLicence(record) || '-' }}
+          </template>
+
+          <!-- 主体备案号 -->
+          <template v-else-if="column.key === 'mainLicence'">
+            {{ getOsintMainLicence(record) || '-' }}
           </template>
 
           <!-- 主办单位 -->
           <template v-else-if="column.key === 'unitName'">
-            {{ record.unitName || record.companyName || record.miniProgramIcpRecordDetail?.icpFilingSubjectInformation?.organizingName || '-' }}
+            {{ getOsintUnitName(record) || '-' }}
           </template>
 
           <!-- 名称字段多字段兼顾 -->
           <template v-else-if="column.key === 'serviceName' || column.key === 'name'">
-            <template v-if="record.serviceName || record.name || record.webName || record.title">
-              {{ record.serviceName || record.name || record.webName || record.title }}
+            <template v-if="getOsintName(record)">
+              {{ getOsintName(record) }}
             </template>
             <a-tooltip v-else-if="['app', 'mapp', 'kapp'].includes(activeTab) && record.dataId" :title="assetText('tasks.detailPendingHint')">
               <a-tag color="warning" style="margin-inline-end: 0;">{{ assetText('tasks.detailPendingBadge') }}</a-tag>
@@ -471,28 +476,33 @@
 
           <!-- 法定代表人 -->
           <template v-else-if="column.key === 'legalPerson'">
-            {{ record.legalPerson || record.legalPersonName || '-' }}
+            {{ getOsintLegalPerson(record) || '-' }}
           </template>
 
           <!-- 分类字段 -->
           <template v-else-if="column.key === 'category'">
-            {{ record.category || record.classes || record.type || '-' }}
+            {{ getOsintCategory(record) || '-' }}
+          </template>
+
+          <!-- 前置审批/内容类型 -->
+          <template v-else-if="column.key === 'contentTypeName'">
+            {{ getOsintContentType(record) || '-' }}
           </template>
 
           <!-- 微信号 -->
           <template v-else-if="column.key === 'wechatId'">
-            {{ record.wechatId || record.publicNum || '-' }}
+            {{ getOsintWechatId(record) || '-' }}
           </template>
 
           <!-- 更新/审核时间 -->
           <template v-else-if="column.key === 'updateRecordTime'">
-            {{ record.updateRecordTime || record.examineDate || '-' }}
+            {{ getOsintUpdateTime(record) || '-' }}
           </template>
 
           <!-- 简介/描述 -->
           <template v-else-if="column.key === 'brief' || column.key === 'recommend'">
-            <div style="max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="record.brief || record.recommend || record.info || text">
-              {{ record.brief || record.recommend || record.info || text || '-' }}
+            <div style="max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="getOsintBrief(record) || text">
+              {{ getOsintBrief(record) || text || '-' }}
             </div>
           </template>
 
@@ -632,6 +642,26 @@ import { copyText } from '../utils/clipboard';
 import { formatTaskStatus, formatTaskStatusColor } from '../constants/taskStatus';
 import { formatProxyEgressLabel, formatProxyTagColor } from '../constants/proxyStatus';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
+import {
+  getOsintDomain,
+  getOsintName,
+  getOsintUnitName,
+  getOsintCompanyType,
+  getOsintLicence,
+  getOsintMainLicence,
+  getOsintUpdateTime,
+  getOsintHomeUrl,
+  getOsintIcon,
+  getOsintBrief,
+  getOsintCategory,
+  getOsintContentType,
+  getOsintWechatId,
+  getOsintLegalPerson,
+  getOsintStatus,
+  getOsintRegion,
+  formatOsintDate,
+  buildEnterpriseOsintColumns
+} from '../utils/enterpriseOsint';
 import SyncToScopeModal from './SyncToScopeModal.vue';
 import RawDataDrawer from './RawDataDrawer.vue';
 
@@ -1205,19 +1235,21 @@ const osintTabConfig = reactive({
   app: {
     get label() { return assetText('assets.mobileApps'); },
     searchFields: [
-      { get label() { return assetText('tasks.appName'); }, key: 'name' },
+      { get label() { return assetText('tasks.appName'); }, key: 'serviceName' },
       { get label() { return assetText('assets.organization'); }, key: 'unitName' },
       { get label() { return assetText('tasks.icpNumber'); }, key: 'serviceLicence' },
-      { get label() { return assetText('assets.category'); }, key: 'category' }
+      { get label() { return assetText('tasks.category'); }, key: 'category' },
+      { get label() { return assetText('tasks.approvalType'); }, key: 'contentTypeName' }
     ]
   },
   mapp: {
     get label() { return assetText('tasks.wechatMiniPrograms'); },
     searchFields: [
-      { get label() { return assetText('assets.miniProgramName'); }, key: 'name' },
+      { get label() { return assetText('assets.miniProgramName'); }, key: 'serviceName' },
       { get label() { return assetText('assets.organization'); }, key: 'unitName' },
       { get label() { return assetText('tasks.icpNumber'); }, key: 'serviceLicence' },
-      { get label() { return assetText('assets.category'); }, key: 'category' }
+      { get label() { return assetText('tasks.category'); }, key: 'category' },
+      { get label() { return assetText('tasks.approvalType'); }, key: 'contentTypeName' }
     ]
   },
   wechat: {
@@ -1238,9 +1270,10 @@ const osintTabConfig = reactive({
   kapp: {
     get label() { return assetText('tasks.quickApps'); },
     searchFields: [
-      { get label() { return assetText('assets.quickAppName'); }, key: 'name' },
+      { get label() { return assetText('tasks.quickAppName'); }, key: 'serviceName' },
       { get label() { return assetText('assets.organization'); }, key: 'unitName' },
-      { get label() { return assetText('tasks.icpNumber'); }, key: 'serviceLicence' }
+      { get label() { return assetText('tasks.icpNumber'); }, key: 'serviceLicence' },
+      { get label() { return assetText('tasks.approvalType'); }, key: 'contentTypeName' }
     ]
   },
   invest: {
@@ -1277,117 +1310,24 @@ const activeFilterCount = computed(() => {
   return count;
 });
 
-const columnConfigs = {
-  web: [
-    { get title() { return assetText('tasks.no'); }, key: 'index', width: 55, align: 'center' },
-    { get title() { return assetText('tasks.domains'); }, dataIndex: 'domain', key: 'domain', width: 170 },
-    { get title() { return assetText('assets.managementStatus'); }, key: 'managedStatus', width: 95, align: 'center' },
-    { get title() { return assetText('tasks.websiteName'); }, dataIndex: 'serviceName', key: 'serviceName', width: 160, ellipsis: true },
-    { get title() { return assetText('assets.organization'); }, dataIndex: 'unitName', key: 'unitName', ellipsis: true },
-    { get title() { return assetText('tasks.organizationType'); }, dataIndex: 'companyType', key: 'companyType', width: 90, align: 'center' },
-    { get title() { return assetText('tasks.icpNumber'); }, dataIndex: 'serviceLicence', key: 'serviceLicence', width: 170 },
-    { get title() { return assetText('assets.homeUrl'); }, dataIndex: 'homeUrl', key: 'homeUrl', width: 170, ellipsis: true },
-    { get title() { return assetText('assets.updatedAtLabel'); }, dataIndex: 'updateRecordTime', key: 'updateRecordTime', width: 120, align: 'center' },
-    { get title() { return assetText('assets.rawData'); }, key: 'raw', width: 55, align: 'center' }
-  ],
-  app: [
-    { get title() { return assetText('tasks.no'); }, key: 'index', width: 55, align: 'center' },
-    { get title() { return assetText('tasks.icon'); }, dataIndex: 'icon', key: 'icon', width: 65, align: 'center' },
-    { get title() { return assetText('tasks.appName'); }, dataIndex: 'name', key: 'name', width: 160 },
-    { get title() { return assetText('assets.category'); }, dataIndex: 'category', key: 'category', width: 100 },
-    { get title() { return assetText('tasks.icpNumber'); }, dataIndex: 'serviceLicence', key: 'serviceLicence', width: 160 },
-    { get title() { return assetText('assets.organization'); }, dataIndex: 'unitName', key: 'unitName', ellipsis: true },
-    { get title() { return assetText('tasks.description'); }, dataIndex: 'brief', key: 'brief', ellipsis: true },
-    { get title() { return assetText('assets.version'); }, dataIndex: 'version', key: 'version', width: 90, align: 'center' },
-    { get title() { return assetText('assets.updatedAtLabel'); }, dataIndex: 'updateRecordTime', key: 'updateRecordTime', width: 120, align: 'center' },
-    { get title() { return assetText('assets.rawData'); }, key: 'raw', width: 55, align: 'center' }
-  ],
-  mapp: [
-    { get title() { return assetText('tasks.no'); }, key: 'index', width: 55, align: 'center' },
-    { get title() { return assetText('tasks.icon'); }, dataIndex: 'icon', key: 'icon', width: 65, align: 'center' },
-    { get title() { return assetText('tasks.miniProgramName'); }, dataIndex: 'name', key: 'name', width: 160 },
-    { get title() { return assetText('tasks.icpNumber'); }, dataIndex: 'serviceLicence', key: 'serviceLicence', width: 170 },
-    { get title() { return assetText('assets.organization'); }, dataIndex: 'unitName', key: 'unitName', ellipsis: true },
-    { get title() { return assetText('assets.category'); }, dataIndex: 'category', key: 'category', width: 100 },
-    { get title() { return assetText('assets.description'); }, dataIndex: 'brief', key: 'brief', ellipsis: true },
-    { get title() { return assetText('assets.updatedAtLabel'); }, dataIndex: 'updateRecordTime', key: 'updateRecordTime', width: 120, align: 'center' },
-    { get title() { return assetText('assets.rawData'); }, key: 'raw', width: 55, align: 'center' }
-  ],
-  wechat: [
-    { get title() { return assetText('tasks.no'); }, key: 'index', width: 55, align: 'center' },
-    { get title() { return assetText('tasks.avatar'); }, dataIndex: 'icon', key: 'icon', width: 65, align: 'center' },
-    { get title() { return assetText('tasks.officialAccountName'); }, dataIndex: 'name', key: 'name', width: 160 },
-    { get title() { return assetText('tasks.wechatId'); }, dataIndex: 'wechatId', key: 'wechatId', width: 140 },
-    { get title() { return assetText('assets.qrCode'); }, key: 'qrcode', width: 80, align: 'center' },
-    { get title() { return assetText('assets.features'); }, dataIndex: 'brief', key: 'brief', ellipsis: true },
-    { get title() { return assetText('assets.verifiedOrganization'); }, dataIndex: 'unitName', key: 'unitName', ellipsis: true },
-    { get title() { return assetText('assets.rawData'); }, key: 'raw', width: 55, align: 'center' }
-  ],
-  weibo: [
-    { get title() { return assetText('tasks.no'); }, key: 'index', width: 55, align: 'center' },
-    { get title() { return assetText('tasks.avatar'); }, dataIndex: 'icon', key: 'icon', width: 65, align: 'center' },
-    { get title() { return assetText('assets.weiboName'); }, dataIndex: 'name', key: 'name', width: 160 },
-    { get title() { return assetText('assets.verificationDescription'); }, dataIndex: 'brief', key: 'brief', ellipsis: true },
-    { get title() { return assetText('assets.weiboProfile'); }, key: 'href', width: 160 },
-    { get title() { return assetText('assets.followers'); }, dataIndex: 'fans', key: 'fans', width: 100, align: 'center' },
-    { get title() { return assetText('assets.rawData'); }, key: 'raw', width: 55, align: 'center' }
-  ],
-  kapp: [
-    { get title() { return assetText('tasks.no'); }, key: 'index', width: 55, align: 'center' },
-    { get title() { return assetText('tasks.icon'); }, dataIndex: 'icon', key: 'icon', width: 65, align: 'center' },
-    { get title() { return assetText('assets.quickAppName'); }, dataIndex: 'name', key: 'name', width: 160 },
-    { get title() { return assetText('tasks.icpNumber'); }, dataIndex: 'serviceLicence', key: 'serviceLicence', width: 170 },
-    { get title() { return assetText('assets.organization'); }, dataIndex: 'unitName', key: 'unitName', ellipsis: true },
-    { get title() { return assetText('assets.category'); }, dataIndex: 'category', key: 'category', width: 100 },
-    { get title() { return assetText('assets.updatedAtLabel'); }, dataIndex: 'updateRecordTime', key: 'updateRecordTime', width: 120, align: 'center' },
-    { get title() { return assetText('assets.rawData'); }, key: 'raw', width: 55, align: 'center' }
-  ],
-  invest: [
-    { get title() { return assetText('tasks.no'); }, key: 'index', width: 55, align: 'center' },
-    { get title() { return assetText('assets.investeeCompany'); }, dataIndex: 'name', key: 'name', ellipsis: true },
-    { get title() { return assetText('tasks.legalRepresentative'); }, dataIndex: 'legalPerson', key: 'legalPerson', width: 110 },
-    { get title() { return assetText('tasks.ownershipShare'); }, dataIndex: 'percent', key: 'percent', width: 100, align: 'center' },
-    { get title() { return assetText('assets.investmentAmount'); }, dataIndex: 'amount', key: 'amount', width: 140 },
-    { get title() { return assetText('assets.companyStatus'); }, dataIndex: 'status', key: 'status', width: 100, align: 'center' },
-    { get title() { return assetText('assets.region'); }, key: 'region', width: 130 },
-    { get title() { return assetText('assets.establishedOn'); }, key: 'estiblishTime', width: 120, align: 'center' },
-    { get title() { return assetText('assets.rawData'); }, key: 'raw', width: 55, align: 'center' }
-  ]
-};
-
-const dynamicColumns = computed(() => {
-  return columnConfigs[activeTab.value] || columnConfigs.web;
-});
-
 const assetList = ref([]);
 const syslogList = ref([]);
 const terminalContainer = ref(null);
 const logLoading = ref(false);
 let logTimer = null;
 
-const getAssetIcon = (record) => {
-  return record.icon || record.titleImgURL || record.codeImg || record.ico || record.productLogo || '';
-};
+const dynamicColumns = computed(() => {
+  return buildEnterpriseOsintColumns(assetText, activeTab.value, assetList.value, {
+    includeManagedStatus: true,
+    indexWidth: 55,
+    rawTitleKey: 'assets.rawData',
+    rawWidth: 55
+  });
+});
 
-const getAssetHomeUrl = (record) => {
-  if (record.homeUrl) return record.homeUrl;
-  if (record.webSite) {
-    if (Array.isArray(record.webSite) && record.webSite.length > 0) return record.webSite[0];
-    if (typeof record.webSite === 'string') return record.webSite;
-  }
-  return '';
-};
-
-const formatDate = (val) => {
-  if (!val) return '-';
-  if (typeof val === 'number') {
-    const d = new Date(val);
-    if (!isNaN(d.getTime())) {
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    }
-  }
-  return String(val);
-};
+const getAssetIcon = getOsintIcon;
+const getAssetHomeUrl = getOsintHomeUrl;
+const formatDate = formatOsintDate;
 
 let latestTaskDetailSeq = 0;
 let latestAssetsSeq = 0;

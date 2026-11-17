@@ -393,6 +393,12 @@ async def run_icp_job(options):
                                 }
                                 if not fields:
                                     continue
+                                sn = (item.get("serviceName") or item.get("name") or item.get("appName") or "").strip()
+                                if sn:
+                                    fields["serviceName"] = sn
+                                    fields.setdefault("name", sn)
+                                    if _qt == "app":
+                                        fields["appName"] = sn
                                 if did and did in _id_map:
                                     await db['icp_asset'].update_one({"_id": _id_map[did]}, {"$set": fields})
                                 elif did:
@@ -409,6 +415,7 @@ async def run_icp_job(options):
                             page_cb=_icp_page_cb,
                             detail_cb=_icp_detail_cb,
                             should_stop_cb=_icp_should_stop_cb,
+                            wait_on_detail_waf=True,
                         )
 
                     try:
@@ -506,6 +513,35 @@ async def run_icp_job(options):
     logger.info(f"ICP query task {task_id} completed.")
 
 
+def _apply_nested_tyc_icp_detail(item, detail_key):
+    """提取 TYC appIcpRecordDetail / miniProgramIcpRecordDetail 嵌套结构中的主体与审批字段"""
+    detail = item.get(detail_key)
+    if not isinstance(detail, dict):
+        return
+    subj = detail.get('icpFilingSubjectInformation') or {}
+    if isinstance(subj, dict):
+        if not item.get('unitName') and subj.get('organizingName'):
+            item['unitName'] = subj['organizingName']
+        if not item.get('mainLicence') and subj.get('mainLicence'):
+            item['mainLicence'] = subj['mainLicence']
+        if not item.get('companyType') and subj.get('natureName'):
+            item['companyType'] = subj['natureName']
+        if not item.get('natureName') and subj.get('natureName'):
+            item['natureName'] = subj['natureName']
+    svc = detail.get('icpFilingServiceInformation') or {}
+    if isinstance(svc, dict):
+        if not item.get('serviceName') and svc.get('serviceName'):
+            item['serviceName'] = svc['serviceName']
+        if not item.get('serviceLicence') and svc.get('serviceLicence'):
+            item['serviceLicence'] = svc['serviceLicence']
+        if not item.get('contentTypeName') and svc.get('contentTypeName'):
+            item['contentTypeName'] = svc['contentTypeName']
+    if not item.get('contentTypeName') and detail.get('contentTypeName'):
+        item['contentTypeName'] = detail['contentTypeName']
+    if not item.get('mainLicence') and detail.get('mainLicence'):
+        item['mainLicence'] = detail['mainLicence']
+
+
 def _normalize_tyc_asset(item, query_type, company_name=None):
     """TYC 资产入库前规整核心别名，提升底层统一性"""
     if not isinstance(item, dict):
@@ -523,14 +559,38 @@ def _normalize_tyc_asset(item, query_type, company_name=None):
         elif isinstance(ws, str):
             item['homeUrl'] = ws
     elif query_type == 'app':
-        item['category'] = item.get('classes') or item.get('category') or ''
+        _apply_nested_tyc_icp_detail(item, 'appIcpRecordDetail')
+        sn = item.get('serviceName') or item.get('appName') or item.get('name') or item.get('filterName') or ''
+        if sn:
+            item['serviceName'] = sn
+            if not item.get('name'):
+                item['name'] = sn
+            if not item.get('appName'):
+                item['appName'] = sn
+        lic = item.get('serviceLicence') or item.get('serviceFilingNumber') or item.get('liscense') or ''
+        if lic:
+            item['serviceLicence'] = lic
+            if not item.get('serviceFilingNumber'):
+                item['serviceFilingNumber'] = lic
+        dt = item.get('updateRecordTime') or item.get('examineDate') or ''
+        if dt:
+            item['updateRecordTime'] = dt
+        item['category'] = item.get('category') or item.get('classes') or item.get('type') or ''
+        if not item.get('icon'):
+            item['icon'] = item.get('productLogo') or item.get('appLogo') or ''
         if company_name and not item.get('unitName'):
             item['unitName'] = company_name
     elif query_type == 'mapp':
+        _apply_nested_tyc_icp_detail(item, 'miniProgramIcpRecordDetail')
+        sn = item.get('serviceName') or item.get('name') or ''
+        if sn:
+            item['serviceName'] = sn
+            if not item.get('name'):
+                item['name'] = sn
         item['serviceLicence'] = item.get('serviceFilingNumber') or item.get('serviceLicence') or ''
         item['updateRecordTime'] = item.get('examineDate') or item.get('updateRecordTime') or ''
-        if isinstance(item.get('miniProgramIcpRecordDetail'), dict):
-            item['unitName'] = item['miniProgramIcpRecordDetail'].get('icpFilingSubjectInformation', {}).get('organizingName', '')
+        if not item.get('category'):
+            item['category'] = item.get('classes') or item.get('type') or ''
         if company_name and not item.get('unitName'):
             item['unitName'] = company_name
     elif query_type == 'wechat':
@@ -554,6 +614,85 @@ def _normalize_tyc_asset(item, query_type, company_name=None):
     if company_name and not item.get('companyName'):
         item['companyName'] = company_name
     return item
+
+
+def _build_asset_merge_fields(query_type, asset, company_name=None):
+    """从增量资产对象提取非空规范化更新字段，供跨源合并与原位详情回写复用。"""
+    update_fields = {}
+    # 1. 归属单位（以最新记录优先更新）
+    target_unit = asset.get("unitName") or company_name
+    if target_unit:
+        update_fields["unitName"] = target_unit
+        update_fields["companyName"] = target_unit
+
+    # 2. 服务备案号与主体备案号（web 兼容主备案号，app/mapp/kapp 独立保留 mainLicence）
+    lic_val = asset.get("serviceLicence") or asset.get("serviceFilingNumber") or asset.get("liscense")
+    if not lic_val and query_type == "web":
+        lic_val = asset.get("mainLicence")
+    if lic_val:
+        update_fields["serviceLicence"] = lic_val
+        update_fields["liscense"] = lic_val
+        if query_type in ("app", "mapp", "kapp"):
+            update_fields["serviceFilingNumber"] = lic_val
+    if asset.get("mainLicence"):
+        update_fields["mainLicence"] = asset["mainLicence"]
+
+    # 3. 核准与更新时间
+    update_time = asset.get("updateRecordTime") or asset.get("examineDate")
+    if update_time:
+        update_fields["updateRecordTime"] = update_time
+        update_fields["examineDate"] = update_time
+
+    # 4. 业务名称
+    sn = asset.get("serviceName") or asset.get("webName") or asset.get("appName") or asset.get("name") or asset.get("title")
+    if sn:
+        update_fields["serviceName"] = sn
+        if query_type == "web":
+            update_fields["webName"] = sn
+        elif query_type == "app":
+            update_fields["appName"] = sn
+            update_fields["name"] = sn
+        elif query_type in ("mapp", "kapp"):
+            update_fields["name"] = sn
+
+    # 5. 链接与主页
+    hu = asset.get("homeUrl") or asset.get("webSite") or asset.get("href") or asset.get("url")
+    if hu:
+        if isinstance(hu, list) and hu:
+            update_fields["homeUrl"] = hu[0]
+        elif isinstance(hu, str):
+            update_fields["homeUrl"] = hu
+            if query_type == "weibo":
+                update_fields["href"] = hu
+
+    # 6. 分类/审批/版本/性质/图标/简介/微信号/详情载荷
+    if asset.get("category") or asset.get("classes"):
+        update_fields["category"] = asset.get("category") or asset.get("classes")
+    if asset.get("contentTypeName"):
+        update_fields["contentTypeName"] = asset["contentTypeName"]
+    if asset.get("version"):
+        update_fields["version"] = asset["version"]
+    if asset.get("dataId"):
+        update_fields["dataId"] = asset["dataId"]
+    if asset.get("companyType") or asset.get("natureName"):
+        ct = asset.get("companyType") or asset.get("natureName")
+        update_fields["companyType"] = ct
+        update_fields["natureName"] = ct
+    if asset.get("icon") or asset.get("titleImgURL") or asset.get("codeImg") or asset.get("ico") or asset.get("productLogo") or asset.get("appLogo"):
+        update_fields["icon"] = (
+            asset.get("icon") or asset.get("titleImgURL") or asset.get("codeImg")
+            or asset.get("ico") or asset.get("productLogo") or asset.get("appLogo")
+        )
+    if asset.get("brief") or asset.get("recommend") or asset.get("info"):
+        update_fields["brief"] = asset.get("brief") or asset.get("recommend") or asset.get("info")
+    if asset.get("wechatId") or asset.get("publicNum"):
+        update_fields["wechatId"] = asset.get("wechatId") or asset.get("publicNum")
+    if asset.get("miniProgramIcpRecordDetail"):
+        update_fields["miniProgramIcpRecordDetail"] = asset.get("miniProgramIcpRecordDetail")
+    if asset.get("appIcpRecordDetail"):
+        update_fields["appIcpRecordDetail"] = asset.get("appIcpRecordDetail")
+
+    return update_fields
 
 
 async def _upsert_task_asset(task_id, query_type, asset, company_name, task_assets_index, source="tyc", doc_sources=None):
@@ -660,57 +799,7 @@ async def _upsert_task_asset(task_id, query_type, asset, company_name, task_asse
         doc_id = index_dict[lic_key]
 
     if doc_id:
-        update_fields = {}
-        # 1. 归属单位（以最新记录优先更新）
-        target_unit = asset.get("unitName") or company_name
-        if target_unit:
-            update_fields["unitName"] = target_unit
-            update_fields["companyName"] = target_unit
-
-        # 2. 备案号
-        lic_val = asset.get("serviceLicence") or asset.get("serviceFilingNumber") or asset.get("liscense") or asset.get("mainLicence")
-        if lic_val:
-            update_fields["serviceLicence"] = lic_val
-            update_fields["liscense"] = lic_val
-            if query_type in ["mapp", "kapp"]:
-                update_fields["serviceFilingNumber"] = lic_val
-
-        # 3. 核准与更新时间
-        update_time = asset.get("updateRecordTime") or asset.get("examineDate")
-        if update_time:
-            update_fields["updateRecordTime"] = update_time
-            update_fields["examineDate"] = update_time
-
-        # 4. 业务名称
-        sn = asset.get("serviceName") or asset.get("webName") or asset.get("appName") or asset.get("name") or asset.get("title")
-        if sn:
-            update_fields["serviceName"] = sn
-            if query_type == "web":
-                update_fields["webName"] = sn
-            elif query_type == "app":
-                update_fields["appName"] = sn
-
-        # 5. 链接与主页
-        hu = asset.get("homeUrl") or asset.get("webSite") or asset.get("href") or asset.get("url")
-        if hu:
-            if isinstance(hu, list) and hu:
-                update_fields["homeUrl"] = hu[0]
-            elif isinstance(hu, str):
-                update_fields["homeUrl"] = hu
-                if query_type == "weibo":
-                    update_fields["href"] = hu
-
-        # 6. 分类/图标/简介/微信号
-        if asset.get("category") or asset.get("classes"):
-            update_fields["category"] = asset.get("category") or asset.get("classes")
-        if asset.get("icon") or asset.get("titleImgURL") or asset.get("codeImg") or asset.get("ico"):
-            update_fields["icon"] = asset.get("icon") or asset.get("titleImgURL") or asset.get("codeImg") or asset.get("ico")
-        if asset.get("brief") or asset.get("recommend") or asset.get("info"):
-            update_fields["brief"] = asset.get("brief") or asset.get("recommend") or asset.get("info")
-        if asset.get("wechatId") or asset.get("publicNum"):
-            update_fields["wechatId"] = asset.get("wechatId") or asset.get("publicNum")
-        if asset.get("miniProgramIcpRecordDetail"):
-            update_fields["miniProgramIcpRecordDetail"] = asset.get("miniProgramIcpRecordDetail")
+        update_fields = _build_asset_merge_fields(query_type, asset, company_name=company_name)
 
         # 仅当跨数据源合并（如既有记录来自 tyc 且本次来自 icp）时才置位 source_synced='tyc+icp'，
         # 防止纯 MIIT 内部二次合并或详情补全回写把 icp 独占记录误标为 tyc+icp
@@ -758,7 +847,7 @@ async def _upsert_task_asset(task_id, query_type, asset, company_name, task_asse
         return True
 
 
-async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_index, counts, total_assets_holder, insert_syslog, update_stats, proxy=None, known_named_lics=None, enabled_miit_types=None, doc_sources=None):
+async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_index, counts, total_assets_holder, insert_syslog, update_stats, proxy=None, known_named_lics=None, enabled_miit_types=None, doc_sources=None, detail_waf_waited=None):
     """
     针对指定企业主体发起工信部官方备案双轨查重与补全
     """
@@ -883,7 +972,7 @@ async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_
                         )
                         if extra_fields:
                             await db['icp_asset'].update_one({"_id": name_doc_id}, {"$set": extra_fields})
-                        await db['icp_asset'].delete_one({"_id": lic_doc_id})
+                        await _delete_asset_doc(db['icp_asset'], lic_doc_id)
                         index_dict[lic_key] = name_doc_id
                         if counts.get(_qt, 0) > 0:
                             counts[_qt] -= 1
@@ -915,12 +1004,18 @@ async def _run_company_icp_enrichment(task_id, company_name, myicp, task_assets_
                 if stat_changed:
                     await update_stats()
 
+            allow_detail_waf_wait = bool(detail_waf_waited is None or not detail_waf_waited[0])
+            if allow_detail_waf_wait and detail_waf_waited is not None:
+                detail_waf_open_fn = getattr(myicp, "_detail_waf_open", None)
+                if callable(detail_waf_open_fn) and detail_waf_open_fn():
+                    detail_waf_waited[0] = True
             myicp.attach_task_hooks(
                 progress_cb=_enrich_progress_cb,
                 page_cb=_enrich_page_cb,
                 detail_cb=_enrich_detail_cb,
                 should_stop_cb=_enrich_should_stop_cb,
                 skip_detail_fn=_enrich_skip_detail_fn,
+                wait_on_detail_waf=allow_detail_waf_wait,
             )
 
         try:
@@ -1265,7 +1360,7 @@ async def run_tyc_job(options):
     if query_types:
         enabled_miit_types = [qt for qt in ("web", "app", "mapp", "kapp") if qt in query_types]
     else:
-        enabled_miit_types = ["web", "app", "mapp"]
+        enabled_miit_types = ["web", "app", "mapp", "kapp"]
 
     type_map = {
         "invest": "对外投资",
@@ -1351,6 +1446,7 @@ async def run_tyc_job(options):
 
     miit_queue = None
     miit_consumer_task = None
+    detail_waf_waited = [False]
     if enable_icp and myicp and enabled_miit_types:
         miit_queue = asyncio.Queue()
 
@@ -1382,6 +1478,7 @@ async def run_tyc_job(options):
                             known_named_lics=known_named_lics,
                             enabled_miit_types=enabled_miit_types,
                             doc_sources=doc_sources,
+                            detail_waf_waited=detail_waf_waited,
                         )
                         if not await _task_is_running(task_id):
                             stopped_flag[0] = True
@@ -1550,12 +1647,20 @@ async def run_tyc_job(options):
                         error_msg.append(f"web error: {str(e)}")
                         await insert_syslog("error", "网站查询", f"目标 {current_gid} 网站查询异常: {str(e)}")
 
-                # App查询
+                # App查询（联动应用市场详情与新版 APP ICP 备案接口，提前补齐备案号并减少 MIIT 重复补抓）
                 if "app" in query_types:
                     await asyncio.sleep(random.uniform(2.0, 5.0))
                     try:
                         await insert_syslog("info", "APP查询", f"正在查询目标 {current_gid} 的APP...")
-                        app_list = await client.get_app_list(current_gid)
+                        app_list = list(await client.get_app_list(current_gid) or [])
+                        app_icp_fn = getattr(client, "get_app_icp_record_list", None)
+                        if callable(app_icp_fn):
+                            try:
+                                app_icp_list = await app_icp_fn(current_gid)
+                                if app_icp_list:
+                                    app_list.extend(app_icp_list)
+                            except Exception as app_icp_err:
+                                logger.warning(f"TYC appIcpRecordList exception for {current_gid}: {app_icp_err}")
                         if app_list:
                             await _ingest_tyc_batch('app', app_list, "同名APP去重合并", "APP查询")
                     except Exception as e:
@@ -1680,10 +1785,244 @@ async def run_tyc_job(options):
     logger.info(f"TYC query task {task_id} completed.")
 
 
+async def _read_cursor_docs(cursor, limit=50000):
+    if hasattr(cursor, "to_list"):
+        return await cursor.to_list(length=limit)
+    if hasattr(cursor, "__aiter__"):
+        return [d async for d in cursor]
+    if isinstance(cursor, list):
+        return list(cursor)
+    return []
+
+
+async def _delete_asset_doc(assets_col, doc_id):
+    if doc_id is None:
+        return
+    del_one = getattr(assets_col, "delete_one", None)
+    if callable(del_one):
+        await del_one({"_id": doc_id})
+        return
+    del_many = getattr(assets_col, "delete_many", None)
+    if callable(del_many):
+        await del_many({"_id": doc_id})
+
+
+async def _recompute_task_statistic(task_id):
+    """依据 icp_asset 实际落库文档重算 icp_task.statistic，确保去重删除后计数一致。"""
+    assets_col = db['icp_asset']
+    docs = await _read_cursor_docs(assets_col.find({"task_id": task_id}, {"query_type": 1}))
+    counts = {"web": 0, "app": 0, "mapp": 0, "wechat": 0, "weibo": 0, "kapp": 0, "invest": 0}
+    total = 0
+    for d in docs:
+        qt = d.get("query_type")
+        total += 1
+        if qt in counts:
+            counts[qt] += 1
+    stat = {"asset_cnt": total, **{f"{k}_cnt": v for k, v in counts.items()}}
+    await db['icp_task'].update_one({"_id": ObjectId(task_id)}, {"$set": {"statistic": stat}})
+    return stat
+
+
+async def _merge_into_existing_named_doc(assets_col, qt, target_doc, incoming_item, company_name=""):
+    """将待合并条目（或原位补全后的 MIIT 记录）的增量字段无损并入既有同名记录，并跨源标记 tyc+icp。"""
+    merged_fields = _build_asset_merge_fields(qt, incoming_item, company_name=company_name)
+    # 不覆盖既有非空来源专属展示字段（如 TYC 图标/简介/分类），仅填补缺失字段；备案/主体等权威字段以非空补全
+    update_set = {}
+    for k, v in merged_fields.items():
+        if v in (None, ""):
+            continue
+        existing_val = target_doc.get(k)
+        if k in ("icon", "brief", "category") and existing_val not in (None, ""):
+            continue
+        if existing_val != v:
+            update_set[k] = v
+
+    incoming_src = incoming_item.get("source")
+    target_src = target_doc.get("source")
+    if (target_src == "tyc" and incoming_src in ("icp", None)) or target_doc.get("source_synced") == "tyc+icp":
+        if target_doc.get("source_synced") != "tyc+icp":
+            update_set["source_synced"] = "tyc+icp"
+
+    if update_set and target_doc.get("_id") is not None:
+        await assets_col.update_one({"_id": target_doc["_id"]}, {"$set": update_set})
+        target_doc.update(update_set)
+    return update_set
+
+
+async def _refresh_stale_miit_docs(
+    myicp,
+    sp,
+    qt,
+    label,
+    task_id,
+    stale_docs,
+    default_company_name,
+    proxy_url,
+    assets_col,
+    doc_by_id,
+    named_by_qt,
+    insert_syslog,
+    should_stop_cb,
+):
+    """
+    为 dataId=0 或因 MIIT 索引轮换返回空占位的历史记录，按备案号/主体重刷最新 dataId。
+
+    返回 (直接补全数, 去重合并数, 待继续查询详情的文档列表)。
+    """
+    if not stale_docs or not hasattr(myicp, "_query_beian_page"):
+        return 0, 0, []
+
+    docs_by_unit = {}
+    for doc in stale_docs:
+        lic = (doc.get("serviceLicence") or doc.get("serviceFilingNumber") or doc.get("liscense") or "").strip()
+        if not lic:
+            continue
+        unit_name = (doc.get("unitName") or doc.get("companyName") or default_company_name or "").strip()
+        if not unit_name:
+            continue
+        docs_by_unit.setdefault(unit_name, []).append((lic.lower(), lic, doc))
+
+    if not docs_by_unit:
+        return 0, 0, []
+
+    direct_filled = 0
+    dedup_merged = 0
+    refreshed_docs = []
+    waited_once = False
+    qt_name_map = named_by_qt.setdefault(qt, {})
+    total_stale = sum(len(v) for v in docs_by_unit.values())
+    await insert_syslog("info", f"详情补全·{label}", f"检测到 {total_stale} 条历史或失效 dataId 记录，开始重刷最新工信部列表索引...")
+
+    async def _query_page_with_wait(query_keyword, page_num, page_size):
+        nonlocal waited_once
+        ok, payload, _ = await myicp._query_beian_page(query_keyword, sp, page_num, page_size, proxy=proxy_url)
+        if not ok and not waited_once and getattr(myicp, "_waf_open", lambda: False)():
+            waited_once = True
+            if await _wait_waf_cooldown_once(myicp, task_id, f"详情补全·{label}", insert_syslog):
+                ok, payload, _ = await myicp._query_beian_page(query_keyword, sp, page_num, page_size, proxy=proxy_url)
+        return ok, payload
+
+    def _safe_refresh_fields(list_item):
+        fields = {}
+        for k, v in list_item.items():
+            if k in ("_id", "task_id", "query_type") or v in (None, ""):
+                continue
+            if k in ("dataId", "serviceType") and v == 0:
+                continue
+            fields[k] = v
+        return fields
+
+    async def _apply_list_match(doc, list_item):
+        nonlocal direct_filled, dedup_merged
+        doc_id = doc.get("_id")
+        fields = _safe_refresh_fields(list_item)
+        new_did = fields.get("dataId")
+        new_sn = (fields.get("serviceName") or fields.get("name") or fields.get("appName") or "").strip()
+        if new_sn:
+            fields["serviceName"] = new_sn
+            fields.setdefault("name", new_sn)
+            if qt == "app":
+                fields["appName"] = new_sn
+            dup_named = qt_name_map.get(new_sn.lower())
+            if dup_named is not None and dup_named.get("_id") != doc_id:
+                orig_doc = dict(doc)
+                orig_doc.update(fields)
+                await _merge_into_existing_named_doc(
+                    assets_col, qt, dup_named, orig_doc, company_name=orig_doc.get("unitName") or ""
+                )
+                if doc_id is not None:
+                    await _delete_asset_doc(assets_col, doc_id)
+                    doc_by_id.pop(doc_id, None)
+                dedup_merged += 1
+                direct_filled += 1
+                return
+            if doc_id is not None and fields:
+                await assets_col.update_one({"_id": doc_id}, {"$set": fields})
+                doc.update(fields)
+                qt_name_map[new_sn.lower()] = doc
+            direct_filled += 1
+            return
+
+        if new_did and str(new_did).strip() != "0":
+            if doc_id is not None and fields:
+                await assets_col.update_one({"_id": doc_id}, {"$set": fields})
+                doc.update(fields)
+            refreshed_docs.append(doc)
+
+    async def _query_single_licence(lic_key, group_items):
+        raw_lic = group_items[0][0]
+        ok, payload = await _query_page_with_wait(raw_lic, 1, 10)
+        if not ok or not isinstance(payload, dict):
+            return
+        lst = (payload.get("params") or {}).get("list") or []
+        match_item = next(
+            (it for it in lst if (it.get("serviceLicence") or "").strip().lower() == lic_key),
+            lst[0] if len(lst) == 1 else None,
+        )
+        if match_item:
+            for _, doc in group_items:
+                await _apply_list_match(doc, match_item)
+
+    for unit_name, entries in docs_by_unit.items():
+        if await should_stop_cb():
+            break
+        wanted_by_lic = {}
+        for lic_key, raw_lic, doc in entries:
+            wanted_by_lic.setdefault(lic_key, []).append((raw_lic, doc))
+
+        if len(wanted_by_lic) <= 5:
+            for lic_key, group_items in wanted_by_lic.items():
+                if await should_stop_cb() or getattr(myicp, "_waf_open", lambda: False)():
+                    break
+                await _query_single_licence(lic_key, group_items)
+                await asyncio.sleep(random.uniform(0.6, 1.2))
+            continue
+
+        remaining_keys = set(wanted_by_lic.keys())
+        page_num = 1
+        total_pages = 1
+        while page_num <= total_pages and remaining_keys:
+            if await should_stop_cb():
+                break
+            ok, payload = await _query_page_with_wait(unit_name, page_num, 26)
+            if not ok or not isinstance(payload, dict):
+                break
+            if page_num == 1 and hasattr(myicp, "_get_total_pages"):
+                total_pages = max(1, int(myicp._get_total_pages(payload, 26) or 1))
+            lst = (payload.get("params") or {}).get("list") or []
+            for it in lst:
+                lic_key = (it.get("serviceLicence") or "").strip().lower()
+                if lic_key in remaining_keys:
+                    remaining_keys.discard(lic_key)
+                    for _, doc in wanted_by_lic[lic_key]:
+                        await _apply_list_match(doc, it)
+            if not lst:
+                break
+            page_num += 1
+            if page_num <= total_pages and remaining_keys:
+                await asyncio.sleep(random.uniform(1.0, 1.8))
+
+        # MIIT 按主体分页偶发存在翻页窗口漏项/排序漂移，对遗留少数未命中项回退按备案号精准检索
+        if remaining_keys and not await should_stop_cb() and not getattr(myicp, "_waf_open", lambda: False)():
+            for lic_key in list(remaining_keys):
+                if await should_stop_cb() or getattr(myicp, "_waf_open", lambda: False)():
+                    break
+                await _query_single_licence(lic_key, wanted_by_lic[lic_key])
+                await asyncio.sleep(random.uniform(0.6, 1.2))
+
+    if refreshed_docs or direct_filled:
+        await insert_syslog(
+            "info",
+            f"详情补全·{label}",
+            f"列表索引重刷完成：直出命名 {direct_filled} 条，待续查最新 dataId {len(refreshed_docs)} 条。",
+        )
+    return direct_filled, dedup_merged, refreshed_docs
+
+
 async def run_backfill_details_job(options):
     """
     原位补全已有任务中缺失名称（serviceName 为空且带 dataId）的 APP/小程序/快应用详情，
-    不新建任务、不重跑列表分页，结束后恢复任务原先终态。
+    取消单批 100 条截断并执行幂等跨源同名合并与统计校准，结束后恢复任务原先终态。
     """
     task_id = options.get("task_id")
     if not task_id:
@@ -1722,6 +2061,7 @@ async def run_backfill_details_job(options):
     myicp = None
     filled_total = 0
     remaining_total = 0
+    dedup_merged_total = 0
     try:
         import sys
         import os
@@ -1735,43 +2075,82 @@ async def run_backfill_details_job(options):
             myicp.attach_proxy_router(proxy_router)
 
         assets_col = db['icp_asset']
-        cursor = assets_col.find({
+        all_docs = await _read_cursor_docs(assets_col.find({
             "task_id": task_id,
             "query_type": {"$in": list(target_qts)},
-        })
-        if hasattr(cursor, "to_list"):
-            all_docs = await cursor.to_list(length=50000)
-        elif hasattr(cursor, "__aiter__"):
-            all_docs = [d async for d in cursor]
-        elif isinstance(cursor, list):
-            all_docs = list(cursor)
-        else:
-            all_docs = []
+        }))
 
-        missing_by_qt = {}
+        # 1. 预索引已有命名记录并幂等合并存量同名重复行（如历史 TYC+MIIT 裂变记录）
+        doc_by_id = {}
+        named_by_qt = {}
+        named_by_lic_qt = {}
         for doc in all_docs:
             qt = doc.get("query_type")
             if qt not in sp_map:
                 continue
-            if not doc.get("dataId"):
+            did_obj = doc.get("_id")
+            sn = (doc.get("serviceName") or doc.get("name") or doc.get("appName") or "").strip()
+            lic = (doc.get("serviceLicence") or doc.get("serviceFilingNumber") or doc.get("liscense") or "").strip().lower()
+            if sn:
+                name_key = sn.lower()
+                qt_name_map = named_by_qt.setdefault(qt, {})
+                existing_named = qt_name_map.get(name_key)
+                if existing_named is not None and existing_named.get("_id") != did_obj:
+                    await _merge_into_existing_named_doc(assets_col, qt, existing_named, doc, company_name=doc.get("unitName") or "")
+                    await _delete_asset_doc(assets_col, did_obj)
+                    dedup_merged_total += 1
+                    continue
+                qt_name_map[name_key] = doc
+                if lic:
+                    named_by_lic_qt.setdefault(qt, {})[lic] = doc
+            if did_obj is not None:
+                doc_by_id[did_obj] = doc
+
+        # 2. 收集待补全条目；若其备案号已与既有命名记录匹配则直接就地合并，无需再请求 MIIT
+        missing_with_did = {}
+        zero_did_by_qt = {}
+        for doc in list(doc_by_id.values()):
+            qt = doc.get("query_type")
+            if qt not in sp_map:
                 continue
             sn = (doc.get("serviceName") or doc.get("name") or doc.get("appName") or "").strip()
             if sn:
                 continue
-            missing_by_qt.setdefault(qt, []).append(doc)
+            lic = (doc.get("serviceLicence") or doc.get("serviceFilingNumber") or doc.get("liscense") or "").strip().lower()
+            if lic and lic in named_by_lic_qt.get(qt, {}):
+                existing_named = named_by_lic_qt[qt][lic]
+                if existing_named.get("_id") != doc.get("_id"):
+                    await _merge_into_existing_named_doc(assets_col, qt, existing_named, doc, company_name=doc.get("unitName") or "")
+                    await _delete_asset_doc(assets_col, doc.get("_id"))
+                    doc_by_id.pop(doc.get("_id"), None)
+                    dedup_merged_total += 1
+                    filled_total += 1
+                    continue
+            did = doc.get("dataId")
+            if did not in (None, "", 0, "0"):
+                missing_with_did.setdefault(qt, []).append(doc)
+            elif lic:
+                zero_did_by_qt.setdefault(qt, []).append(doc)
 
-        pending_count = sum(len(v) for v in missing_by_qt.values())
+        pending_count = sum(len(v) for v in missing_with_did.values()) + sum(len(v) for v in zero_did_by_qt.values())
         if pending_count == 0:
-            await insert_syslog("info", "详情补全", "当前任务不存在缺失名称的待补全资产。")
+            if dedup_merged_total > 0:
+                await _recompute_task_statistic(task_id)
+                await insert_syslog("info", "详情补全", f"已完成存量同源/同名记录去重合并 {dedup_merged_total} 条，当前无剩余待补全资产。")
+            else:
+                await insert_syslog("info", "详情补全", "当前任务不存在缺失名称的待补全资产。")
             return
 
-        await insert_syslog("info", "详情补全", f"开始原位补全缺失详情，共发现 {pending_count} 条待补全记录...")
+        await insert_syslog("info", "详情补全", f"开始原位补全缺失详情，共发现 {pending_count} 条待补全记录（不限单批 100 条上限）...")
+        default_company_name = (task_doc.get("company_name") or task_doc.get("name") or "").strip()
 
-        for qt, docs_list in missing_by_qt.items():
+        active_qts = [qt for qt in sp_map if missing_with_did.get(qt) or zero_did_by_qt.get(qt)]
+        for qt in active_qts:
             if not await _task_is_running(task_id):
                 break
             sp, label = sp_map[qt]
-            id_by_dataid = {str(d.get("dataId")): d.get("_id") for d in docs_list if d.get("dataId") is not None}
+            docs_with_did = list(missing_with_did.get(qt) or [])
+            zero_docs = list(zero_did_by_qt.get(qt) or [])
 
             async def _bf_progress_cb(_sp, _stage, message, _label=label):
                 await insert_syslog("info", f"详情补全·{_label}", message)
@@ -1779,49 +2158,110 @@ async def run_backfill_details_job(options):
             async def _bf_should_stop_cb():
                 return not await _task_is_running(task_id)
 
-            async def _bf_detail_cb(_sp, enriched_items, _id_map=id_by_dataid, _qt=qt):
-                nonlocal filled_total
-                if not await _task_is_running(task_id):
-                    return
-                for item in enriched_items:
-                    did = str(item.get("dataId") or "").strip()
-                    doc_id = _id_map.get(did) or item.get("_id")
-                    extra_fields = {
-                        k: v for k, v in item.items()
-                        if k not in ("_id", "task_id", "query_type") and v not in (None, "")
-                    }
-                    if not extra_fields:
-                        continue
-                    sn = (item.get("serviceName") or item.get("name") or item.get("appName") or "").strip()
-                    if sn:
-                        extra_fields["serviceName"] = sn
-                        if _qt == "app":
-                            extra_fields["appName"] = sn
-                        filled_total += 1
-                    if doc_id is not None:
-                        await db['icp_asset'].update_one({"_id": doc_id}, {"$set": extra_fields})
+            async def _enrich_batch(target_docs):
+                nonlocal filled_total, dedup_merged_total
+                if not target_docs or not await _task_is_running(task_id):
+                    return False
+                id_by_dataid = {str(d.get("dataId")): d.get("_id") for d in target_docs if d.get("dataId") not in (None, "", 0, "0")}
 
-            myicp.attach_task_hooks(
-                progress_cb=_bf_progress_cb,
-                detail_cb=_bf_detail_cb,
-                should_stop_cb=_bf_should_stop_cb,
-            )
-            try:
-                res = await myicp._enrich_app_details(
-                    {"code": 200, "success": True, "params": {"list": docs_list}},
-                    sp,
-                    {},
-                    sys_proxy,
-                    target_name=task_doc.get("company_name") or task_doc.get("name") or "",
+                async def _bf_detail_cb(_sp, enriched_items, _id_map=id_by_dataid, _qt=qt):
+                    nonlocal filled_total, dedup_merged_total
+                    if not await _task_is_running(task_id):
+                        return
+                    qt_name_map = named_by_qt.setdefault(_qt, {})
+                    for item in enriched_items:
+                        did = str(item.get("dataId") or "").strip()
+                        doc_id = _id_map.get(did) or item.get("_id")
+                        extra_fields = {
+                            k: v for k, v in item.items()
+                            if k not in ("_id", "task_id", "query_type")
+                            and v not in (None, "")
+                            and not (k in ("dataId", "serviceType") and v == 0)
+                        }
+                        if not extra_fields:
+                            continue
+                        sn = (item.get("serviceName") or item.get("name") or item.get("appName") or "").strip()
+                        if sn:
+                            extra_fields["serviceName"] = sn
+                            extra_fields.setdefault("name", sn)
+                            if _qt == "app":
+                                extra_fields["appName"] = sn
+
+                            dup_named = qt_name_map.get(sn.lower())
+                            if dup_named is not None and dup_named.get("_id") != doc_id:
+                                orig_doc = dict(doc_by_id.get(doc_id) or {})
+                                orig_doc.update(extra_fields)
+                                await _merge_into_existing_named_doc(
+                                    assets_col, _qt, dup_named, orig_doc,
+                                    company_name=orig_doc.get("unitName") or "",
+                                )
+                                if doc_id is not None:
+                                    await _delete_asset_doc(assets_col, doc_id)
+                                    doc_by_id.pop(doc_id, None)
+                                dedup_merged_total += 1
+                                filled_total += 1
+                                continue
+
+                            filled_total += 1
+                        if doc_id is not None:
+                            await assets_col.update_one({"_id": doc_id}, {"$set": extra_fields})
+                            if doc_id in doc_by_id:
+                                doc_by_id[doc_id].update(extra_fields)
+                            if sn:
+                                qt_name_map[sn.lower()] = doc_by_id.get(doc_id) or {"_id": doc_id, **extra_fields}
+
+                myicp.attach_task_hooks(
+                    progress_cb=_bf_progress_cb,
+                    detail_cb=_bf_detail_cb,
+                    should_stop_cb=_bf_should_stop_cb,
                 )
-                remaining_total += int((res.get("params") or {}).get("_detail_missing") or 0)
-            finally:
-                myicp.attach_task_hooks()
+                try:
+                    res = await myicp._enrich_app_details(
+                        {"code": 200, "success": True, "params": {"list": target_docs}},
+                        sp,
+                        {},
+                        sys_proxy,
+                        target_name=default_company_name,
+                        max_items=0,
+                        wait_on_detail_waf=True,
+                    )
+                    prm = res.get("params") or {}
+                    return bool(prm.get("_detail_circuit_break") or prm.get("_detail_waf") or prm.get("_stopped"))
+                finally:
+                    myicp.attach_task_hooks()
 
+            aborted_or_waf = await _enrich_batch(docs_with_did)
+
+            still_stale = [
+                d for d in (docs_with_did + zero_docs)
+                if d.get("_id") in doc_by_id
+                and not (d.get("serviceName") or d.get("name") or d.get("appName") or "").strip()
+            ]
+            if still_stale and not aborted_or_waf and await _task_is_running(task_id):
+                d_fill, d_merge, refreshed_docs = await _refresh_stale_miit_docs(
+                    myicp, sp, qt, label, task_id, still_stale,
+                    default_company_name, sys_proxy, assets_col, doc_by_id,
+                    named_by_qt, insert_syslog, _bf_should_stop_cb,
+                )
+                filled_total += d_fill
+                dedup_merged_total += d_merge
+                if refreshed_docs and await _task_is_running(task_id):
+                    await _enrich_batch(refreshed_docs)
+
+            remaining_total += sum(
+                1 for d in (docs_with_did + zero_docs)
+                if d.get("_id") in doc_by_id
+                and not (d.get("serviceName") or d.get("name") or d.get("appName") or "").strip()
+            )
+
+        if dedup_merged_total > 0 or filled_total > 0:
+            await _recompute_task_statistic(task_id)
+
+        merge_note = f"，并去重合并 {dedup_merged_total} 条重复记录" if dedup_merged_total > 0 else ""
         await insert_syslog(
             "info",
             "详情补全",
-            f"原位补全结束：本次成功补全 {filled_total} 条，仍剩余 {remaining_total} 条待补全。",
+            f"原位补全结束：本次成功补全 {filled_total} 条{merge_note}，仍剩余 {remaining_total} 条待补全。",
         )
     except Exception as e:
         logger.error(f"Backfill details exception for {task_id}: {e}")

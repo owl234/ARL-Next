@@ -1437,13 +1437,13 @@ const executeBindNew = async () => {
         depth: 1,
         invest_ratio: 50,
         enable_icp: true,
-        query_type: ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo']
+        query_type: ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo', 'kapp']
       });
     } else {
       createRes = await request.post('/icp/task', {
         name: `${targetName.value}全景测绘`,
         target: targetVal,
-        query_type: ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo']
+        query_type: ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo', 'kapp']
       });
     }
 

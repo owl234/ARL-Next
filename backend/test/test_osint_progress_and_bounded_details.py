@@ -749,6 +749,7 @@ class JobRunnerIncrementalAndDedupTests(unittest.IsolatedAsyncioTestCase):
              patch.object(client, "getAppAndMiniDetail", side_effect=lambda did, *_: detail_calls.append(did)), \
              patch.object(ymicp, "beian", return_value=client), \
              patch.object(tyc_async.AsyncTycClient, "get_app_list", side_effect=fake_app_list), \
+             patch.object(tyc_async.AsyncTycClient, "get_app_icp_record_list", return_value=[]), \
              patch.object(job_runner, "db", fake_db), \
              patch.object(job_runner.asyncio, "sleep", side_effect=_no_sleep):
             await job_runner.run_tyc_job({

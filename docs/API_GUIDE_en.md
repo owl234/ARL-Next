@@ -81,7 +81,7 @@ For isolated regression checks, install the backend dependencies plus `pytest` a
 | **Stop Single Enterprise Task** | `GET /api/icp/stop/<task_id>` | URL path param: `task_id` (24-char hex) | ⚠️ **Note: Uses GET to perform state mutation**; cancels the `osint-service` task and clears any asset group update lock; returns code `105` if already finished |
 | **Batch Stop Enterprise Tasks** | `POST /api/icp/batch_stop/` | JSON: `{"task_ids": ["<task_id>"]}` (`task_id` alias also accepted) | Stops active enterprise OSINT tasks, clears group update locks, skips finished tasks, and returns `stopped_ids`, `skipped_ids`, and `failed_ids` |
 | **Resume Enterprise Task** | `POST /api/icp/resume/<task_id>` | URL path param: `task_id` | Requires terminal state (`stop` or `error`) with an incomplete `recon_checkpoint`; resumes remaining entities/dimensions in place while preserving existing assets |
-| **Backfill Missing Details** | `POST /api/icp/backfill_details/<task_id>` | URL path param: `task_id`; optional JSON: `{"query_types": ["app", "mapp", "kapp"]}` | Requires terminal task state; fetches missing details in place for records with non-empty `dataId` and empty `serviceName` without creating a new task |
+| **Backfill Missing Details** | `POST /api/icp/backfill_details/<task_id>` | URL path param: `task_id`; optional JSON: `{"query_types": ["app", "mapp", "kapp"]}` | Requires terminal task state; backfills empty `serviceName` entries without a 100-item batch cap (refreshing `dataId=0` or rotated IDs by filing number), merges cross-source duplicates, and recalculates statistics in place |
 | **Delete Task** | `POST /api/task/delete/` | JSON: `{"task_id": ["<task_id>"], "del_task_data": false}` | ⚠️ **State Constraint**: Only tasks in terminal states (`done`, `stop`, `error`) can be deleted. Running tasks return error code `104` ("Task is running") |
 | **Restart Task** | `POST /api/task/restart/` | JSON: `{"task_id": ["<task_id>"]}` | Only stopped/finished tasks can be restarted |
 
@@ -340,7 +340,7 @@ ARL-Next integrates the Model Context Protocol (MCP 2024-11-05 specification) fo
 | Tool Name | Category | Primary Inputs | Description | Activation Condition |
 | :--- | :--- | :--- | :--- | :--- |
 | `get_asset_profile` | Read-only Profile | `target` (required), `task_id` (optional) | Unified asset intelligence correlation (IPs, ports, services, fingerprints, certs, vulns, leaks) | Enabled by default |
-| `get_enterprise_profile` | Read-only Profile | `target` (required), `category`, `page`, `size`, `task_id` | Enterprise ecosystem profile and organizational structure (corporate background, ICP domains, mobile apps, mini programs, official accounts, Weibo, investments) | Enabled by default |
+| `get_enterprise_profile` | Read-only Profile | `target` (required), `category`, `page`, `size`, `task_id` | Enterprise ecosystem profile and organizational structure (corporate background, ICP domains, mobile apps, mini programs, fast apps, official accounts, Weibo, investments) | Enabled by default |
 | `search_assets` | Read-only Search | `query` (required), `asset_type`, `limit` | Searches sites, IPs, domains, or known vulnerabilities | Enabled by default |
 | `get_task_status` | Read-only Status | `task_id` (required) | Inspects scanning progress, execution state, and metric counts | Enabled by default |
 | `create_scan_task` | Controlled Dispatch | `name`, `target`, `policy_id` | Uses standard target validation and queue routing | Tool enabled in governance settings and `task:dispatch` scope |

@@ -206,31 +206,95 @@
             {{ (pagination.current - 1) * pagination.pageSize + index + 1 }}
           </template>
           <template v-else-if="column.key === 'icon'">
-            <img v-if="text" :src="text" style="width:32px;height:32px;border-radius:4px;" />
+            <img v-if="getOsintIcon(record)" :src="getOsintIcon(record)" style="width:32px;height:32px;border-radius:4px;" />
+            <span v-else>-</span>
+          </template>
+          <template v-else-if="column.key === 'domain'">
+            <a v-if="getOsintDomain(record)" :href="getOsintDomain(record).startsWith('http') ? getOsintDomain(record) : ('http://' + getOsintDomain(record))" target="_blank" rel="noopener noreferrer" style="color: var(--arl-theme-color); word-break: break-all;">
+              {{ getOsintDomain(record) }}
+            </a>
+            <span v-else>-</span>
+          </template>
+          <template v-else-if="column.key === 'homeUrl'">
+            <a v-if="getOsintHomeUrl(record)" :href="getOsintHomeUrl(record)" target="_blank" rel="noopener noreferrer" style="color: var(--arl-theme-color); word-break: break-all;">
+              {{ getOsintHomeUrl(record) }}
+            </a>
+            <span v-else>-</span>
+          </template>
+          <template v-else-if="column.key === 'href'">
+            <a v-if="record.href || record.homeUrl" :href="record.href || record.homeUrl" target="_blank" rel="noopener noreferrer" style="color: var(--arl-theme-color);">
+              {{ taskText('assets.openWeibo') }} <export-outlined style="font-size: 11px;" />
+            </a>
+            <span v-else>-</span>
+          </template>
+          <template v-else-if="column.key === 'qrcode'">
+            <a-popover v-if="record.codeImg" placement="right" trigger="hover">
+              <template #content>
+                <div style="text-align: center; padding: 4px;">
+                  <img :src="record.codeImg" style="width: 150px; height: 150px; display: block;" />
+                  <span style="font-size: 12px; color: #8c8c8c; margin-top: 4px; display: block;">{{ taskText('assets.scanWithWechatToFollow') }}</span>
+                </div>
+              </template>
+              <a-tag color="blue" style="cursor: pointer;"><qrcode-outlined /> {{ taskText('assets.viewQrCode') }}</a-tag>
+            </a-popover>
+            <span v-else>-</span>
+          </template>
+          <template v-else-if="column.key === 'status'">
+            <a-tag v-if="['存续', '在业', '正常'].includes(getOsintStatus(record))" color="success">
+              {{ getOsintStatus(record) }}
+            </a-tag>
+            <a-tag v-else-if="['注销', '吊销', '撤销', '迁出'].includes(getOsintStatus(record))" color="error">
+              {{ getOsintStatus(record) }}
+            </a-tag>
+            <a-tag v-else-if="getOsintStatus(record)">
+              {{ getOsintStatus(record) }}
+            </a-tag>
+            <span v-else>-</span>
+          </template>
+          <template v-else-if="column.key === 'region'">
+            {{ getOsintRegion(record) || '-' }}
+          </template>
+          <template v-else-if="column.key === 'estiblishTime'">
+            {{ formatOsintDate(record.estiblishTime) }}
+          </template>
+          <template v-else-if="column.key === 'companyType'">
+            {{ getOsintCompanyType(record) || '-' }}
+          </template>
+          <template v-else-if="column.key === 'category'">
+            {{ getOsintCategory(record) || '-' }}
+          </template>
+          <template v-else-if="column.key === 'contentTypeName'">
+            {{ getOsintContentType(record) || '-' }}
+          </template>
+          <template v-else-if="column.key === 'wechatId'">
+            {{ getOsintWechatId(record) || '-' }}
+          </template>
+          <template v-else-if="column.key === 'legalPerson'">
+            {{ getOsintLegalPerson(record) || '-' }}
           </template>
           <template v-else-if="column.key === 'brief' || column.key === 'recommend'">
-            <div style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="text">
-              {{ text || '-' }}
+            <div style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="getOsintBrief(record) || text">
+              {{ getOsintBrief(record) || text || '-' }}
             </div>
           </template>
           <template v-else-if="column.key === 'serviceName' || column.key === 'name'">
-            <template v-if="record.serviceName || record.name">{{ record.serviceName || record.name }}</template>
+            <template v-if="getOsintName(record)">{{ getOsintName(record) }}</template>
             <a-tooltip v-else-if="['app', 'mapp', 'kapp'].includes(activeTab) && record.dataId" :title="taskText('tasks.detailPendingHint')">
               <a-tag color="warning" style="margin-inline-end: 0;">{{ taskText('tasks.detailPendingBadge') }}</a-tag>
             </a-tooltip>
             <span v-else>-</span>
           </template>
           <template v-else-if="column.key === 'serviceLicence' || column.key === 'serviceFilingNumber'">
-            {{ record.serviceLicence || record.serviceFilingNumber || record.liscense || '-' }}
+            {{ getOsintLicence(record) || '-' }}
           </template>
           <template v-else-if="column.key === 'unitName' || column.key === 'companyName'">
-            {{ record.unitName || record.companyName || '-' }}
+            {{ getOsintUnitName(record) || '-' }}
           </template>
           <template v-else-if="column.key === 'mainLicence'">
-            {{ record.mainLicence || record.liscense || '-' }}
+            {{ getOsintMainLicence(record) || '-' }}
           </template>
           <template v-else-if="column.key === 'updateRecordTime' || column.key === 'examineDate'">
-            {{ record.updateRecordTime || record.examineDate || '-' }}
+            {{ getOsintUpdateTime(record) || '-' }}
           </template>
           <template v-else-if="column.key === 'raw'">
             <a-popover :title="taskText('tasks.rawData')" trigger="click" placement="left">
@@ -286,13 +350,33 @@ import { useI18n } from 'vue-i18n';
 
 import { ref, reactive, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ArrowLeftOutlined, FilterOutlined, UndoOutlined, SearchOutlined, DownloadOutlined, CloudSyncOutlined, ExportOutlined, PlayCircleOutlined, SyncOutlined } from '@ant-design/icons-vue';
+import { ArrowLeftOutlined, FilterOutlined, UndoOutlined, SearchOutlined, DownloadOutlined, CloudSyncOutlined, ExportOutlined, PlayCircleOutlined, SyncOutlined, QrcodeOutlined } from '@ant-design/icons-vue';
 import SyncToScopeModal from './SyncToScopeModal.vue';
 import { message } from 'ant-design-vue';
 import request from '../utils/request';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import { useSticky } from '../utils/useSticky';
 import { formatTaskStatus, formatTaskStatusColor } from '../constants/taskStatus';
+import {
+  getOsintDomain,
+  getOsintName,
+  getOsintUnitName,
+  getOsintCompanyType,
+  getOsintLicence,
+  getOsintMainLicence,
+  getOsintUpdateTime,
+  getOsintHomeUrl,
+  getOsintIcon,
+  getOsintBrief,
+  getOsintCategory,
+  getOsintContentType,
+  getOsintWechatId,
+  getOsintLegalPerson,
+  getOsintStatus,
+  getOsintRegion,
+  formatOsintDate,
+  buildEnterpriseOsintColumns
+} from '../utils/enterpriseOsint';
 
 const { t: taskText } = useI18n({ useScope: 'global' });
 
@@ -427,18 +511,8 @@ const sortState = reactive({
 });
 
 const getDefaultSortForTab = (tab) => {
-  if (tab === 'kapp') {
+  if (['web', 'app', 'mapp', 'kapp'].includes(tab)) {
     return { field: 'updateRecordTime', order: 'descend' };
-  }
-  const isTyc = taskType.value === 'tyc';
-  if (isTyc) {
-    if (tab === 'web' || tab === 'mapp') {
-      return { field: 'examineDate', order: 'descend' };
-    }
-  } else {
-    if (['web', 'app', 'mapp'].includes(tab)) {
-      return { field: 'updateRecordTime', order: 'descend' };
-    }
   }
   return { field: null, order: null };
 };
@@ -449,122 +523,25 @@ const resetTabSort = (tab) => {
   sortState.order = def.order;
 };
 
-const webColumns = [
-  { get title() { return taskText('tasks.organizationName'); }, dataIndex: 'companyName', key: 'companyName', width: 220 },
-  { get title() { return taskText('tasks.organizationType'); }, dataIndex: 'companyType', key: 'companyType', width: 120 },
-  { get title() { return taskText('tasks.primaryIcpNumber'); }, dataIndex: 'liscense', key: 'liscense', width: 180 },
-  { get title() { return taskText('tasks.domains'); }, dataIndex: 'ym', key: 'ym', width: 200 },
-  { get title() { return taskText('tasks.websiteName'); }, dataIndex: 'webName', key: 'webName', width: 200 },
-  { get title() { return taskText('tasks.reviewDate'); }, dataIndex: 'examineDate', key: 'examineDate', width: 120 },
-  { get title() { return taskText('tasks.details'); }, key: 'raw', width: 80 }
-];
-
-const mappColumns = [
-  { get title() { return taskText('tasks.miniProgramName'); }, dataIndex: 'serviceName', key: 'serviceName', width: 200 },
-  { get title() { return taskText('tasks.icpNumber'); }, dataIndex: 'serviceFilingNumber', key: 'serviceFilingNumber', width: 200 },
-  { get title() { return taskText('tasks.reviewDate'); }, dataIndex: 'examineDate', key: 'examineDate', width: 120 },
-  { get title() { return taskText('tasks.details'); }, key: 'raw', width: 80 }
-];
-
-const appColumns = [
-  { get title() { return taskText('tasks.icon'); }, dataIndex: 'icon', key: 'icon', width: 60 },
-  { get title() { return taskText('tasks.appName'); }, dataIndex: 'name', key: 'name', width: 150 },
-  { get title() { return taskText('tasks.category'); }, dataIndex: 'classes', key: 'classes', width: 100 },
-  { get title() { return taskText('tasks.appType'); }, dataIndex: 'type', key: 'type', width: 100 },
-  { get title() { return taskText('tasks.description'); }, dataIndex: 'brief', key: 'brief', width: 300, ellipsis: true },
-  { get title() { return taskText('tasks.details'); }, key: 'raw', width: 80 }
-];
-
-const investColumns = [
-  { get title() { return taskText('tasks.investeeCompany'); }, dataIndex: 'name', key: 'name', width: 220 },
-  { get title() { return taskText('tasks.legalRepresentative'); }, dataIndex: 'legalPersonName', key: 'legalPersonName', width: 120 },
-  { get title() { return taskText('tasks.registeredCapital'); }, dataIndex: 'amount', key: 'amount', width: 120 },
-  { get title() { return taskText('tasks.ownershipShare'); }, dataIndex: 'percent', key: 'percent', width: 100 },
-  { get title() { return taskText('tasks.details'); }, key: 'raw', width: 80 }
-];
-
-const wechatColumns = [
-  { get title() { return taskText('tasks.avatar'); }, dataIndex: 'titleImgURL', key: 'icon', width: 60 },
-  { get title() { return taskText('tasks.officialAccountName'); }, dataIndex: 'title', key: 'title', width: 200 },
-  { get title() { return taskText('tasks.wechatId'); }, dataIndex: 'publicNum', key: 'publicNum', width: 150 },
-  { get title() { return taskText('tasks.description'); }, dataIndex: 'recommend', key: 'recommend', width: 300, ellipsis: true },
-  { get title() { return taskText('tasks.details'); }, key: 'raw', width: 80 }
-];
-
-const weiboColumns = [
-  { get title() { return taskText('tasks.weiboAccountName'); }, dataIndex: 'name', key: 'name', width: 200 },
-  { get title() { return taskText('tasks.weiboUrl'); }, dataIndex: 'href', key: 'href', width: 250 },
-  { get title() { return taskText('tasks.details'); }, key: 'raw', width: 80 }
-];
-
-const baseIcpColumns = [
-  { get title() { return taskText('tasks.organizationName'); }, dataIndex: 'unitName', key: 'unitName', width: 220 },
-  { get title() { return taskText('tasks.organizationType'); }, dataIndex: 'natureName', key: 'natureName', width: 120 },
-  { get title() { return taskText('tasks.primaryIcpNumber'); }, dataIndex: 'mainLicence', key: 'mainLicence', width: 180 },
-  { get title() { return taskText('tasks.domains'); }, dataIndex: 'domain', key: 'domain', width: 200 },
-  { get title() { return taskText('tasks.websiteName'); }, dataIndex: 'serviceName', key: 'serviceName', width: 200 },
-  { get title() { return taskText('tasks.reviewDate'); }, dataIndex: 'updateRecordTime', key: 'updateRecordTime', width: 140 },
-  { get title() { return taskText('tasks.details'); }, key: 'raw', width: 80 }
-];
-
-const mobileIcpColumns = [
-  { get title() { return taskText('tasks.applicationName'); }, dataIndex: 'serviceName', key: 'serviceName', width: 200 },
-  { get title() { return taskText('tasks.serviceIcpNumber'); }, dataIndex: 'serviceLicence', key: 'serviceLicence', width: 200 },
-  { get title() { return taskText('tasks.organizationName'); }, dataIndex: 'unitName', key: 'unitName', width: 220 },
-  { get title() { return taskText('tasks.primaryIcpNumber'); }, dataIndex: 'mainLicence', key: 'mainLicence', width: 180 },
-  { get title() { return taskText('tasks.approvalType'); }, dataIndex: 'contentTypeName', key: 'contentTypeName', width: 150 },
-  { get title() { return taskText('tasks.reviewDate'); }, dataIndex: 'updateRecordTime', key: 'updateRecordTime', width: 140 },
-  { get title() { return taskText('tasks.details'); }, key: 'raw', width: 80 }
-];
-
-const kappColumns = [
-  { get title() { return taskText('tasks.quickAppName'); }, dataIndex: 'serviceName', key: 'serviceName', width: 200 },
-  { get title() { return taskText('tasks.quickAppIcpNumber'); }, dataIndex: 'serviceLicence', key: 'serviceLicence', width: 200 },
-  { get title() { return taskText('tasks.organizationName'); }, dataIndex: 'unitName', key: 'unitName', width: 220 },
-  { get title() { return taskText('tasks.primaryIcpNumber'); }, dataIndex: 'mainLicence', key: 'mainLicence', width: 180 },
-  { get title() { return taskText('tasks.approvalType'); }, dataIndex: 'contentTypeName', key: 'contentTypeName', width: 150 },
-  { get title() { return taskText('tasks.reviewDate'); }, dataIndex: 'updateRecordTime', key: 'updateRecordTime', width: 140 },
-  { get title() { return taskText('tasks.details'); }, key: 'raw', width: 80 }
-];
-
-const genericColumns = [
-  { get title() { return taskText('tasks.name'); }, dataIndex: 'filterName', key: 'filterName', width: 200 },
-  { get title() { return taskText('tasks.details'); }, key: 'raw', width: 80 }
-];
-
 const dynamicColumns = computed(() => {
-  const isTyc = taskType.value === 'tyc';
-  let cols = [];
-  if (activeTab.value === 'invest') cols = investColumns;
-  else if (activeTab.value === 'wechat') cols = wechatColumns;
-  else if (activeTab.value === 'weibo') cols = weiboColumns;
-  else if (activeTab.value === 'kapp') cols = kappColumns;
-  else if (isTyc) {
-    if (activeTab.value === 'web') cols = webColumns;
-    else if (activeTab.value === 'mapp') cols = mappColumns;
-    else if (activeTab.value === 'app') cols = appColumns;
-    else cols = genericColumns;
-  } else {
-    if (activeTab.value === 'web') cols = baseIcpColumns;
-    else if (['app', 'mapp'].includes(activeTab.value)) cols = mobileIcpColumns;
-    else cols = genericColumns;
-  }
-
-  const processedCols = cols.map((col) => {
-    if (col.key === 'examineDate' || col.key === 'updateRecordTime') {
-      return {
-        ...col,
-        sorter: true,
-        sortOrder: sortState.field === col.key ? sortState.order : null
-      };
-    }
-    return col;
+  return buildEnterpriseOsintColumns(taskText, activeTab.value, assetList.value, {
+    includeManagedStatus: false,
+    indexWidth: 65,
+    rawTitleKey: 'tasks.details',
+    rawWidth: 80,
+    sortState
   });
+});
 
-  return [
-    { title: taskText('tasks.no'), key: 'index', width: 70, align: 'center' },
-    ...processedCols
-  ];
+const allTabFilterColumns = computed(() => {
+  return buildEnterpriseOsintColumns(taskText, activeTab.value, assetList.value, {
+    includeManagedStatus: false,
+    includeAllOptional: true,
+    indexWidth: 65,
+    rawTitleKey: 'tasks.details',
+    rawWidth: 80,
+    sortState
+  });
 });
 
 const exportLoading = ref(false);
@@ -601,8 +578,8 @@ const searchForm = reactive({});
 const searchFormOp = reactive({ amount: 'eq', percent: 'eq' });
 const filterExpanded = ref(false);
 const filterColumns = computed(() =>
-  (dynamicColumns.value || []).filter(
-    col => !['index', 'raw', 'icon', 'examineDate', 'updateRecordTime'].includes(col.key)
+  (allTabFilterColumns.value || []).filter(
+    col => col.dataIndex && !['index', 'raw', 'icon', 'qrcode', 'examineDate', 'updateRecordTime', 'estiblishTime'].includes(col.key)
   )
 );
 const activeFilterCount = computed(() =>

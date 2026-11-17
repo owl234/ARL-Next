@@ -948,5 +948,410 @@ class TestReconResumeAndBackfillRoutes(AioHTTPTestCase):
             self.assertEqual(mock_submit.call_args[0][1]["action"], "backfill_details")
 
 
+class TestOsintBlankAndPendingFixes(unittest.TestCase):
+    def test_detail_failover_writes_back_detail_context_and_per_exit_cooldown(self):
+        async def run():
+            router = OsintProxyRouter(bundle={
+                "policy": {"mode": "failover", "cooldown_sec": 300, "max_failovers": 2},
+                "nodes": [
+                    {"id": "ecs-1", "name": "Backup-1", "protocol": "http", "proxy_url": "http://192.0.2.21:8080"},
+                ],
+            })
+            client = ymicp.beian()
+            client.attach_proxy_router(router)
+
+            seen_auth = []
+
+            class _Resp:
+                def __init__(self, status, payload):
+                    self.status = status
+                    self._payload = payload
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    return False
+
+                async def text(self):
+                    return json.dumps(self._payload)
+
+            class _Sess:
+                def __init__(self, proxy=""):
+                    self.proxy = proxy
+                    self.closed = False
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    return False
+
+                def post(self, _url, **kwargs):
+                    p = kwargs.get("proxy") or self.proxy
+                    hdrs = kwargs.get("headers") or {}
+                    seen_auth.append((p, hdrs.get("uuid"), hdrs.get("sign"), hdrs.get("token")))
+                    if not p:
+                        return _Resp(403, {"code": 403, "msg": "blocked"})
+                    return _Resp(200, {"code": 200, "success": True, "params": {"serviceName": "恢复应用"}})
+
+            async def fake_check_img(proxy="", **_kwargs):
+                return True, f"uuid-{proxy or 'direct'}", "tok-backup", f"sign-{proxy or 'direct'}", {}
+
+            detail_ctx = {"p_uuid": "uuid-direct", "token": "tok-direct", "sign": "sign-direct", "base_header": {}, "exit_id": DIRECT_EXIT_ID}
+            items_res = {"code": 200, "success": True, "params": {"list": [
+                {"dataId": "D1", "serviceLicence": "L1"},
+                {"dataId": "D2", "serviceLicence": "L2"},
+            ]}}
+
+            with patch.object(client, "check_img", side_effect=fake_check_img), \
+                 patch.object(client, "get_session", side_effect=lambda proxy="", direct_override=False: _Sess(proxy=proxy)), \
+                 patch.object(ymicp, "config", SimpleNamespace(system=SimpleNamespace(detail_concurrency=1, detail_max_items=20), captcha=SimpleNamespace(enable=True))), \
+                 patch.object(ymicp.asyncio, "sleep", side_effect=_no_sleep):
+                out = await client._enrich_app_details(items_res, 1, detail_ctx, "")
+
+            # 第一条切至备份出口后，detail_context 被回写为备份出口上下文，第二条直接使用备份凭据一次成功
+            self.assertEqual(detail_ctx["exit_id"], "ecs-1")
+            self.assertEqual(detail_ctx["sign"], "sign-http://192.0.2.21:8080")
+            self.assertEqual(len(seen_auth), 3)
+            self.assertEqual(seen_auth[0][0], "")
+            self.assertEqual(seen_auth[1], ("http://192.0.2.21:8080", "uuid-http://192.0.2.21:8080", "sign-http://192.0.2.21:8080", "tok-backup"))
+            self.assertEqual(seen_auth[2], ("http://192.0.2.21:8080", "uuid-http://192.0.2.21:8080", "sign-http://192.0.2.21:8080", "tok-backup"))
+            self.assertEqual([x["serviceName"] for x in out["params"]["list"]], ["恢复应用", "恢复应用"])
+            # 仅主出口处于冷却，备用出口仍健康，故全局 _detail_waf_open 保持 False
+            client._detail_waf_trip("直连详情限流", exit_id=DIRECT_EXIT_ID)
+            self.assertFalse(client._detail_waf_open())
+
+        asyncio.run(run())
+
+    def test_slider_miss_does_not_lock_refresh_streak_into_circuit_break(self):
+        async def run():
+            client = ymicp.beian()
+            refresh_attempts = {"cnt": 0}
+
+            async def fake_check_img(*_args, **_kwargs):
+                refresh_attempts["cnt"] += 1
+                if refresh_attempts["cnt"] == 1:
+                    return False, "滑块匹配失败", "", "", ""
+                return True, "u-ok", "t-ok", "s-ok", {}
+
+            async def fake_detail(_did, _st, _u, _t, sign, _hdr, _proxy=""):
+                if sign != "s-ok":
+                    return True, {"success": False, "code": 500, "msg": "sign expired"}
+                return True, {"success": True, "params": {"serviceName": "正常应用"}}
+
+            res = {"code": 200, "success": True, "params": {"list": [
+                {"dataId": "d1", "serviceLicence": "L1"},
+                {"dataId": "d2", "serviceLicence": "L2"},
+                {"dataId": "d3", "serviceLicence": "L3"},
+            ]}}
+
+            with patch.object(ymicp, "config", SimpleNamespace(system=SimpleNamespace(detail_concurrency=1, detail_max_items=20), captcha=SimpleNamespace(enable=True))), \
+                 patch.object(ymicp.asyncio, "sleep", side_effect=_no_sleep), \
+                 patch.object(client, "check_img", side_effect=fake_check_img), \
+                 patch.object(client, "getAppAndMiniDetail", side_effect=fake_detail):
+                out = await client._enrich_app_details(res, 1, {"p_uuid": "u0", "token": "t0", "sign": "s-stale", "base_header": {}}, "")
+
+            self.assertEqual(refresh_attempts["cnt"], 2)
+            self.assertFalse(client._detail_waf_open())
+            self.assertEqual(out["params"]["list"][1]["serviceName"], "正常应用")
+            self.assertEqual(out["params"]["list"][2]["serviceName"], "正常应用")
+
+        asyncio.run(run())
+
+    def test_tyc_app_merges_app_icp_record_list_and_skips_miit_detail(self):
+        async def run():
+            task_id = ObjectId()
+            tasks_col = _FakeAsyncCollection([
+                {"_id": task_id, "status": "waiting", "name": "app-merge", "query_type": ["app"]}
+            ])
+            assets_col = _FakeAsyncCollection()
+            syslog_col = _FakeAsyncCollection()
+            cfg_col = _FakeAsyncCollection([{"_id": "general_config", "detail_max_items": 50}])
+            fake_db = _FakeDb({
+                "icp_task": tasks_col,
+                "icp_asset": assets_col,
+                "syslog": syslog_col,
+                "asset_scope": _FakeAsyncCollection(),
+                "system_config": cfg_col,
+            })
+
+            client_icp = ymicp.beian()
+            detail_called = []
+
+            async def fake_query(_name, sp, _pn, _ps, _proxy=""):
+                if sp == 1:
+                    return True, {
+                        "code": 200, "success": True,
+                        "params": {"total": 1, "pages": 1, "list": [
+                            {"dataId": "did-wx", "serviceLicence": "粤ICP备09052002号-2A"}
+                        ]}
+                    }, {"p_uuid": "", "token": "t", "sign": "s", "base_header": {}}
+                return True, {"code": 200, "success": True, "params": {"total": 0, "pages": 0, "list": []}}, None
+
+            async def fake_app(_gid):
+                return [{"name": "微信", "icon": "https://img.example/wx.png", "classes": "社交", "brief": "即时通讯"}]
+
+            async def fake_app_icp(_gid):
+                return [{
+                    "serviceName": "微信",
+                    "serviceFilingNumber": "粤ICP备09052002号-2A",
+                    "examineDate": "2024-03-01",
+                    "appIcpRecordDetail": {
+                        "icpFilingSubjectInformation": {
+                            "organizingName": "深圳市腾讯计算机系统有限公司",
+                            "mainLicence": "粤ICP备09052002号",
+                        },
+                        "contentTypeName": "即时通信",
+                    },
+                }]
+
+            with patch.object(job_runner, "db", fake_db), \
+                 patch.object(job_runner.asyncio, "sleep", side_effect=_no_sleep), \
+                 patch.object(ymicp.asyncio, "sleep", side_effect=_no_sleep), \
+                 patch.object(ymicp, "beian", return_value=client_icp), \
+                 patch.object(client_icp, "_query_beian_page", side_effect=fake_query), \
+                 patch.object(client_icp, "getAppAndMiniDetail", side_effect=lambda did, *_: detail_called.append(did)), \
+                 patch.object(tyc_async.AsyncTycClient, "get_app_list", side_effect=fake_app), \
+                 patch.object(tyc_async.AsyncTycClient, "get_app_icp_record_list", side_effect=fake_app_icp):
+                await job_runner.run_tyc_job({
+                    "task_id": str(task_id),
+                    "gid": "9519792",
+                    "depth": 1,
+                    "query_type": ["app"],
+                    "enable_icp": True,
+                    "tyc_id": "id",
+                    "tyc_token": _make_jwt(time.time() + 3600),
+                    "company_name": "深圳市腾讯计算机系统有限公司",
+                })
+
+            self.assertEqual(detail_called, [])
+            self.assertEqual(len(assets_col.docs), 1)
+            doc = assets_col.docs[0]
+            self.assertEqual(doc["serviceName"], "微信")
+            self.assertEqual(doc["icon"], "https://img.example/wx.png")
+            self.assertEqual(doc["category"], "社交")
+            self.assertEqual(doc["serviceLicence"], "粤ICP备09052002号-2A")
+            self.assertEqual(doc["mainLicence"], "粤ICP备09052002号")
+            self.assertEqual(doc["contentTypeName"], "即时通信")
+            self.assertEqual(doc["updateRecordTime"], "2024-03-01")
+
+        asyncio.run(run())
+
+    def test_backfill_details_unlimited_and_deduplicates_against_tyc(self):
+        async def run():
+            task_id = ObjectId()
+            tyc_doc_id = ObjectId()
+            miit_dup_id = ObjectId()
+            tasks_col = _FakeAsyncCollection([
+                {"_id": task_id, "status": "done", "name": "bf-full", "company_name": "测试有限公司", "statistic": {"asset_cnt": 106, "app_cnt": 106}}
+            ])
+            unnamed_docs = [
+                {"_id": miit_dup_id, "task_id": str(task_id), "query_type": "app", "dataId": "D-DUP", "serviceLicence": "LIC-DUP", "mainLicence": "MAIN-DUP", "contentTypeName": "社交", "serviceName": "", "source": "icp"}
+            ] + [
+                {"_id": ObjectId(), "task_id": str(task_id), "query_type": "app", "dataId": f"D-{i}", "serviceLicence": f"LIC-{i}", "serviceName": "", "source": "icp"}
+                for i in range(104)
+            ]
+            assets_col = _FakeAsyncCollection([
+                {"_id": tyc_doc_id, "task_id": str(task_id), "query_type": "app", "name": "重复APP", "serviceName": "重复APP", "icon": "https://ico.test/app.png", "brief": "TYC简介", "source": "tyc"},
+                *unnamed_docs,
+            ])
+            syslog_col = _FakeAsyncCollection()
+            cfg_col = _FakeAsyncCollection([{"_id": "general_config", "detail_max_items": 2}])
+            fake_db = _FakeDb({
+                "icp_task": tasks_col,
+                "icp_asset": assets_col,
+                "syslog": syslog_col,
+                "system_config": cfg_col,
+                "asset_scope": _FakeAsyncCollection(),
+            })
+
+            client_icp = ymicp.beian()
+            queried_dids = []
+
+            async def fake_detail(did, _st, *_a, **_k):
+                queried_dids.append(did)
+                if did == "D-DUP":
+                    return True, {"success": True, "code": 200, "params": {"dataId": did, "serviceName": "重复APP", "mainLicence": "MAIN-DUP", "version": "2.0"}}
+                return True, {"success": True, "code": 200, "params": {"dataId": did, "serviceName": f"App-{did}"}}
+
+            with patch.object(job_runner, "db", fake_db), \
+                 patch.object(job_runner.asyncio, "sleep", side_effect=_no_sleep), \
+                 patch.object(ymicp.asyncio, "sleep", side_effect=_no_sleep), \
+                 patch.object(ymicp, "config", SimpleNamespace(system=SimpleNamespace(detail_concurrency=2, detail_max_items=2, progress_log_interval_sec=30), captcha=SimpleNamespace(enable=False))), \
+                 patch.object(ymicp, "beian", return_value=client_icp), \
+                 patch.object(client_icp, "getAppAndMiniDetail", side_effect=fake_detail):
+                client_icp._get_exit_state(DIRECT_EXIT_ID).update({"token": "tok-bf", "token_expire": time.time() * 1000 + 600000})
+                await job_runner.run_backfill_details_job({"task_id": str(task_id), "query_types": ["app"]})
+
+            # 1. 即使系统配置 detail_max_items=2，手动原位补全仍应全量处理 105 条待补全记录
+            self.assertEqual(len(queried_dids), 105)
+            # 2. 重复命名记录与既有 TYC 记录自动合并去重，最终应保留 105 条不重复 APP
+            self.assertEqual(len(assets_col.docs), 105)
+            merged_tyc = next(d for d in assets_col.docs if d["_id"] == tyc_doc_id)
+            self.assertEqual(merged_tyc["icon"], "https://ico.test/app.png")
+            self.assertEqual(merged_tyc["brief"], "TYC简介")
+            self.assertEqual(merged_tyc["serviceLicence"], "LIC-DUP")
+            self.assertEqual(merged_tyc["mainLicence"], "MAIN-DUP")
+            self.assertEqual(merged_tyc["contentTypeName"], "社交")
+            self.assertEqual(merged_tyc["version"], "2.0")
+            self.assertEqual(merged_tyc["source_synced"], "tyc+icp")
+            # 3. 统计计数应重算为 105
+            self.assertEqual(tasks_col.docs[0]["status"], "done")
+            self.assertEqual(tasks_col.docs[0]["statistic"]["app_cnt"], 105)
+            self.assertEqual(tasks_col.docs[0]["statistic"]["asset_cnt"], 105)
+
+        asyncio.run(run())
+
+    def test_normalize_icp_asset_item_extracts_nested_tyc_details(self):
+        src = Path(_BACKEND_DIR, "app", "routes", "icp.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        fn_node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "normalize_icp_asset_item")
+        env = {}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[fn_node], type_ignores=[])), "icp.py", "exec"), env)
+        normalize_fn = env["normalize_icp_asset_item"]
+
+        out = normalize_fn({
+            "query_type": "app",
+            "appName": "示例应用",
+            "appLogo": "https://img.example/logo.png",
+            "appIcpRecordDetail": {
+                "icpFilingSubjectInformation": {
+                    "organizingName": "示例科技有限公司",
+                    "mainLicence": "京ICP备20240001号",
+                    "natureName": "企业",
+                },
+                "icpFilingServiceInformation": {
+                    "serviceLicence": "京ICP备20240001号-1A",
+                    "contentTypeName": "工具",
+                },
+            },
+        })
+        self.assertEqual(out["serviceName"], "示例应用")
+        self.assertEqual(out["unitName"], "示例科技有限公司")
+        self.assertEqual(out["mainLicence"], "京ICP备20240001号")
+        self.assertEqual(out["serviceLicence"], "京ICP备20240001号-1A")
+        self.assertEqual(out["contentTypeName"], "工具")
+        self.assertEqual(out["companyType"], "企业")
+        self.assertEqual(out["icon"], "https://img.example/logo.png")
+
+    def test_sentinel_empty_detail_does_not_overwrite_dataid_or_break(self):
+        async def run():
+            client = ymicp.beian()
+            client._get_exit_state(DIRECT_EXIT_ID).update({"token": "tok-s", "token_expire": time.time() * 1000 + 600000})
+            items_res = {
+                "code": 200,
+                "success": True,
+                "params": {
+                    "list": [
+                        {"dataId": 10001 + i, "serviceType": 6, "serviceLicence": f"LIC-{i}", "serviceName": ""}
+                        for i in range(6)
+                    ]
+                },
+            }
+
+            async def fake_sentinel_detail(*_a, **_k):
+                return True, {
+                    "code": 200,
+                    "success": True,
+                    "msg": "操作成功",
+                    "params": {
+                        "contentTypeName": "",
+                        "dataId": 0,
+                        "mainLicence": "",
+                        "natureName": "企业",
+                        "serviceLicence": "",
+                        "serviceName": "",
+                        "serviceType": 0,
+                        "unitName": "",
+                        "updateRecordTime": None,
+                    },
+                }
+
+            progress_msgs = []
+
+            async def fake_prog(_sp, _stage, msg):
+                progress_msgs.append(msg)
+
+            client.attach_task_hooks(progress_cb=fake_prog)
+            try:
+                with patch.object(ymicp.asyncio, "sleep", side_effect=_no_sleep), \
+                     patch.object(ymicp, "config", SimpleNamespace(system=SimpleNamespace(detail_concurrency=2, detail_max_items=0, progress_log_interval_sec=30), captcha=SimpleNamespace(enable=False))), \
+                     patch.object(client, "getAppAndMiniDetail", side_effect=fake_sentinel_detail):
+                    out = await client._enrich_app_details(items_res, 1, {"p_uuid": "", "token": "tok-s", "sign": "s", "base_header": {}}, "", max_items=0)
+            finally:
+                client.attach_task_hooks()
+
+            prm = out["params"]
+            self.assertFalse(bool(prm.get("_detail_circuit_break")))
+            self.assertEqual(prm["_detail_missing"], 6)
+            for idx, item in enumerate(prm["list"]):
+                self.assertEqual(item["dataId"], 10001 + idx)
+                self.assertEqual(item["serviceType"], 6)
+            self.assertTrue(any("成功 0 条" in m for m in progress_msgs), msg=progress_msgs)
+
+        asyncio.run(run())
+
+    def test_backfill_refreshes_stale_and_zero_dataid_by_licence(self):
+        async def run():
+            task_id = ObjectId()
+            id_zero = ObjectId()
+            id_stale = ObjectId()
+            tasks_col = _FakeAsyncCollection([
+                {"_id": task_id, "status": "done", "name": "bf-refresh", "company_name": "腾讯测绘主体", "statistic": {"asset_cnt": 2, "app_cnt": 2}}
+            ])
+            assets_col = _FakeAsyncCollection([
+                {"_id": id_zero, "task_id": str(task_id), "query_type": "app", "dataId": 0, "serviceType": 0, "serviceLicence": "粤B2-TEST-1A", "unitName": "腾讯测绘主体", "serviceName": "", "source": "icp"},
+                {"_id": id_stale, "task_id": str(task_id), "query_type": "app", "dataId": 700001, "serviceType": 6, "serviceLicence": "粤B2-TEST-2A", "unitName": "腾讯测绘主体", "serviceName": "", "source": "icp"},
+            ])
+            syslog_col = _FakeAsyncCollection()
+            cfg_col = _FakeAsyncCollection([{"_id": "general_config"}])
+            fake_db = _FakeDb({
+                "icp_task": tasks_col,
+                "icp_asset": assets_col,
+                "syslog": syslog_col,
+                "system_config": cfg_col,
+                "asset_scope": _FakeAsyncCollection(),
+            })
+
+            client_icp = ymicp.beian()
+            client_icp._get_exit_state(DIRECT_EXIT_ID).update({"token": "tok-rf", "token_expire": time.time() * 1000 + 600000})
+
+            async def fake_query_page(keyword, sp, page_num, page_size, proxy=""):
+                mapping = {
+                    "粤B2-TEST-1A": {"dataId": 880001, "serviceType": 6, "serviceLicence": "粤B2-TEST-1A", "serviceName": "", "unitName": "腾讯测绘主体"},
+                    "粤B2-TEST-2A": {"dataId": 880002, "serviceType": 6, "serviceLicence": "粤B2-TEST-2A", "serviceName": "", "unitName": "腾讯测绘主体"},
+                }
+                item = mapping.get(keyword)
+                return True, {"code": 200, "success": True, "params": {"total": 1 if item else 0, "list": [item] if item else []}}, {}
+
+            async def fake_detail(did, _st, *_a, **_k):
+                if did == 700001:
+                    return True, {"code": 200, "success": True, "params": {"dataId": 0, "serviceType": 0, "serviceName": ""}}
+                if did == 880001:
+                    return True, {"code": 200, "success": True, "params": {"dataId": 880001, "serviceType": 6, "serviceName": "刷新后App1", "mainLicence": "粤B2-TEST"}}
+                if did == 880002:
+                    return True, {"code": 200, "success": True, "params": {"dataId": 880002, "serviceType": 6, "serviceName": "刷新后App2", "mainLicence": "粤B2-TEST"}}
+                return False, {}
+
+            with patch.object(job_runner, "db", fake_db), \
+                 patch.object(job_runner.asyncio, "sleep", side_effect=_no_sleep), \
+                 patch.object(ymicp.asyncio, "sleep", side_effect=_no_sleep), \
+                 patch.object(ymicp, "config", SimpleNamespace(system=SimpleNamespace(detail_concurrency=2, detail_max_items=0, progress_log_interval_sec=30), captcha=SimpleNamespace(enable=False))), \
+                 patch.object(ymicp, "beian", return_value=client_icp), \
+                 patch.object(client_icp, "_query_beian_page", side_effect=fake_query_page), \
+                 patch.object(client_icp, "getAppAndMiniDetail", side_effect=fake_detail):
+                await job_runner.run_backfill_details_job({"task_id": str(task_id), "query_types": ["app"]})
+
+            by_id = {d["_id"]: d for d in assets_col.docs}
+            self.assertEqual(by_id[id_zero]["serviceName"], "刷新后App1")
+            self.assertEqual(by_id[id_zero]["dataId"], 880001)
+            self.assertEqual(by_id[id_stale]["serviceName"], "刷新后App2")
+            self.assertEqual(by_id[id_stale]["dataId"], 880002)
+            self.assertEqual(tasks_col.docs[0]["status"], "done")
+
+        asyncio.run(run())
+
+
 if __name__ == "__main__":
     unittest.main()

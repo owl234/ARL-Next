@@ -731,9 +731,11 @@ def build_enterprise_profile(target: str, category: str = "all", page: int = 1, 
             }
         elif category == "kapp":
             item = {
-                "name": raw.get("name", ""),
+                "name": raw.get("name") or raw.get("serviceName", ""),
                 "unit_name": raw.get("unitName") or raw.get("companyName", ""),
                 "service_licence": raw.get("serviceLicence", ""),
+                "main_licence": raw.get("mainLicence", ""),
+                "content_type": raw.get("contentTypeName", ""),
                 "category": raw.get("category", "")
             }
         elif category == "invest":

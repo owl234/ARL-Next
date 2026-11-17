@@ -2748,7 +2748,7 @@ const startWizardRecon = async () => {
         depth: wizardForm.depth || 1,
         invest_ratio: wizardForm.invest_ratio || 50,
         enable_icp: wizardForm.enable_icp !== false,
-        query_type: ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo'],
+        query_type: ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo', 'kapp'],
         ...buildAutoGroupIntent()
       };
       if (customName) {
@@ -2783,7 +2783,7 @@ const startWizardRecon = async () => {
         depth: wizardForm.depth || 1,
         invest_ratio: wizardForm.invest_ratio || 50,
         enable_icp: wizardForm.enable_icp !== false,
-        query_type: ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo'],
+        query_type: ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo', 'kapp'],
         ...buildAutoGroupIntent()
       };
       const taskRes = await request.post('/icp/task', payload);

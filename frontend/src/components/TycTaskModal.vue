@@ -178,6 +178,7 @@
               <a-checkbox value="web">{{ taskText('tasks.websiteIcpRecords') }}</a-checkbox>
               <a-checkbox value="app">{{ taskText('tasks.mobileApps') }}</a-checkbox>
               <a-checkbox value="mapp">{{ taskText('tasks.wechatMiniPrograms') }}</a-checkbox>
+              <a-checkbox value="kapp">{{ taskText('tasks.quickApps') }}</a-checkbox>
               <a-checkbox value="wechat">{{ taskText('tasks.wechatOfficialAccounts') }}</a-checkbox>
               <a-checkbox value="weibo">{{ taskText('tasks.corporateWeiboAccounts') }}</a-checkbox>
             </a-checkbox-group>
@@ -236,7 +237,7 @@ const formState = reactive({
   rawTarget: '',
   depth: 1,
   invest_ratio: 50,
-  query_type: ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo'],
+  query_type: ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo', 'kapp'],
   enable_icp: true
 });
 
@@ -326,7 +327,7 @@ watch(() => props.open, (val) => {
     formState.rawTarget = draft ? draft.rawTarget : '';
     formState.depth = 1;
     formState.invest_ratio = 50;
-    formState.query_type = ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo'];
+    formState.query_type = ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo', 'kapp'];
     formState.enable_icp = true;
     checkTycConfig();
   }

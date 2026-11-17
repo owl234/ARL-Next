@@ -81,7 +81,7 @@
 | **停止单个企业任务** | `GET /api/icp/stop/<task_id>` | URL 路径参数：`task_id` (24位十六进制) | ⚠️ **注意：此接口使用 GET 方法执行状态变更**；终止 `osint-service` 测绘协程并释放关联资产组更新锁；已结束任务返回错误码 `105` |
 | **批量停止企业任务** | `POST /api/icp/batch_stop/` | JSON：`{"task_ids": ["<task_id>"]}`（兼容 `task_id` 字段） | 逐项终止活跃企业测绘任务并释放关联资产组更新锁，自动跳过已结束任务，返回 `stopped_ids` / `skipped_ids` / `failed_ids` 明细 |
 | **断点续跑企业任务** | `POST /api/icp/resume/<task_id>` | URL 路径参数：`task_id` | 仅允许处于 `stop` 或 `error` 且存在未完成 `recon_checkpoint` 的任务；原位恢复剩余主体与维度测绘，保留已入库资产 |
-| **原位补全缺失详情** | `POST /api/icp/backfill_details/<task_id>` | URL 路径参数：`task_id`；可选 JSON：`{"query_types": ["app", "mapp", "kapp"]}` | 仅允许终态任务；针对 `dataId` 非空且 `serviceName` 为空的条目按需补抓详情并原位更新，不新建任务 |
+| **原位补全缺失详情** | `POST /api/icp/backfill_details/<task_id>` | URL 路径参数：`task_id`；可选 JSON：`{"query_types": ["app", "mapp", "kapp"]}` | 仅允许终态任务；取消单批 100 条截断上限，原位补全 `serviceName` 为空的条目（对 `dataId=0` 或已轮换失效记录按备案号重刷最新 `dataId`），并执行跨源同名合并与统计校准，不新建任务 |
 | **删除任务** | `POST /api/task/delete/` | JSON：`{"task_id": ["<task_id>"], "del_task_data": false}` | ⚠️ **前置条件约束**：仅允许删除处于 `done`、`stop` 或 `error` 结束态的任务；运行中任务将返回错误码 `104`（“任务运行中”） |
 | **重启任务** | `POST /api/task/restart/` | JSON：`{"task_id": ["<task_id>"]}` | 仅允许重启已结束的任务 |
 
@@ -342,7 +342,7 @@ ARL-Next 集成了 Model Context Protocol (MCP 2024-11-05 规范)，支持 AI �
 | 工具名称 | 类别 | 核心入参 | 功能说明 | 启用条件 |
 | :--- | :--- | :--- | :--- | :--- |
 | `get_asset_profile` | 只读画像 | `target` (必填), `task_id` (可选) | 综合资产情报关联（IP/端口/服务/Web指纹/证书/漏洞/泄露） | 默认启用 |
-| `get_enterprise_profile` | 只读画像 | `target` (必填), `category`, `page`, `size`, `task_id` | 企业全景生态资产画像与组织架构（工商背景、ICP备案、APP、小程序、公众号、微博、投资关系） | 默认启用 |
+| `get_enterprise_profile` | 只读画像 | `target` (必填), `category`, `page`, `size`, `task_id` | 企业全景生态资产画像与组织架构（工商背景、ICP备案、APP、小程序、快应用、公众号、微博、投资关系） | 默认启用 |
 | `search_assets` | 只读检索 | `query` (必填), `asset_type`, `limit` | 依条件检索站点、IP、域名或已知漏洞记录 | 默认启用 |
 | `get_task_status` | 只读状态 | `task_id` (必填) | 查询任务执行状态、进度与统计数据 | 默认启用 |
 | `create_scan_task` | 受控调度 | `name`, `target`, `policy_id` | 通过标准目标校验与轻重队列投递扫描任务 | 管理台启用工具且 Key 具有 `task:dispatch` |

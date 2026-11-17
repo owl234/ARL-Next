@@ -76,7 +76,7 @@ add_tyc_task_fields = ns.model('AddTycTask', {
     'gid': fields.String(required=True, description="公司/节点GID"),
     'depth': fields.Integer(required=False, default=1, description="递归查询层数"),
     'invest_ratio': fields.Float(required=False, default=50, description="对外投资最小比例(%)"),
-    'query_type': fields.List(fields.String, required=True, description="查询类型(web/app/mapp/wechat/weibo/invest)"),
+    'query_type': fields.List(fields.String, required=True, description="查询类型(web/app/mapp/wechat/weibo/invest/kapp)"),
     'enable_icp': fields.Boolean(required=False, default=True, description="是否联动工信部ICP双轨查重与补全"),
     'auto_group': fields.Boolean(required=False, default=False, description="测绘完成后是否由后端自动纳管建组"),
     'auto_group_scan': fields.Boolean(required=False, default=False, description="自动建组后是否立即下发主动探测"),
@@ -239,7 +239,7 @@ class IcpTask(ARLResource):
             gid = str(matched_tyc["gid"])
             official_company_name = matched_tyc.get("company_name") or target_str
             final_name = custom_name or (f"{official_company_name}全景测绘" if official_company_name else f"TYC_{gid}")
-            full_query_type = ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo']
+            full_query_type = ['invest', 'web', 'app', 'mapp', 'wechat', 'weibo', 'kapp']
 
             task_data = {
                 "name": final_name,
@@ -528,6 +528,32 @@ def normalize_icp_asset_item(item):
     if not isinstance(item, dict):
         return item
 
+    # 0. 优先提取 TYC APP/小程序 ICP 详情嵌套结构体中的主体、备案与内容类型字段
+    for detail_key in ('appIcpRecordDetail', 'miniProgramIcpRecordDetail'):
+        detail = item.get(detail_key)
+        if not isinstance(detail, dict):
+            continue
+        subj = detail.get('icpFilingSubjectInformation') or {}
+        if isinstance(subj, dict):
+            if not item.get('unitName') and subj.get('organizingName'):
+                item['unitName'] = subj['organizingName']
+            if not item.get('mainLicence') and subj.get('mainLicence'):
+                item['mainLicence'] = subj['mainLicence']
+            if not item.get('natureName') and subj.get('natureName'):
+                item['natureName'] = subj['natureName']
+        svc = detail.get('icpFilingServiceInformation') or {}
+        if isinstance(svc, dict):
+            if not item.get('serviceName') and svc.get('serviceName'):
+                item['serviceName'] = svc['serviceName']
+            if not item.get('serviceLicence') and svc.get('serviceLicence'):
+                item['serviceLicence'] = svc['serviceLicence']
+            if not item.get('contentTypeName') and svc.get('contentTypeName'):
+                item['contentTypeName'] = svc['contentTypeName']
+        if not item.get('contentTypeName') and detail.get('contentTypeName'):
+            item['contentTypeName'] = detail['contentTypeName']
+        if not item.get('mainLicence') and detail.get('mainLicence'):
+            item['mainLicence'] = detail['mainLicence']
+
     # 1. 域名归一化
     domain = item.get('domain') or item.get('ym') or ''
     item['domain'] = domain
@@ -535,7 +561,7 @@ def normalize_icp_asset_item(item):
         item['ym'] = domain
 
     # 2. 名称归一化 (网站名称/应用名称/公众号标题)
-    service_name = item.get('serviceName') or item.get('webName') or item.get('name') or item.get('title') or ''
+    service_name = item.get('serviceName') or item.get('webName') or item.get('appName') or item.get('name') or item.get('title') or ''
     item['serviceName'] = service_name
     if not item.get('name'):
         item['name'] = service_name
@@ -546,8 +572,6 @@ def normalize_icp_asset_item(item):
 
     # 3. 主办单位归一化
     unit_name = item.get('unitName') or item.get('companyName') or ''
-    if not unit_name and isinstance(item.get('miniProgramIcpRecordDetail'), dict):
-        unit_name = item['miniProgramIcpRecordDetail'].get('icpFilingSubjectInformation', {}).get('organizingName', '')
     item['unitName'] = unit_name
     if not item.get('companyName'):
         item['companyName'] = unit_name
@@ -559,6 +583,8 @@ def normalize_icp_asset_item(item):
         item['liscense'] = licence
     if not item.get('serviceFilingNumber'):
         item['serviceFilingNumber'] = licence
+    if not item.get('mainLicence'):
+        item['mainLicence'] = ''
 
     # 5. 更新/审核时间归一化
     update_time = item.get('updateRecordTime') or item.get('examineDate') or ''
@@ -577,16 +603,20 @@ def normalize_icp_asset_item(item):
     item['homeUrl'] = home_url or ''
 
     # 7. 图标/图片/二维码归一化
-    icon = item.get('icon') or item.get('titleImgURL') or item.get('codeImg') or item.get('ico') or item.get('productLogo') or ''
+    icon = item.get('icon') or item.get('titleImgURL') or item.get('codeImg') or item.get('ico') or item.get('productLogo') or item.get('appLogo') or ''
     item['icon'] = icon
 
     # 8. 简介/描述/认证信息归一化
     brief = item.get('brief') or item.get('recommend') or item.get('info') or ''
     item['brief'] = brief
 
-    # 9. 分类/类型归一化
+    # 9. 分类/类型/单位性质/审批类型归一化
     category = item.get('category') or item.get('classes') or item.get('type') or ''
     item['category'] = category
+    if not item.get('companyType') and item.get('natureName'):
+        item['companyType'] = item['natureName']
+    if not item.get('contentTypeName'):
+        item['contentTypeName'] = ''
 
     # 10. 微信公众号 ID 归一化
     wechat_id = item.get('wechatId') or item.get('publicNum') or ''

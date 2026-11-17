@@ -38,6 +38,30 @@ from proxy_router import (
 def is_public_ipv6(ipv6):
     return not (ipv6.startswith("fe80") or ipv6.startswith("fc00") or ipv6.startswith("fd00"))
 
+
+def _is_sentinel_empty_detail_params(params):
+    """MIIT 对失效或已轮换 dataId 会返回 success=True 且关键字段全空、dataId=0 的占位对象。"""
+    if not isinstance(params, dict):
+        return True
+    has_name = bool(str(params.get("serviceName") or params.get("name") or params.get("appName") or "").strip())
+    has_lic = bool(str(params.get("serviceLicence") or params.get("mainLicence") or "").strip())
+    has_did = bool(params.get("dataId"))
+    return not (has_name or has_lic or has_did)
+
+
+def _merge_safe_detail_params(item, params):
+    """合并详情响应时仅写入有效非空值，防止以 0/空占位覆盖既有的正数 dataId 或 serviceType。"""
+    merged = dict(item)
+    if not isinstance(params, dict):
+        return merged
+    for k, v in params.items():
+        if v in (None, ""):
+            continue
+        if k in ("dataId", "serviceType") and v == 0 and merged.get(k):
+            continue
+        merged[k] = v
+    return merged
+
 # 获取本地IPv6地址
 def _run_cmd_capture(cmd):
     """执行系统命令并自动多编码尝试解码，失败返回空字符串"""
@@ -176,8 +200,9 @@ class beian:
         # WAF 熔断状态挂在实例上：单 IP 冷却期对齐 IP 封禁 300s TTL
         self._waf_block_ts = 0.0
         self.waf_cooldown = 300
-        # 详情专属熔断状态：避免详情限流殃及列表查询（冷却 180s）
+        # 详情专属熔断状态：避免详情限流殃及列表查询（冷却 180s），并按 exit_id 细粒度追踪
         self._detail_waf_block_ts = 0.0
+        self._detail_waf_block_by_exit = {}
         self.detail_waf_cooldown = 180
         self._token_lock = None
 
@@ -190,6 +215,7 @@ class beian:
         self._detail_cb = None
         self._should_stop_cb = None
         self._skip_detail_fn = None
+        self._wait_on_detail_waf = False
 
     def _get_exit_state(self, exit_id=None):
         eid = str(exit_id or DIRECT_EXIT_ID)
@@ -256,6 +282,7 @@ class beian:
         detail_cb=None,
         should_stop_cb=None,
         skip_detail_fn=None,
+        wait_on_detail_waf=False,
     ):
         """挂载任务级进度日志、增量落库、详情回写与协同终止回调"""
         self._progress_cb = progress_cb
@@ -263,6 +290,7 @@ class beian:
         self._detail_cb = detail_cb
         self._should_stop_cb = should_stop_cb
         self._skip_detail_fn = skip_detail_fn
+        self._wait_on_detail_waf = bool(wait_on_detail_waf)
 
     def _get_system_int_config(self, key, default):
         val = getattr(getattr(config, "system", object()), key, None)
@@ -322,17 +350,57 @@ class beian:
         await self.proxy_router.acquire_rate_slot(eff_exit, interval_range=(2.6, 3.2))
         self._last_req_ts = time.time()
 
+    def _detail_waf_open_for_exit(self, exit_id=None):
+        eid = str(exit_id or DIRECT_EXIT_ID)
+        ts = float(self._detail_waf_block_by_exit.get(eid, 0.0) or 0.0)
+        return (time.time() - ts) < self.detail_waf_cooldown
+
     def _detail_waf_open(self):
-        """详情熔断是否处于开启态（冷却期内跳过详情补全）"""
+        """详情熔断是否处于开启态（多出口下仅当可用出口均处于详情冷却时才开启全局详情熔断）"""
+        router = getattr(self, "proxy_router", None)
+        if router is not None and router.has_structured_policy:
+            cands = router.get_candidates(sticky=True)
+            if cands:
+                return all(self._detail_waf_open_for_exit(c.exit_id) for c in cands)
+            return True
         return (time.time() - self._detail_waf_block_ts) < self.detail_waf_cooldown
 
-    def _detail_waf_trip(self, scene="详情获取"):
-        first_trip = not self._detail_waf_open()
-        self._detail_waf_block_ts = time.time()
+    def _detail_waf_trip(self, scene="详情获取", exit_id=None):
+        now_ts = time.time()
+        router = getattr(self, "proxy_router", None)
+        if exit_id is not None:
+            eid = str(exit_id)
+            first_trip = not self._detail_waf_open_for_exit(eid)
+            self._detail_waf_block_by_exit[eid] = now_ts
+            if router is None or not router.has_structured_policy:
+                self._detail_waf_block_ts = now_ts
+        else:
+            first_trip = not self._detail_waf_open()
+            self._detail_waf_block_ts = now_ts
+            self._detail_waf_block_by_exit[DIRECT_EXIT_ID] = now_ts
         if first_trip:
             logger.warning(
                 f"{scene}触发限流或创宇盾拦截，启动详情降级：跳过后续详情请求，冷却 {self.detail_waf_cooldown}s"
             )
+
+    def get_detail_waf_remaining(self):
+        """计算距离最近一个可用出口解除详情冷却的剩余秒数。"""
+        now_ts = time.time()
+        router = getattr(self, "proxy_router", None)
+        if router is not None and router.has_structured_policy:
+            cands = router.get_candidates(sticky=True)
+            if cands:
+                rems = [
+                    max(0.0, float(self._detail_waf_block_by_exit.get(c.exit_id, 0.0) or 0.0) + float(self.detail_waf_cooldown) - now_ts)
+                    for c in cands
+                ]
+                return min(rems) if rems else 0.0
+        return max(0.0, float(self._detail_waf_block_ts) + float(self.detail_waf_cooldown) - now_ts)
+
+    def reset_detail_waf(self):
+        """重置详情级冷却状态，供有限等待结束后恢复补全。"""
+        self._detail_waf_block_ts = 0.0
+        self._detail_waf_block_by_exit.clear()
 
     def _extract_proxy_ip(self, proxy):
         """从代理连接串中提取 IP 或主机名标识"""
@@ -978,8 +1046,8 @@ class beian:
             logger.warning(f"check_image Faile : {e}")
             return False, str(e), '', '', ''
 
-    async def getAppAndMiniDetail(self, dataId, serviceType, p_uuid, token, sign, base_header, proxy="", session=None):
-        """优化的详情获取，支持多协议代理、每出口控频与故障切换"""
+    async def getAppAndMiniDetail(self, dataId, serviceType, p_uuid, token, sign, base_header, proxy="", session=None, detail_context=None):
+        """优化的详情获取，支持多协议代理、每出口控频与故障切换（含跨出口鉴权上下文回写）"""
         info = {"dataId": dataId, "serviceType": serviceType}
         length = str(len(str(ujson.dumps(info, ensure_ascii=False)).encode("utf-8")))
         captcha_enabled = bool(getattr(getattr(config, 'captcha', object()), 'enable', False))
@@ -1029,8 +1097,10 @@ class beian:
         candidates = self._iter_attempt_exits(proxy, sticky=True)
         if not candidates:
             self._detail_waf_trip("详情获取")
+            self._detail_waf_block_ts = time.time()
             return False, {"code": 403, "msg": "当前所有出口均处于冷却状态", "success": False}
 
+        ctx_exit_id = detail_context.get("exit_id") if isinstance(detail_context, dict) else None
         cur_uuid = p_uuid
         cur_token = token
         cur_sign = sign
@@ -1038,7 +1108,14 @@ class beian:
         last_err = {"code": 500, "msg": "详情获取失败", "success": False}
         for idx, cand in enumerate(candidates):
             next_cand = candidates[idx + 1] if (idx + 1 < len(candidates)) else None
-            if idx > 0:
+            if self._detail_waf_open_for_exit(cand.exit_id) and next_cand is not None:
+                continue
+            need_fresh_auth = (
+                idx > 0
+                or (ctx_exit_id is not None and str(ctx_exit_id) != str(cand.exit_id))
+                or (captcha_enabled and not cur_sign)
+            )
+            if need_fresh_auth:
                 if captcha_enabled:
                     try:
                         ok_ctx, new_uuid, new_tok, new_sign, new_hdr = await self.check_img(
@@ -1070,10 +1147,11 @@ class beian:
                             continue
                         return False, last_err
                 else:
-                    tok_ok, new_tok, new_hdr = await self.get_token(proxy, force=True, exit_candidate=cand)
+                    tok_ok, new_tok, new_hdr = await self.get_token(proxy, force=(idx > 0), exit_candidate=cand)
                     if tok_ok:
                         cur_token = new_tok
                         cur_header = new_hdr
+                        cur_sign = cur_sign or self.sign
             detail_header = dict(cur_header)
             detail_header.update({"Content-Length": length, "uuid": cur_uuid, "token": cur_token, "sign": cur_sign})
             if not captcha_enabled:
@@ -1120,10 +1198,11 @@ class beian:
                     next_cand=next_cand,
                     scene="详情补全",
                 )
+                self._detail_waf_trip("详情获取", exit_id=cand.exit_id)
                 last_err = {"code": 403, "msg": "当前访问已被创宇盾拦截", "success": False}
                 if next_cand is not None:
                     continue
-                self._detail_waf_trip("详情获取")
+                self._detail_waf_block_ts = time.time()
                 return False, last_err
 
             try:
@@ -1136,12 +1215,19 @@ class beian:
                         next_cand=next_cand,
                         scene="详情补全",
                     )
+                    self._detail_waf_trip("详情获取(业务限流)", exit_id=cand.exit_id)
                     last_err = {"code": 429, "msg": f"业务限流: {_msg}", "success": False}
                     if next_cand is not None:
                         continue
-                    self._detail_waf_trip("详情获取(业务限流)")
+                    self._detail_waf_block_ts = time.time()
                     return False, last_err
                 await self._handle_exit_success(cand, switched_from_primary=(idx > 0))
+                if isinstance(detail_context, dict) and (need_fresh_auth or ctx_exit_id != cand.exit_id):
+                    detail_context["p_uuid"] = cur_uuid
+                    detail_context["token"] = cur_token
+                    detail_context["sign"] = cur_sign
+                    detail_context["base_header"] = cur_header
+                    detail_context["exit_id"] = cand.exit_id
                 return True, parsed_res
             except Exception as e:
                 logger.warning(f"解析详情响应失败: {e}, 响应文本截断: {res[:100]}")
@@ -1295,8 +1381,8 @@ class beian:
 
         return False, last_err, None
 
-    async def _enrich_app_details(self, result, sp, detail_context, proxy, target_name=""):
-        """为APP/小程序/快应用结果补充详情（支持跳过已知、上限截断、令牌单次自愈与连续失败熔断）"""
+    async def _enrich_app_details(self, result, sp, detail_context, proxy, target_name="", max_items=None, wait_on_detail_waf=False):
+        """为APP/小程序/快应用结果补充详情（支持跳过已知、可配置上限、跨出口续签、有限冷却等待与熔断保护）"""
         if (sp in (1, 2, 3)
             and result.get("success")
             and result.get("params", {}).get("list")):
@@ -1305,7 +1391,7 @@ class beian:
             if not items:
                 return result
 
-            detail_context = detail_context or {}
+            detail_context = detail_context if isinstance(detail_context, dict) else {}
 
             # 先筛除无 dataId、已自带名称、或调用方判定已命中的条目
             candidate_indices = []
@@ -1325,10 +1411,13 @@ class beian:
                         logger.warning(f"跳过已知详情判定异常: {e}")
                 candidate_indices.append(idx)
 
-            max_items = self._get_system_int_config("detail_max_items", 100)
-            if max_items > 0 and len(candidate_indices) > max_items:
-                skipped_cap = len(candidate_indices) - max_items
-                target_indices = candidate_indices[:max_items]
+            if max_items is None:
+                effective_max_items = self._get_system_int_config("detail_max_items", 100)
+            else:
+                effective_max_items = int(max_items)
+            if effective_max_items > 0 and len(candidate_indices) > effective_max_items:
+                skipped_cap = len(candidate_indices) - effective_max_items
+                target_indices = candidate_indices[:effective_max_items]
             else:
                 skipped_cap = 0
                 target_indices = candidate_indices
@@ -1344,13 +1433,38 @@ class beian:
                     )
                 return result
 
-            # 详情熔断检查：若处于详情冷却中，直接返回基础列表资产，不阻塞整体流程
+            sp_labels = {1: "移动APP", 2: "小程序", 3: "快应用"}
+            sp_label = sp_labels.get(sp, "备案资产")
+            target_prefix = f"主体【{target_name}】" if target_name else ""
+
+            # 详情熔断检查：默认跳过不阻塞；当显式允许有限等待冷却时等待一次并支持协同停止
             if self._detail_waf_open():
-                result["params"]["_detail_missing"] = len(candidate_indices)
-                result["params"]["_detail_waf"] = True
-                result["params"]["_detail_circuit_break"] = True
-                logger.info(f"当前处于详情熔断冷却期，跳过 {len(target_indices)} 条条目详情补全，保留基础列表数据")
-                return result
+                waited_ok = False
+                if wait_on_detail_waf:
+                    rem = self.get_detail_waf_remaining()
+                    if 0 < rem <= float(self.detail_waf_cooldown):
+                        logger.info(f"{target_prefix}{sp_label}详情补全命中冷却，等待 {int(rem)}s 后恢复补全")
+                        await self._emit_progress(
+                            sp,
+                            "detail",
+                            f"{target_prefix}{sp_label}详情补全命中保护冷却，等待 {int(rem)}s 后自动恢复...",
+                        )
+                        slept = 0.0
+                        while slept < rem:
+                            if await self._check_should_stop():
+                                result["params"]["_stopped"] = True
+                                return result
+                            step = min(2.0, rem - slept)
+                            await asyncio.sleep(step)
+                            slept += step
+                        self.reset_detail_waf()
+                        waited_ok = not self._detail_waf_open()
+                if not waited_ok:
+                    result["params"]["_detail_missing"] = len(candidate_indices)
+                    result["params"]["_detail_waf"] = True
+                    result["params"]["_detail_circuit_break"] = True
+                    logger.info(f"当前处于详情熔断冷却期，跳过 {len(target_indices)} 条条目详情补全，保留基础列表数据")
+                    return result
 
             max_concurrency = min(
                 self._get_system_int_config("detail_concurrency", 2),
@@ -1361,12 +1475,17 @@ class beian:
             sem = asyncio.Semaphore(max_concurrency)
             context_lock = asyncio.Lock()
             captcha_enabled = bool(getattr(getattr(config, 'captcha', object()), 'enable', False))
-            stats = {"enriched": 0}
+            stats = {"enriched": 0, "named_enriched": 0}
             state = {
                 "consecutive_failures": 0,
                 "refresh_used_in_streak": False,
+                "refresh_attempts_in_streak": 0,
                 "circuit_broken": False,
             }
+            try:
+                accepts_detail_ctx = "detail_context" in inspect.signature(self.getAppAndMiniDetail).parameters
+            except (TypeError, ValueError):
+                accepts_detail_ctx = False
 
             async def ensure_token_valid():
                 if captcha_enabled:
@@ -1377,18 +1496,24 @@ class beian:
                 now_ms = int(time.time() * 1000)
                 if st["token"] and (st["token_expire"] - now_ms >= 60000):
                     detail_context["token"] = st["token"]
+                    detail_context["exit_id"] = active_cand.exit_id
+                    detail_context.setdefault("sign", self.sign)
                     return
                 lock = self._get_exit_token_lock(active_cand.exit_id)
                 async with lock:
                     now_ms = int(time.time() * 1000)
                     if st["token"] and (st["token_expire"] - now_ms >= 60000):
                         detail_context["token"] = st["token"]
+                        detail_context["exit_id"] = active_cand.exit_id
+                        detail_context.setdefault("sign", self.sign)
                         return
                     try:
                         logger.info("ICP Token 即将过期，正在自动刷新 Token...")
                         tok_ok, new_tok, new_hdr = await self.get_token(proxy, exit_candidate=active_cand)
                         if tok_ok:
                             detail_context["token"] = new_tok
+                            detail_context["exit_id"] = active_cand.exit_id
+                            detail_context["sign"] = self.sign
                             if new_hdr:
                                 detail_context["base_header"] = new_hdr
                             logger.info("ICP Token 自动刷新成功")
@@ -1398,9 +1523,10 @@ class beian:
             async def _refresh_detail_captcha_context():
                 cands = self._iter_attempt_exits(proxy, sticky=True)
                 if not getattr(self, "proxy_router", None) or not self.proxy_router.has_structured_policy:
-                    return await self.check_img(proxy, force_token=True)
+                    ok_c, u_c, t_c, s_c, h_c = await self.check_img(proxy, force_token=True)
+                    return ok_c, u_c, t_c, s_c, h_c, DIRECT_EXIT_ID
                 if not cands:
-                    return False, "当前所有出口均处于冷却状态", "", "", ""
+                    return False, "当前所有出口均处于冷却状态", "", "", "", None
                 for idx, cand in enumerate(cands):
                     next_cand = cands[idx + 1] if (idx + 1 < len(cands)) else None
                     try:
@@ -1412,7 +1538,7 @@ class beian:
                         )
                         if res_ctx[0]:
                             await self._handle_exit_success(cand, switched_from_primary=(idx > 0))
-                            return res_ctx
+                            return (*res_ctx, cand.exit_id)
                     except _ExitAttemptError as ctx_err:
                         await self._handle_exit_failure(
                             cand,
@@ -1424,7 +1550,7 @@ class beian:
                         )
                         if next_cand is not None:
                             continue
-                return False, "详情验证码刷新失败", "", "", ""
+                return False, "详情验证码刷新失败", "", "", "", None
 
             def _is_waf_failure(d_data):
                 return self._detail_waf_open() or (
@@ -1437,15 +1563,24 @@ class beian:
                     d_success
                     and isinstance(d_data, dict)
                     and d_data.get("success")
-                    and d_data.get("params")
+                    and isinstance(d_data.get("params"), dict)
+                    and not _is_sentinel_empty_detail_params(d_data.get("params"))
                 )
+
+            def _is_genuine_empty_detail(d_success, d_data):
+                if not d_success or not isinstance(d_data, dict):
+                    return False
+                msg = str(d_data.get("msg") or d_data.get("message") or "")
+                if d_data.get("success") and _is_sentinel_empty_detail_params(d_data.get("params")):
+                    return True
+                return any(kw in msg for kw in ("无数据", "未找到", "不存在", "已注销"))
 
             async def _request_detail_once(item, serviceType):
                 async with sem:
                     if self._detail_waf_open() or state["circuit_broken"]:
                         return False, {"code": 403, "msg": "详情熔断中", "success": False}
                     await ensure_token_valid()
-                    return await self.getAppAndMiniDetail(
+                    args = (
                         item["dataId"],
                         serviceType,
                         detail_context.get("p_uuid", ""),
@@ -1454,6 +1589,14 @@ class beian:
                         detail_context.get("base_header", {}),
                         proxy,
                     )
+                    if accepts_detail_ctx:
+                        return await self.getAppAndMiniDetail(*args, detail_context=detail_context)
+                    return await self.getAppAndMiniDetail(*args)
+
+            def _record_success(merged_item):
+                stats["enriched"] += 1
+                if str(merged_item.get("serviceName") or merged_item.get("name") or merged_item.get("appName") or "").strip():
+                    stats["named_enriched"] += 1
 
             async def fetch_detail(item):
                 if self._detail_waf_open() or self._waf_open() or state["circuit_broken"] or "dataId" not in item:
@@ -1469,9 +1612,9 @@ class beian:
                         async with context_lock:
                             state["consecutive_failures"] = 0
                             state["refresh_used_in_streak"] = False
-                        merged_item = item.copy()
-                        merged_item.update(d_data["params"])
-                        stats["enriched"] += 1
+                            state["refresh_attempts_in_streak"] = 0
+                        merged_item = _merge_safe_detail_params(item, d_data["params"])
+                        _record_success(merged_item)
                         return merged_item, True
 
                     if _is_waf_failure(d_data):
@@ -1479,20 +1622,26 @@ class beian:
                             self._detail_waf_trip("详情获取")
                         return item, False
 
-                    # 非 WAF 业务失败：打码模式下至多单次锁定刷新 (p_uuid, sign) 并重试一次
+                    if _is_genuine_empty_detail(d_success, d_data):
+                        return item, False
+
+                    # 非 WAF 业务失败：打码模式下至多单次有效刷新 (p_uuid, sign) 并重试一次（滑块误判最多尝试 2 次刷新）
                     should_retry = False
                     if captcha_enabled and not await self._check_should_stop():
                         async with context_lock:
                             if detail_context.get("p_uuid", "") != used_p_uuid or detail_context.get("sign", "") != used_sign:
                                 should_retry = True
-                            elif not state["refresh_used_in_streak"]:
-                                state["refresh_used_in_streak"] = True
-                                ok, new_uuid, new_tok, new_sign, new_hdr = await _refresh_detail_captcha_context()
+                            elif not state["refresh_used_in_streak"] and state["refresh_attempts_in_streak"] < 2:
+                                state["refresh_attempts_in_streak"] += 1
+                                ok, new_uuid, new_tok, new_sign, new_hdr, new_eid = await _refresh_detail_captcha_context()
                                 if ok:
+                                    state["refresh_used_in_streak"] = True
                                     detail_context["p_uuid"] = new_uuid
                                     detail_context["token"] = new_tok
                                     detail_context["sign"] = new_sign
                                     detail_context["base_header"] = new_hdr
+                                    if new_eid:
+                                        detail_context["exit_id"] = new_eid
                                     should_retry = True
 
                     if should_retry and not self._detail_waf_open() and not self._waf_open() and not state["circuit_broken"]:
@@ -1501,13 +1650,15 @@ class beian:
                             async with context_lock:
                                 state["consecutive_failures"] = 0
                                 state["refresh_used_in_streak"] = False
-                            merged_item = item.copy()
-                            merged_item.update(d_data["params"])
-                            stats["enriched"] += 1
+                                state["refresh_attempts_in_streak"] = 0
+                            merged_item = _merge_safe_detail_params(item, d_data["params"])
+                            _record_success(merged_item)
                             return merged_item, True
                         if _is_waf_failure(d_data):
                             if not self._detail_waf_open():
                                 self._detail_waf_trip("详情获取")
+                            return item, False
+                        if _is_genuine_empty_detail(d_success, d_data):
                             return item, False
 
                     async with context_lock:
@@ -1527,9 +1678,6 @@ class beian:
                                 self._detail_waf_trip("详情连续异常")
                     return item, False
 
-            sp_labels = {1: "移动APP", 2: "小程序", 3: "快应用"}
-            sp_label = sp_labels.get(sp, "备案资产")
-            target_prefix = f"主体【{target_name}】" if target_name else ""
             interval_sec = max(1, self._get_system_int_config("progress_log_interval_sec", 30))
 
             if len(target_indices) > 5:
@@ -1546,12 +1694,14 @@ class beian:
                 )
 
             if captcha_enabled and not detail_context.get("sign") and not await self._check_should_stop():
-                ok_init, init_uuid, init_tok, init_sign, init_hdr = await _refresh_detail_captcha_context()
+                ok_init, init_uuid, init_tok, init_sign, init_hdr, init_eid = await _refresh_detail_captcha_context()
                 if ok_init:
                     detail_context["p_uuid"] = init_uuid
                     detail_context["token"] = init_tok
                     detail_context["sign"] = init_sign
                     detail_context["base_header"] = init_hdr
+                    if init_eid:
+                        detail_context["exit_id"] = init_eid
 
             detailed_list = list(items)
             batch_size = max_concurrency
@@ -1592,7 +1742,7 @@ class beian:
                     await self._emit_progress(
                         sp,
                         "detail",
-                        f"正在补全{target_prefix}{sp_label}详情：已完成 {processed}/{len(target_indices)} 条（成功 {stats['enriched']} 条）",
+                        f"正在补全{target_prefix}{sp_label}详情：已完成 {processed}/{len(target_indices)} 条（成功 {stats['named_enriched']} 条）",
                     )
                     last_log_ts = now_ts
 
@@ -1603,7 +1753,7 @@ class beian:
                     await asyncio.sleep(random.uniform(0.25, 0.5))
 
             result["params"]["list"] = detailed_list
-            missing = max(len(candidate_indices) - stats["enriched"], 0)
+            missing = max(len(candidate_indices) - stats["named_enriched"], 0)
             circuit_broken = bool(state["circuit_broken"] or self._detail_waf_open())
             if missing:
                 result["params"]["_detail_missing"] = missing
@@ -1614,7 +1764,7 @@ class beian:
                     await self._emit_progress(
                         sp,
                         "detail",
-                        f"{target_prefix}{sp_label}详情补全触发保护熔断：已完成 {processed}/{len(target_indices)} 条（成功 {stats['enriched']} 条），其余保留基础备案号入库",
+                        f"{target_prefix}{sp_label}详情补全触发保护熔断：已完成 {processed}/{len(target_indices)} 条（成功 {stats['named_enriched']} 条），其余保留基础备案号入库",
                     )
             logger.info(
                 f"并发详情获取完成，总计 {len(detailed_list)} 条 (目标 {len(target_indices)} 条, 跳过已知 {skipped_known} 条, 上限跳过 {skipped_cap} 条, 详情缺失 {missing} 条, 详情熔断 {circuit_broken})"
@@ -1641,7 +1791,10 @@ class beian:
             return False, result
 
         if not auto_pagination:
-            result = await self._enrich_app_details(result, sp, detail_context, proxy, target_name=name)
+            result = await self._enrich_app_details(
+                result, sp, detail_context, proxy, target_name=name,
+                wait_on_detail_waf=self._wait_on_detail_waf,
+            )
             return True, result
 
         params = result.get("params", {})
@@ -1720,7 +1873,10 @@ class beian:
         if stopped:
             return True, result
 
-        result = await self._enrich_app_details(result, sp, detail_context, proxy, target_name=name)
+        result = await self._enrich_app_details(
+            result, sp, detail_context, proxy, target_name=name,
+            wait_on_detail_waf=self._wait_on_detail_waf,
+        )
         return True, result
 
     async def _getblackbeian_once(self, name, sp, cand, force_token=False):
