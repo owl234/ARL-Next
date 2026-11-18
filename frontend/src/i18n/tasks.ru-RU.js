@@ -227,6 +227,7 @@ export default {
   "enabledPluginsAndConfiguration": "Включённые плагины и настройки",
   "risks": "Риски",
   "risksCount": "Рисков: {count}",
+  "nucleiVulnsCount": "Уязвимостей Nuclei: {count}",
   "domains": "Домены",
   "domainsCount": "Доменов: {count}",
   "websites": "Сайты",

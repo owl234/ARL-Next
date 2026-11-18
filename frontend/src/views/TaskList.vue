@@ -817,6 +817,12 @@
                     <span class="stat-num">{{ record.statistic.vuln_cnt }}</span>
                   </span>
                 </a-tooltip>
+                <a-tooltip v-if="record.statistic.nuclei_result_cnt !== undefined && record.statistic.nuclei_result_cnt > 0" :title="taskText('tasks.nucleiVulnsCount', { count: record.statistic.nuclei_result_cnt })">
+                  <span class="stat-capsule nuclei">
+                    <span class="stat-lbl">Nuclei</span>
+                    <span class="stat-num">{{ record.statistic.nuclei_result_cnt }}</span>
+                  </span>
+                </a-tooltip>
               </div>
               <span v-else style="color: var(--arl-text-secondary);">-</span>
             </template>
@@ -3158,6 +3164,7 @@ onUnmounted(() => {
 .stat-capsule.ip { background: rgba(82, 196, 26, 0.12); color: #389e0d; }
 .stat-capsule.wih { background: rgba(250, 173, 20, 0.15); color: #d48806; }
 .stat-capsule.vuln { background: rgba(255, 77, 79, 0.15); color: #cf1322; }
+.stat-capsule.nuclei { background: rgba(250, 84, 28, 0.14); color: #d4380d; }
 
 .stat-lbl { opacity: 0.8; font-weight: 400; }
 .stat-num { font-weight: 600; }

@@ -229,6 +229,7 @@ export default {
   "enabledPluginsAndConfiguration": "Enabled plugins and configuration",
   "risks": "Risks",
   "risksCount": "Risks: {count}",
+  "nucleiVulnsCount": "Nuclei vulnerabilities: {count}",
   "domains": "Domains",
   "domainsCount": "Domains: {count}",
   "websites": "Websites",

@@ -229,6 +229,7 @@ export default {
   "enabledPluginsAndConfiguration": "已启用策略与配置",
   "risks": "风险",
   "risksCount": "风险: {count}",
+  "nucleiVulnsCount": "Nuclei 漏洞: {count}",
   "domains": "域名",
   "domainsCount": "域名: {count}",
   "websites": "站点",
