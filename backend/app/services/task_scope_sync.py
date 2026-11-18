@@ -5,7 +5,7 @@ from app.modules import ScopeValidationError, TaskSyncStatus
 from app.helpers.scope import validate_task_scope
 
 
-def sync_task_to_scope(task_id, scope_id, push_flag=False):
+def sync_task_to_scope(task_id, scope_id, push_flag=False, details_out=None):
     # 此处只同步已有扫描结果，不重新派发扫描任务。
     from app.services.syncAsset import sync_asset
     tasks = utils.conn_db('task')
@@ -20,7 +20,10 @@ def sync_task_to_scope(task_id, scope_id, push_flag=False):
             "sync_status": TaskSyncStatus.RUNNING, "sync_scope_id": scope_id,
             "sync_scope_name": scope.get("name", "")
         }, "$unset": {"sync_error": "", "sync_summary": ""}})
-        sync_asset(task_id=task_id, scope_id=scope_id, push_flag=push_flag)
+        if details_out is not None:
+            sync_asset(task_id=task_id, scope_id=scope_id, push_flag=push_flag, details_out=details_out)
+        else:
+            sync_asset(task_id=task_id, scope_id=scope_id, push_flag=push_flag)
         tasks.update_one(query, {"$set": {
             "sync_status": TaskSyncStatus.DEFAULT, "synced_scope_id": scope_id,
             "synced_scope_name": scope.get("name", "")

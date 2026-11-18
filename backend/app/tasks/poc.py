@@ -211,13 +211,13 @@ class RiskCruising(CommonTask):
             with self.safe_phase("PoC", self):
                 self.run_poc()
 
-        with self.safe_phase("common_run", self):
-            self.common_run()
-
-        # nuclei_scan 放在最后执行，防止高并发扫描把目标打挂或者触发IP封禁
+        # nuclei_scan 放在漏洞探测最后执行，防止高并发扫描把目标打挂或者触发IP封禁，但须先于统计与同步完成
         if self.options.get("nuclei_scan"):
             with self.safe_phase("nuclei_scan", self):
                 web_site_fetch.run_func("nuclei_scan", web_site_fetch.nuclei_scan)
+
+        with self.safe_phase("common_run", self):
+            self.common_run(push_flag=False)
 
     def run(self):
         with TaskHeartbeat(self.task_id, interval=60):
@@ -225,9 +225,10 @@ class RiskCruising(CommonTask):
                 self.update_task_field("start_time", utils.curr_date())
                 self.work()
                 self.update_task_field("status", TaskStatus.DONE)
+                self.update_task_field("end_time", utils.curr_date())
+                self.dispatch_completion_notifications()
             except Exception as e:
                 self.update_task_field("status", TaskStatus.ERROR)
+                self.update_task_field("end_time", utils.curr_date())
                 logger.exception(e)
-
-            self.update_task_field("end_time", utils.curr_date())
 

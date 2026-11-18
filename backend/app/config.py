@@ -97,7 +97,7 @@ DYNAMIC_PROPERTIES = {
     "EMAIL_HOST", "EMAIL_PORT", "EMAIL_USERNAME", "EMAIL_PASSWORD", "EMAIL_TO",
     "GITHUB_TOKEN", "DOMAIN_BRUTE_CONCURRENT", "ALT_DNS_CONCURRENT",
     "PROXY_URL", "QUERY_PLUGIN_CONFIG", "WEB_HOOK_URL", "WEB_HOOK_TOKEN",
-    "AUTH", "API_KEY", "TYC_ID", "TYC_TOKEN", "PUSH_OPTIONS",
+    "AUTH", "API_KEY", "TYC_ID", "TYC_TOKEN", "PUSH_OPTIONS", "NUCLEI_PUSH_SEVERITIES",
     "TG_BOT_TOKEN", "TG_CHAT_ID", "SO_SEARCH_COOKIE", "BING_SEARCH_COOKIE"
 }
 
@@ -111,6 +111,7 @@ DYNAMIC_KEYS_MAP = {
     "TYC_ID": "tyc_id",
     "TYC_TOKEN": "tyc_token",
     "PUSH_OPTIONS": "push_options",
+    "NUCLEI_PUSH_SEVERITIES": "nuclei_push_severities",
     "SO_SEARCH_COOKIE": "so_search_cookie",
     "BING_SEARCH_COOKIE": "bing_search_cookie"
 }
@@ -223,7 +224,8 @@ class Config(object, metaclass=ConfigMeta):
     _TG_BOT_TOKEN = ""
     _TG_CHAT_ID = ""
 
-    _PUSH_OPTIONS = ['task_complete', 'github_leak', 'github_cve', 'github_tools', 'github_hackers', 'asset_site']
+    _PUSH_OPTIONS = ['task_complete', 'nuclei_vuln', 'github_leak', 'github_cve', 'github_tools', 'github_hackers', 'asset_site']
+    _NUCLEI_PUSH_SEVERITIES = ['critical', 'high', 'medium', 'low']
 
     _SO_SEARCH_COOKIE = ""
     _BING_SEARCH_COOKIE = ""

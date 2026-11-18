@@ -1457,6 +1457,46 @@ def ensure_proxy_config_schema():
     _ensure_proxy()
 
 
+def migrate_nuclei_push_options():
+    """平滑演进：为存量 general_config 补齐 nuclei_vuln 订阅事件与严重等级白名单（单次迁移，保留后续手动关闭）"""
+    import logging
+    import time
+    log = logging.getLogger()
+    sys_db = conn_db("system_config")
+    migration_id = "migration_nuclei_vuln_push"
+    record = sys_db.find_one({"_id": migration_id})
+    if record and record.get("status") == "completed":
+        return
+
+    try:
+        general = sys_db.find_one({"_id": "general_config"})
+        updated = False
+        if general:
+            update_ops = {}
+            push_opts = general.get("push_options")
+            if isinstance(push_opts, list) and "nuclei_vuln" not in push_opts:
+                update_ops["$addToSet"] = {"push_options": "nuclei_vuln"}
+            if "nuclei_push_severities" not in general:
+                update_ops["$set"] = {"nuclei_push_severities": ["critical", "high", "medium", "low"]}
+            if update_ops:
+                sys_db.update_one({"_id": "general_config"}, update_ops)
+                updated = True
+
+        if updated:
+            from app.config import clear_system_config_cache, bump_system_config_version
+            clear_system_config_cache()
+            bump_system_config_version()
+
+        sys_db.update_one(
+            {"_id": migration_id},
+            {"$set": {"status": "completed", "completed_at": int(time.time())}},
+            upsert=True,
+        )
+        log.info("migrate_nuclei_push_options completed (updated=%s).", updated)
+    except Exception as e:
+        log.error(f"migrate_nuclei_push_options error: {e}")
+
+
 def arl_update():
     if is_run_flask_routes():
         return
@@ -1534,6 +1574,7 @@ def arl_update():
         _run_step("ensure_mcp_governance_schema", ensure_mcp_governance_schema)
         _run_step("ensure_packet_lease_schema", ensure_packet_lease_schema)
         _run_step("ensure_proxy_config_schema", ensure_proxy_config_schema)
+        _run_step("migrate_nuclei_push_options", migrate_nuclei_push_options)
         db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
     except Exception as e:
         import logging

@@ -1,4 +1,5 @@
 import re
+import html as html_lib
 import time
 import base64
 import hmac
@@ -141,7 +142,11 @@ class Push(object):
 
         if has_vuln:
             vuln_new = sum(r["new"] for r in rows if r["key"] in ("vuln", "nuclei_result"))
-            lines.append(f"⚠️ 安全预警：检出 {vuln_new} 项漏洞风险，请尽快排查！\n")
+            vuln_update = sum(r["update"] for r in rows if r["key"] in ("vuln", "nuclei_result"))
+            if vuln_new > 0:
+                lines.append(f"⚠️ 安全预警：检出 {vuln_new} 项漏洞风险，请尽快排查！\n")
+            elif vuln_update > 0:
+                lines.append(f"⚠️ 安全预警：监测到 {vuln_update} 项存量漏洞变动，请尽快排查！\n")
 
         lines.append("💡 提示：详情请登录 ARL-Next 控制台查看完整资产清单。")
         return "\n".join(lines)
@@ -173,8 +178,14 @@ class Push(object):
         vuln_banner = ""
         if has_vuln:
             vuln_new = sum(r["new"] for r in rows if r["key"] in ("vuln", "nuclei_result"))
-            vuln_banner = f"""<div style="background-color: #fff1f0; border: 1px solid #ffa39e; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; color: #cf1322;">
+            vuln_update = sum(r["update"] for r in rows if r["key"] in ("vuln", "nuclei_result"))
+            if vuln_new > 0:
+                vuln_banner = f"""<div style="background-color: #fff1f0; border: 1px solid #ffa39e; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; color: #cf1322;">
     ⚠️ <b>安全风险预警</b>：检出 <strong>{vuln_new}</strong> 项漏洞风险，请尽快登录排查！
+</div>"""
+            elif vuln_update > 0:
+                vuln_banner = f"""<div style="background-color: #fff1f0; border: 1px solid #ffa39e; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; color: #cf1322;">
+    ⚠️ <b>安全风险预警</b>：监测到 <strong>{vuln_update}</strong> 项存量漏洞变动，请尽快登录排查！
 </div>"""
 
         table_rows = []
@@ -319,7 +330,18 @@ def message_push(asset_map, asset_counter, update_map=None, update_counter=None)
     p.push_wx_work()
     p.push_telegram()
 
-def unified_push(push_type: str, title: str, content: str):
+def _truncate_utf8_by_bytes(text: str, max_bytes: int, suffix: str = "") -> str:
+    """按 UTF-8 字节上限截断纯文本，适配企业微信等按字节计数的推送通道"""
+    raw = text.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text
+    suffix_bytes = suffix.encode("utf-8")
+    budget = max(0, max_bytes - len(suffix_bytes))
+    trimmed = raw[:budget].decode("utf-8", errors="ignore").rstrip()
+    return f"{trimmed}{suffix}"
+
+
+def unified_push(push_type: str, title: str, content: str, html_content: str = None):
     """
     统一消息推送入口，适配所有配置的有效渠道
     即时通讯渠道统一自动清洗 Markdown 语法，输出优美可读纯文本
@@ -348,36 +370,301 @@ def unified_push(push_type: str, title: str, content: str):
         except Exception as e:
             logger.warning(f"unified_push feishu error: {e}")
 
-    # 企业微信
+    # 企业微信（文本消息上限 2048 字节）
     if Config.WX_WORK_WEBHOOK:
         try:
-            wx_content = f"{clean_title}\n\n{plain_content}"
+            wx_content = _truncate_utf8_by_bytes(
+                f"{clean_title}\n\n{plain_content}",
+                2000,
+                suffix="\n...（内容过长已截断，请登录控制台查看详情）",
+            )
             res = wx_work_send(wx_content, Config.WX_WORK_WEBHOOK)
             if res.get("errcode", 0) != 0:
                 logger.warning(f"unified_push wx_work api error: {res}")
         except Exception as e:
             logger.warning(f"unified_push wx_work error: {e}")
 
-    # 邮件 (Email 渲染原生 HTML，若无特定 html 则以纯文本换行格式组织)
+    # 邮件 (优先使用定制 HTML 卡片；否则回退为转义纯文本换行格式)
     if Config.EMAIL_HOST and Config.EMAIL_USERNAME and Config.EMAIL_PASSWORD and Config.EMAIL_TO:
         try:
-            html = plain_content.replace('\n', '<br>')
-            html = f"<div><h3>{clean_title}</h3><div>{html}</div></div>"
-            send_email(Config.EMAIL_HOST, Config.EMAIL_PORT, Config.EMAIL_USERNAME, Config.EMAIL_PASSWORD, Config.EMAIL_TO, clean_title, html)
+            if html_content:
+                email_html = html_content
+            else:
+                escaped_body = html_lib.escape(plain_content).replace('\n', '<br>')
+                email_html = f"<div><h3>{html_lib.escape(clean_title)}</h3><div>{escaped_body}</div></div>"
+            send_email(Config.EMAIL_HOST, Config.EMAIL_PORT, Config.EMAIL_USERNAME, Config.EMAIL_PASSWORD, Config.EMAIL_TO, clean_title, email_html)
         except Exception as e:
             logger.warning(f"unified_push email error: {e}")
 
-    # Telegram (使用纯文本传输)
+    # Telegram (使用纯文本传输，单条上限 4096 字符)
     tg_token = getattr(Config, 'TG_BOT_TOKEN', None)
     tg_chat = getattr(Config, 'TG_CHAT_ID', None)
     if tg_token and tg_chat:
         try:
             tg_msg = f"{clean_title}\n\n{plain_content}"
+            if len(tg_msg) > 4000:
+                tg_msg = tg_msg[:3960].rstrip() + "\n...（内容过长已截断，请登录控制台查看详情）"
             res = telegram_send(tg_msg, tg_token, tg_chat)
             if not res.get("ok"):
                 logger.warning(f"unified_push telegram api error: {res}")
         except Exception as e:
             logger.warning(f"unified_push telegram error: {e}")
+
+
+NUCLEI_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
+NUCLEI_SEVERITY_RANK = {sev: idx for idx, sev in enumerate(NUCLEI_SEVERITY_ORDER)}
+NUCLEI_SEVERITY_LABELS = {
+    "critical": "严重",
+    "high": "高危",
+    "medium": "中危",
+    "low": "低危",
+    "info": "信息",
+}
+NUCLEI_SEVERITY_BADGE_STYLES = {
+    "critical": ("#cf1322", "#fff1f0", "#ffa39e"),
+    "high": ("#d4380d", "#fff2e8", "#ffbb96"),
+    "medium": ("#d48806", "#fffbe6", "#ffe58f"),
+    "low": ("#096dd9", "#e6f7ff", "#91d5ff"),
+    "info": ("#595959", "#fafafa", "#d9d9d9"),
+}
+DEFAULT_NUCLEI_PUSH_SEVERITIES = ["critical", "high", "medium", "low"]
+
+
+def normalize_nuclei_push_severities(severities, default=None):
+    """规范化 Nuclei 推送严重等级列表，保留标准排序并去重。"""
+    if severities is None:
+        return list(default) if default is not None else list(DEFAULT_NUCLEI_PUSH_SEVERITIES)
+    if isinstance(severities, str):
+        raw_items = [part.strip().lower() for part in severities.split(",")]
+    elif isinstance(severities, (list, tuple, set)):
+        raw_items = [str(part).strip().lower() for part in severities if part is not None]
+    else:
+        return list(default) if default is not None else list(DEFAULT_NUCLEI_PUSH_SEVERITIES)
+
+    allowed = {item for item in raw_items if item in NUCLEI_SEVERITY_RANK}
+    return [sev for sev in NUCLEI_SEVERITY_ORDER if sev in allowed]
+
+
+def filter_and_sort_nuclei_results(results, allowed_severities=None):
+    """按严重等级白名单过滤 Nuclei 结果，并按 critical -> info 优先级排序。"""
+    if not results:
+        return []
+    if allowed_severities is None:
+        raw_cfg = getattr(Config, "NUCLEI_PUSH_SEVERITIES", None)
+        if not isinstance(raw_cfg, (list, tuple, set, str)):
+            raw_cfg = DEFAULT_NUCLEI_PUSH_SEVERITIES
+        allowed = set(normalize_nuclei_push_severities(raw_cfg))
+    else:
+        allowed = set(normalize_nuclei_push_severities(allowed_severities))
+
+    if not allowed:
+        return []
+
+    filtered = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        sev = str(item.get("vuln_severity") or "").strip().lower()
+        if sev in allowed:
+            filtered.append(item)
+
+    filtered.sort(
+        key=lambda x: (
+            NUCLEI_SEVERITY_RANK.get(str(x.get("vuln_severity") or "").strip().lower(), 99),
+            str(x.get("template_id") or ""),
+            str(x.get("vuln_url") or x.get("target") or x.get("host") or ""),
+        )
+    )
+    return filtered
+
+
+def count_nuclei_severities(results):
+    """统计各严重等级命中数量。"""
+    counts = {sev: 0 for sev in NUCLEI_SEVERITY_ORDER}
+    for item in results or []:
+        sev = str(item.get("vuln_severity") or "").strip().lower()
+        if sev in counts:
+            counts[sev] += 1
+    return counts
+
+
+def _shorten_text(value: str, limit: int = 120) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(1, limit - 3)] + "..."
+
+
+def build_nuclei_vuln_report(task_name, task_target, results, scope_name="", max_items=20):
+    """构造 Nuclei 漏洞告警的标题、IM 纯文本与 HTML 邮件卡片。"""
+    total = len(results)
+    sev_counts = count_nuclei_severities(results)
+    clean_task_name = str(task_name or "").strip() or "未命名任务"
+    clean_target = _shorten_text(task_target or "-", 120)
+    clean_scope = str(scope_name or "").strip()
+
+    title = f"[Nuclei 漏洞告警-{clean_task_name[:30]}] 检出 {total} 项漏洞"
+
+    summary_parts = [
+        f"{NUCLEI_SEVERITY_LABELS[sev]} {sev_counts[sev]}"
+        for sev in NUCLEI_SEVERITY_ORDER
+        if sev_counts.get(sev, 0) > 0
+    ]
+    summary_line = " | ".join(summary_parts) if summary_parts else f"总计 {total}"
+
+    lines = [
+        "【ARL-Next Nuclei 漏洞告警】",
+        f"任务名称：{clean_task_name}",
+        f"扫描目标：{clean_target}",
+    ]
+    if clean_scope:
+        lines.append(f"所属资产组：{clean_scope}")
+    lines.append(f"命中统计：共 {total} 项（{summary_line}）")
+    lines.append("-----------------------------")
+
+    display_items = results[:max_items]
+    for idx, item in enumerate(display_items, 1):
+        sev = str(item.get("vuln_severity") or "").strip().lower()
+        sev_label = NUCLEI_SEVERITY_LABELS.get(sev, sev or "未知")
+        vuln_name = _shorten_text(item.get("vuln_name") or item.get("template_id") or "未命名漏洞", 120)
+        template_id = str(item.get("template_id") or "-").strip()
+        vuln_url = _shorten_text(item.get("vuln_url") or item.get("target") or item.get("host") or "-", 180)
+        lines.append(f"{idx}. [{sev_label}] {vuln_name} ({template_id})")
+        lines.append(f"   命中地址：{vuln_url}")
+
+    lines.append("-----------------------------")
+    if total > max_items:
+        lines.append(f"… 共检出 {total} 项漏洞，其余 {total - max_items} 项请登录 ARL-Next 控制台查看。")
+    lines.append("💡 提示：请尽快核验漏洞详情并开展修复。")
+    plain_content = "\n".join(lines)
+
+    # 构造邮件 HTML 表格
+    badge_html_parts = []
+    for sev in NUCLEI_SEVERITY_ORDER:
+        cnt = sev_counts.get(sev, 0)
+        if cnt <= 0:
+            continue
+        fg, bg, border = NUCLEI_SEVERITY_BADGE_STYLES[sev]
+        badge_html_parts.append(
+            f'<span style="display: inline-block; padding: 2px 8px; margin-right: 6px; border-radius: 4px; '
+            f'font-size: 12px; font-weight: 600; color: {fg}; background-color: {bg}; border: 1px solid {border};">'
+            f'{NUCLEI_SEVERITY_LABELS[sev]}: {cnt}</span>'
+        )
+    badges_html = "".join(badge_html_parts)
+
+    scope_row_html = ""
+    if clean_scope:
+        scope_row_html = f'<div style="margin-top: 4px;"><b>所属资产组</b>：{html_lib.escape(clean_scope)}</div>'
+
+    table_rows = []
+    for idx, item in enumerate(display_items, 1):
+        sev = str(item.get("vuln_severity") or "").strip().lower()
+        sev_label = NUCLEI_SEVERITY_LABELS.get(sev, sev or "未知")
+        fg, bg, border = NUCLEI_SEVERITY_BADGE_STYLES.get(sev, ("#595959", "#fafafa", "#d9d9d9"))
+        template_id = html_lib.escape(str(item.get("template_id") or "-"))
+        vuln_name = html_lib.escape(str(item.get("vuln_name") or item.get("template_id") or "未命名漏洞"))
+        vuln_url = html_lib.escape(str(item.get("vuln_url") or item.get("target") or item.get("host") or "-"))
+        table_rows.append(
+            f'<tr style="border-bottom: 1px solid #f0f0f0;">'
+            f'<td style="padding: 8px 10px; color: #595959;">{idx}</td>'
+            f'<td style="padding: 8px 10px;"><span style="display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 12px; color: {fg}; background-color: {bg}; border: 1px solid {border};">{html_lib.escape(sev_label)}</span></td>'
+            f'<td style="padding: 8px 10px; font-family: monospace; font-size: 12px; color: #262626;">{template_id}</td>'
+            f'<td style="padding: 8px 10px; color: #262626;">{vuln_name}</td>'
+            f'<td style="padding: 8px 10px; color: #1890ff; word-break: break-all;">{vuln_url}</td>'
+            f'</tr>'
+        )
+
+    trunc_html = ""
+    if total > max_items:
+        trunc_html = (
+            f'<div style="margin-top: 10px; font-size: 13px; color: #8c8c8c;">'
+            f'… 共检出 {total} 项漏洞，以上展示前 {max_items} 项，完整明细请登录 ARL-Next 控制台查看。</div>'
+        )
+
+    html_content = f"""<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 780px; padding: 24px; border: 1px solid #e8e8e8; border-radius: 8px; background-color: #ffffff; color: #262626;">
+    <h3 style="margin-top: 0; color: #cf1322; font-size: 18px; border-bottom: 1px solid #f0f0f0; padding-bottom: 12px; margin-bottom: 16px;">
+        🚨 {html_lib.escape(clean_task_name)} - Nuclei 漏洞告警
+    </h3>
+    <div style="background-color: #fff1f0; border: 1px solid #ffa39e; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; font-size: 14px;">
+        <div><b>扫描目标</b>：{html_lib.escape(clean_target)}</div>
+        {scope_row_html}
+        <div style="margin-top: 8px;"><b>检出统计（共 {total} 项）</b>：{badges_html}</div>
+    </div>
+    <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: left;">
+        <thead>
+            <tr style="background-color: #fafafa; border-bottom: 2px solid #e8e8e8;">
+                <th style="padding: 8px 10px; color: #595959; width: 42px;">#</th>
+                <th style="padding: 8px 10px; color: #595959; width: 70px;">等级</th>
+                <th style="padding: 8px 10px; color: #595959;">模板 ID</th>
+                <th style="padding: 8px 10px; color: #595959;">漏洞名称</th>
+                <th style="padding: 8px 10px; color: #595959;">命中地址</th>
+            </tr>
+        </thead>
+        <tbody>
+            {"".join(table_rows)}
+        </tbody>
+    </table>
+    {trunc_html}
+    <div style="font-size: 12px; color: #8c8c8c; border-top: 1px solid #f0f0f0; padding-top: 12px; margin-top: 16px;">
+        💡 <b>提示</b>：请尽快登录 ARL-Next 控制台核验漏洞详情并开展修复。
+    </div>
+</div>"""
+
+    return title, plain_content, html_content, sev_counts
+
+
+def nuclei_vuln_push(task_id: str, results: list, scope_id: str = "", task_info: dict = None) -> bool:
+    """过滤、聚合 Nuclei 漏洞结果并分发至已配置的 IM/邮件通道与全局 Webhook。"""
+    push_options = getattr(Config, "PUSH_OPTIONS", None)
+    if not isinstance(push_options, (list, tuple, set)) or "nuclei_vuln" not in push_options:
+        return False
+
+    filtered = filter_and_sort_nuclei_results(results)
+    if not filtered:
+        return False
+
+    from bson import ObjectId
+    from app.utils.conn import conn_db
+
+    if task_info is None and task_id and ObjectId.is_valid(str(task_id)):
+        try:
+            task_info = conn_db("task").find_one({"_id": ObjectId(str(task_id))})
+        except Exception as e:
+            logger.warning(f"nuclei_vuln_push fetch task failed ({task_id}): {e}")
+            task_info = None
+
+    scope_name = ""
+    if scope_id and ObjectId.is_valid(str(scope_id)):
+        try:
+            scope_doc = conn_db("asset_scope").find_one({"_id": ObjectId(str(scope_id))}, {"name": 1})
+            if scope_doc:
+                scope_name = scope_doc.get("name", "")
+        except Exception as e:
+            logger.warning(f"nuclei_vuln_push fetch scope failed ({scope_id}): {e}")
+
+    task_name = (task_info or {}).get("name", "")
+    task_target = (task_info or {}).get("target", "")
+    title, plain_content, html_content, _ = build_nuclei_vuln_report(
+        task_name=task_name,
+        task_target=task_target,
+        results=filtered,
+        scope_name=scope_name,
+    )
+
+    unified_push("nuclei_vuln", title, plain_content, html_content=html_content)
+
+    try:
+        from app.services import webhook
+        webhook.nuclei_vuln_web_hook(
+            task_id=str(task_id or ""),
+            scope_id=str(scope_id or ""),
+            nuclei_results=filtered,
+            task_data=task_info,
+        )
+    except Exception as e:
+        logger.warning(f"nuclei_vuln_push webhook dispatch failed: {e}")
+
+    return True
 
 
 def dict2dingding_mark(info_list):

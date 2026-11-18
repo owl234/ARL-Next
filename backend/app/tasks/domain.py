@@ -1331,10 +1331,11 @@ class DomainTask(CommonTask):
 
         # 执行统计和同步操作
         with self.safe_phase("common_run", base_update):
-            self.common_run()
+            self.common_run(push_flag=False)
 
         self.update_task_field("status", TaskStatus.DONE)
         self.update_task_field("end_time", utils.curr_date())
+        self.dispatch_completion_notifications()
 
 
 def domain_task(base_domain, task_id, options):

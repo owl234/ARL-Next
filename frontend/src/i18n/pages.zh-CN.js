@@ -783,6 +783,8 @@ export default {
   "saveNotificationConfiguration": "保存推送配置",
   "subscribedEvents": "订阅消息类型",
   "assetDiscoveryTaskCompleted": "资产侦察任务完成",
+  "nucleiVulnerabilityAlert": "Nuclei 漏洞告警",
+  "nucleiPushSeverityFilter": "Nuclei 推送严重等级过滤",
   "githubKeywordAlert": "GitHub 关键字告警",
   "githubCveUpdate": "GitHub CVE 更新",
   "githubSecurityToolUpdate": "GitHub 武器库更新",

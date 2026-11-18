@@ -330,10 +330,12 @@ class IPTask(CommonTask):
 
             # 如果有关联的资产组就进行同步
             if self.task_tag == "task":
-                self.sync_asset()
+                self.sync_asset(push_flag=False)
 
         base_update.update_task_field("status", TaskStatus.DONE)
         base_update.update_task_field("end_time", utils.curr_date())
+        if self.task_tag == "task":
+            self.dispatch_completion_notifications()
 
 
 def ip_task(ip_target, task_id, options):

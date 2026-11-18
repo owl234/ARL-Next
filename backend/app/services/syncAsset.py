@@ -45,6 +45,7 @@ class SyncAsset(object):
         self.update_asset_map = copy.deepcopy(self.new_asset_map)
         self.update_asset_counter = {k: 0 for k in self.available_category}
         self.max_record_asset_count = 10
+        self.new_nuclei_results = []
 
     def site_in_asset_site(self, site: str) -> bool:
         """站点包含? 和 ; 非严格判断站点是否在资产组里面"""
@@ -179,6 +180,8 @@ class SyncAsset(object):
                     if self.new_asset_counter[category] < self.max_record_asset_count:
                         self.new_asset_map[category].append(copy.deepcopy(data))
                     self.new_asset_counter[category] += 1
+                if category == "nuclei_result":
+                    self.new_nuclei_results.append(copy.deepcopy(data))
 
                 bulk_operations.append(InsertOne(data))
 
@@ -540,13 +543,22 @@ class SyncAsset(object):
         if asset_bulk_ops:
             asset_site_coll.bulk_write(asset_bulk_ops, ordered=False)
 
-def sync_asset(task_id, scope_id, update_flag=False,  category=None, push_flag=False, task_name=""):
+def sync_asset(task_id, scope_id, update_flag=False,  category=None, push_flag=False, task_name="", details_out=None):
     sync = SyncAsset(task_id=task_id, scope_id=scope_id,
                      update_flag=update_flag, category=category, task_name=task_name)
     ret = sync.run()
     if not ret or not isinstance(ret, tuple) or len(ret) != 4:
         return {}, {}, {}, {}
     new_asset_map, new_asset_counter, update_asset_map, update_asset_counter = ret
+
+    raw_new_nuclei = getattr(sync, "new_nuclei_results", None)
+    new_nuclei_results = raw_new_nuclei if isinstance(raw_new_nuclei, list) else []
+    if isinstance(details_out, dict):
+        details_out["new_asset_map"] = new_asset_map
+        details_out["new_asset_counter"] = new_asset_counter
+        details_out["update_asset_map"] = update_asset_map
+        details_out["update_asset_counter"] = update_asset_counter
+        details_out["new_nuclei_results"] = new_nuclei_results
 
     # 将本次同步的新增入库与更新存量计数落库到 task.sync_summary，便于列表页区分零新增与存量刷新。
     # 该逻辑内联在 sync_asset 中，以兼容仅按函数名通过 AST 加载 SyncAsset/sync_asset 的测试框架。
@@ -576,5 +588,11 @@ def sync_asset(task_id, scope_id, update_flag=False,  category=None, push_flag=F
 
     if push_flag:
         utils.message_push(asset_map=new_asset_map, asset_counter=new_asset_counter, update_map=update_asset_map, update_counter=update_asset_counter)
+        if new_nuclei_results:
+            try:
+                from app.utils.push import nuclei_vuln_push
+                nuclei_vuln_push(task_id=task_id, results=new_nuclei_results, scope_id=scope_id)
+            except Exception as exc:
+                logger.warning("nuclei_vuln_push failed for task %s: %s", task_id, exc)
 
     return new_asset_map, new_asset_counter, update_asset_map, update_asset_counter

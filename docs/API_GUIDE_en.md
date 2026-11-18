@@ -408,3 +408,52 @@ Code leak findings are deduplicated across one-time scans (`github_result`) and 
 | `GET` | `/api/github_threat/hackers_history` | Query tools discovered from tracked researchers with optional `github_id` and `q` (repo/description/language) filters |
 
 - **Dashboard & Batch Alignment**: `github_monitors` in `GET /api/dashboard/stats` counts `github_scheduler` documents; `POST /api/github_threat/tools_target` and `POST /api/github_threat/hackers_target` accept both single items and batch lists (`repo_urls` / `github_ids`).
+
+## 10. Notifications & Nuclei Vulnerability Alert Callbacks
+
+Global notification settings are managed via `GET` / `POST /api/system_config/general` (administrator `Token` header required) across DingTalk, Feishu, WeCom, Telegram, SMTP email, and Global Webhook callbacks.
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `push_options` | `string[]` | Subscribed event list, now including `nuclei_vuln` (Nuclei vulnerability alert); existing configurations are backfilled once during startup migration while preserving subsequent opt-outs |
+| `nuclei_push_severities` | `string[]` | Severity allowlist for Nuclei alerts (`critical`, `high`, `medium`, `low`, `info`), defaulting to `["critical", "high", "medium", "low"]` |
+
+- **Trigger Timing & Deduplication**:
+  - Regular domain/IP scans, risk cruising (`RiskCruising`), add-asset-site tasks, and scope monitoring tasks dispatch alerts after all scan phases and asset synchronization complete (`status = "done"` and `end_time` recorded). Each task sends one aggregated alert ordered by severity with up to 20 detail items (WeCom text payloads are truncated cleanly at 2,000 UTF-8 bytes).
+  - Scope-bound and monitoring tasks push only newly discovered vulnerabilities absent from `asset_nuclei_result`, whereas standalone unscoped tasks push all matched findings of the task. Manual task sync (`POST /api/task/sync/`) and online template dry-runs (`POST /api/nuclei/test`) do not emit alerts.
+- **Global Webhook `nuclei_vuln` Payload**: When `webhook_url` is configured, `nuclei_vuln` is subscribed, and filtered findings are non-empty, ARL-Next sends a `POST` request to `webhook_url` (with `Token: <webhook_token>` header when configured):
+
+```json
+{
+  "type": "nuclei_vuln",
+  "task_id": "65f0...",
+  "task_data": {
+    "name": "example.com",
+    "target": "https://arl.example.com",
+    "type": "domain",
+    "task_tag": "task",
+    "start_time": "2026-11-18 20:00:00",
+    "status": "done",
+    "end_time": "2026-11-18 20:05:00"
+  },
+  "scope_id": "65f1...",
+  "scope_data": { "name": "Core Asset Scope", "scope_type": "domain" },
+  "summary": {
+    "total": 1,
+    "truncated": false,
+    "severity_counts": { "critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0 }
+  },
+  "nuclei_results": [
+    {
+      "template_id": "CVE-2026-0001",
+      "vuln_name": "Example Vulnerability",
+      "vuln_severity": "high",
+      "vuln_url": "https://arl.example.com/probe",
+      "target": "https://arl.example.com",
+      "host": "https://arl.example.com"
+    }
+  ]
+}
+```
+
+> Each Webhook callback includes up to 100 entries in `nuclei_results`; when exceeded, `summary.truncated` is `true`.

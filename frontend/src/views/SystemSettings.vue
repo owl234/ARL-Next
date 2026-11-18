@@ -1080,6 +1080,7 @@
             <a-checkbox-group v-model:value="generalForm.push_options" style="width: 100%;">
               <a-row :gutter="[12, 8]">
                 <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="task_complete">{{ pageText('pages.assetDiscoveryTaskCompleted') }}</a-checkbox></a-col>
+                <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="nuclei_vuln">{{ pageText('pages.nucleiVulnerabilityAlert') }}</a-checkbox></a-col>
                 <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_leak">{{ pageText('pages.githubKeywordAlert') }}</a-checkbox></a-col>
                 <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_cve">{{ pageText('pages.githubCveUpdate') }}</a-checkbox></a-col>
                 <a-col :xs="24" :sm="12" :md="8" :xl="6" class="page-form-spacing"><a-checkbox value="github_tools">{{ pageText('pages.githubSecurityToolUpdate') }}</a-checkbox></a-col>
@@ -1087,6 +1088,12 @@
                 <a-col :xs="24" :sm="12" :md="8" :xl="6"><a-checkbox value="asset_site">{{ pageText('pages.websiteMonitoringUpdate') }}</a-checkbox></a-col>
               </a-row>
             </a-checkbox-group>
+            <div v-if="(generalForm.push_options || []).includes('nuclei_vuln')" class="nuclei-push-severity-box" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border-color-split, #f0f0f0);">
+              <div style="margin-bottom: 8px; font-size: 13px; color: var(--text-color-secondary, #595959);">
+                {{ pageText('pages.nucleiPushSeverityFilter') }}
+              </div>
+              <a-checkbox-group v-model:value="generalForm.nuclei_push_severities" :options="nucleiPushSeverityOptions" />
+            </div>
           </a-card>
 
           <!-- 6 通道自适应网格卡片（无固定高度，带已配置/未配置角标与代理域标注） -->
@@ -2016,12 +2023,21 @@ const testPushLoading = reactive({
 });
 
 const WEBHOOK_SAMPLE_PAYLOAD = JSON.stringify({
-  type: 'domain_task',
+  type: 'domain_monitor | site_monitor | nuclei_vuln',
   task_id: '65f0...',
-  task_name: 'example.com',
-  status: 'done',
-  timestamp: 1731800000,
+  task_data: { name: 'example.com', status: 'done', end_time: '2026-11-18 12:00:00' },
+  scope_id: '65f1...',
+  summary: { total: 2, severity_counts: { critical: 1, high: 1, medium: 0, low: 0, info: 0 } },
+  nuclei_results: [{ template_id: 'CVE-2024-0001', vuln_severity: 'high', vuln_url: 'https://example.com' }],
 }, null, 2);
+
+const nucleiPushSeverityOptions = [
+  { get label() { return pageText('pages.critical'); }, value: 'critical' },
+  { get label() { return pageText('pages.high'); }, value: 'high' },
+  { get label() { return pageText('pages.medium'); }, value: 'medium' },
+  { get label() { return pageText('pages.low'); }, value: 'low' },
+  { get label() { return pageText('pages.info'); }, value: 'info' },
+];
 
 const handleTestPush = async (type) => {
   let config = {};
@@ -2058,7 +2074,7 @@ const handleTestPush = async (type) => {
 const GENERAL_FIELD_GROUPS = {
   api_config: ['fofa_key', 'fofa_url', 'fofa_max_page', 'fofa_page_size', 'github_token',
     'tyc_id', 'tyc_token', 'so_search_cookie', 'bing_search_cookie', 'query_plugin_config'],
-  message_push: ['push_options', 'dingding', 'feishu', 'wxwork', 'telegram', 'email',
+  message_push: ['push_options', 'nuclei_push_severities', 'dingding', 'feishu', 'wxwork', 'telegram', 'email',
     'webhook_url', 'webhook_token'],
   scan_params: ['port_top_10', 'domain_brute_concurrent', 'alt_dns_concurrent'],
   system_auth: ['auth', 'api_key'],
@@ -2307,7 +2323,7 @@ const SETTINGS_INDEX = [
     get desc() { return pageText('pages.cnameAndIpCidrRulesForIdentifyingCdns'); }, keywords: ['cdn', 'cname', 'cidr', '特征', '规则'] },
   // 主域 4：告警与回调
   { tab: 'notifications', get tabLabel() { return pageText('pages.settingsDomainNotifications'); }, get label() { return pageText('pages.subscribedEventTypes'); }, anchor: 'push_options',
-    get desc() { return pageText('pages.chooseWhichEventsSendNotifications'); }, keywords: ['订阅', '推送', '通知', '告警', '消息类型'] },
+    get desc() { return pageText('pages.chooseWhichEventsSendNotifications'); }, keywords: ['订阅', '推送', '通知', '告警', '消息类型', 'nuclei', '漏洞'] },
   { tab: 'notifications', get tabLabel() { return pageText('pages.settingsDomainNotifications'); }, get label() { return pageText('pages.dingtalkFeishuWecomTelegramBots'); }, anchor: 'im',
     get desc() { return pageText('pages.messagingNotificationChannelsAndTestDelivery'); }, keywords: ['钉钉', 'dingding', '飞书', 'feishu', '企业微信', 'wxwork', 'telegram', '机器人'] },
   { tab: 'notifications', get tabLabel() { return pageText('pages.settingsDomainNotifications'); }, get label() { return pageText('pages.globalWebhookCallbackLabel2'); }, anchor: 'webhook',
@@ -2537,7 +2553,8 @@ const generalForm = ref({
   telegram: { bot_token: '', chat_id: '' },
   email: { host: '', port: 465, username: '', password: '', to: '' },
   query_plugin_config: {},
-  push_options: ['task_complete', 'github_leak', 'github_cve', 'github_tools', 'github_hackers', 'asset_site'],
+  push_options: ['task_complete', 'nuclei_vuln', 'github_leak', 'github_cve', 'github_tools', 'github_hackers', 'asset_site'],
+  nuclei_push_severities: ['critical', 'high', 'medium', 'low'],
 });
 captureBaseline();
 
@@ -2586,6 +2603,8 @@ const fetchGeneralConfig = async () => {
       generalForm.value = {
         ...generalForm.value,
         ...res.data,
+        push_options: Array.isArray(res.data.push_options) ? res.data.push_options : generalForm.value.push_options,
+        nuclei_push_severities: Array.isArray(res.data.nuclei_push_severities) ? res.data.nuclei_push_severities : generalForm.value.nuclei_push_severities,
         dingding: { ...generalForm.value.dingding, ...(res.data.dingding || {}) },
         feishu: { ...generalForm.value.feishu, ...(res.data.feishu || {}) },
         wxwork: { ...generalForm.value.wxwork, ...(res.data.wxwork || {}) },

@@ -639,7 +639,8 @@ class GeneralConfig(ARLResource):
                 "to": Config.EMAIL_TO
             },
             "query_plugin_config": Config.QUERY_PLUGIN_CONFIG,
-            "push_options": Config.PUSH_OPTIONS
+            "push_options": Config.PUSH_OPTIONS,
+            "nuclei_push_severities": Config.NUCLEI_PUSH_SEVERITIES
         }
 
         return {
@@ -716,7 +717,12 @@ class GeneralConfig(ARLResource):
             doc["email_password"] = req_data["email"].get("password")
             doc["email_to"] = req_data["email"].get("to")
         if "query_plugin_config" in req_data: doc["query_plugin_config"] = req_data["query_plugin_config"]
-        if "push_options" in req_data: doc["push_options"] = req_data["push_options"]
+        if "push_options" in req_data:
+            raw_opts = req_data["push_options"]
+            doc["push_options"] = [str(o) for o in raw_opts if o] if isinstance(raw_opts, list) else []
+        if "nuclei_push_severities" in req_data:
+            from app.utils.push import normalize_nuclei_push_severities
+            doc["nuclei_push_severities"] = normalize_nuclei_push_severities(req_data["nuclei_push_severities"])
 
         # 空提交直接短路：既避免无意义的 upsert，也让前端"无改动点保存"有明确反馈。
         if not doc:

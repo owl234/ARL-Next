@@ -170,7 +170,7 @@ class AddAssetSiteTask(RiskCruising):
                     web_site_fetch.run_func("nuclei_scan", web_site_fetch.nuclei_scan)
 
         with self.safe_phase("common_run", self):
-            self.common_run()
+            self.common_run(push_flag=False)
 
 
 # 添加资产站点任务

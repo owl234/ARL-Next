@@ -81,6 +81,7 @@ class CommonTask(object):
     def __init__(self, task_id):
         self.task_id = task_id
         self._phase_errors = {}
+        self._pending_push_context = None
 
     @contextmanager
     def safe_phase(self, phase_name: str, base_update=None, critical: bool = False):
@@ -163,7 +164,8 @@ class CommonTask(object):
             utils.safe_insert_asset('cip', ['task_id', 'cidr_ip'], data)
 
     # 资产同步
-    def sync_asset(self):
+    def sync_asset(self, push_flag=True):
+        self._pending_push_context = None
         options = getattr(self, 'options', {})
         if not options:
             logger.warning("not found options {}".format(self.task_id))
@@ -171,7 +173,10 @@ class CommonTask(object):
 
         related_scope_id = options.get("related_scope_id", "")
         if not related_scope_id:
-            self._push_task_result_only()
+            if push_flag:
+                self._push_task_result_only()
+            else:
+                self._pending_push_context = {"mode": "task_only"}
             return
 
         task = utils.conn_db('task').find_one({"_id": ObjectId(self.task_id)})
@@ -179,43 +184,125 @@ class CommonTask(object):
             return
         if task.get("task_tag") == "task" and task.get("type") in ("domain", "ip"):
             from app.services.task_scope_sync import sync_task_to_scope
-            if not sync_task_to_scope(self.task_id, related_scope_id, push_flag=True):
-                return
+            if push_flag:
+                if not sync_task_to_scope(self.task_id, related_scope_id, push_flag=True):
+                    return
+            else:
+                details = {}
+                if not sync_task_to_scope(self.task_id, related_scope_id, push_flag=False, details_out=details):
+                    self._pending_push_context = {"mode": "nuclei_only_fallback"}
+                    return
+                self._pending_push_context = {
+                    "mode": "scope_sync",
+                    "scope_id": related_scope_id,
+                    "details": details,
+                }
         else:
             # 添加站点、风险巡航等任务继续使用各自的既有同步行为。
             if len(related_scope_id) != 24:
-                self._push_task_result_only()
+                if push_flag:
+                    self._push_task_result_only()
+                else:
+                    self._pending_push_context = {"mode": "task_only"}
                 return
-            services.sync_asset(task_id=self.task_id, scope_id=related_scope_id, push_flag=True)
+            if push_flag:
+                services.sync_asset(task_id=self.task_id, scope_id=related_scope_id, push_flag=True)
+            else:
+                details = {}
+                services.sync_asset(task_id=self.task_id, scope_id=related_scope_id, push_flag=False, details_out=details)
+                self._pending_push_context = {
+                    "mode": "scope_sync",
+                    "scope_id": related_scope_id,
+                    "details": details,
+                }
 
         from app.utils.monitor_diff import log_monitor_diff_summary
         log_monitor_diff_summary(self.task_id)
 
     def _push_task_result_only(self):
-        asset_map = {"domain": [], "ip": [], "site": [], "task_name": ""}
-        asset_counter = {"domain": 0, "ip": 0, "site": 0}
+        categories = [
+            "site", "domain", "ip", "wih", "cert", "service",
+            "fileleak", "url", "vuln", "npoc_service", "cip",
+            "nuclei_result", "stat_finger",
+        ]
+        asset_map = {category: [] for category in categories}
+        asset_map["task_name"] = ""
+        asset_counter = {category: 0 for category in categories}
 
         task_info = utils.conn_db('task').find_one({"_id": ObjectId(self.task_id)})
         if task_info:
             asset_map["task_name"] = task_info.get("name", "")
 
-        for category in ["domain", "ip", "site"]:
+        nuclei_items = []
+        for category in categories:
             items = list(utils.conn_db(category).find({"task_id": self.task_id}))
             asset_counter[category] = len(items)
             asset_map[category] = items[:10]
+            if category == "nuclei_result":
+                nuclei_items = items
 
         utils.message_push(
-            asset_map=asset_map, 
-            asset_counter=asset_counter, 
-            update_map=asset_map, 
-            update_counter=asset_counter
+            asset_map=asset_map,
+            asset_counter=asset_counter,
+            update_map={},
+            update_counter={},
         )
+        if nuclei_items:
+            try:
+                from app.utils.push import nuclei_vuln_push
+                nuclei_vuln_push(
+                    task_id=self.task_id,
+                    results=nuclei_items,
+                    scope_id="",
+                    task_info=task_info,
+                )
+            except Exception as e:
+                logger.warning(f"nuclei_vuln_push error for task {self.task_id}: {e}")
 
-    def common_run(self):
+    def dispatch_completion_notifications(self):
+        """在任务全部阶段及状态落库完成后统一分发完成汇总与 Nuclei 漏洞告警"""
+        ctx = getattr(self, "_pending_push_context", None)
+        self._pending_push_context = None
+        if not ctx:
+            return
+        try:
+            mode = ctx.get("mode")
+            if mode == "task_only":
+                self._push_task_result_only()
+            elif mode == "scope_sync":
+                details = ctx.get("details") or {}
+                new_asset_map = details.get("new_asset_map") or {}
+                new_asset_counter = details.get("new_asset_counter") or {}
+                update_asset_map = details.get("update_asset_map") or {}
+                update_asset_counter = details.get("update_asset_counter") or {}
+                new_nuclei_results = details.get("new_nuclei_results") or []
+
+                utils.message_push(
+                    asset_map=new_asset_map,
+                    asset_counter=new_asset_counter,
+                    update_map=update_asset_map,
+                    update_counter=update_asset_counter,
+                )
+                if new_nuclei_results:
+                    from app.utils.push import nuclei_vuln_push
+                    nuclei_vuln_push(
+                        task_id=self.task_id,
+                        results=new_nuclei_results,
+                        scope_id=ctx.get("scope_id", ""),
+                    )
+            elif mode == "nuclei_only_fallback":
+                nuclei_items = list(utils.conn_db('nuclei_result').find({"task_id": self.task_id}))
+                if nuclei_items:
+                    from app.utils.push import nuclei_vuln_push
+                    nuclei_vuln_push(task_id=self.task_id, results=nuclei_items, scope_id="")
+        except Exception as e:
+            logger.warning(f"dispatch_completion_notifications error for task {self.task_id}: {e}")
+
+    def common_run(self, push_flag=True):
         self.insert_finger_stat()
         self.insert_cip_stat()
         self.insert_task_stat()
-        self.sync_asset()
+        self.sync_asset(push_flag=push_flag)
 
 
 def sync_service_from_site(task_id, site_info_list):

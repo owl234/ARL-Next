@@ -783,6 +783,8 @@ export default {
   "saveNotificationConfiguration": "Сохранить настройки уведомлений",
   "subscribedEvents": "Подписки на события",
   "assetDiscoveryTaskCompleted": "Задача обнаружения активов завершена",
+  "nucleiVulnerabilityAlert": "Оповещения об уязвимостях Nuclei",
+  "nucleiPushSeverityFilter": "Фильтр критичности оповещений Nuclei",
   "githubKeywordAlert": "Оповещение по ключевому слову GitHub",
   "githubCveUpdate": "Обновление CVE GitHub",
   "githubSecurityToolUpdate": "Обновление инструмента безопасности GitHub",

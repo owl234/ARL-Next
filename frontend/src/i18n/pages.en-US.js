@@ -783,6 +783,8 @@ export default {
   "saveNotificationConfiguration": "Save notification configuration",
   "subscribedEvents": "Subscribed events",
   "assetDiscoveryTaskCompleted": "Asset discovery task completed",
+  "nucleiVulnerabilityAlert": "Nuclei vulnerability alert",
+  "nucleiPushSeverityFilter": "Nuclei alert severity filter",
   "githubKeywordAlert": "GitHub keyword alert",
   "githubCveUpdate": "GitHub CVE update",
   "githubSecurityToolUpdate": "GitHub security tool update",

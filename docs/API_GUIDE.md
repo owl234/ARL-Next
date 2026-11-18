@@ -410,3 +410,52 @@ Worker 不可达、控制指令没有完整确认或停止超时，均中止恢�
 | `GET` | `/api/github_threat/hackers_history` | 查询监控研究员开源工具发现记录，支持可选 `github_id` 与 `q`（仓库名/简介/语言）过滤 |
 
 - **仪表盘统计口径同步**：`GET /api/dashboard/stats` 中的 `github_monitors` 统计 `github_scheduler` 集合记录数；`POST /api/github_threat/tools_target` 与 `POST /api/github_threat/hackers_target` 均同时兼容单条提交与批量数组（`repo_urls` / `github_ids`）。
+
+## 10. 消息推送与 Nuclei 漏洞告警回调
+
+全局推送配置通过 `GET` / `POST /api/system_config/general` 读写（需管理员 `Token` 请求头），覆盖钉钉、飞书、企业微信、Telegram、SMTP 邮件及全局 Webhook 回调六类通道。
+
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| `push_options` | `string[]` | 订阅事件列表，新增 `nuclei_vuln`（Nuclei 漏洞告警）；存量环境启动迁移时默认自动补齐并尊重后续手动取消 |
+| `nuclei_push_severities` | `string[]` | Nuclei 告警严重等级白名单，可选 `critical`、`high`、`medium`、`low`、`info`，默认 `["critical", "high", "medium", "low"]` |
+
+- **触发时机与去重边界**：
+  - 常规域名/IP 扫描、风险巡航（`RiskCruising`）、添加资产站点与资产组监控任务均在全部扫描阶段与资产同步完成后（任务处于 `done` 且写入 `end_time`）统一触发推送；单任务聚合发送 1 条告警，按严重等级排序并展示前 20 条明细（企业微信通道按 2,000 UTF-8 字节边界安全截断）。
+  - 关联资产组或监控任务仅推送首次新发现且尚不存在于 `asset_nuclei_result` 的漏洞；未关联资产组的独立任务推送本次任务的全部匹配结果。手动同步（`POST /api/task/sync/`）与模板在线调试（`POST /api/nuclei/test`）不触发推送。
+- **全局 Webhook `nuclei_vuln` 载荷格式**：当配置 `webhook_url` 且订阅 `nuclei_vuln` 并命中等级过滤条件时，向 `webhook_url` 发送 `POST` 请求（配置 `webhook_token` 时附带请求头 `Token: <webhook_token>`）：
+
+```json
+{
+  "type": "nuclei_vuln",
+  "task_id": "65f0...",
+  "task_data": {
+    "name": "example.com",
+    "target": "https://arl.example.com",
+    "type": "domain",
+    "task_tag": "task",
+    "start_time": "2026-11-18 20:00:00",
+    "status": "done",
+    "end_time": "2026-11-18 20:05:00"
+  },
+  "scope_id": "65f1...",
+  "scope_data": { "name": "核心资产组", "scope_type": "domain" },
+  "summary": {
+    "total": 1,
+    "truncated": false,
+    "severity_counts": { "critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0 }
+  },
+  "nuclei_results": [
+    {
+      "template_id": "CVE-2026-0001",
+      "vuln_name": "Example Vulnerability",
+      "vuln_severity": "high",
+      "vuln_url": "https://arl.example.com/probe",
+      "target": "https://arl.example.com",
+      "host": "https://arl.example.com"
+    }
+  ]
+}
+```
+
+> 单次 Webhook 回调中 `nuclei_results` 最多携带 100 条明细，超出时 `summary.truncated` 为 `true`。
