@@ -272,7 +272,7 @@ except Exception as e:
 try:
     zip_buf = io.BytesIO()
     import_tid = f"import-test-{int(time.time())}"
-    import_yaml = f"id: {import_tid}\ninfo:\n  name: Imported Test PoC\n  severity: medium\nhttp:\n  - method: GET\n"
+    import_yaml = f"id: {import_tid}\ninfo:\n  name: Imported Test PoC\n  author: tester\n  severity: medium\nhttp:\n  - method: GET\n    path:\n      - \"{{{{BaseURL}}}}/\"\n"
     with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"{import_tid}.yaml", import_yaml)
     zip_buf.seek(0)

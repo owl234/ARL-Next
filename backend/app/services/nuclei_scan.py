@@ -30,6 +30,47 @@ def _detect_json_flag(binary_identity):
     raise RuntimeError("Nuclei does not support -jsonl or -json")
 
 
+def resolve_nuclei_proxy(targets):
+    """按 scan 域代理策略解析 Nuclei 可用代理及脱敏字符串。"""
+    nuclei_proxy = ""
+    masked_proxy = ""
+    try:
+        from app.services.proxy_service import (
+            load_proxy_config,
+            mask_proxy_url_secret,
+            resolve_proxy_url,
+            should_bypass_url,
+        )
+        proxy_cfg = load_proxy_config()
+        scan_pol = (proxy_cfg.get("policies") or {}).get("scan") or {}
+        if scan_pol.get("apply_to_nuclei", True):
+            non_bypassed = [
+                t for t in (targets or [])
+                if not should_bypass_url(str(t), proxy_cfg.get("bypass"), domain="scan")
+            ]
+            if non_bypassed or not targets:
+                raw_proxy = resolve_proxy_url(domain="scan")
+                if raw_proxy:
+                    # Go/Nuclei dialer expects socks5:// rather than socks5h://
+                    if raw_proxy.lower().startswith("socks5h://"):
+                        nuclei_proxy = "socks5://" + raw_proxy[len("socks5h://"):]
+                    else:
+                        nuclei_proxy = raw_proxy
+                    masked_proxy = mask_proxy_url_secret(nuclei_proxy)
+    except Exception as exc:
+        logger.debug(f"resolve nuclei proxy failed: {exc}")
+    return nuclei_proxy, masked_proxy
+
+
+def _dir_has_yaml_templates(directory: str) -> bool:
+    if not directory or not os.path.isdir(directory):
+        return False
+    for _, _, files in os.walk(directory):
+        if any(name.endswith((".yaml", ".yml")) for name in files):
+            return True
+    return False
+
+
 class NucleiScan(object):
     def __init__(self, targets: list, options: dict = None):
         self.targets = targets
@@ -43,6 +84,7 @@ class NucleiScan(object):
 
         self.nuclei_result_path = os.path.join(tmp_path,
                                                f"nuclei_result_{rand_str}.json")
+        self.nuclei_custom_result_path = None
 
         self.custom_templates_path = None
         self.nuclei_exclude_file = None
@@ -68,12 +110,20 @@ class NucleiScan(object):
         try:
             nuclei_config = self.options.get("nuclei_config") or self.options.get("site_config", {}).get("nuclei_config") or {}
             mode = nuclei_config.get("custom_template_mode", "all_enabled")
+            if mode == "none":
+                return
 
             query = {"enable": True}
-            if mode == "selected" and nuclei_config.get("selected_custom_templates"):
-                query = {"template_id": {"$in": nuclei_config["selected_custom_templates"]}, "enable": True}
-            elif mode == "tags" and nuclei_config.get("selected_tags"):
-                query = {"tags": {"$in": nuclei_config["selected_tags"]}, "enable": True}
+            if mode == "selected":
+                selected_ids = nuclei_config.get("selected_custom_templates") or []
+                if not selected_ids:
+                    return
+                query = {"template_id": {"$in": selected_ids}, "enable": True}
+            elif mode == "tags":
+                selected_tags = nuclei_config.get("selected_tags") or []
+                if not selected_tags:
+                    return
+                query = {"tags": {"$in": selected_tags}, "enable": True}
 
             col = utils.conn_db('nuclei_template')
             custom_docs = list(col.find(query))
@@ -86,7 +136,7 @@ class NucleiScan(object):
                 written_cnt = 0
                 for doc in custom_docs:
                     content = doc.get("content", "")
-                    t_id = doc.get("template_id", "temp")
+                    t_id = os.path.basename(str(doc.get("template_id") or "temp")) or "temp"
                     if content:
                         file_path = os.path.join(self.custom_templates_path, f"{t_id}.yaml")
                         with open(file_path, "w", encoding="utf-8") as f:
@@ -135,6 +185,7 @@ class NucleiScan(object):
 
     def _delete_file(self):
         paths = [(self.nuclei_target_path, False), (self.nuclei_result_path, False),
+                 (self.nuclei_custom_result_path, False),
                  (self.custom_templates_path, True), (self.nuclei_exclude_file, False)]
         for path, is_directory in paths:
             if not path:
@@ -167,12 +218,12 @@ class NucleiScan(object):
                     continue
                 f.write(domain + "\n")
 
-    def dump_result(self) -> list:
+    def _parse_result_file(self, result_path: str) -> list:
         results = []
-        if not os.path.exists(self.nuclei_result_path):
+        if not result_path or not os.path.exists(result_path):
             return results
 
-        with open(self.nuclei_result_path, "r", encoding="utf-8", errors="replace") as f:
+        with open(result_path, "r", encoding="utf-8", errors="replace") as f:
             while True:
                 line = f.readline()
                 if not line:
@@ -201,70 +252,33 @@ class NucleiScan(object):
 
         return results
 
-    def exec_nuclei(self):
-        self._gen_target_file()
-        self._materialize_custom_templates()
+    def dump_result(self) -> list:
+        results = self._parse_result_file(self.nuclei_result_path)
+        if self.nuclei_custom_result_path:
+            results.extend(self._parse_result_file(self.nuclei_custom_result_path))
+        return results
 
-        nuclei_config = self.options.get("nuclei_config") or self.options.get("site_config", {}).get("nuclei_config") or {}
-        severities = nuclei_config.get("severity") or ["low", "medium", "high", "critical"]
-        if isinstance(severities, list) and severities:
-            sev_arg = "-severity " + ",".join([s.strip().lower() for s in severities if s.strip()])
-        else:
-            sev_arg = "-severity low,medium,high,critical"
-
+    def _run_nuclei_command(self, result_path, *, template_dir=None, tags_arg=None,
+                            sev_arg="-severity low,medium,high,critical",
+                            exclude_file=None, nuclei_proxy="", masked_proxy=""):
         command = [
             shlex.quote(self.nuclei_bin_path), "-duc",
-            "-tags cve,http",
+        ]
+        if template_dir:
+            command.append(f"-t {shlex.quote(template_dir)}")
+        if tags_arg:
+            command.append(tags_arg)
+        command.extend([
             sev_arg,
             f"-l {self.nuclei_target_path}",
             self.nuclei_json_flag,
             "-stats",
             "-stats-interval 60",
-            f"-o {self.nuclei_result_path}",
-        ]
+            f"-o {result_path}",
+        ])
 
-        # 若存在排除清单文件，拼接 -eid 参数排除误报模板
-        exclude_file = self._prepare_exclude_file()
         if exclude_file and os.path.exists(exclude_file):
             command.append(f"-eid {exclude_file}")
-
-        # 若存在物化的自建模板目录，拼接 -t 参数加载
-        if self.custom_templates_path and os.path.exists(self.custom_templates_path):
-            from app.routes.nuclei import get_community_templates_dir
-            comm_dir = get_community_templates_dir()
-            # 当显式指定 -t 自建模板时，Nuclei 默认只扫 -t 路径；
-            # 若同时存在官方模板目录，一并注入保证社区底座不丢失
-            if comm_dir:
-                command.insert(2, f"-t {comm_dir}")
-            command.insert(2, f"-t {self.custom_templates_path}")
-
-        nuclei_proxy = ""
-        masked_proxy = ""
-        try:
-            from app.services.proxy_service import (
-                load_proxy_config,
-                mask_proxy_url_secret,
-                resolve_proxy_url,
-                should_bypass_url,
-            )
-            proxy_cfg = load_proxy_config()
-            scan_pol = (proxy_cfg.get("policies") or {}).get("scan") or {}
-            if scan_pol.get("apply_to_nuclei", True):
-                non_bypassed = [
-                    t for t in (self.targets or [])
-                    if not should_bypass_url(str(t), proxy_cfg.get("bypass"), domain="scan")
-                ]
-                if non_bypassed or not self.targets:
-                    raw_proxy = resolve_proxy_url(domain="scan")
-                    if raw_proxy:
-                        # Go/Nuclei dialer expects socks5:// rather than socks5h://
-                        if raw_proxy.lower().startswith("socks5h://"):
-                            nuclei_proxy = "socks5://" + raw_proxy[len("socks5h://"):]
-                        else:
-                            nuclei_proxy = raw_proxy
-                        masked_proxy = mask_proxy_url_secret(nuclei_proxy)
-        except Exception as exc:
-            logger.debug(f"resolve nuclei proxy failed: {exc}")
 
         if nuclei_proxy:
             command.append(f"-proxy {shlex.quote(nuclei_proxy)}")
@@ -276,6 +290,67 @@ class NucleiScan(object):
         completed = utils.exec_system(command, timeout=15 * 24 * 60 * 60)
         if completed.returncode != 0:
             raise subprocess.CalledProcessError(completed.returncode, command)
+
+    def exec_nuclei(self):
+        self._gen_target_file()
+        self._materialize_custom_templates()
+
+        nuclei_config = self.options.get("nuclei_config") or self.options.get("site_config", {}).get("nuclei_config") or {}
+        severities = nuclei_config.get("severity") or ["low", "medium", "high", "critical"]
+        if isinstance(severities, list) and severities:
+            sev_arg = "-severity " + ",".join([s.strip().lower() for s in severities if s.strip()])
+        else:
+            sev_arg = "-severity low,medium,high,critical"
+
+        exclude_file = self._prepare_exclude_file()
+        nuclei_proxy, masked_proxy = resolve_nuclei_proxy(self.targets)
+
+        if self.custom_templates_path and os.path.exists(self.custom_templates_path):
+            from app.routes.nuclei import get_community_templates_dir
+            comm_dir = get_community_templates_dir()
+            # 社区模板保持 -tags cve,http 过滤以控量，自建模板独立通道执行不加 -tags 过滤
+            if _dir_has_yaml_templates(comm_dir):
+                self._run_nuclei_command(
+                    self.nuclei_result_path,
+                    template_dir=comm_dir,
+                    tags_arg="-tags cve,http",
+                    sev_arg=sev_arg,
+                    exclude_file=exclude_file,
+                    nuclei_proxy=nuclei_proxy,
+                    masked_proxy=masked_proxy,
+                )
+                self.nuclei_custom_result_path = os.path.join(
+                    Config.TMP_PATH, f"nuclei_custom_result_{utils.random_choices()}.json"
+                )
+                self._run_nuclei_command(
+                    self.nuclei_custom_result_path,
+                    template_dir=self.custom_templates_path,
+                    tags_arg=None,
+                    sev_arg=sev_arg,
+                    exclude_file=exclude_file,
+                    nuclei_proxy=nuclei_proxy,
+                    masked_proxy=masked_proxy,
+                )
+            else:
+                self._run_nuclei_command(
+                    self.nuclei_result_path,
+                    template_dir=self.custom_templates_path,
+                    tags_arg=None,
+                    sev_arg=sev_arg,
+                    exclude_file=exclude_file,
+                    nuclei_proxy=nuclei_proxy,
+                    masked_proxy=masked_proxy,
+                )
+        else:
+            self._run_nuclei_command(
+                self.nuclei_result_path,
+                template_dir=None,
+                tags_arg="-tags cve,http",
+                sev_arg=sev_arg,
+                exclude_file=exclude_file,
+                nuclei_proxy=nuclei_proxy,
+                masked_proxy=masked_proxy,
+            )
 
     def run(self):
         if not self.check_have_nuclei():

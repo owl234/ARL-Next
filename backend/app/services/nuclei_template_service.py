@@ -8,6 +8,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime
+from urllib.parse import urlsplit
 import requests
 
 from app import utils
@@ -160,12 +161,71 @@ def extract_templates_zip_to_dir(zip_file_path: str, target_dir: str) -> int:
     return count
 
 
+_ANSI_RE = re.compile(r'\x1b\[[0-9;?]*[ -/]*[@-~]')
+
+
+def strip_ansi(text: str) -> str:
+    """移除终端输出中的 ANSI 颜色与控制转义序列。"""
+    if not text:
+        return ""
+    return _ANSI_RE.sub("", text)
+
+
+def normalize_dry_run_target(raw_target: str, protocol: str = "http"):
+    """根据模板协议规范化单目标输入，防止参数注入与跨协议误拼前缀。"""
+    if not isinstance(raw_target, str):
+        return False, "目标格式非法"
+    target = raw_target.strip()
+    if not target:
+        return False, "目标地址不能为空"
+    if any(ch.isspace() or ord(ch) < 32 for ch in target):
+        return False, "单目标即时调试仅支持单个目标，不能包含空格、换行或控制字符"
+    if target.startswith("-"):
+        return False, "非法目标格式，不能以 '-' 开头"
+
+    proto = (protocol or "http").strip().lower()
+    if proto in {"http", "headless"}:
+        if not target.lower().startswith(("http://", "https://")):
+            target = "http://" + target
+        return True, target
+    if proto == "websocket":
+        if not target.lower().startswith(("ws://", "wss://", "http://", "https://")):
+            target = "http://" + target
+        return True, target
+
+    if proto in {"dns", "tcp", "network", "ssl", "whois"}:
+        if target.lower().startswith(("http://", "https://")):
+            parsed = urlsplit(target)
+            if not parsed.netloc:
+                return False, "无效的目标主机或端口"
+            target = parsed.netloc
+        elif "/" in target:
+            target = target.split("/", 1)[0]
+        if not target:
+            return False, "无效的目标地址"
+        return True, target
+
+    return True, target
+
+
+def _extract_nuclei_error_summary(raw_output: str) -> str:
+    """从 Nuclei 输出中提取核心错误信息，过滤启动 ASCII Banner。"""
+    cleaned = strip_ansi(raw_output).strip()
+    if not cleaned:
+        return ""
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    key_lines = [line for line in lines if any(tag in line for tag in ("[ERR]", "[FTL]", "cause=", "Invalid "))]
+    if key_lines:
+        return "\n".join(key_lines[-4:])
+    return "\n".join(lines[-5:])
+
+
 def parse_and_validate_nuclei_yaml(content: str, run_nuclei_validate: bool = False):
     """
     解析与静态校验 Nuclei 模板 YAML
     返回: (is_valid: bool, data_or_error: dict|str)
     """
-    if not content or not content.strip():
+    if not isinstance(content, str) or not content.strip():
         return False, "模板内容不能为空"
 
     try:
@@ -189,32 +249,60 @@ def parse_and_validate_nuclei_yaml(content: str, run_nuclei_validate: bool = Fal
         return False, "缺少 'info' 元数据块"
 
     name = info.get("name")
-    if not name or not str(name).strip():
+    if name is None or isinstance(name, bool) or not str(name).strip():
         return False, "info 节点下缺少有效 'name'（漏洞名称）"
 
-    raw_severity = str(info.get("severity", "info")).strip().lower()
+    raw_author = info.get("author")
+    if isinstance(raw_author, list):
+        authors = [str(a).strip() for a in raw_author if a is not None and not isinstance(a, bool) and str(a).strip()]
+        author = ", ".join(authors)
+    elif raw_author is not None and not isinstance(raw_author, bool):
+        author = str(raw_author).strip()
+    else:
+        author = ""
+    if not author:
+        return False, "info 节点下缺少有效 'author'（模板作者，Nuclei 引擎要求必填）"
+
+    raw_severity = info.get("severity")
     valid_severities = {"info", "low", "medium", "high", "critical", "unknown"}
-    severity = raw_severity if raw_severity in valid_severities else "info"
+    if raw_severity is None or isinstance(raw_severity, bool) or not str(raw_severity).strip():
+        return False, "info 节点下缺少有效 'severity'（可选值: info/low/medium/high/critical/unknown）"
+    severity = str(raw_severity).strip().lower()
+    if severity not in valid_severities:
+        return False, f"无效的危害级别 severity '{raw_severity}'，可选值: info/low/medium/high/critical/unknown"
 
     raw_tags = info.get("tags", [])
+    tags = []
+    seen_tags = set()
     if isinstance(raw_tags, str):
-        tags = [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
+        candidates = [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
     elif isinstance(raw_tags, list):
-        tags = [str(t).strip().lower() for t in raw_tags if str(t).strip()]
+        candidates = [str(t).strip().lower() for t in raw_tags if t is not None and str(t).strip()]
     else:
-        tags = []
+        candidates = []
+    for tag in candidates:
+        if tag not in seen_tags:
+            seen_tags.add(tag)
+            tags.append(tag)
 
-    known_protocols = ["http", "dns", "tcp", "ssl", "websocket", "whois", "code", "javascript", "headless", "network", "file"]
-    protocol = "http"
+    known_protocols = [
+        "http", "requests", "dns", "tcp", "network", "ssl",
+        "websocket", "whois", "code", "javascript", "headless", "file", "workflows"
+    ]
+    found_protocols = []
     for p in known_protocols:
         if p in doc:
-            protocol = p
-            break
-    if "requests" in doc and protocol == "http":
-        protocol = "http"
+            val = doc.get(p)
+            if isinstance(val, (list, dict)) and len(val) > 0:
+                found_protocols.append(p)
+            else:
+                return False, f"协议配置块 '{p}' 不能为空"
+    if not found_protocols:
+        return False, "模板缺少有效的协议探测块（如 http、dns、tcp、ssl、network、workflows 等）"
 
-    author = str(info.get("author", "")).strip()
-    description = str(info.get("description", "")).strip()
+    protocol = "http" if found_protocols[0] == "requests" else found_protocols[0]
+
+    description = str(info.get("description", "")).strip() if info.get("description") is not None else ""
     reference = info.get("reference", [])
     if isinstance(reference, str):
         reference = [reference]
@@ -233,20 +321,22 @@ def parse_and_validate_nuclei_yaml(content: str, run_nuclei_validate: bool = Fal
         "content": content
     }
 
-    # 深度语义校验 nuclei -validate
-    if run_nuclei_validate and shutil.which("nuclei"):
+    # 深度语义校验 nuclei -duc -no-color -validate
+    nuclei_bin = shutil.which("nuclei") if run_nuclei_validate else None
+    if run_nuclei_validate and nuclei_bin:
         tmp_path = os.path.join(Config.TMP_PATH, f"validate_{utils.random_choices(8)}.yaml")
         try:
             with open(tmp_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            cmd = ["nuclei", "-validate", "-t", tmp_path]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+            cmd = [nuclei_bin, "-duc", "-no-color", "-validate", "-t", tmp_path]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
             if res.returncode != 0:
-                err_text = (res.stderr or res.stdout).strip()
-                if err_text:
-                    return False, f"Nuclei 语义验证不通过: {err_text}"
-        except Exception as e:
-            logger.warning(f"nuclei -validate error: {e}")
+                summary = _extract_nuclei_error_summary(res.stderr or res.stdout)
+                return False, f"Nuclei 语义验证不通过: {summary or f'退出码 {res.returncode}'}"
+        except subprocess.TimeoutExpired:
+            return False, "Nuclei 语义验证超时，请检查模板语法或稍后重试"
+        except OSError as e:
+            logger.warning(f"nuclei -validate unavailable, fallback to static check: {e}")
         finally:
             if os.path.exists(tmp_path):
                 try:

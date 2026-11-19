@@ -420,7 +420,7 @@ Global notification settings are managed via `GET` / `POST /api/system_config/ge
 
 - **Trigger Timing & Deduplication**:
   - Regular domain/IP scans, risk cruising (`RiskCruising`), add-asset-site tasks, and scope monitoring tasks dispatch alerts after all scan phases and asset synchronization complete (`status = "done"` and `end_time` recorded). Each task sends one aggregated alert ordered by severity with up to 20 detail items (WeCom text payloads are truncated cleanly at 2,000 UTF-8 bytes).
-  - Scope-bound and monitoring tasks push only newly discovered vulnerabilities absent from `asset_nuclei_result`, whereas standalone unscoped tasks push all matched findings of the task. Manual task sync (`POST /api/task/sync/`) and online template dry-runs (`POST /api/nuclei/test`) do not emit alerts.
+  - Scope-bound and monitoring tasks push only newly discovered vulnerabilities absent from `asset_nuclei_result`, whereas standalone unscoped tasks push all matched findings of the task. Manual task sync (`POST /api/task/sync/`) and online template dry-runs (`POST /api/nuclei/template/test/`) do not emit alerts.
 - **Global Webhook `nuclei_vuln` Payload**: When `webhook_url` is configured, `nuclei_vuln` is subscribed, and filtered findings are non-empty, ARL-Next sends a `POST` request to `webhook_url` (with `Token: <webhook_token>` header when configured):
 
 ```json
@@ -457,3 +457,22 @@ Global notification settings are managed via `GET` / `POST /api/system_config/ge
 ```
 
 > Each Webhook callback includes up to 100 entries in `nuclei_results`; when exceeded, `summary.truncated` is `true`.
+
+## 11. Custom Nuclei Templates & Online Single-Target Dry Run
+
+Custom template lifecycle and online debugging are exposed under `/api/nuclei/template/*` (valid `Token` header required):
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/api/nuclei/template/create/` | `POST` | Creates a custom YAML template; accepts `content` (required) and `enable` (optional boolean, default `true`), returning `template_id` and `enable` |
+| `/api/nuclei/template/update/` | `POST` | Updates an existing custom template with `template_id` and `content`; supports renaming via YAML `id` (returns `code: 999` on ID conflict) |
+| `/api/nuclei/template/test/` | `POST` | Runs an online single-target dry run (30-second timeout); accepts `target` (required) and `content` (or stored `template_id`) |
+
+- **Template Static & Semantic Validation Contract**:
+  - `create` and `update` validate top-level YAML mapping, `id` (`a-zA-Z0-9_.-`), `info.name`, `info.author` (string or non-empty list of strings), `info.severity` allowlist (`info`, `low`, `medium`, `high`, `critical`, `unknown`), and at least one non-empty protocol/workflow section (`http`, `requests`, `dns`, `tcp`, `network`, `ssl`, `websocket`, `whois`, `code`, `javascript`, `headless`, `file`, `workflows`).
+  - When the `nuclei` binary is present on `PATH`, semantic validation additionally runs `nuclei -duc -no-color -validate` (falling back to static checks when absent). Validation errors and duplicate IDs return `code: 999` with an explicit `message`.
+- **Online Single-Target Dry Run (`POST /api/nuclei/template/test/`)**:
+  - **Protocol-Aware Target Normalization**: Rejects whitespace, newlines/control characters, and leading `-` arguments. Prepends `http://` for `http`/`headless` targets without a scheme (preserving `ws(s)://`/`http(s)://` for `websocket`), and strips unintended `http(s)://` schemes and paths for `dns`/`tcp`/`network`/`ssl`/`whois` templates.
+  - **Proxy Alignment & Output Cleaning**: Reuses the `scan` domain proxy policy (`apply_to_nuclei`) with credentials masked in logs and output; strips ANSI escape codes and extracts structured matches via `-jle` (falling back to plain stdout parsing on legacy Nuclei builds).
+  - **Response Fields**: On success (`code: 200`), `data` contains `matched`, `matched_count`, `findings` (`template_id`, `name`, `severity`, `matched_at`, `curl_command`, `extracted_results`), `target`, `output`, `returncode`, and `cost_seconds`. When `nuclei` exits non-zero, the endpoint returns `code: 999` with a concise error summary in `message` while preserving diagnostic `output` and `returncode` in `data`.
+- **Isolated Custom Scan Channel**: During scheduled or ad-hoc task scans, community templates retain `-tags cve,http` filtering while materialized custom templates execute in a dedicated channel without `-tags cve,http` (still governed by policy `severity`, `exclude_blacklist` / `-eid`, and proxy rules). Setting `custom_template_mode: "none"` skips custom template materialization.

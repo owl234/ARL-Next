@@ -422,7 +422,7 @@ Worker 不可达、控制指令没有完整确认或停止超时，均中止恢�
 
 - **触发时机与去重边界**：
   - 常规域名/IP 扫描、风险巡航（`RiskCruising`）、添加资产站点与资产组监控任务均在全部扫描阶段与资产同步完成后（任务处于 `done` 且写入 `end_time`）统一触发推送；单任务聚合发送 1 条告警，按严重等级排序并展示前 20 条明细（企业微信通道按 2,000 UTF-8 字节边界安全截断）。
-  - 关联资产组或监控任务仅推送首次新发现且尚不存在于 `asset_nuclei_result` 的漏洞；未关联资产组的独立任务推送本次任务的全部匹配结果。手动同步（`POST /api/task/sync/`）与模板在线调试（`POST /api/nuclei/test`）不触发推送。
+  - 关联资产组或监控任务仅推送首次新发现且尚不存在于 `asset_nuclei_result` 的漏洞；未关联资产组的独立任务推送本次任务的全部匹配结果。手动同步（`POST /api/task/sync/`）与模板在线调试（`POST /api/nuclei/template/test/`）不触发推送。
 - **全局 Webhook `nuclei_vuln` 载荷格式**：当配置 `webhook_url` 且订阅 `nuclei_vuln` 并命中等级过滤条件时，向 `webhook_url` 发送 `POST` 请求（配置 `webhook_token` 时附带请求头 `Token: <webhook_token>`）：
 
 ```json
@@ -459,3 +459,22 @@ Worker 不可达、控制指令没有完整确认或停止超时，均中止恢�
 ```
 
 > 单次 Webhook 回调中 `nuclei_results` 最多携带 100 条明细，超出时 `summary.truncated` 为 `true`。
+
+## 11. Nuclei 自建模板管理与在线单目标即时调试
+
+自建模板生命周期与在线调试通过 `/api/nuclei/template/*` 端点管理（需携带有效 `Token` 请求头）：
+
+| 端点 | 方法 | 说明 |
+| :--- | :--- | :--- |
+| `/api/nuclei/template/create/` | `POST` | 新建自建 YAML 模板，接收 `content`（必填）与 `enable`（可选布尔值，默认 `true`），返回 `template_id` 与 `enable` |
+| `/api/nuclei/template/update/` | `POST` | 更新已有自建模板，接收 `template_id` 与 `content`；支持在 YAML 中修改 `id` 完成重命名（与存量冲突时返回 `code: 999`） |
+| `/api/nuclei/template/test/` | `POST` | 在线单目标即时调试（Dry Run），限时 30 秒执行；接收 `target`（必填）与 `content`（或已入库的 `template_id`） |
+
+- **模板静态与语义校验契约**：
+  - `create` / `update` 强制校验顶层 YAML 映射、`id`（仅限 `a-zA-Z0-9_.-`）、`info.name`、`info.author`（字符串或非空字符串列表）、`info.severity` 白名单（`info` / `low` / `medium` / `high` / `critical` / `unknown`）及至少一个非空协议/工作流块（`http`、`requests`、`dns`、`tcp`、`network`、`ssl`、`websocket`、`whois`、`code`、`javascript`、`headless`、`file`、`workflows`）。
+  - 当运行环境检测到 `nuclei` 二进制时，额外执行 `nuclei -duc -no-color -validate` 深度语义校验（缺失二进制时自动降级为静态校验）；校验失败或 `template_id` 重复均返回 `code: 999` 与明确提示。
+- **在线单目标即时调试（`POST /api/nuclei/template/test/`）规范**：
+  - **目标协议自适应与防注入**：拒绝空白符、换行/控制字符及以 `-` 开头的目标输入；对 `http` / `headless` 自动补齐 `http://`（`websocket` 保留 `ws(s)://` / `http(s)://`），对 `dns` / `tcp` / `network` / `ssl` / `whois` 自动剥离多余的 `http(s)://` 前缀与路径段。
+  - **代理与输出清洗**：复用全局 `scan` 域代理策略（`apply_to_nuclei`）并在日志与回显中对代理凭据脱敏；移除终端 ANSI 颜色转义序列并优先基于 `-jle` 解析结构化命中（旧版引擎自动回退无 ANSI 文本行判定）。
+  - **响应字段**：成功（`code: 200`）时 `data` 包含 `matched`、`matched_count`、`findings`（每项含 `template_id`、`name`、`severity`、`matched_at`、`curl_command`、`extracted_results`）、`target`、`output`、`returncode`、`cost_seconds`；当 `nuclei` 退出码非 0 时返回 `code: 999`，`message` 给出核心错误摘要，`data.output` 与 `data.returncode` 仍保留完整诊断日志。
+- **真实扫描任务通道隔离**：任务执行阶段社区模板保持 `-tags cve,http` 过滤，已物化的自建模板通过独立通道执行且不附加 `-tags cve,http`（仍受策略 `severity`、`exclude_blacklist` / `-eid` 与扫描代理约束）；当策略配置 `custom_template_mode: "none"` 时跳过自建模板物化。

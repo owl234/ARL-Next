@@ -576,35 +576,48 @@
       :destroyOnClose="true"
     >
       <div style="display: flex; flex-direction: column; gap: 12px;">
-        <!-- 骨架模板快速填充选择器 (仅新建时显示) -->
-        <div v-if="isCreateMode" style="display: flex; align-items: center; justify-content: space-between; background: var(--arl-bg-layout); padding: 8px 12px; border-radius: 4px;">
-          <span class="page-label">{{ pageText('pages.starterTemplate') }}</span>
-          <a-select v-model:value="selectedSkeleton" style="width: 240px;" @change="handleSkeletonChange">
-            <a-select-option value="http_get">{{ pageText('pages.standardHttpGetVulnerabilityCheck') }}</a-select-option>
-            <a-select-option value="http_post">{{ pageText('pages.httpPostWithBodyAndHeaders') }}</a-select-option>
-            <a-select-option value="file_leak">{{ pageText('pages.sensitiveInformationBackupFileDisclosure') }}</a-select-option>
-            <a-select-option value="dns_check">{{ pageText('pages.dnsRecordMatching') }}</a-select-option>
-          </a-select>
+        <!-- 骨架模板快速填充与初始启用开关 (仅新建时显示) -->
+        <div v-if="isCreateMode" class="nuclei-create-bar">
+          <div class="nuclei-create-bar-group">
+            <span class="page-label">{{ pageText('pages.starterTemplate') }}</span>
+            <a-select :value="selectedSkeleton" style="width: 240px;" @change="handleSkeletonChange">
+              <a-select-option value="http_get">{{ pageText('pages.standardHttpGetVulnerabilityCheck') }}</a-select-option>
+              <a-select-option value="http_post">{{ pageText('pages.httpPostWithBodyAndHeaders') }}</a-select-option>
+              <a-select-option value="file_leak">{{ pageText('pages.sensitiveInformationBackupFileDisclosure') }}</a-select-option>
+              <a-select-option value="dns_check">{{ pageText('pages.dnsRecordMatching') }}</a-select-option>
+            </a-select>
+          </div>
+          <div class="nuclei-create-bar-group">
+            <span class="page-label">{{ pageText('pages.enableAfterCreate') }}</span>
+            <a-switch
+              v-model:checked="createEnable"
+              :checked-children="pageText('pages.enable')"
+              :un-checked-children="pageText('pages.disable')"
+            />
+          </div>
         </div>
 
         <!-- CodeMirror 代码编辑区域 -->
-        <div style="border: 1px solid var(--arl-border-color); border-radius: 4px; overflow: hidden;">
-          <codemirror
-            v-model="currentEditorCode"
-            :placeholder="pageText('pages.enterAValidNucleiYamlTemplateHere')"
-            :style="{ height: '400px', fontSize: '13px' }"
-            :autofocus="true"
-            :indent-with-tab="true"
-            :tab-size="2"
-            :extensions="editExtensions"
-          />
-        </div>
+        <a-spin :spinning="detailLoading" :tip="pageText('pages.loadingTemplateSource')">
+          <div style="border: 1px solid var(--arl-border-color); border-radius: 4px; overflow: hidden;">
+            <codemirror
+              v-model="currentEditorCode"
+              :disabled="detailLoading"
+              :placeholder="pageText('pages.enterAValidNucleiYamlTemplateHere')"
+              :style="{ height: '400px', fontSize: '13px' }"
+              :autofocus="!focusDryRunOnOpen"
+              :indent-with-tab="true"
+              :tab-size="2"
+              :extensions="editExtensions"
+            />
+          </div>
+        </a-spin>
 
         <!-- 错误提示横条 -->
         <a-alert v-if="saveErrorMsg" :message="saveErrorMsg" type="error" show-icon closable @close="saveErrorMsg = ''" />
 
         <!-- 在线即时调试 (Dry Run) 面板 -->
-        <div class="dryrun-panel">
+        <div ref="dryRunPanelRef" class="dryrun-panel">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
             <div style="font-weight: 600; display: flex; align-items: center; gap: 6px;">
               <thunderbolt-outlined style="color: #faad14;" />
@@ -614,17 +627,69 @@
           </div>
 
           <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            <a-input v-model:value="dryRunTarget" :placeholder="pageText('pages.testTargetEGHttpsExampleComOr1')" class="page-fill-space" />
-            <a-button type="primary" ghost :loading="dryRunLoading" @click="executeDryRun">
+            <a-input
+              ref="dryRunTargetInputRef"
+              v-model:value="dryRunTarget"
+              :placeholder="pageText('pages.dryRunTargetPlaceholder')"
+              class="page-fill-space"
+              @pressEnter="executeDryRun"
+            />
+            <a-button
+              type="primary"
+              ghost
+              :loading="dryRunLoading"
+              :disabled="detailLoading || detailLoadFailed"
+              @click="executeDryRun"
+            >
               <template #icon><play-circle-outlined /></template>
               {{ pageText('pages.runTest') }}
             </a-button>
           </div>
 
-          <div v-if="dryRunOutput" class="dryrun-console">
+          <a-alert v-if="dryRunError" :message="dryRunError" type="error" show-icon style="margin-bottom: 8px;" />
+
+          <div v-if="dryRunMatched && dryRunFindings.length > 0" class="dryrun-findings">
+            <div class="dryrun-findings-header">
+              <span>{{ pageText('pages.matchedSummaryCount', { count: dryRunFindings.length }) }}</span>
+            </div>
+            <div v-for="(finding, idx) in dryRunFindings" :key="idx" class="dryrun-finding-item">
+              <div class="dryrun-finding-row">
+                <a-tag :color="getSeverityColor(finding.severity)" size="small" style="text-transform: uppercase;">
+                  {{ finding.severity || 'unknown' }}
+                </a-tag>
+                <span class="arl-mono" style="font-weight: 600;">{{ finding.template_id }}</span>
+                <span v-if="finding.matched_at" class="page-secondary-label-alt">{{ pageText('pages.matchedTargetAt') }}:</span>
+                <span v-if="finding.matched_at" class="arl-mono dryrun-matched-at">{{ finding.matched_at }}</span>
+                <a-button
+                  v-if="finding.curl_command"
+                  size="small"
+                  type="link"
+                  style="margin-left: auto; padding: 0;"
+                  @click="copyText(finding.curl_command)"
+                >
+                  <template #icon><copy-outlined /></template>
+                  {{ pageText('pages.copyCurlCommand') }}
+                </a-button>
+              </div>
+              <div v-if="finding.extracted_results && finding.extracted_results.length > 0" class="dryrun-extracted-row">
+                <span class="page-secondary-label-alt">{{ pageText('pages.extractedResultsLabel') }}:</span>
+                <a-tag v-for="(extVal, extIdx) in finding.extracted_results" :key="extIdx" color="blue" size="small">
+                  {{ extVal }}
+                </a-tag>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="dryRunOutput || dryRunLoading" class="dryrun-console">
             <div style="display: flex; justify-content: space-between; margin-bottom: 4px; color: #8c8c8c; font-size: 11px;">
               <span>{{ pageText('pages.nucleiOutputElapsed') }} {{ dryRunCost }}s)</span>
-              <a-tag :color="dryRunMatched ? 'red' : 'default'" size="small">
+              <a-tag v-if="dryRunLoading" color="processing" size="small">
+                {{ pageText('pages.dryRunRunning') }}
+              </a-tag>
+              <a-tag v-else-if="dryRunError" color="error" size="small">
+                {{ pageText('pages.dryRunFailedStatus') }}
+              </a-tag>
+              <a-tag v-else :color="dryRunMatched ? 'red' : 'default'" size="small">
                 {{ dryRunMatched ? pageText('pages.vulnerabilityMatched') : pageText('pages.noMatch') }}
               </a-tag>
             </div>
@@ -635,7 +700,7 @@
         <!-- 底部保存按钮 -->
         <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 8px;">
           <a-button @click="isEditModalVisible = false">{{ pageText('assets.cancel') }}</a-button>
-          <a-button type="primary" :loading="saveLoading" @click="saveTemplate">
+          <a-button type="primary" :loading="saveLoading" :disabled="detailLoading || detailLoadFailed" @click="saveTemplate">
             {{ pageText('pages.saveTemplate') }}
           </a-button>
         </div>
@@ -849,9 +914,9 @@
 
 <script setup>
 import { useI18n } from 'vue-i18n';
-import { ref, reactive, onMounted, onBeforeUnmount, computed, watch } from 'vue';
+import { ref, reactive, onMounted, onBeforeUnmount, onActivated, onDeactivated, computed, watch, nextTick } from 'vue';
 import { useRoute } from 'vue-router';
-import { message, notification } from 'ant-design-vue';
+import { message, notification, Modal } from 'ant-design-vue';
 import {
   PlusOutlined,
   CloudUploadOutlined,
@@ -1154,12 +1219,13 @@ http:
       - "{{BaseURL}}/.git/config"
       - "{{BaseURL}}/.env"
       - "{{BaseURL}}/config.inc.php.bak"
-    matchers-condition: or
+    matchers-condition: and
     matchers:
       - type: word
         words:
           - "[core]"
           - "DB_PASSWORD"
+        condition: or
       - type: status
         status:
           - 200
@@ -1190,45 +1256,119 @@ const isCreateMode = ref(false);
 const currentEditTemplateId = ref('');
 const currentEditorCode = ref('');
 const selectedSkeleton = ref('http_get');
+const createEnable = ref(true);
 const saveLoading = ref(false);
 const saveErrorMsg = ref('');
+const detailLoading = ref(false);
+const detailLoadFailed = ref(false);
+const focusDryRunOnOpen = ref(false);
+const dryRunPanelRef = ref(null);
+const dryRunTargetInputRef = ref(null);
+let lastAppliedSkeletonCode = skeletonTemplates.http_get;
+let activeModalSeq = 0;
+let activeDryRunSeq = 0;
+
+// ---------- Dry Run 即时调试 ----------
+const dryRunTarget = ref('');
+const dryRunLoading = ref(false);
+const dryRunOutput = ref('');
+const dryRunMatched = ref(false);
+const dryRunFindings = ref([]);
+const dryRunError = ref('');
+const dryRunCost = ref(0);
+
+const resetDryRunState = () => {
+  activeDryRunSeq += 1;
+  dryRunLoading.value = false;
+  dryRunOutput.value = '';
+  dryRunMatched.value = false;
+  dryRunFindings.value = [];
+  dryRunError.value = '';
+  dryRunCost.value = 0;
+};
 
 const openCreateModal = () => {
+  activeModalSeq += 1;
   isCreateMode.value = true;
   currentEditTemplateId.value = '';
   selectedSkeleton.value = 'http_get';
+  createEnable.value = true;
   currentEditorCode.value = skeletonTemplates.http_get;
+  lastAppliedSkeletonCode = skeletonTemplates.http_get;
+  detailLoading.value = false;
+  detailLoadFailed.value = false;
+  focusDryRunOnOpen.value = false;
   saveErrorMsg.value = '';
-  dryRunOutput.value = '';
+  resetDryRunState();
   isEditModalVisible.value = true;
 };
 
-const openEditModal = async (record) => {
+const openEditModal = async (record, options = {}) => {
+  const modalSeq = ++activeModalSeq;
   isCreateMode.value = false;
   currentEditTemplateId.value = record.template_id;
+  currentEditorCode.value = '';
   saveErrorMsg.value = '';
-  dryRunOutput.value = '';
+  detailLoading.value = true;
+  detailLoadFailed.value = false;
+  focusDryRunOnOpen.value = !!options.focusDryRun;
+  resetDryRunState();
   isEditModalVisible.value = true;
 
   try {
     const res = await request.get('/nuclei/template/detail/', { params: { template_id: record.template_id } });
+    if (modalSeq !== activeModalSeq) return;
     if (res.code === 200 && res.data) {
       currentEditorCode.value = res.data.content || '';
+      if (options.focusDryRun) {
+        await nextTick();
+        dryRunPanelRef.value?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+        dryRunTargetInputRef.value?.focus?.();
+      }
     } else {
-      message.error(pageText('pages.failedToLoadTemplateSource') + (res.message || pageText('tasks.unknownError')));
+      detailLoadFailed.value = true;
+      const errText = pageText('pages.failedToLoadTemplateSource') + (res.message || res.error || pageText('tasks.unknownError'));
+      saveErrorMsg.value = errText;
+      message.error(errText);
     }
   } catch (e) {
+    if (modalSeq !== activeModalSeq) return;
+    detailLoadFailed.value = true;
+    saveErrorMsg.value = pageText('pages.failedToLoadTemplateData');
     message.error(pageText('pages.failedToLoadTemplateData'));
+  } finally {
+    if (modalSeq === activeModalSeq) {
+      detailLoading.value = false;
+    }
+  }
+};
+
+const applySkeleton = (val) => {
+  if (skeletonTemplates[val]) {
+    selectedSkeleton.value = val;
+    currentEditorCode.value = skeletonTemplates[val];
+    lastAppliedSkeletonCode = skeletonTemplates[val];
   }
 };
 
 const handleSkeletonChange = (val) => {
-  if (skeletonTemplates[val]) {
-    currentEditorCode.value = skeletonTemplates[val];
+  if (!skeletonTemplates[val]) return;
+  const trimmed = currentEditorCode.value.trim();
+  if (!trimmed || currentEditorCode.value === lastAppliedSkeletonCode) {
+    applySkeleton(val);
+    return;
   }
+  Modal.confirm({
+    title: pageText('pages.overwriteSkeletonConfirmTitle'),
+    content: pageText('pages.overwriteSkeletonConfirmDesc'),
+    okText: pageText('pages.confirmReplace'),
+    cancelText: pageText('tasks.cancel'),
+    onOk: () => applySkeleton(val),
+  });
 };
 
 const saveTemplate = async () => {
+  if (detailLoading.value || detailLoadFailed.value) return;
   saveErrorMsg.value = '';
   if (!currentEditorCode.value.trim()) {
     saveErrorMsg.value = pageText('pages.templateContentCannotBeEmpty');
@@ -1238,7 +1378,7 @@ const saveTemplate = async () => {
   try {
     const endpoint = isCreateMode.value ? '/nuclei/template/create/' : '/nuclei/template/update/';
     const payload = isCreateMode.value
-      ? { content: currentEditorCode.value, enable: true }
+      ? { content: currentEditorCode.value, enable: createEnable.value }
       : { template_id: currentEditTemplateId.value, content: currentEditorCode.value };
 
     const res = await request.post(endpoint, payload);
@@ -1257,32 +1397,40 @@ const saveTemplate = async () => {
   }
 };
 
-// ---------- Dry Run 即时调试 ----------
-const dryRunTarget = ref('');
-const dryRunLoading = ref(false);
-const dryRunOutput = ref('');
-const dryRunMatched = ref(false);
-const dryRunCost = ref(0);
-
-const openDryRunDirect = (record) => {
-  openEditModal(record);
-};
+const openDryRunDirect = (record) => openEditModal(record, { focusDryRun: true });
 
 const executeDryRun = async () => {
+  if (detailLoading.value) {
+    message.info(pageText('pages.waitTemplateLoading'));
+    return;
+  }
+  if (detailLoadFailed.value) return;
+  if (!currentEditorCode.value.trim()) {
+    message.warning(pageText('pages.templateContentRequiredForTest'));
+    return;
+  }
   if (!dryRunTarget.value.trim()) {
     message.warning(pageText('pages.enterATargetUrlToTest'));
     return;
   }
+  const modalSeq = activeModalSeq;
+  const runSeq = ++activeDryRunSeq;
   dryRunLoading.value = true;
+  dryRunMatched.value = false;
+  dryRunFindings.value = [];
+  dryRunError.value = '';
+  dryRunCost.value = 0;
   dryRunOutput.value = pageText('pages.startingTheNucleiTestPleaseWait');
   try {
     const res = await request.post('/nuclei/template/test/', {
       content: currentEditorCode.value,
       target: dryRunTarget.value.trim()
     });
+    if (modalSeq !== activeModalSeq || runSeq !== activeDryRunSeq || !isEditModalVisible.value) return;
     if (res.code === 200 && res.data) {
       dryRunOutput.value = res.data.output || pageText('pages.noStandardOutput');
       dryRunMatched.value = !!res.data.matched;
+      dryRunFindings.value = Array.isArray(res.data.findings) ? res.data.findings : [];
       dryRunCost.value = res.data.cost_seconds || 0;
       if (dryRunMatched.value) {
         message.success(pageText('pages.vulnerabilityMatchingConditionsMet'));
@@ -1290,15 +1438,34 @@ const executeDryRun = async () => {
         message.info(pageText('pages.testCompletedNoVulnerabilityRuleMatched'));
       }
     } else {
-      dryRunOutput.value = pageText('pages.executionFailed') + (res.message || res.error || pageText('tasks.unknownError'));
+      const errMsg = res.message || res.error || pageText('tasks.unknownError');
+      dryRunError.value = pageText('pages.executionFailed') + errMsg;
+      dryRunOutput.value = res.data?.output || '';
+      dryRunCost.value = res.data?.cost_seconds || 0;
       dryRunMatched.value = false;
+      dryRunFindings.value = [];
+      message.error(dryRunError.value);
     }
   } catch (e) {
-    dryRunOutput.value = pageText('pages.requestFailedLabel2') + e.message;
+    if (modalSeq !== activeModalSeq || runSeq !== activeDryRunSeq || !isEditModalVisible.value) return;
+    dryRunError.value = pageText('pages.requestFailedLabel2') + e.message;
+    dryRunOutput.value = '';
+    dryRunMatched.value = false;
+    dryRunFindings.value = [];
   } finally {
-    dryRunLoading.value = false;
+    if (modalSeq === activeModalSeq && runSeq === activeDryRunSeq) {
+      dryRunLoading.value = false;
+    }
   }
 };
+
+watch(isEditModalVisible, (open) => {
+  if (!open) {
+    activeModalSeq += 1;
+    detailLoading.value = false;
+    resetDryRunState();
+  }
+});
 
 // ---------- 导入弹窗 ----------
 const isImportModalVisible = ref(false);
@@ -1790,12 +1957,88 @@ onMounted(() => {
   fetchSyncStatus();
 });
 
+onActivated(() => {
+  if (syncStatus.status === 'syncing' && !syncTimer) {
+    startSyncPolling();
+  }
+});
+
+onDeactivated(() => {
+  isEditModalVisible.value = false;
+  isImportModalVisible.value = false;
+  isCommunityDrawerVisible.value = false;
+  isSyncLogModalVisible.value = false;
+  isOfflineModalVisible.value = false;
+  isMarkModalVisible.value = false;
+  isAddBlacklistModalVisible.value = false;
+  stopSyncPolling();
+});
+
 onBeforeUnmount(() => {
   stopSyncPolling();
 });
 </script>
 
 <style scoped>
+.nuclei-create-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--arl-bg-layout);
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.nuclei-create-bar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dryrun-findings {
+  background: var(--arl-bg-layout);
+  border: 1px solid var(--arl-border-color);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dryrun-findings-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #cf1322;
+}
+
+.dryrun-finding-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dryrun-finding-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.dryrun-matched-at {
+  word-break: break-all;
+}
+
+.dryrun-extracted-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
 .nuclei-sync-terminal {
   max-height: 380px;
 }

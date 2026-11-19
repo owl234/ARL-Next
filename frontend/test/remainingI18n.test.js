@@ -333,6 +333,7 @@ test('Nuclei 模板提交与误报屏蔽保留原始 YAML、标识及原因', as
     const page = component('components/NucleiManage.vue', {
       saveErrorMsg: ref(''), currentEditorCode: ref('id: fixture\n# 用户规则\ninfo:\n  name: 用户模板\n'),
       saveLoading: ref(false), isCreateMode: ref(false), currentEditTemplateId: ref('fixture'), isEditModalVisible: ref(true),
+      detailLoading: ref(false), detailLoadFailed: ref(false), createEnable: ref(true),
       markModalForm: { template_id: 'fixture', name: '用户模板', severity: 'high', tags: ['custom'], reason: '' },
       markModalLoading: ref(false), isMarkModalVisible: ref(true), fetchCustomTemplates() {}, fetchStats() {}, fetchBlacklist() {}, fetchCommunityTemplates() {},
       request: { async post(url, data) { calls.push({ url, data: plain(data) }); return { code: 200 }; } },
