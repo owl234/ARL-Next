@@ -8,35 +8,34 @@
   # ARL-Next
   **Modern Attack Surface Reconnaissance & Vulnerability Monitoring Platform**
 
-  <p><b>Enterprise Asset Correlation · Async Decoupled Scheduling · Native MCP Support · Docker-Ready Deployment</b></p>
+  <p><b>Enterprise Asset Mapping · Attack Surface & Vulnerability Discovery · Continuous Threat Monitoring · Native AI (MCP) Integration</b></p>
 
   <p>
     <a href="https://github.com/owl234/ARL-Next/releases"><img src="https://img.shields.io/github/v/release/owl234/ARL-Next?style=flat-square&color=blue" alt="Release"></a>
     <a href="https://github.com/owl234/ARL-Next/stargazers"><img src="https://img.shields.io/github/stars/owl234/ARL-Next?style=flat-square&color=gold" alt="Stars"></a>
-    <a href="https://github.com/owl234/ARL-Next/network/members"><img src="https://img.shields.io/github/forks/owl234/ARL-Next?style=flat-square" alt="Forks"></a>
+    <a href="https://github.com/owl234/ARL-Next/network/members"><img src="https://img.shields.io/github/forks/owl234/ARL-Next?style=flat-square&color=teal" alt="Forks"></a>
     <a href="./LICENSE"><img src="https://img.shields.io/badge/License-GPL%20v3-blue?style=flat-square" alt="License"></a>
   </p>
 
   <p>
     <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
-    <img src="https://img.shields.io/badge/Nmap-7.95%20Stable-blue?style=flat-square" alt="Nmap">
-    <img src="https://img.shields.io/badge/MongoDB-7.0-47A248?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB">
     <img src="https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue">
+    <img src="https://img.shields.io/badge/MongoDB-7.0-47A248?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB">
     <img src="https://img.shields.io/badge/MCP-Native-purple?style=flat-square" alt="MCP">
+    <img src="https://img.shields.io/badge/i18n-%E4%B8%AD%E6%96%87%20%7C%20EN%20%7C%20RU-0EA5E9?style=flat-square" alt="i18n">
   </p>
 
   <p>
     <a href="./docs/QUICKSTART_en.md"><b>🚀 Quickstart (5-Min)</b></a> •
-    <a href="#quick-deploy"><b>⚡ Quick Deployment</b></a> •
-    <a href="#comparison"><b>💡 Architectural Comparison</b></a> •
-    <a href="#core-features"><b>✨ Core Features</b></a> •
-    <a href="./docs/API_GUIDE_en.md"><b>🔌 API Guide</b></a> •
-    <a href="./mcp-server/README_en.md"><b>🤖 MCP Guide</b></a> •
-    <a href="./docs/MCP_PENTEST_TEST_CASES_en.md"><b>🎯 MCP Use Cases</b></a> •
+    <a href="#scenarios"><b>🎯 Use Cases</b></a> •
+    <a href="#core-features"><b>✨ Capabilities</b></a> •
+    <a href="#preview"><b>📸 Preview</b></a> •
+    <a href="#quick-deploy"><b>⚡ Deployment</b></a> •
+    <a href="#integration"><b>🤖 MCP & API</b></a> •
+    <a href="#architecture"><b>🏗️ Architecture</b></a> •
     <a href="./CHANGELOG_en.md"><b>📜 Changelog</b></a> •
-    <a href="https://github.com/owl234/ARL-Next/discussions"><b>💬 Discussions</b></a> •
-    <a href="./LICENSE"><b>📄 License</b></a>
+    <a href="https://github.com/owl234/ARL-Next/discussions"><b>💬 Discussions</b></a>
   </p>
 </div>
 
@@ -44,96 +43,104 @@
 
 ---
 
-## 💡 What is ARL-Next?
+## <span id="scenarios"></span>💡 What is ARL-Next & Who Is It For?
 
-> **ARL-Next** is an asset mapping platform re-engineered from the classic open-source project ARL (Asset Reconnaissance Lighthouse).
-> Addressing task-queue congestion in large-scale scans, memory growth during prolonged runs, and outdated dependencies, it uses microservice decoupling with async task isolation, upgraded runtimes and mapping toolchains, and a native **Model Context Protocol (MCP)** server for automated asset profiling and AI-assisted analysis.
+> **ARL-Next** is an open-source, self-hosted **attack surface reconnaissance and vulnerability monitoring platform** built for enterprise security teams, bug bounty / SRC researchers, and authorized penetration testers.  
+> It unifies **enterprise asset discovery → attack surface mapping & vulnerability detection → continuous monitoring & alerting → AI Agent (MCP) collaboration** into a single workflow, helping you map, organize, and govern real-world external exposure starting from a company name, domain, or IP range.
 
----
+### 🎯 Typical Use Cases
 
-### <span id="comparison"></span>💡 Architectural Evolution & Benchmark Comparison
-
-| Evaluation Dimension | Legacy ARL Architecture & Implementation | ARL-Next Re-engineered Architecture |
+| Use Case | Challenge | How ARL-Next Helps |
 | :--- | :--- | :--- |
-| **Concurrency & Task Scheduling** | All scan tasks shared a single Celery queue, causing frequent queue stalling and process hangs under high concurrency | **Decoupled OSINT and screenshot capture into dedicated microservices**; implemented dual-track light/heavy task queues and bulk database persistence to resolve concurrency bottlenecks |
-| **Automation Protocol Integration** | Lacked standardized external integration interfaces; restricted to manual Web UI interactions | **Supports native MCP Server & visual Governance Center**, providing multi-dimensional asset profiling, fine-grained scoped keys, tool-level switches, and call auditing |
-| **Enterprise Asset Topology** | Lacked organizational equity mapping and multi-tier digital asset drill-downs | **Integrated Asset Group Management**: correlates corporate equity with multi-category ICP registrations (websites, APPs, mini-programs, quick apps) to construct hierarchical group topologies |
-| **Containerization & Delivery** | Outdated dependencies lacking mirror acceleration; vulnerable to network disruption during installation | **Multi-stage Docker builds with pre-compiled artifacts on Alibaba Cloud ACR**, paired with full-system data archive backup and migration restore via Web or CLI |
-| **Runtime Environment Baseline** | Python 3.6 / Vue 2 / MongoDB 3.x / Nmap 7.70 | **Python 3.13 / Vue 3.5 / MongoDB 7.0 / Nmap 7.95 Stable**; modernized runtime baseline |
-| **Sensitive Data Extraction** | Relied on external Go binaries with cross-platform build and runtime overhead | **Pure-Python streaming extraction engine**, supporting JS/HTML stream extraction plus WIH static relative API candidate extraction and same-origin reachability probing |
-| **Web UI / User Experience** | Long tables lacked sticky headers, pagination states were lost on refresh, and UI was Chinese-only | **Chinese / English / Russian i18n switching**, sticky table headers and floating action bars, local pagination state persistence, and a 3-pane dictionary manager |
-| **Threat Intelligence Integration** | Lacked continuous intelligence feeds; unaligned timestamps led to redundant alerts | **Automated CVE synchronization & GitHub credential leak monitoring**, deduplicated via database atomic upsert locks with strict timezone normalization |
+| **Enterprise Attack Surface Inventory & Governance** | Assets across subsidiaries are fragmented; shadow web apps, mobile apps, and mini-programs are hard to track continuously | Correlates websites, mobile apps, mini-programs, and quick apps via corporate OSINT (Tianyancha / MIIT ICP) into hierarchical asset groups with a 13-dimensional asset profile drawer |
+| **Authorized Pentesting & Bug Bounty Recon** | Chaining subdomain, port, fingerprint, JS extraction, and vulnerability scanners manually yields scattered outputs | Orchestrates subdomain brute-forcing, adaptive port scanning, 8,800+ Web fingerprints, WIH JS endpoint extraction, and Nuclei / PoC scanning in one workspace with unified search and export |
+| **Continuous Exposure & Leak Monitoring** | Newly exposed services, emerging CVEs, and GitHub credential leaks often go unnoticed until exploitation | Combines scheduled scans and incremental asset group monitoring with CVE feeds, a GitHub leak triage workbench, and severity-filtered Nuclei webhook alerts |
+| **AI Agent-Assisted Security Analysis** | Analysts spend repetitive time pivoting across pages to assemble exposure summaries for a host or organization | Connects Cursor, Claude Desktop, and other MCP clients through the built-in **MCP Center** for natural-language asset profiling, enterprise lookups, and scoped scan dispatch |
 
 ---
 
-### <span id="core-features"></span>✨ Core Feature Matrix
+## <span id="core-features"></span>✨ End-to-End Capabilities
 
-* 🤖 **Native AI Agent Integration & MCP Governance Center (MCP 2.0)**: Compliant with the Model Context Protocol (2024-11-05) standard, providing dual-mode support for **Remote Native SSE Direct Connection** (copy-paste ready for Cursor / Claude Desktop) and **Local Stdio Bridge** (out-of-the-box for self-signed certificates / private networks); includes a built-in visual **MCP Governance Center** (issuing fine-grained scoped keys, tool-level enable/disable switches, rate limits, and call audit logs), covering 5-dimensional asset profiling, enterprise ecosystem profiling, conditional query, status tracking, and controlled scan task dispatch. (👉 [MCP Configuration Guide](./mcp-server/README_en.md) · [MCP Pentest Prompt Cases](./docs/MCP_PENTEST_TEST_CASES_en.md))
-* ⚙️ **Asynchronous Decoupled Scheduling**: Microservice isolation with dedicated queues and bulk MongoDB operations ensures stable execution under high-throughput scanning workloads.
-* 🌐 **Hierarchical Asset Group Management**: Integrated corporate asset discovery supporting multi-tier organizational structures, multi-category ICP association (Web / APP / Mini-program / Quick App), and unified attack surface mapping.
-* 🔍 **Modern Reconnaissance Baseline & WIH API Probing**: Standardized on Nmap 7.95 Stable; native Python streaming engine for sensitive information discovery, supporting static extraction of relative API endpoint candidates from HTML/same-origin JS and same-origin GET reachability verification.
-* 🛡️ **Vulnerability & Leak Monitoring**: Continuous tracking of authoritative CVE feeds and automated GitHub credential leak monitoring with atomic lock deduplication.
-* 💾 **Full-System Backup & Online Operations**: One-click export and `--drop` full restore of MongoDB collections, site screenshots, custom wordlists, and PoC plugins via the Web console or CLI tool (with SHA256 checksum verification and safe Worker consumer pausing); integrated container health probes and online hot updates.
-* 🌍 **Multilingual UI & Modern Experience**: Built-in real-time switching across Simplified Chinese, English, and Russian (`zh-CN` / `en-US` / `ru-RU`), paired with global settings search, sticky table headers, and a 3-pane wordlist workbench.
-* 📦 **Pre-built Container Images**: Pre-compiled multi-stage container images on Alibaba Cloud ACR minimize network latency and dependency installation failures.
+### 1. Enterprise Asset Mapping & Hierarchical Asset Groups
+* **Flexible Group Creation**: Create asset groups immediately by entering IPs, CIDRs, and domains manually, or run multi-source corporate reconnaissance (Tianyancha & MIIT ICP) covering **websites, mobile apps, mini-programs, and quick apps** with automatic group creation, batch stop, checkpoint resume, and in-place detail backfill.
+* **Multi-Tier Groups & Panoramic Profiling**: Manage multi-tier corporate hierarchies (including group dissolution and transfer); drill down via the **13-dimensional asset profile drawer** inside Asset Group details, or query across tasks in **Asset search** (**12 asset tab dimensions**, excluding Nuclei results).
+
+### 2. Attack Surface Discovery & Vulnerability Detection
+* **Full Reconnaissance Pipeline**: Covers subdomain discovery and dictionary brute-forcing, Nmap 7.95 port scanning (with adaptive host discovery modes), an **8,800+ Web technology fingerprint repository**, and task/policy-level optional headless site screenshots.
+* **WIH Sensitive Info & API Discovery**: Built-in pure-Python streaming extractor identifies sensitive data from HTML and same-origin JS, statically extracts relative API endpoint candidates, and performs controlled same-origin GET reachability checks.
+* **Nuclei & Python PoC Orchestration**: Integrates Nuclei community and custom multi-protocol templates (`web` / `network` / `dns` bucketing, custom-only policies, and online single-target live dry-run debugging) alongside a Python PoC plugin pool (PoC verification, weak-credential checks, service identification) with reusable scan policies.
+
+### 3. Continuous Monitoring, Threat Intel & Targeted Alerts
+* **Scheduled Scans & Asset Monitoring**: Separate management for recurring scan schedules and incremental asset group monitoring under **Plans and schedules** to detect newly exposed domains, sites, and services.
+* **CVE Feeds & GitHub Leak Triage**: Continuously tracks CVE vulnerability feeds and monitors GitHub for sensitive code and credential leaks, featuring a triage workbench with status transitions, noisy-repo blocklists, a built-in regex code reader, and CSV export.
+* **Webhooks & Dedicated Nuclei Push**: Supports task completion callbacks plus a dedicated Nuclei vulnerability push channel with severity-level filtering.
+
+### 4. Native AI Collaboration & MCP Governance
+* **Dual-Mode Client Integration**: Compliant with the Model Context Protocol (2024-11-05) specification, supporting both **Remote SSE direct connection** and **Local Stdio bridge** for Cursor, Claude Desktop, Claude Code, Windsurf, and Antigravity.
+* **Visual Access Governance**: Issue least-privilege scoped keys in **MCP Center** (`asset:read` read-only intelligence separated from `task:dispatch` scan control), toggle individual tools, enforce query-size and rate limits, and review call audit logs.
+
+### 5. Multi-Protocol Proxy, Online Operations & Multilingual UI
+* **Unified Proxy Pool & 3-Domain Routing**: Manage `HTTP` / `HTTPS` / `SOCKS5` proxy pools with independent egress strategies for `scan`, `osint`, and `intel` traffic, internal CIDR and custom `NO_PROXY` bypass allowlists, and inline health probes.
+* **5-Domain Settings & Flexible Operations**: Settings organized across **Intel & APIs / Proxy & Guardrails / Scan & Arsenal / Alerts & Webhooks / System Ops** with `/` quick search; includes scan exclusion guardrails (IP / domain), a 3-pane wordlist arsenal, live tuning of worker-process and per-task packet concurrency, Web console online upgrades, and full backup & migration restore.
+* **Multilingual & Modern UX**: Real-time switching across **Simplified Chinese, English, and Russian (`zh-CN` / `en-US` / `ru-RU`)**, dark/light themes, customizable sidebar ordering, sticky table headers and action bars, and local pagination persistence.
 
 ---
 
-## 📸 Interface Preview
+## <span id="preview"></span>📸 Interface Preview
 
-* **Global Dashboard**: Real-time visualization of attack surface posture, active reconnaissance pipelines, vulnerability distribution, and threat feeds. Features CPU/memory/disk telemetry, task queue queues, security dispatch log streams, and TOP 5 Web technology fingerprints.
-  
+* **Global Dashboard**: Visualizes attack surface posture, recent reconnaissance activity, vulnerability distribution, and threat feeds alongside host resource telemetry (CPU / memory / disk), task queue status, TOP 5 Web fingerprints, and active pipeline progress.
+
   <p align="center">
     <img src="./img/dashboard.png" alt="ARL-Next Global Dashboard" width="850">
   </p>
 
-<details open>
-<summary><b>🖼️ Click to expand / collapse core application views</b></summary>
+<details>
+<summary><b>🖼️ Click to expand more core application views (Asset Groups & Profile · Tasks · Threat Intel · MCP Center · System Settings — 9 screenshots)</b></summary>
 
 <br/>
 
-* **Hierarchical Asset Groups & Panoramic Asset Profile**: Enterprise asset reconnaissance integrated into a unified grouping architecture. Supports multi-tier organizational hierarchy, corporate OSINT asset correlation, attack surface management (ASM), and asset profile drill-downs (the profile drawer aggregates 13 dimensions, whereas the Asset Search page exposes 12 tab dimensions, excluding Nuclei results).
-  
+* **Hierarchical Asset Groups & Panoramic Asset Profile**: Manage multi-tier group hierarchies, correlate corporate OSINT assets, map external attack surfaces (ASM), and drill down via the 13-dimensional asset profile drawer.
+
   <p align="center">
     <img src="./img/asset-group-overview.png" alt="Hierarchical Asset Groups and Coverage" width="850">
   </p>
-  
+
   <p align="center">
     <img src="./img/asset-group-osint.png" alt="Corporate OSINT Dimensions" width="850">
   </p>
-  
+
   <p align="center">
     <img src="./img/asset-group-asm.png" alt="Attack Surface Management (ASM)" width="850">
   </p>
-  
+
   <p align="center">
     <img src="./img/asset-group-profile.png" alt="13-Dimensional Asset Profile Drawer" width="850">
   </p>
 
-* **Task Dispatch & Policy Scheduling**: Integrates Nuclei orchestration, a pure-Python multi-category plugin pool (PoC verification, credential brute-forcing, service identification), and an 8,800+ entry Web technology fingerprint repository with end-to-end task lifecycle tracking.
-  
+* **Task Dispatch & Full Lifecycle Management**: Quick scan presets (Quick discovery / Standard discovery / Full discovery) and custom policies integrated with Nuclei, Python plugins, and 8,800+ Web fingerprints, tracking task stages and incremental group sync summaries.
+
   <p align="center">
     <img src="./img/task-new.png" alt="Task Creation & Policy Selection" width="800">
   </p>
-  
+
   <p align="center">
     <img src="./img/task-management1.png" alt="Task Lifecycle Management" width="800">
   </p>
 
-* **Threat Intelligence & Credential Leak Radar**: Real-time surveillance of global CVE vulnerabilities and automated tracking of sensitive code or credential disclosures on GitHub.
-  
+* **Threat Intelligence & Credential Leak Radar**: Tracks global CVE feeds and monitors GitHub repositories for sensitive code and credential disclosures.
+
   <p align="center">
     <img src="./img/threat-intel-radar.png" alt="Threat Intelligence Radar" width="800">
   </p>
 
-* **MCP Service Governance Center**: Visual management of AI Agent integration and security policies, supporting fine-grained scoped keys (`asset:read` read-only intelligence vs. `task:dispatch` scan scheduling), tool-level switches, query size and rate-limit quotas, and invocation monitoring.
-  
+* **MCP Service Governance Center**: Visually manages AI Agent connections, scoped API keys, tool-level switches, query and rate quotas, and call audit logs.
+
   <p align="center">
     <img src="./img/mcp-center.png" alt="MCP Service Governance Center" width="800">
   </p>
 
-* **System Settings & Wordlist Arsenal**: Organized into five workflow domains (Intel & APIs, Proxy & Guardrails, Scan & Arsenal, Alerts & Webhooks, System Ops) with `/` quick search; provides a 3-pane wordlist manager (cross-category search, tiered preview, export, and inline editing), worker concurrency scaling, and alert webhook configurations.
-  
+* **System Settings & Wordlist Arsenal**: Five workflow domains (Intel & APIs, Proxy & Guardrails, Scan & Arsenal, Alerts & Webhooks, System Ops) with `/` quick search, a 3-pane wordlist workbench (cross-category search, tiered preview, export, inline maintenance), live concurrency tuning, and alert webhook configuration.
+
   <p align="center">
     <img src="./img/system-settings.png" alt="System Settings and Wordlist Arsenal" width="800">
   </p>
@@ -142,92 +149,19 @@
 
 ---
 
-## 🏗️ Architecture Design
+## <span id="quick-deploy"></span>🚀 Quick Deployment & Access
 
-ARL-Next adopts a decoupled frontend-backend architecture with asynchronous distributed Celery task queues and lightweight microservices. The overall dataflow and component topology are illustrated below:
+**Requirements**: Linux server (Ubuntu / Debian / CentOS / RHEL / UOS, etc. with root privileges), recommended **4-Core CPU, 4GB RAM or higher**, with TCP port **5173** open.  
+**Delivery**: Pre-built container images hosted on Alibaba Cloud ACR; `start-prod.sh` automatically configures Swap, installs missing Docker / Compose packages, and runs readiness health probes.
 
-```mermaid
-graph TD
-    %% 1. Access Layer
-    User["👨‍💻 Security Analyst (Browser)"] -->|"HTTPS (5173, Basic Auth optional)"| Nginx["🖥️ Frontend (Nginx + Vue 3.5)"]
-    Agent["🤖 AI Agent (Claude / Cursor)"] -->|"Track 1: Remote Direct (SSE /mcp/sse)"| Nginx
-    Agent -.->|"Track 2: Local Script (Stdio Bridge)"| MCP_Stdio["🤖 Local Stdio Script (arl_mcp.py)"]
+> [!TIP]
+> First time deploying? Follow the [**🚀 5-Minute Quickstart Guide (QUICKSTART_en.md)**](./docs/QUICKSTART_en.md) to complete the minimal loop: **Deploy & Sign In → Create Asset Group → Dispatch First Task → Inspect Results**.
 
-    %% 2. API Gateway & Microservice Layer
-    Nginx -->|"REST API Reverse Proxy (5000)"| Backend["⚙️ Backend API (Gunicorn / Python 3.13)"]
-    Nginx -->|"SSE Persistent Stream Reverse Proxy (5005)"| MCP_Service["🚀 arl-mcp Async Microservice (Python asyncio)"]
-    MCP_Stdio -->|"HTTPS / API Token (5173 Proxy)"| Nginx
+### Deployment Methods
 
-    %% 3. Dispatch & Task Routing (Dual-Track Decoupling)
-    Backend -->|"1. Synchronous HTTP Call (16181)"| OSINT["🧩 OSINT Microservice"]
-    Backend -->|"2. Produce Scan Tasks"| MQ(("⚡ RabbitMQ 3 (Light/Heavy/Threat Queues)"))
+#### Method 1: Accelerated Mirror Deployment (Recommended)
 
-    %% 4. Celery Worker Scan Cluster
-    subgraph WorkerCluster ["⚙️ Celery Worker Scan & Scheduling Cluster"]
-        MQ -->|"Light Queue arltask_light"| W_Light["⚡ Light Worker (Space Recon / Single Asset / WIH / Sync)"]
-        MQ -->|"Heavy Queue arltask, arltask_heavy"| W_Heavy["🔥 Heavy Worker (Full Scan / Risk Cruise / Nuclei / PoC)"]
-        MQ -->|"Threat Queue arlgithub"| W_Git["🛡️ Threat Intel Worker (CVE / Code Leaks)"]
-        
-        Scheduler["⏰ Scheduling Engine (Scheduler & Beat)"] -.->|"Periodic Triggers"| MQ
-        W_Heavy -->|"HTTP Screenshot Render (3000)"| Puppeteer["🧩 Puppeteer Microservice (Headless / Auto-restart)"]
-    end
-
-    %% 5. Unified Data Persistence Layer
-    Backend <-->|"Telemetry Queries / State CRUD"| DB[("🗄️ MongoDB 7.0 (Compound Index Collections)")]
-    OSINT -->|"Async Direct Write"| DB
-    W_Light -->|"safe_insert_asset_many Bulk Write"| DB
-    W_Heavy -->|"bulk_write Batch Write"| DB
-    W_Git -->|"Atomic upsert Write"| DB
-
-    Autoheal["🛡️ Autoheal Watchdog Probe"] -.->|"docker.sock Probing & Auto-restart"| WorkerCluster
-
-    classDef default fill:#fbfbfb,stroke:#e0e0e0,stroke-width:1px;
-    classDef core fill:#eef2ff,stroke:#6366f1,stroke-width:2px;
-    classDef ai fill:#f5f3ff,stroke:#8b5cf6,stroke-width:2px;
-    classDef db fill:#ecfdf5,stroke:#10b981,stroke-width:2px;
-    classDef micro fill:#fffbeb,stroke:#f59e0b,stroke-width:1px;
-    
-    class Nginx,Backend,WorkerCluster,W_Light,W_Heavy,W_Git core;
-    class Agent,MCP_Stdio,MCP_Service ai;
-    class DB,MQ db;
-    class OSINT,Puppeteer,Autoheal,Scheduler micro;
-```
-
-### Key Architectural Highlights:
-
-1. 🖥️ **Presentation & Gateway (Frontend / Nginx)**: Built with **Vue 3.5 + Nginx**, featuring core table sticky headers and floating action toolbars; provides **frontline Basic Auth gateway protection** (disabled by default, toggleable from the top navigation bar).
-2. ⚙️ **Core API & Protocol Integration (Backend / MCP)**: Main business logic powered by **Python 3.13 + Gunicorn**; equipped with a dedicated **`arl-mcp` asynchronous microservice container** natively handling MCP SSE persistent streams and standard protocol endpoints for multi-dimensional asset profiling and controlled task dispatch.
-3. 🧩 **Dedicated OSINT Microservice**: Dedicated engine for corporate asset discovery and ICP lookup; invoked synchronously by the backend over HTTP (5s timeout guard) and **isolated from Celery scan queues to prevent long-running tasks from stalling them**.
-4. ⚡ **Multi-Queue Worker Cluster**: Segregated into **lightweight**, **heavyweight**, and **threat intelligence** task queues; controls worker memory growth through subprocess lifecycle recycling; standardizes on **Nmap 7.95 Stable**.
-5. 🛡️ **Microservices & Autoheal Watchdog (Puppeteer / Autoheal)**: Containerized headless browser isolation with request-count recycling; **Autoheal watchdog periodically checks scan workers and automatically restarts unresponsive containers**; pure Python engine for streaming sensitive data discovery.
-6. 🗄️ **High-Throughput Persistence (MongoDB 7.0)**: High-throughput asset ingestion utilizes `bulk_write` and `safe_insert_asset_many` batch interfaces; compound unique indexes across core collections backed by a 1GB memory buffer pool to maintain scanning throughput and database stability.
-
----
-
-## <span id="quick-deploy"></span>🚀 Deployment Guide
-
-### Production Deployment (Recommended)
-
-**Target Environments**: Public Cloud VMs (Ubuntu / Debian / CentOS / RHEL / Rocky Linux, etc.) or Enterprise Internal Servers.  
-**Recommended Specs**: 4-Core CPU, 4GB RAM or higher (ensures stability for multi-task concurrency and large-scale scanning).  
-**Estimated Time**: Typically completes within minutes on a host with Docker already installed; on bare metal, Docker installation and Swap configuration add further time depending on host and network conditions.
-
-**Key Operational Advantages**:
-* ⚡ **Mainland China Mirror Acceleration**: Pulls directly from the Alibaba Cloud ACR private mirror repository, avoiding cross-border network timeouts and pull interruptions.
-* 📦 **Out-of-the-Box Delivery**: Pre-built container images eliminate local toolchain compilation and dependency configuration.
-* 🛡️ **Dual-Layer Security**: Bundled local SSL encryption; **frontline Basic Auth gateway protection is disabled by default** (toggleable from the top navigation bar); core internal services isolated within a private Docker bridge network.
-* 🔄 **Background Hot Updates**: Trigger an online upgrade from the web console; the background daemon pulls updated images and orchestrations automatically.
-* 🩺 **Health Readiness Probing**: Integrated startup probe loops verify API readiness before allowing incoming traffic, preventing intermittent startup errors.
-
----
-
-#### 🚀 Deployment Methods
-
-**For the vast majority of setups, just run "Method 1" below** — no need to determine your OS or network environment first; the script auto-detects the system, installs missing dependencies, and tunes kernel parameters.
-
-##### Method 1: Accelerated Mirror Deployment (Recommended)
-
-On your server terminal (root required), paste and run the command below. It extracts the deployment orchestration from the Alibaba Cloud ACR mirror, and `start-prod.sh` then configures Swap, installs/pads Docker and the Compose plugin, and brings the stack up:
+Run the command below in your server terminal to pull the orchestration scripts and start the stack:
 
 ```bash
 mkdir -p ~/ARL-Next && cd ~/ARL-Next && \
@@ -247,14 +181,14 @@ chmod +x start-prod.sh && bash start-prod.sh
 ```
 
 > [!TIP]
-> - **Single-line Execution Tip**: Some cloud web consoles (such as Web SSH, VNC, or bastion hosts) may drop newlines or reorder pasted lines due to terminal buffer latency, causing errors such as `No such container: arl-temp`. If you encounter this, expand the "Step-by-Step Single-Line Commands" below and paste each line individually.
-> - If Docker is not yet installed on the host, run step 1 of "Method 2" below first, then return to this command.
+> - **Web Console Paste Tip**: Some cloud Web SSH, VNC, or bastion consoles drop line continuations on multi-line paste (causing errors like `No such container: arl-temp`). Expand "Step-by-Step Single-Line Commands" below and run one line at a time.
+> - **No Docker Yet**: Run Step 1 of "Method 2" below first, then return here.
 
 <details>
 <summary><b>🛠️ If multi-line paste errors occur, click to expand [Step-by-Step Single-Line Commands]</b></summary>
 <br/>
 
-Run the following commands line by line in your terminal (each line runs independently without backslash continuation):
+Run each line independently without backslash continuation:
 
 ```bash
 # 1. Create and enter directory
@@ -283,12 +217,10 @@ chmod +x start-prod.sh && bash start-prod.sh
 </details>
 
 <details>
-<summary><b>Method 2: Full Manual Commands (by OS type)</b></summary>
+<summary><b>Method 2: Bare-Metal Step-by-Step Installation (by OS type)</b></summary>
 <br/>
 
-The two commands below differ **only in how base tools are installed** (choose `apt-get` or `yum`); the second step is identical for all systems.
-
-**Step 1: Install base tools and create the directory**
+**Step 1: Install base tools (choose your OS)**
 
 - Ubuntu / Debian / UOS:
   ```bash
@@ -324,7 +256,7 @@ chmod +x start-prod.sh && bash start-prod.sh
 </details>
 
 <details>
-<summary><b>Method 3: Git Clone Source Deployment (Overseas servers / modifying source)</b></summary>
+<summary><b>Method 3: Git Clone Source Deployment (Keep repository / customization)</b></summary>
 <br/>
 
 ```bash
@@ -334,27 +266,31 @@ bash start-prod.sh
 ```
 
 > [!TIP]
-> `start-prod.sh` includes environment probes that also install Docker and tune kernel parameters on bare-metal systems.
+> `start-prod.sh` includes environment probes that also install Docker and tune kernel parameters on bare-metal systems; by default it still pulls the pre-built production images rather than compiling locally on the host.
 
 </details>
 
----
+### 🔑 Access & Initial Credentials
 
-#### 🔑 Access & Default Credentials
+Once deployed, open `https://<YOUR_SERVER_IP>:5173` in your browser (proceed past the self-signed certificate warning on first visit).
 
-After deployment completes, open your browser and navigate to: `https://<YOUR_SERVER_IP>:5173` (bypass the self-signed certificate warning on first visit).
-
-| Authentication Layer | Default Username | Default Password | Description |
+| Authentication Layer | Default Username | Default Password | Notes |
 | :--- | :--- | :--- | :--- |
-| **Layer 1: Nginx Basic Auth Gateway** | `admin` | `arl_next` | Prevents automated internet scanner brute-forcing. Disabled by default; can be toggled via the security switch in the top navigation bar. |
-| **Layer 2: ARL-Next System Login** | `admin` | Randomly generated on first startup | Existing passwords are preserved; new passwords require at least 12 characters. |
+| **Layer 1: Nginx Basic Auth Gateway** | `admin` | `arl_next` | Optional frontline brute-force shield (**disabled by default**; toggle from the security switch in the top navigation bar; disable and re-enable to change password) |
+| **Layer 2: ARL-Next System Login** | `admin` | Randomly generated on first startup | Existing accounts keep their password; new passwords require at least 12 characters |
 
-On a trusted host, run `docker exec arl-web-prod cat /tmp/arl_initial_admin_password` to read the initial password. The file is mode `0600`; the password is never printed in startup logs. Alternatively, set `ARL_ADMIN_PASSWORD` to at least 12 characters before first startup (note that `sudo` resets environment variables by default: pass it via `sudo ARL_ADMIN_PASSWORD=... bash start-prod.sh`, `sudo -E bash start-prod.sh`, or `.env` in the deployment directory). After changing the password and confirming login, remove the bootstrap file (`docker exec arl-web-prod rm -f /tmp/arl_initial_admin_password`). If the container is recreated before you read the file, reset it via `--reset` in FAQ Q2 below. Upgrades preserve existing accounts; deployments using the old default password must change it explicitly.
+On a trusted host, read the bootstrap admin password with the command below (the file is mode `0600` and is never printed to startup logs):
 
-Login sessions expire after 24 hours. Long-running API/MCP integrations should use a separately configured `API_KEY` in the `Token` header. See [API authentication](docs/API_GUIDE_en.md#2-authentication--security-policy).
+```bash
+docker exec arl-web-prod cat /tmp/arl_initial_admin_password
+```
+
+Alternatively, pre-set `ARL_ADMIN_PASSWORD` (at least 12 characters) before first startup (note that `sudo` resets environment variables by default: use `sudo ARL_ADMIN_PASSWORD=... bash start-prod.sh`, `sudo -E bash start-prod.sh`, or write `ARL_ADMIN_PASSWORD=...` to `.env` in the deployment directory). After changing the password and verifying sign-in, remove the bootstrap file (`docker exec arl-web-prod rm -f /tmp/arl_initial_admin_password`). If the container was recreated before you read it, reset it using `--reset` in FAQ Q2 below; upgrades preserve existing credentials.
+
+Web sessions expire after 24 hours. For long-running API or MCP integrations, use a dedicated `API_KEY` or scoped MCP key; see [Authentication & Security Policy](docs/API_GUIDE_en.md#2-authentication--security-policy).
 
 > [!IMPORTANT]
-> **Required**: Ensure port **5173** (TCP) is allowed in your cloud provider security groups and local firewall, otherwise the console will be unreachable.
+> **Firewall Requirement**: Ensure TCP port **5173** is open in both your cloud security group and host firewall:
 > ```bash
 > # Ubuntu / Debian
 > ufw allow 5173/tcp
@@ -363,31 +299,44 @@ Login sessions expire after 24 hours. Long-running API/MCP integrations should u
 > ```
 
 > [!TIP]
-> **Optional optimizations** (not required for basic operation):
-> - **Custom SSL Certificates**: Place your official certificates renamed as `arl.crt` and `arl.key` into the `ssl-certs/` directory, then re-run `bash start-prod.sh`.
-> - **Enable Basic Auth**: Toggle the security switch in the top navigation bar after logging in (disabled by default).
+> **Optional Hardening** (not required for basic usage):
+> - **Custom SSL Certificates**: Rename your certificate files to `arl.crt` and `arl.key`, place them in `ssl-certs/`, and re-run `bash start-prod.sh`.
+> - **Enable Basic Auth**: Toggle the security switch in the top navigation bar after logging in.
 
 ---
 
-### 🔄 Upgrading in Production
+## <span id="integration"></span>🤖 AI Agent (MCP) & API Integration
 
-ARL-Next offers two upgrade paths: **Web Console Online Update** (recommended, no terminal required) and **Standard Terminal Upgrade**.
+ARL-Next provides standard interfaces for both **AI Agent workflows** and **traditional security automation**:
+
+* **🤖 AI Agent Integration (MCP 2.0)**: Open **MCP Center** in the left navigation bar to issue least-privilege scoped keys and copy or export client configs (supports Remote SSE at `/mcp/sse` and Local Stdio bridging). Ships 6 standard tools — 4 read-only intelligence tools enabled by default (`get_asset_profile`, `get_enterprise_profile`, `search_assets`, `get_task_status`) and 2 scan-control tools disabled by default and gated by scope (`create_scan_task`, `stop_scan_task`).
+  * 📘 Setup guide: [MCP Configuration Guide (`mcp-server/README_en.md`)](./mcp-server/README_en.md)
+  * 🎯 Prompt playbook: [MCP Pentest Prompt Cases (`docs/MCP_PENTEST_TEST_CASES_en.md`)](./docs/MCP_PENTEST_TEST_CASES_en.md)
+* **🔌 RESTful API & Automation**: Built for scripts, CI/CD pipelines, and SOAR orchestration.
+  * 📖 Interactive Swagger UI: Visit `https://<YOUR_SERVER_IP>:5173/api/doc` after deployment to inspect OpenAPI schemas and test endpoints live.
+  * 📘 Calling conventions: See [**API Calling Guide (`docs/API_GUIDE_en.md`)**](./docs/API_GUIDE_en.md) for auth headers, lifecycle constraints, and query namespaces.
+
+---
+
+## 🛠️ Upgrade, Backup & FAQ
+
+### 🔄 Upgrading in Production
 
 #### Option 1: Web Console Online Update (Recommended)
 
-Log in to ARL-Next ➔ Navigate to **"System Settings"** ➔ **"System Ops"** ➔ **"Updates & Version"** tab ➔ Click **"One-Click System Update"**.<br/>
-The host update daemon pulls the latest images, synchronizes orchestration scripts, and performs service health checks in the background without requiring SSH access.
+Log in to ARL-Next ➔ Go to **"System settings"** ➔ **"System Ops"** ➔ **"Updates & Version"** ➔ Click **"Update system"**.<br/>
+The host update daemon pulls the latest images, syncs orchestration scripts and version files, restarts containers, and runs readiness checks in the background.
 
 > [!WARNING]
-> The update restarts the background Worker container, which **interrupts any running scan tasks** (they will be marked as interrupted). Run it during idle periods.
+> Updating restarts the background Worker container, which **interrupts any running scan tasks** (marked as "Failed" after restart). Run updates during idle windows.
 
 <details>
 <summary><b>Option 2: Standard Terminal Upgrade</b></summary>
 <br/>
 
-Navigate to your ARL-Next installation directory and run the commands matching your installation method.
+Enter your deployment directory and run the command matching your initial install method:
 
-- **Method 1 / Method 2 users** (no Git, syncing orchestration from the image):
+- **Mirror deployment users (Method 1 / Method 2)**:
   ```bash
   cd ~/ARL-Next && \
   docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
@@ -395,7 +344,7 @@ Navigate to your ARL-Next installation directory and run the commands matching y
   sudo bash start-prod.sh
   ```
 
-- **Method 3 users** (Git clone):
+- **Git source deployment users (Method 3)**:
   ```bash
   cd ~/ARL-Next && git pull && sudo bash start-prod.sh
   ```
@@ -403,24 +352,21 @@ Navigate to your ARL-Next installation directory and run the commands matching y
 </details>
 
 > [!TIP]
-> **Upgrade Safeguards**:
-> - **Incremental Database Schema Evolution**: Automatically preserves collection structures and compound unique indexes, mitigating upgrade conflicts.
-> - **Image Backup Tags**: Tags existing running images with `backup-stable` prior to pulling new images, allowing quick rollback in case of runtime anomalies.
-> - **Readiness Probing**: Validates API responsiveness dynamically before releasing traffic.
+> **Upgrade Safeguards**: Built-in incremental database migrations maintain schema compatibility and compound unique indexes; running images are tagged `backup-stable` before pulling updates, and readiness probes verify API availability on startup.
 
 ---
 
 ### 💾 System Data Backup & Migration Restore
 
-Before cross-host migration or major upgrades, you can package and export all MongoDB collections, site screenshots, custom wordlists, and PoC plugins, or perform a `--drop` full overwrite restore:
+Package and archive all MongoDB collections, site screenshots (optional), custom wordlists, and PoC plugins (with SHA256 integrity checks), or perform a `--drop` full overwrite restore for cross-host migration or pre-upgrade snapshots:
 
-- **Web Console Visual Operations**: Go to **"System Settings" ➔ "System Ops" ➔ "Backup & Restore"** to create backups online (optionally excluding screenshots to reduce archive size), download archives, upload external archives, and trigger a confirmed (`RESTORE`) overwrite restore.
-- **Terminal CLI Utility** (automatically forwarded to the container when run on the host):
+- **Web Console**: Navigate to **"System settings" ➔ "System Ops" ➔ "Backup & Restore"** to create archives online, download or upload external archives, and trigger an overwrite restore confirmed by typing `RESTORE`.
+- **Terminal CLI** (automatically forwarded to the container when run on the host):
   ```bash
-  # Create a full backup (or append --no-screenshots for a compact archive)
+  # Create a full backup (append --no-screenshots for a compact archive)
   python3 tools/arl_backup.py backup --note "Pre-upgrade snapshot"
 
-  # List existing backups and inspect archive metadata
+  # List existing backups or inspect archive metadata
   python3 tools/arl_backup.py list
   python3 tools/arl_backup.py info <archive_name.tar.gz>
 
@@ -430,123 +376,172 @@ Before cross-host migration or major upgrades, you can package and export all Mo
 
 ---
 
-## 🔌 Developer API & Integration
+### ❓ FAQ & Troubleshooting
 
-ARL-Next provides standardized RESTful APIs for automation scripts, CI/CD pipelines, and security orchestration (SOAR) integrations.
-
-* 📖 **Interactive Swagger UI**: After deployment, access `https://<your-arl-host>:5173/api/doc` in your browser to inspect full OpenAPI schemas and test endpoints interactively.
-* 📘 **Calling Conventions & Gotchas**: For token authentication, task lifecycle constraints, HTTP method conventions (e.g., GET for stopping tasks), and asset query namespaces, refer to ➔ [**API Calling Guide (API_GUIDE_en.md)**](./docs/API_GUIDE_en.md).
-
----
-
-## ❓ FAQ & Troubleshooting
-
-<details open>
+<details>
 <summary><b>Q1: Browser warns "Your connection is not private / Not Secure" on first HTTPS access?</b></summary>
 <br/>
 
-**A:** The system generates a local self-signed SSL certificate upon first startup.
-- Click **"Advanced" ➔ "Proceed to (unsafe)"** in your browser to continue (in Chromium browsers, typing `thisisunsafe` on the error page will bypass the warning).
-- **Configure Custom Domain Certificates**: Rename your commercial certificate files to `arl.crt` and `arl.key`, place them into the `ssl-certs/` directory, and run `bash start-prod.sh` to apply.
+**A:** ARL-Next generates a local self-signed SSL certificate on first startup.
+- Click **"Advanced" ➔ "Proceed to (unsafe)"** in your browser (in Chromium browsers, typing `thisisunsafe` on the warning page skips it directly).
+- **Use custom domain certificates**: Rename your certificate files to `arl.crt` and `arl.key`, place them into `ssl-certs/`, and run `bash start-prod.sh`.
 </details>
 
 <details>
-<summary><b>Q2: What should I do if I forget the admin password or Basic Auth credentials?</b></summary>
+<summary><b>Q2: What if I forget the admin login password or Basic Auth credentials?</b></summary>
 <br/>
 
-**A:** Execute the following commands on the server terminal to reset credentials:
-- **Reset Platform Admin Account (admin)**:
+**A:** Run the appropriate reset step from a trusted host terminal:
+- **Reset platform admin password (`admin`)**:
   ```bash
   docker exec -it arl-web-prod /code/backend/.venv-docker/bin/python3 /code/backend/inject_user.py --reset
   ```
   > [!NOTE]
-  > Startup preserves existing passwords. `--reset` generates a new random password and revokes the login session; read it from `/tmp/arl_initial_admin_password` inside the container. If `ARL_ADMIN_PASSWORD` is set, that value is used instead. Run only from a trusted host shell.
-- **Reset or View Basic Auth Credentials**: Edit `frontend/.htpasswd` in your deployment directory, or toggle the Basic Auth switch in the web top navigation bar after logging in (to change the password, disable and re-enable it).
+  > Normal startup preserves existing passwords. Adding `--reset` generates a new random password and revokes active sessions. Read it from `/tmp/arl_initial_admin_password` inside the container (or set `ARL_ADMIN_PASSWORD`).
+- **Reset/view Basic Auth credentials**: Edit `frontend/.htpasswd` in your deployment directory, or toggle Basic Auth off and back on from the top navigation bar after logging in.
 </details>
 
 <details>
-<summary><b>Q3: Web console displays <code>[ERROR] Trigger update failed</code> when clicking "One-Click System Update"?</b></summary>
+<summary><b>Q3: Web console shows <code>[ERROR] Trigger update failed</code> when clicking "Update system"?</b></summary>
 <br/>
 
-**A:** This typically occurs when the host updater daemon is inactive. Resolve via either of the following:
-- **Option A (Recommended)**: Perform a standard manual terminal upgrade:
+**A:** This usually means the host update daemon is not responding. Resolve via either option:
+- **Option A (Recommended)**: Run a standard terminal upgrade:
   ```bash
   cd ~/ARL-Next && sudo bash start-prod.sh
   ```
-- **Option B**: Restart the updater service and retry from the Web console:
+- **Option B**: Restart the host updater service and retry from the Web console:
   ```bash
   sudo systemctl restart arl-updater.service
   ```
 </details>
 
 <details>
-<summary><b>Q4: How do I adjust scan concurrency under high workload volume?</b></summary>
+<summary><b>Q4: How do I tune scan concurrency under heavy workloads?</b></summary>
 <br/>
 
-**A:** ARL-Next supports **dynamic live concurrency tuning** without restarting containers:
-- Log in to the web console ➔ **"System Settings"** ➔ **"Scan & Arsenal"** ➔ **"Concurrency & Defaults"** tab;
-- Adjust **Heavy Task Queue Concurrency** (Domain/IP port scanning, risk cruising, Nuclei / PoC pipelines), **Light Task Queue Concurrency** (Space reconnaissance, single asset updates, WIH leak extraction, data synchronization) and **OSINT Concurrency**; save changes for instant application;
-- All three values are **Worker process counts** (typically 1–128) bounded by host memory. The UI derives a recommendation from detected memory and offers one-click fill.
-- ⚠️ To tune the **intra-task DNS brute-force send concurrency** (typically hundreds to thousands), adjust it under **"Per-Task Packet Concurrency & Scan Defaults"** in the same tab. The two are different metrics — do not use the same magnitude for both.
+**A:** ARL-Next supports live concurrency tuning without restarting containers:
+- Log in ➔ Go to **"System settings"** ➔ **"Scan & Arsenal"** ➔ **"Concurrency & Defaults"**;
+- Adjust **Heavy Task Queue Concurrency** (domain/IP scanning, risk cruising, Nuclei / PoC pipelines), **Light Task Queue Concurrency** (space recon, single-asset updates, WIH extraction, sync), and **OSINT Concurrency**;
+- All three are **Worker process counts** (typically `1–128`) bounded by host RAM; the UI displays memory-based recommendations with one-click fill;
+- ⚠️ To tune **intra-task DNS brute-force packet concurrency** (typically hundreds to thousands), edit **"Per-Task Packet Concurrency & Scan Defaults"** below on the same page. The two metrics operate at different scales — do not confuse them.
 </details>
 
 <details>
-<summary><b>Q5: Quick reference commands for Docker container maintenance and log inspection?</b></summary>
+<summary><b>Q5: Quick reference commands for Docker container status and logs?</b></summary>
 <br/>
 
 ```bash
-# Check container statuses and health probes
+# Check container states and health probes
 docker compose -f docker-compose.prod.yml ps
 
-# Inspect scan worker execution logs in real time
+# Follow scan worker logs in real time
 docker compose -f docker-compose.prod.yml logs -f arl-worker
 
-# Gracefully restart all services
+# Gracefully restart core services
 docker compose -f docker-compose.prod.yml restart
 ```
 </details>
 
 <details>
-<summary><b>Q6: Frontend container crashes or port 5173 is inaccessible on legacy kernels like CentOS 7 / Linux 3.x?</b></summary>
+<summary><b>Q6: Frontend container crashes or port 5173 is unreachable on legacy kernels (CentOS 7 / Linux 3.x)?</b></summary>
 <br/>
 
-**A:** On legacy kernels such as Linux 3.10, Docker's default Seccomp profile may intercept modern system calls (e.g., `SYS_pwritev2` or newer libc write routines), preventing Nginx from writing its PID file (triggering `pwrite() "/run/nginx.pid" failed (1: Operation not permitted)`) and causing a container restart loop.
+**A:** On older kernels such as Linux 3.10, Docker's default Seccomp profile can block newer syscalls (e.g., `SYS_pwritev2`), preventing Nginx from writing its PID file (`pwrite() "/run/nginx.pid" failed (1: Operation not permitted)`) and causing a restart loop.
 
-**Remediation Steps**:
-1. **Verify Compose Configuration**: The latest `docker-compose.prod.yml` includes `security_opt: [seccomp:unconfined]` under `arl-frontend` by default.
-2. **Quick Fix for Existing Deployments**: If your deployment was initialized with an earlier compose file lacking this setting, apply the patch and recreate the frontend container (idempotent, safe to run multiple times):
+**Remediation**:
+1. **Check Compose config**: The latest `docker-compose.prod.yml` includes `security_opt: [seccomp:unconfined]` for `arl-frontend` by default.
+2. **Patch existing installs**: If your compose file predates this setting, apply it idempotently and recreate `arl-frontend`:
    ```bash
-   # Add unconfined seccomp option under arl-frontend (if not already present)
    grep -q "seccomp:unconfined" docker-compose.prod.yml || sed -i '/container_name: arl-frontend-prod/a \    security_opt:\n      - seccomp:unconfined' docker-compose.prod.yml
-   # Recreate frontend container
    docker compose -f docker-compose.prod.yml up -d arl-frontend
    ```
-3. **Re-run Deployment Verification**: Execute `bash start-prod.sh`. The built-in health assertion and connectivity probe will verify that the service is operational.
+3. **Verify readiness**: Run `bash start-prod.sh` and let the built-in container and port probes verify startup health.
 </details>
+
+---
+
+## <span id="architecture"></span>🏗️ System Architecture
+
+ARL-Next uses a decoupled frontend/backend design with multi-queue asynchronous Celery workers and isolated lightweight microservices. All external traffic enters through the Nginx HTTPS gateway, while internal components communicate over a private Docker bridge network:
+
+```mermaid
+graph TD
+    %% 1. Access Layer
+    User["👨‍💻 Security Analyst (Browser)"] -->|"HTTPS (5173, Basic Auth optional)"| Nginx["🖥️ Frontend (Nginx + Vue 3.5)"]
+    Agent["🤖 AI Agent (Claude / Cursor)"] -->|"Track 1: Remote Direct (SSE /mcp/sse)"| Nginx
+    Agent -.->|"Track 2: Local Script (Stdio Bridge)"| MCP_Stdio["🤖 Local Stdio Bridge (mcp-server/server.py)"]
+
+    %% 2. API Gateway & Microservice Layer
+    Nginx -->|"REST API Reverse Proxy (5000)"| Backend["⚙️ Backend API (Gunicorn / Python 3.13)"]
+    Nginx -->|"SSE Stream Reverse Proxy (5005)"| MCP_Service["🚀 arl-mcp Async Microservice (Python asyncio)"]
+    MCP_Stdio -->|"HTTPS / API Token (5173 Proxy)"| Nginx
+
+    %% 3. Dispatch & Task Routing
+    Backend -->|"1. Synchronous HTTP Call (16181)"| OSINT["🧩 OSINT Microservice"]
+    Backend -->|"2. Produce Scan Tasks"| MQ(("⚡ RabbitMQ 3 (Light/Heavy/Threat Queues)"))
+
+    %% 4. Celery Worker Scan Cluster
+    subgraph WorkerCluster ["⚙️ Celery Worker Scan & Scheduling Cluster"]
+        MQ -->|"Light Queue arltask_light"| W_Light["⚡ Light Worker (Space Recon / Single Asset / WIH / Sync)"]
+        MQ -->|"Heavy Queue arltask, arltask_heavy"| W_Heavy["🔥 Heavy Worker (Full Scan / Risk Cruise / Nuclei / PoC)"]
+        MQ -->|"Threat Queue arlgithub"| W_Git["🛡️ Threat Intel Worker (CVE / Code Leaks)"]
+
+        Scheduler["⏰ Scheduling Engine (Scheduler & Beat)"] -.->|"Periodic Triggers"| MQ
+        W_Heavy -->|"HTTP Screenshot Render (3000)"| Puppeteer["🧩 Puppeteer Microservice (Headless / Auto-restart)"]
+    end
+
+    %% 5. Unified Data Persistence Layer
+    Backend <-->|"Queries / State CRUD"| DB[("🗄️ MongoDB 7.0 (Compound Index Collections)")]
+    OSINT -->|"Async Direct Write"| DB
+    W_Light -->|"safe_insert_asset_many Bulk Write"| DB
+    W_Heavy -->|"bulk_write Batch Write"| DB
+    W_Git -->|"Atomic upsert Write"| DB
+
+    Autoheal["🛡️ Autoheal Watchdog Probe"] -.->|"docker.sock Probing & Auto-restart"| WorkerCluster
+
+    classDef default fill:#fbfbfb,stroke:#e0e0e0,stroke-width:1px;
+    classDef core fill:#eef2ff,stroke:#6366f1,stroke-width:2px;
+    classDef ai fill:#f5f3ff,stroke:#8b5cf6,stroke-width:2px;
+    classDef db fill:#ecfdf5,stroke:#10b981,stroke-width:2px;
+    classDef micro fill:#fffbeb,stroke:#f59e0b,stroke-width:1px;
+
+    class Nginx,Backend,WorkerCluster,W_Light,W_Heavy,W_Git core;
+    class Agent,MCP_Stdio,MCP_Service ai;
+    class DB,MQ db;
+    class OSINT,Puppeteer,Autoheal,Scheduler micro;
+```
+
+### Architectural Highlights
+
+1. 🖥️ **Unified Gateway & Presentation (`Frontend / Nginx`)**: Built with **Vue 3.5 + Nginx**, exposing only port `5173` (HTTPS) externally with optional **Basic Auth protection**, unbuffered streaming reverse proxy (for MCP SSE and backup archive transfers), and a multilingual UI.
+2. ⚙️ **Core API & Async MCP Service (`Backend / arl-mcp`)**: Main business APIs run on **Python 3.13 + Gunicorn**; persistent MCP SSE connections are isolated in a dedicated **`arl-mcp` (`asyncio`) container** to prevent long-lived streams from exhausting Web worker threads.
+3. 🧩 **Dedicated Corporate Recon Service (`OSINT Service`)**: Handles Tianyancha and MIIT ICP lookups via direct HTTP calls from Backend (with a 5s timeout guard), isolated from Celery queues so long OSINT jobs do not stall regular scans.
+4. ⚡ **Multi-Queue Worker Cluster (`Celery Cluster`)**: Splits workloads across **light**, **heavy**, and **threat-intel** queues with subprocess recycling and packet-phase concurrency leases to control memory growth and network contention; standardized on **Nmap 7.95 Stable**.
+5. 🛡️ **Headless Browser Isolation & Watchdog (`Puppeteer / Autoheal`)**: Containerized headless screenshot service with request-count recycling; **Autoheal** periodically probes scan workers and automatically restarts unresponsive containers.
+6. 🗄️ **Batch Persistence (`MongoDB 7.0`)**: High-frequency writes use `safe_insert_asset_many` and `bulk_write` batch APIs with compound unique indexes and a 1GB WiredTiger cache cap to balance ingestion throughput with host memory stability.
 
 ---
 
 ## 📜 Changelog
 
-For detailed version history, feature additions, performance enhancements, and bug fixes, refer to ➔ [**CHANGELOG_en.md**](./CHANGELOG_en.md)
+For detailed release notes, new capabilities, and bug fix history, see ➔ [**CHANGELOG_en.md**](./CHANGELOG_en.md)
 
 ---
 
 ## 🤝 Acknowledgements
 
-ARL-Next stands on the shoulders of giants. Special thanks to the following projects and teams:
+ARL-Next benefits from the open-source security community. Special thanks to:
 
-* **Core Architecture**: Re-engineered from the open-source project [ARL (Asset Reconnaissance Lighthouse)](https://github.com/TophantTechnology/ARL), with architectural references from [Aabyss-Team/ARL](https://github.com/Aabyss-Team/ARL) and [adysec/ARL](https://github.com/adysec/ARL).
-* **Fingerprint Data**: Special appreciation to the **Weiling Security Team** (<img src="./img/weiling.jpg" width="18" height="18" align="absmiddle" /> WeChat Official Account) for providing the high-quality Web technology fingerprint repository.
-* **Functional Inspirations**: Corporate OSINT modules reference [ICP_Query](https://github.com/HG-ha/ICP_Query); threat intelligence tracking incorporates designs from [github-cve-monitor](https://github.com/yhy0/github-cve-monitor).
-
-ARL-Next remains dedicated to open-source collaboration, providing reliable tooling for offensive reconnaissance and defensive asset management.
+* **Open-Source Lineage**: Originally evolved from the open-source project [ARL (Asset Reconnaissance Lighthouse)](https://github.com/TophantTechnology/ARL), with community references from [Aabyss-Team/ARL](https://github.com/Aabyss-Team/ARL) and [adysec/ARL](https://github.com/adysec/ARL).
+* **Fingerprint Repository**: Thanks to the **Weiling Security Team** (<img src="./img/weiling.jpg" width="18" height="18" align="absmiddle" /> WeChat Official Account) for providing the Web technology fingerprint repository.
+* **Module References**: Corporate OSINT and threat monitoring modules drew inspiration from [ICP_Query](https://github.com/HG-ha/ICP_Query) and [github-cve-monitor](https://github.com/yhy0/github-cve-monitor).
 
 ---
 
 ## 💖 Sponsorship & Support
 
-Continuous development of ARL-Next is supported by our open-source community. Special thanks to our sponsors:
+Ongoing maintenance and development of ARL-Next are supported by the open-source community. Special thanks to our sponsors:
 
 <p align="center">
   <img src="./img/buymeacoffee.png" width="180" alt="Buy Me A Coffee" />
@@ -583,18 +578,18 @@ Continuous development of ARL-Next is supported by our open-source community. Sp
 
 ## 📄 License
 
-The ARL-Next project is licensed under the [GNU General Public License v3.0 (GPL-3.0)](./LICENSE).
+ARL-Next is licensed under the [GNU General Public License v3.0 (GPL-3.0)](./LICENSE).
 
-* 🆓 **Free & Open Source**: Permitted for enterprise deployment, security research, asset mapping, and penetration testing, with full rights to read, modify, and customize source code.
-* 🌐 **Copyleft & Share-Alike**: If you distribute modified versions or derivative works based on this project to third parties, you must release corresponding source code under the same GPL-3.0 license.
-* ⚖️ **Attribution & Disclaimer Retention**: All distributions of source code must retain original copyright notices, license text, and disclaimer terms.
+* 🆓 **Free & Open Source**: Permitted for enterprise deployment, security research, asset mapping, and penetration testing, with full rights to read, modify, and customize the source code.
+* 🌐 **Copyleft & Share-Alike**: If you distribute modified versions or derivative works based on this project to third parties, you must release the corresponding source code under the same GPL-3.0 license.
+* ⚖️ **Attribution & Disclaimer Retention**: All redistributions must retain original copyright notices, the license text, and disclaimer terms.
 
 ---
 
 ## 💬 Community & Feedback Channels
 
-- 🐛 **Issue Reporting & Feature Requests**: Submit feedback via [GitHub Issues](https://github.com/owl234/ARL-Next/issues); tracked and reviewed regularly.
-- 💡 **Discussions**: Engage in architecture and feature discussions via GitHub Issues and Discussions.
+- 🐛 **Issues & Feature Requests**: Submit reports and suggestions via [GitHub Issues](https://github.com/owl234/ARL-Next/issues).
+- 💡 **Discussions**: Join technical discussions on [GitHub Discussions](https://github.com/owl234/ARL-Next/discussions).
 - 📢 **Chinese Community Channels**: Connect via WeChat or QQ group for asset mapping discussions and release updates.
 
 <table align="center">

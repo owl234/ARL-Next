@@ -8,37 +8,36 @@
   # ARL-Next
   **现代化资产测绘与漏洞监控平台**
 
-  *Modern Attack Surface Reconnaissance & Asset Intelligence Platform*
+  *Modern Attack Surface Reconnaissance & Vulnerability Monitoring Platform*
 
-  <p><b>企业资产关联 · 异步解耦调度 · 原生 MCP 协议集成 · 容器化开箱部署</b></p>
+  <p><b>企业全景测绘 · 攻击面发现与漏洞探测 · 持续威胁监控 · 原生 AI (MCP) 协同</b></p>
 
   <p>
     <a href="https://github.com/owl234/ARL-Next/releases"><img src="https://img.shields.io/github/v/release/owl234/ARL-Next?style=flat-square&color=blue" alt="Release"></a>
     <a href="https://github.com/owl234/ARL-Next/stargazers"><img src="https://img.shields.io/github/stars/owl234/ARL-Next?style=flat-square&color=gold" alt="Stars"></a>
-    <a href="https://github.com/owl234/ARL-Next/network/members"><img src="https://img.shields.io/github/forks/owl234/ARL-Next?style=flat-square" alt="Forks"></a>
+    <a href="https://github.com/owl234/ARL-Next/network/members"><img src="https://img.shields.io/github/forks/owl234/ARL-Next?style=flat-square&color=teal" alt="Forks"></a>
     <a href="./LICENSE"><img src="https://img.shields.io/badge/License-GPL%20v3-blue?style=flat-square" alt="License"></a>
   </p>
 
   <p>
     <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
     <img src="https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
-    <img src="https://img.shields.io/badge/Nmap-7.95%20Stable-blue?style=flat-square" alt="Nmap">
-    <img src="https://img.shields.io/badge/MongoDB-7.0-47A248?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB">
     <img src="https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white" alt="Vue">
+    <img src="https://img.shields.io/badge/MongoDB-7.0-47A248?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB">
     <img src="https://img.shields.io/badge/MCP-Native-purple?style=flat-square" alt="MCP">
+    <img src="https://img.shields.io/badge/i18n-%E4%B8%AD%E6%96%87%20%7C%20EN%20%7C%20RU-0EA5E9?style=flat-square" alt="i18n">
   </p>
 
   <p>
     <a href="./docs/QUICKSTART.md"><b>🚀 快速入门（5 分钟）</b></a> •
-    <a href="#quick-deploy"><b>⚡ 快速部署指南</b></a> •
-    <a href="#comparison"><b>💡 架构演进对比</b></a> •
-    <a href="#core-features"><b>✨ 核心特性</b></a> •
-    <a href="./docs/API_GUIDE.md"><b>🔌 API对接指南</b></a> •
-    <a href="./mcp-server/README.md"><b>🤖 MCP配置指南</b></a> •
-    <a href="./docs/MCP_PENTEST_TEST_CASES.md"><b>🎯 MCP实战用例</b></a> •
+    <a href="#scenarios"><b>🎯 适用场景</b></a> •
+    <a href="#core-features"><b>✨ 核心能力</b></a> •
+    <a href="#preview"><b>📸 界面预览</b></a> •
+    <a href="#quick-deploy"><b>⚡ 快速部署</b></a> •
+    <a href="#integration"><b>🤖 MCP 与 API</b></a> •
+    <a href="#architecture"><b>🏗️ 系统架构</b></a> •
     <a href="./CHANGELOG.md"><b>📜 更新日志</b></a> •
-    <a href="https://github.com/owl234/ARL-Next/discussions"><b>💬 讨论交流</b></a> •
-    <a href="./LICENSE"><b>📄 开源协议</b></a>
+    <a href="https://github.com/owl234/ARL-Next/discussions"><b>💬 讨论交流</b></a>
   </p>
 </div>
 
@@ -46,96 +45,104 @@
 
 ---
 
-## 💡 什么是 ARL-Next？
+## <span id="scenarios"></span>💡 ARL-Next 是什么？适合谁用？
 
-> **ARL-Next** 是基于经典开源项目 ARL (资产侦察灯塔) 进行架构重构与持续演进的资产测绘平台。
-> 针对大规模扫描场景下的任务队列阻塞、长时间运行内存增长以及历史依赖过时等工程瓶颈，系统实施了微服务拆分与异步任务解耦，全面升级现代运行时环境与测绘工具链，并集成了 **Model Context Protocol (MCP)** 标准协议，支持自动化资产透视与 AI 协同分析。
+> **ARL-Next** 是一款开源、自托管的**攻击面测绘与漏洞监控平台**，面向企业安全团队、SRC 研究人员与授权渗透测试人员。  
+> 平台打通了**企业关联资产发现 → 网络暴露面测绘与漏洞探测 → 持续监控与风险告警 → AI Agent (MCP) 协同分析**的完整工作流，帮助你从企业名称、域名或 IP 出发，持续盘点、梳理并治理真实网络暴露面。
 
----
+### 🎯 典型适用场景
 
-### <span id="comparison"></span>💡 架构演进与技术方案基准对比
-
-| 评估维度 | ARL 原始架构与实现 | ARL-Next 重构方案 |
+| 适用场景 | 你面临的问题 | 在 ARL-Next 中的用法 |
 | :--- | :--- | :--- |
-| **并发与调度架构** | 任务执行共用单 Celery 队列，复杂任务高并发时易发生队列阻塞与假死 | **拆分 OSINT 与截图为独立微服务**，引入轻重分离队列与批量落库，显著收敛队列阻塞与并发瓶颈 |
-| **自动化协议集成** | 无标准化外部调度接口，仅支持 Web 控制台人工交互 | **支持原生 MCP Server 与可视化治理中心**，提供多维资产画像检索、细粒度 Scope 专用密钥、工具级开关与调用审计 |
-| **企业资产拓扑** | 无关联企业与全类型数字资产下钻链路 | **资产组深度融合**：支持企业股权关联与多类型 ICP 检索（网站 / APP / 小程序 / 快应用），构建多级集团拓扑与暴露面画像 |
-| **容器构建与部署** | 依赖陈旧且缺乏镜像加速，构建拉取易受外部网络波动影响 | **多阶段容器构建与阿里云国内镜像源预编译**，配套 Web / CLI 全量数据归档备份与迁移恢复能力 |
-| **底层技术栈基线** | Python 3.6 / Vue 2 / MongoDB 3.x / Nmap 7.70 | **Python 3.13 / Vue 3.5 / MongoDB 7.0 / Nmap 7.95 稳定版** 现代运行环境基线基准对齐 |
-| **敏感信息提取** | 基于外部 Go 二进制工具，跨平台存在依赖与编译维护成本 | **纯 Python 原生提取引擎**，支持 JS/HTML 流式提取及 WIH 相对接口候选静态识别与同源可达性探测 |
-| **Web 交互体验** | 大数据长列表无固定表头，分页状态未持久化，仅支持单一中文界面 | **中 / 英 / 俄三语国际化切换**、表头与操作栏 Sticky 悬浮吸附、分页状态本地持久化、三栏式字典管理器 |
-| **威胁情报协同** | 缺乏持续情报同步机制，时间戳处理不统一易产生冗余告警 | **CVE 与 GitHub 代码泄露监听**、基于数据库原子更新锁去重、严格时区归一化 |
+| **企业暴露面盘点与资产治理** | 集团与子公司资产分散、边界模糊，影子站点、APP 与小程序难以持续归口管理 | 通过企业名称或天眼查 / 工信部多源测绘自动关联网站、APP、小程序与快应用，沉淀为多级资产组并下钻 13 维资产画像 |
+| **授权渗透与 SRC 前期收集** | 手工串联子域、端口、指纹、JS 提取与漏洞扫描工具繁琐，结果分散且难以回溯 | 统一调度子域爆破、自适应端口扫描、8,800+ Web 指纹、WIH JS 接口提取与 Nuclei / PoC 探测，结果集中检索与导出 |
+| **长期资产变更与泄露监控** | 新上线服务、新披露 CVE 及 GitHub 代码凭据泄露难以及时发现 | 配置计划任务与资产组增量监控，结合 CVE 情报、GitHub 泄露研判工作台与 Nuclei 分级 Webhook 推送，及时感知暴露变化 |
+| **AI Agent 自动化安全协同** | 安全分析师在多页面间反复查库、拼凑暴露面报告耗时耗力 | 通过内置 **MCP 中心** 对接 Cursor、Claude Desktop 等客户端，用自然语言查资产画像、企业生态或受控调度扫描任务 |
 
 ---
 
-### <span id="core-features"></span>✨ 核心特性矩阵
+## <span id="core-features"></span>✨ 核心能力闭环
 
-* 🤖 **AI Agent 原生集成与 MCP 治理中心 (MCP 2.0)**：遵循 Model Context Protocol (2024-11-05) 标准，提供 **远程原生 SSE 直连**（Cursor / Claude Desktop 粘贴即用）与 **本地 Stdio 桥接**（自签证书 / 内网专网开箱即通）双模支持；内置可视化 **MCP 治理中心**（支持签发细粒度 Scope 专用密钥、工具级启用开关、速率配额与调用审计日志），覆盖五维资产画像、企业生态画像、条件检索、状态追踪及受控扫描调度。（👉 [MCP 配置手册](./mcp-server/README.md) · [MCP 渗透测试实战用例库](./docs/MCP_PENTEST_TEST_CASES.md)）
-* ⚙️ **异步解耦并发调度**：微服务拆分与独立任务队列分流，结合批量数据落库优化，保障高吞吐扫描平稳运行。
-* 🌐 **多级资产组与深度融合**：企业资产查询深度融入资产组管理架构，支持集团多级架构管理、多类型 ICP（网站 / APP / 小程序 / 快应用）与生态资产自动化关联及网络暴露面统一测绘。
-* 🔍 **现代资产测绘与 WIH 接口探测**：基于 Nmap 7.95 稳定版；内置原生 Python 敏感信息流式提取引擎，支持从站点 HTML 与同源 JS 中静态识别相对 API 接口候选并执行同源 GET 可达性验证。
-* 🛡️ **漏洞与代码泄露监控**：持续同步权威 CVE 漏洞情报，监听 GitHub 关联代码与凭据泄露，支持基于原子更新的去重机制。
-* 💾 **全量数据备份与在线平滑运维**：支持通过 Web 控制台或 CLI 工具一键打包导出/覆盖恢复全库 MongoDB 集合、站点截图、自定义字典与 PoC 插件（内置 SHA256 完整性校验与 Worker 消费安全暂停）；集成容器健康探活、就绪轮询与后台在线热更新。
-* 🌍 **多语言国际化与现代交互体验**：内置简体中文、English、Русский 三语实时切换，结合全局设置项搜索、表头悬浮吸附与三栏式字典工作台。
-* 📦 **预构建镜像加速**：提供阿里云国内镜像源预编译构建制品，规避跨国网络波动导致的镜像拉取与依赖安装失败。
+### 1. 企业全景测绘与多级资产组治理
+* **双模式灵活建组**：支持手工录入（混填 IP / CIDR / 域名）零门槛建组，也支持联动天眼查与工信部备案多源数据开展企业全景测绘，覆盖**网站、APP、小程序、快应用**等生态资产，提供自动建组、批量停止、断点续跑与原位详情补全。
+* **多级集团与全景资产画像**：支持集团与下属资产组的层级管理（支持解散与划转）；在资产组详情提供 **13 维资产画像抽屉**，在「资产搜索」页提供 **12 个资产页签维度**（不含 Nuclei 结果）的跨任务条件检索。
+
+### 2. 攻击面发现与多维漏洞探测
+* **完整侦察流水线**：覆盖子域收集与字典爆破、Nmap 7.95 端口扫描（支持自适应存活探测策略）、**8,800+ Web 组件指纹库**与任务/策略级可选站点无头截图。
+* **WIH 敏感信息与接口挖掘**：内置纯 Python 流式提取引擎，可从站点 HTML 与同源 JS 中提取敏感特征、静态识别相对 API 路由候选并执行受控的同源 GET 可达性验证。
+* **Nuclei 与 PoC 插件协同**：集成 Nuclei 社区与自建多协议模板（支持 `web` / `network` / `dns` 分桶、纯自建模板策略与在线单目标即时调试），并内置 Python PoC 插件池（PoC 验证、弱口令检测、服务识别），支持策略模板复用。
+
+### 3. 持续监控、威胁情报与分级告警
+* **计划扫描与资产持续监控**：在「计划与调度」中心区分管理周期性扫描计划任务与资产组增量监控，自动捕获新增域名、站点与服务变化。
+* **CVE 情报与 GitHub 泄露研判**：持续同步权威 CVE 漏洞情报并监听 GitHub 敏感代码与凭据泄露；内置研判工作台支持状态流转、噪音仓库屏蔽、正则代码阅读器与 CSV 导出。
+* **多渠道回调与 Nuclei 独立推送**：支持任务汇总告警回调与 Nuclei 漏洞独立推送通道，可按严重级别灵活过滤告警噪音。
+
+### 4. 原生 AI 协同与 MCP 服务治理
+* **双模接入主流 AI 客户端**：遵循 Model Context Protocol (2024-11-05) 规范，提供**远程 SSE 直连**与**本地 Stdio 桥接**两种接入方式，适配 Cursor、Claude Desktop、Claude Code、Windsurf、Antigravity 等客户端。
+* **可视化权限与审计治理**：在「MCP 中心」按需签发细粒度 Scope 专用密钥（`asset:read` 只读情报与 `task:dispatch` 调度权限分离），配置单工具开关、查询条数与速率配额，并记录完整调用审计日志。
+
+### 5. 多协议代理、在线运维与多语言体验
+* **统一代理池与三域分流**：支持 `HTTP` / `HTTPS` / `SOCKS5` 代理节点池管理，按 `scan`（扫描探针）、`osint`（企业测绘）、`intel`（威胁情报与模板同步）三域配置独立出口策略、内网与自定义 `NO_PROXY` 旁路白名单，并支持在线探针测活。
+* **五域系统设置与弹性运维**：按「情报凭据 / 代理与红线 / 扫描与武器库 / 告警与回调 / 系统运维」五域分区并支持 `/` 快捷检索；内置禁扫红线（IP / 域名）、三栏式字典武器库、Worker 进程与单任务发包并发动态热调、Web 控制台在线升级及全量数据备份与迁移恢复。
+* **三语国际化与现代交互**：内置**简体中文、English、Русский**三语切换，支持明暗主题、自定义侧栏顺序、表头与操作栏悬浮吸附及分页状态本地保存。
 
 ---
 
-## 📸 界面预览
+## <span id="preview"></span>📸 界面预览
 
-* **全局仪表盘 (Dashboard)**：实时呈现资产暴露面态势、今日侦察动向、漏洞风险矩阵与威胁情报；集成系统资源占用（CPU/内存/磁盘）与扫描调度队列监控、风险演进趋势分析、全景安全调度日志流、Web 组件指纹 TOP 5 分布及实时侦察流水线追踪。
-  
+* **全局仪表盘 (Dashboard)**：集中呈现资产暴露面态势、近期侦察动向、漏洞风险分布与威胁情报，集成宿主机资源占用（CPU / 内存 / 磁盘）、扫描调度队列监控、Web 指纹 TOP 5 分布与侦察流水线状态。
+
   <p align="center">
     <img src="./img/dashboard.png" alt="ARL-Next 全局仪表盘" width="850">
   </p>
 
-<details open>
-<summary><b>🖼️ 点击收起 / 展开更多核心业务界面</b></summary>
+<details>
+<summary><b>🖼️ 点击展开查看更多核心业务界面（资产组与画像 · 任务调度 · 威胁情报 · MCP 中心 · 系统设置，共 9 张）</b></summary>
 
 <br/>
 
-* **多级资产组与全景资产画像**：原企业资产查询现已深度整合至资产组统一架构。支持集团多级组织架构管理、企业生态资产关联分析 (OSINT)、网络暴露面测绘 (ASM) 与全景资产画像下钻（画像抽屉聚合 13 个维度；「资产搜索」页则为 12 个页签维度，不含 Nuclei 结果）。
-  
+* **多级资产组与全景资产画像**：统一管理集团多级组织架构，联动企业生态资产关联分析 (OSINT)、网络暴露面测绘 (ASM) 与 13 维资产画像抽屉下钻。
+
   <p align="center">
     <img src="./img/asset-group-overview.png" alt="集团多级资产组与覆盖度" width="850">
   </p>
-  
+
   <p align="center">
     <img src="./img/asset-group-osint.png" alt="企业生态资产 (OSINT) 维度" width="850">
   </p>
-  
+
   <p align="center">
     <img src="./img/asset-group-asm.png" alt="网络暴露面 (ASM) 测绘" width="850">
   </p>
-  
+
   <p align="center">
     <img src="./img/asset-group-profile.png" alt="13 维全景资产画像抽屉" width="850">
   </p>
 
-* **任务下发与策略调度**：深度联动 Nuclei、基于 Python 原生引擎的多类型插件池（PoC 验证 / 弱口令爆破 / 服务识别等）及 8800+ 条 Web 指纹库，支持任务下发、状态轮转与全流程追踪。
-  
+* **任务下发与全生命周期管理**：提供快捷预设（快速侦查 / 常规探测 / 深度全量）与自定义策略选择，联动 Nuclei、Python 插件池与 8,800+ Web 指纹库，全程追踪任务状态与增量同步结果。
+
   <p align="center">
     <img src="./img/task-new.png" alt="任务新建与策略选择" width="800">
   </p>
-  
+
   <p align="center">
     <img src="./img/task-management1.png" alt="任务全生命周期管理" width="800">
   </p>
 
-* **威胁情报与代码泄露雷达**：实时追踪全球最新 CVE 漏洞，自动化监听 GitHub 敏感代码与凭证泄露。
-  
+* **威胁情报与代码泄露雷达**：追踪最新 CVE 漏洞情报，自动化监听并研判 GitHub 关联代码与凭据泄露。
+
   <p align="center">
     <img src="./img/threat-intel-radar.png" alt="威胁情报雷达" width="800">
   </p>
 
-* **MCP 服务治理中心**：可视化管理 AI Agent 接入配置与安全策略，支持签发细粒度 Scope 专用密钥（`asset:read` 只读情报与 `task:dispatch` 扫描调度分级授权）、工具级启用开关、检索条数与调用频率配额及调用监控。
-  
+* **MCP 服务治理中心**：可视化管理 AI Agent 接入配置与安全策略，支持签发细粒度 Scope 专用密钥、配置单工具开关、速率与条数配额及查看调用审计流水。
+
   <p align="center">
     <img src="./img/mcp-center.png" alt="MCP 服务治理中心" width="800">
   </p>
 
-* **系统设置与字典武器库**：按情报凭据、代理与红线、扫描与武器库、告警与回调、系统运维五域分区并支持 `/` 快捷检索；内置三栏式字典武器库（跨分类检索、分级预览、导出与在线维护）、Worker 并发扩缩容及告警回调通道配置。
-  
+* **系统设置与字典武器库**：按情报凭据、代理与红线、扫描与武器库、告警与回调、系统运维五域分区并支持 `/` 快捷检索；内置三栏式字典武器库（跨分类检索、分级预览、导出与在线维护）、并发扩缩容及告警回调通道配置。
+
   <p align="center">
     <img src="./img/system-settings.png" alt="系统设置与字典武器库" width="800">
   </p>
@@ -144,92 +151,19 @@
 
 ---
 
-## 🏗️ 架构设计
+## <span id="quick-deploy"></span>🚀 快速部署与访问
 
-ARL-Next 采用前后端解耦、异步分布式任务队列与轻量微服务集群架构。整体数据流与模块交互如下：
+**环境要求**：Linux 服务器（Ubuntu / Debian / CentOS / RHEL / 统信等，需 root 权限），推荐 **4 核 4G 及以上**，并放行 **5173** TCP 端口。  
+**部署说明**：提供预构建阿里云国内镜像源，`start-prod.sh` 内置环境探测，会自动配置 Swap、补齐 Docker / Compose 并执行就绪探活检查。
 
-```mermaid
-graph TD
-    %% 1. 接入层
-    User["👨‍💻 安全分析师 (浏览器)"] -->|"HTTPS (5173，Basic Auth 可选)"| Nginx["🖥️ Frontend (Nginx + Vue 3.5)"]
-    Agent["🤖 AI Agent (Claude / Cursor)"] -->|"轨道 1: 远程直连 (SSE /mcp/sse)"| Nginx
-    Agent -.->|"轨道 2: 本地脚本 (Stdio 桥接)"| MCP_Stdio["🤖 本地 Stdio 脚本 (arl_mcp.py)"]
+> [!TIP]
+> 首次上手建议配合 [**🚀 5 分钟快速入门指南 (QUICKSTART.md)**](./docs/QUICKSTART.md)，按步骤走通「部署登录 → 建组 → 下发首个任务 → 查看结果」最小闭环。
 
-    %% 2. API 网关与微服务层
-    Nginx -->|"REST API 反代 (5000)"| Backend["⚙️ Backend API (Gunicorn / Python 3.13)"]
-    Nginx -->|"SSE 长连接流式反代 (5005)"| MCP_Service["🚀 arl-mcp 异步微服务 (Python asyncio)"]
-    MCP_Stdio -->|"HTTPS / API Token (5173 反代)"| Nginx
+### 部署方式
 
-    %% 3. 调度与任务分流 (双轨解耦)
-    Backend -->|"1. 同步 HTTP 直调 (16181)"| OSINT["🧩 OSINT 微服务"]
-    Backend -->|"2. 生产扫描任务"| MQ(("⚡ RabbitMQ 3 (轻重/GitHub 多队列)"))
+#### 方式一：国内镜像快速部署（推荐）
 
-    %% 4. Celery Worker 扫描计算集群
-    subgraph WorkerCluster ["⚙️ Celery Worker 扫描与调度集群"]
-        MQ -->|"轻量队列 arltask_light"| W_Light["⚡ 轻任务 Worker (空间测绘/单点更新/WIH/同步)"]
-        MQ -->|"重载队列 arltask, arltask_heavy"| W_Heavy["🔥 重任务 Worker (常规扫描/风险巡航/Nuclei/PoC)"]
-        MQ -->|"威胁队列 arlgithub"| W_Git["🛡️ 威胁情报 Worker (CVE/代码泄露)"]
-        
-        Scheduler["⏰ 监控调度引擎 (Scheduler & Beat)"] -.->|"周期触发"| MQ
-        W_Heavy -->|"HTTP 截图渲染 (3000)"| Puppeteer["🧩 Puppeteer 微服务 (无头截图/异常自动重启)"]
-    end
-
-    %% 5. 数据统一落库 (从上往下自然汇聚分流)
-    Backend <-->|"大盘查询 / 状态读写"| DB[("🗄️ MongoDB 7.0 (联合索引大宽表)")]
-    OSINT -->|"异步结果直接入库"| DB
-    W_Light -->|"safe_insert_asset_many 批量写入"| DB
-    W_Heavy -->|"bulk_write 批量写入"| DB
-    W_Git -->|"原子 upsert 写入"| DB
-
-    Autoheal["🛡️ Autoheal 守护探针"] -.->|"docker.sock 探活与异常重启"| WorkerCluster
-
-    classDef default fill:#fbfbfb,stroke:#e0e0e0,stroke-width:1px;
-    classDef core fill:#eef2ff,stroke:#6366f1,stroke-width:2px;
-    classDef ai fill:#f5f3ff,stroke:#8b5cf6,stroke-width:2px;
-    classDef db fill:#ecfdf5,stroke:#10b981,stroke-width:2px;
-    classDef micro fill:#fffbeb,stroke:#f59e0b,stroke-width:1px;
-    
-    class Nginx,Backend,WorkerCluster,W_Light,W_Heavy,W_Git core;
-    class Agent,MCP_Stdio,MCP_Service ai;
-    class DB,MQ db;
-    class OSINT,Puppeteer,Autoheal,Scheduler micro;
-```
-
-### 核心架构要点：
-
-1. 🖥️ **展示与网关 (Frontend / Nginx)**：基于 **Vue 3.5 + Nginx**，支持核心数据表格与操作栏 **Sticky 悬浮吸附**；提供 **Basic Auth 前置网关防护**（默认关闭，可在顶部导航栏开启）。
-2. ⚙️ **业务与协议接入 (Backend / MCP)**：主业务基于 **Python 3.13 + Gunicorn**；配备独立的 **`arl-mcp` 异步微服务容器**，原生承载 MCP SSE 长连接与标准协议接口，实现多维资产画像与受控调度。
-3. 🧩 **OSINT 独立微服务**：专职企业资产与 ICP 情报采集，由 Backend 通过 HTTP 直接调用（含 5s 超时保护），**独立于 Celery 扫描队列以规避长耗时任务阻塞**。
-4. ⚡ **多队列 Worker 集群**：划分**轻量/重载/威胁情报**独立队列；通过 Worker 子进程生命周期轮转机制控制内存增长；**测绘执行引擎统一至 Nmap 7.95 稳定版**。
-5. 🛡️ **微服务与守护探针 (Puppeteer / Autoheal)**：无头截图容器化隔离并支持请求计数轮转；**Autoheal 守护进程定时探活扫描 Worker 并自动重启异常容器**；纯 Python 引擎高效提取敏感信息。
-6. 🗄️ **高吞吐持久层与并发优化 (MongoDB 7.0)**：高频数据写入采用 `bulk_write` / `safe_insert_asset_many` 批量接口，核心集合覆盖联合唯一索引并设 1GB 内存池保护；解除不合理的内存硬限制，保障高吞吐扫描平稳性。
-
----
-
-## <span id="quick-deploy"></span>🚀 部署指南
-
-### 生产部署 (推荐)
-
-**适用环境**：公网云服务器 (Ubuntu / Debian / CentOS / 统信等)、企业内网服务器。  
-**推荐配置**：4 核 4G 及以上（保证多任务并发与大资产巡航稳定性）。  
-**预估耗时**：自带 Docker 环境通常在数分钟内完成；裸机需额外安装 Docker 与配置 Swap，耗时视宿主机与网络状况而定。
-
-**核心机制与优势**：
-* ⚡ **国内镜像加速**：直连阿里云国内镜像私库，规避跨国网络超时与拉取阻断。
-* 📦 **开箱即用**：预构建交付，无需在宿主机配置复杂编译链与工具库。
-* 🛡️ **双层安全防护**：内置 SSL 证书，**Basic Auth 前置网关防护默认关闭**（可在顶部导航栏开启），核心组件默认私有网络隔离。
-* 🔄 **后台平滑热更**：可在管理后台触发在线升级流程，自动同步编排脚本与最新镜像。
-* 🩺 **服务健康探活**：内置 API 就绪轮询机制与内存防护配置，服务就绪再放行，保障启动稳定性。
-
----
-
-#### 🚀 部署方式选择
-
-**绝大多数场景直接执行下方「方式一」即可**，无需预先判断系统类型或网络环境——脚本会自动探测系统、安装缺失依赖并调优内核。
-
-##### 方式一：国内镜像快速部署（推荐）
-
-在服务器终端（需 root 权限）粘贴执行下方命令。命令从阿里云国内镜像提取部署编排，`start-prod.sh` 会自动配置 Swap、安装/补齐 Docker 与 Compose 插件并拉起服务：
+绝大多数场景在服务器终端直接执行下方命令即可完成拉取与启动：
 
 ```bash
 mkdir -p ~/ARL-Next && cd ~/ARL-Next && \
@@ -249,14 +183,14 @@ chmod +x start-prod.sh && bash start-prod.sh
 ```
 
 > [!TIP]
-> - **单行执行提示**：部分云厂商控制台（如网页 Web SSH、VNC、堡垒机）在多行粘贴时可能因吞换行或网络延迟导致指令乱序报错（如 `No such container: arl-temp`）。若遇到此类报错，请点击展开下方「单行逐步执行版」，逐行复制执行。
-> - 若宿主机尚未安装 Docker，请先执行下方「方式二」的第一步补齐基础工具，再回来执行本命令。
+> - **网页终端粘贴提示**：部分云厂商 Web SSH、VNC 或堡垒机多行粘贴时可能吞掉换行导致报错（如 `No such container: arl-temp`），请展开下方「单行逐步执行版」逐行执行。
+> - **裸机未装 Docker**：请先展开下方「方式二」执行第一步补齐基础工具，再回到此处运行。
 
 <details>
 <summary><b>🛠️ 若多行粘贴报错，点击展开【单行逐步执行版】</b></summary>
 <br/>
 
-在终端中逐行执行以下命令（每行独立执行，无反斜杠连缀）：
+在终端中逐行复制执行（无反斜杠连缀）：
 
 ```bash
 # 1. 创建并进入工作目录
@@ -285,12 +219,10 @@ chmod +x start-prod.sh && bash start-prod.sh
 </details>
 
 <details>
-<summary><b>方式二：完整命令部署（按系统类型手动执行）</b></summary>
+<summary><b>方式二：裸机分步安装基础工具后部署（按系统类型）</b></summary>
 <br/>
 
-下面两条命令的差异**仅在第一段的基础工具安装方式**（`apt-get` 与 `yum` 二选一），第二段完全一致。
-
-**第一步：安装基础工具并创建目录**
+**第一步：安装基础工具（按系统二选一）**
 
 - Ubuntu / Debian / 统信：
   ```bash
@@ -326,7 +258,7 @@ chmod +x start-prod.sh && bash start-prod.sh
 </details>
 
 <details>
-<summary><b>方式三：GitHub 源码克隆部署（海外服务器 / 需要改源码）</b></summary>
+<summary><b>方式三：GitHub 源码克隆部署（需要保留仓库 / 二次开发）</b></summary>
 <br/>
 
 ```bash
@@ -336,27 +268,31 @@ bash start-prod.sh
 ```
 
 > [!TIP]
-> `start-prod.sh` 内置环境探针，裸机运行亦会自动安装 Docker 并优化内核配置。
+> `start-prod.sh` 内置环境探针，裸机运行亦会自动安装 Docker 并优化内核配置；启动时默认仍拉取预构建生产镜像（而非在宿主机本地编译）。
 
 </details>
 
----
+### 🔑 访问与初始凭据
 
-#### 🔑 访问与初始凭据
-
-部署完成后，在浏览器中访问：`https://<你的服务器IP>:5173`（首次自签名证书请无视浏览器不安全提示）。
+部署完成后，在浏览器中访问：`https://<你的服务器IP>:5173`（首次访问自签名证书按浏览器提示继续前往即可）。
 
 | 验证层级 | 默认账号 | 默认密码 | 说明 |
 | :--- | :--- | :--- | :--- |
-| **第一层：Nginx Basic Auth 网关** | `admin` | `arl_next` | 前置防扫描器爆破（**默认关闭**，可在顶部导航栏安全开关处开启/关闭；修改密码需先关闭再重新开启） |
-| **第二层：ARL-Next 系统登录** | `admin` | 首次启动随机生成 | 既有账号密码保持不变；新密码至少 12 个字符 |
+| **第一层：Nginx Basic Auth 网关** | `admin` | `arl_next` | 前置防扫描器爆破（**默认关闭**，登录后可在顶部导航栏安全开关处开启或关闭；修改密码需先关闭再重新开启） |
+| **第二层：ARL-Next 系统登录** | `admin` | 首次启动随机生成 | 既有账号密码保持不变；新密码要求至少 12 个字符 |
 
-首次部署后，在受信宿主机执行 `docker exec arl-web-prod cat /tmp/arl_initial_admin_password` 读取初始密码；该文件权限为 `0600`，密码不会输出到启动日志。也可在首次启动前通过 `ARL_ADMIN_PASSWORD` 设置至少 12 个字符的初始密码（注意 `sudo` 默认会重置环境变量，需使用 `sudo ARL_ADMIN_PASSWORD=... bash start-prod.sh`、`sudo -E bash start-prod.sh`，或在部署目录 `.env` 文件中写入 `ARL_ADMIN_PASSWORD=...`）。修改密码并确认登录成功后，建议删除容器内的初始密码文件（`docker exec arl-web-prod rm -f /tmp/arl_initial_admin_password`）。若未及时读取且容器已被重建，请按下方常见问题 Q2 执行 `--reset` 重新生成；升级不会重置已有账号，仍在使用旧默认密码的部署应主动修改。
+在受信宿主机执行以下命令读取首次生成的管理员初始密码（文件权限为 `0600`，密码不会打印到启动日志）：
 
-登录会话有效期为 24 小时。长期 API/MCP 集成请配置独立的 `API_KEY` 并通过请求头发送，详见 [鉴权与安全修复约定](docs/API_GUIDE.md#2-身份鉴权与安全机制)。
+```bash
+docker exec arl-web-prod cat /tmp/arl_initial_admin_password
+```
+
+也可在首次启动前通过环境变量 `ARL_ADMIN_PASSWORD` 预设至少 12 个字符的密码（注意 `sudo` 默认会清空环境变量，请使用 `sudo ARL_ADMIN_PASSWORD=... bash start-prod.sh`、`sudo -E bash start-prod.sh`，或在部署目录 `.env` 文件中写入 `ARL_ADMIN_PASSWORD=...`）。修改密码并确认登录成功后，建议删除容器内的初始密码文件（`docker exec arl-web-prod rm -f /tmp/arl_initial_admin_password`）。若未读取而容器已被重建，可按下方常见问题 Q2 执行 `--reset` 重新生成；升级不会重置已有账号。
+
+登录会话有效期为 24 小时。长期 API 或 MCP 集成请使用独立的 `API_KEY` / MCP 专用密钥，详见 [身份鉴权与安全机制](docs/API_GUIDE.md#2-身份鉴权与安全机制)。
 
 > [!IMPORTANT]
-> **必须完成**：请确保云服务器控制台安全组及系统本地防火墙已放行 **5173** TCP 端口，否则将无法访问。
+> **端口放行**：请确保云服务器控制台安全组及宿主机防火墙均已放行 **5173** TCP 端口：
 > ```bash
 > # Ubuntu / Debian
 > ufw allow 5173/tcp
@@ -365,31 +301,44 @@ bash start-prod.sh
 > ```
 
 > [!TIP]
-> **可选优化**（不影响基本可用性）：
-> - **替换商业证书**：将真实 SSL 证书重命名为 `arl.crt` 和 `arl.key` 放至 `ssl-certs/` 目录，再次执行 `bash start-prod.sh`。
-> - **开启 Basic Auth 防护**：登录后于顶部导航栏安全开关开启（默认关闭）。
+> **可选配置**（不影响基本可用性）：
+> - **替换商业证书**：将证书文件重命名为 `arl.crt` 和 `arl.key` 放入 `ssl-certs/` 目录，再次执行 `bash start-prod.sh` 即可切换。
+> - **开启 Basic Auth 前置防护**：登录控制台后在顶部导航栏安全开关处开启。
 
 ---
 
+## <span id="integration"></span>🤖 AI Agent (MCP) 与 API 集成
+
+ARL-Next 同时面向 **AI Agent 协同** 与 **传统自动化编排** 开放标准化接入能力：
+
+* **🤖 AI Agent 接入（MCP 2.0）**：登录控制台进入左侧菜单 **「MCP 中心」**，可按需签发最小权限密钥并直接复制/导出客户端配置（支持远程 SSE `/mcp/sse` 与本地 Stdio 桥接）。内置 6 项标准工具，其中 4 项只读情报工具默认开放（`get_asset_profile`、`get_enterprise_profile`、`search_assets`、`get_task_status`），2 项扫描调度工具默认关闭并受 Scope 控制（`create_scan_task`、`stop_scan_task`）。
+  * 📘 配置说明：[MCP 配置手册 (`mcp-server/README.md`)](./mcp-server/README.md)
+  * 🎯 实战提示词：[MCP 渗透测试实战用例库 (`docs/MCP_PENTEST_TEST_CASES.md`)](./docs/MCP_PENTEST_TEST_CASES.md)
+* **🔌 RESTful API 与自动化对接**：适用于自动化脚本、CI/CD 流水线与安全编排 (SOAR) 系统集成。
+  * 📖 在线交互文档：部署完成后访问 `https://<你的服务器IP>:5173/api/doc` 查看 OpenAPI / Swagger 规范并在线调试。
+  * 📘 调用规范与约束：鉴权方式、状态流转与接口约定请参阅 [**API 调用与二次开发约定指南 (`docs/API_GUIDE.md`)**](./docs/API_GUIDE.md)。
+
+---
+
+## 🛠️ 升级、备份与常见问题
+
 ### 🔄 生产环境版本升级
 
-ARL-Next 提供两种升级路径：**Web 管理后台在线更新**（推荐，无需登录终端）与 **终端标准手动升级**。
+#### 方案一：Web 控制台在线更新（推荐）
 
-#### 方案一：Web 管理后台在线更新（推荐）
-
-登录 ARL-Next 平台 ➔ 进入 **「系统设置」** ➔ **「系统运维」** ➔ **「版本与系统更新」** 子页 ➔ 点击 **「一键系统更新」**。<br/>
-宿主机更新守护进程将自动拉取最新构建、同步最新编排脚本与版本文件，并在后台完成容器热重启与服务就绪检查，通常无需登录终端。
+登录 ARL-Next ➔ 进入 **「系统设置」** ➔ **「系统运维」** ➔ **「版本与系统更新」** ➔ 点击 **「一键系统更新」**。<br/>
+宿主机更新守护进程会自动拉取最新镜像、同步编排脚本与版本文件，并在后台完成容器重启与就绪检查，通常无需登录终端。
 
 > [!WARNING]
-> 更新过程会重启后台 Worker 容器，**正在运行的扫描任务将被中断**（重启后标记为中断状态）。请在任务空闲时段执行。
+> 更新过程会重启后台 Worker 容器，**正在运行的扫描任务将被中断**（重启后标记为「异常失败」）。建议在任务空闲时段执行。
 
 <details>
 <summary><b>方案二：终端标准手动升级</b></summary>
 <br/>
 
-在服务器终端进入 ARL-Next 部署目录，根据初次安装方式执行对应命令。
+在服务器终端进入部署目录，按初次部署方式执行对应命令：
 
-- **方式一 / 方式二部署的用户**（免 Git，从镜像同步编排）：
+- **国内镜像部署用户（方式一 / 方式二）**：
   ```bash
   cd ~/ARL-Next && \
   docker pull crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-web:latest && \
@@ -397,7 +346,7 @@ ARL-Next 提供两种升级路径：**Web 管理后台在线更新**（推荐，
   sudo bash start-prod.sh
   ```
 
-- **方式三部署的用户**（Git 源码克隆）：
+- **Git 源码部署用户（方式三）**：
   ```bash
   cd ~/ARL-Next && git pull && sudo bash start-prod.sh
   ```
@@ -405,24 +354,21 @@ ARL-Next 提供两种升级路径：**Web 管理后台在线更新**（推荐，
 </details>
 
 > [!TIP]
-> **升级保障机制**：
-> - **数据增量平滑迁移**：内置版本增量迁移逻辑，自动维护集合结构与联合唯一索引，降低升级冲突风险。
-> - **运行镜像备份标签**：升级前自动为当前运行的服务镜像（Web、Worker、Puppeteer、OSINT等）打上 `backup-stable` 标签，保障异常时可快速回滚。
-> - **镜像加速与就绪探针**：直连阿里云国内镜像仓库拉取构建制品，API 动态探活就绪后再行放行。
+> **升级保障**：升级流程内置数据库增量迁移与索引维护逻辑；拉取新镜像前会为当前运行镜像打上 `backup-stable` 回滚标签，并在容器启动后通过就绪探针验证 API 可用性。
 
 ---
 
 ### 💾 系统数据备份与迁移恢复
 
-支持在跨机器迁移、重大升级前对全库 MongoDB 集合、站点资产截图、自定义字典与 PoC 插件进行一键打包归档与 `--drop` 全量覆盖恢复：
+支持在跨机迁移或重大升级前，对全库 MongoDB 集合、站点截图（可选排除）、自定义字典与 PoC 插件进行打包归档（内置 SHA256 完整性校验）与 `--drop` 全量覆盖恢复：
 
-- **Web 控制台可视化操作**：进入 **「系统设置」 ➔ 「系统运维」 ➔ 「数据备份与恢复」**，支持在线创建备份（可选排除截图以压缩体积）、下载归档包、上传外部归档包及二次确认（输入 `RESTORE`）覆盖恢复。
-- **终端 CLI 运维工具**（宿主机执行会自动透传至容器）：
+- **Web 控制台操作**：进入 **「系统设置」 ➔ 「系统运维」 ➔ 「数据备份与恢复」**，可在线创建备份、下载或上传外部归档包，并通过二次输入 `RESTORE` 确认执行覆盖恢复。
+- **终端 CLI 工具**（宿主机执行会自动透传至容器）：
   ```bash
-  # 创建全量备份（或追加 --no-screenshots 创建轻量备份）
+  # 创建全量备份（追加 --no-screenshots 可排除截图以减小归档体积）
   python3 tools/arl_backup.py backup --note "升级前全量快照"
 
-  # 列出所有现存备份包及查看备份包详情
+  # 列出已有备份包或查看归档元数据
   python3 tools/arl_backup.py list
   python3 tools/arl_backup.py info <archive_name.tar.gz>
 
@@ -432,50 +378,41 @@ ARL-Next 提供两种升级路径：**Web 管理后台在线更新**（推荐，
 
 ---
 
-## 🔌 二次开发与 API 集成
+### ❓ 常见问题与排错 (FAQ)
 
-ARL-Next 提供标准化 RESTful API，支持外部自动化运维、CI/CD 流水线与安全编排 (SOAR) 系统对接。
-
-* 📖 **交互式文档与在线调试**：部署完成后可在浏览器中访问 `https://<你的服务器IP>:5173/api/doc` 查阅完整 OpenAPI / Swagger 规范并进行接口在线调用测试。
-* 📘 **调用规范与避坑指南**：关于 Token 鉴权机制、状态流转约束、任务停止/删除等关键 HTTP 特殊约定及数据命名空间隔离规范，请参阅 ➔ [**API 调用与二次开发约定指南 (API_GUIDE.md)**](./docs/API_GUIDE.md)。
-
----
-
-## ❓ 常见问题与运维排错 (FAQ)
-
-<details open>
+<details>
 <summary><b>Q1: 首次通过 HTTPS 访问时，浏览器提示“不安全 / 您的连接不是私密连接”？</b></summary>
 <br/>
 
-**A:** 系统首次启动时会自动签发本地自签名 SSL 证书。
-- 点击浏览器页面的 **“高级” ➔ “继续前往 (不安全)”** 即可正常访问（Chrome 浏览器亦可在页面任意空白处直接键盘盲打 `thisisunsafe` 跳过警告）。
-- **配置真实域名证书**：将您申请的证书重命名为 `arl.crt` 和 `arl.key` 放至 `ssl-certs/` 目录，执行 `bash start-prod.sh` 即可无缝切换。
+**A:** 系统首次启动会自动签发本地自签名 SSL 证书。
+- 点击浏览器页面 **“高级” ➔ “继续前往 (不安全)”** 即可访问（Chromium 系浏览器亦可在警告页直接键盘输入 `thisisunsafe` 跳过）。
+- **替换正式证书**：将商业证书重命名为 `arl.crt` 和 `arl.key` 放至 `ssl-certs/` 目录，重新执行 `bash start-prod.sh` 生效。
 </details>
 
 <details>
-<summary><b>Q2: 忘记系统登录密码或 Basic Auth 防爆破凭证怎么办？</b></summary>
+<summary><b>Q2: 忘记系统登录密码或 Basic Auth 网关凭证怎么办？</b></summary>
 <br/>
 
-**A:** 在服务器终端执行以下操作即可重置：
-- **重置平台管理员账号 (admin)**：
+**A:** 在受信宿主机终端执行对应重置操作：
+- **重置平台管理员密码 (`admin`)**：
   ```bash
   docker exec -it arl-web-prod /code/backend/.venv-docker/bin/python3 /code/backend/inject_user.py --reset
   ```
   > [!NOTE]
-  > 平台启动时保留现有密码；追加 `--reset` 会生成新的随机密码并撤销登录会话。新密码从容器 `/tmp/arl_initial_admin_password` 读取；若设置了 `ARL_ADMIN_PASSWORD` 则使用该值。请在受信宿主机执行。
-- **重置/查看 Basic Auth 凭据**：编辑工作目录下的 `frontend/.htpasswd`，或登录系统后在顶部导航栏安全开关处开启/关闭（修改密码需先关闭再重新开启）。
+  > 正常启动会保留既有密码；追加 `--reset` 会生成新的随机密码并撤销已有会话。新密码从容器内 `/tmp/arl_initial_admin_password` 读取；若设置了 `ARL_ADMIN_PASSWORD` 则使用该值。
+- **重置/查看 Basic Auth 凭据**：编辑工作目录下的 `frontend/.htpasswd`，或登录后在顶部导航栏安全开关处关闭并重新开启以重新设定。
 </details>
 
 <details>
-<summary><b>Q3: 点击 Web 端的“一键系统更新”时，提示 <code>[ERROR]触发更新失败</code>？</b></summary>
+<summary><b>Q3: 点击 Web 端“一键系统更新”时提示 <code>[ERROR]触发更新失败</code>？</b></summary>
 <br/>
 
-**A:** 这种情况通常是因为宿主机更新守护进程未响应。可通过以下任一方式解决：
-- **方案 A (推荐)：直接在终端执行标准手动升级**
+**A:** 通常因宿主机更新守护进程未响应导致，可通过以下任一方式处理：
+- **方案 A（推荐）**：直接在终端执行手动升级：
   ```bash
   cd ~/ARL-Next && sudo bash start-prod.sh
   ```
-- **方案 B：重启宿主机更新服务后重试 Web 更新**
+- **方案 B**：重启宿主机更新守护进程后回到 Web 端重试：
   ```bash
   sudo systemctl restart arl-updater.service
   ```
@@ -485,11 +422,11 @@ ARL-Next 提供标准化 RESTful API，支持外部自动化运维、CI/CD 流�
 <summary><b>Q4: 扫描任务较多时，如何调整系统并发性能？</b></summary>
 <br/>
 
-**A:** ARL-Next 支持**动态热调整并发**，无需重启容器！
-- 登录平台 ➔ 进入 **「系统设置」** ➔ **「扫描与武器库」** ➔ **「并发与默认参数」** 子页；
-- 可视化调整**重任务队列并发**（常规域名 / IP 扫描、风险巡航、Nuclei/PoC 长线任务）、**轻任务队列并发**（空间测绘 / 单点更新 / WIH 提取 / 数据同步）与 **OSINT 任务并发**，保存后系统将自动热生效；
-- 上述三项均为 **Worker 进程数**（通常 1~128），受本机内存约束。页面会依据当前机器内存给出推荐值，可一键回填。
-- ⚠️ 如需调整**单个任务内部**的 DNS 爆破发包并发度（通常在数百至上千量级），可在同一子页下方的 **「单任务内发包并发与默认扫描参数」** 区域调整。二者不是同一指标，请勿按同一量级填写。
+**A:** ARL-Next 支持并发参数动态热调，无需重启容器：
+- 登录控制台 ➔ 进入 **「系统设置」** ➔ **「扫描与武器库」** ➔ **「并发与默认参数」**；
+- 可视化调整**重任务队列并发**（常规域名 / IP 扫描、风险巡航、Nuclei / PoC 长线任务）、**轻任务队列并发**（空间测绘 / 单点更新 / WIH 提取 / 数据同步）与 **OSINT 任务并发**；
+- 上述三项均为 **Worker 进程数**（通常 `1~128`），受宿主机内存限制，页面会基于当前内存给出推荐值并支持回填；
+- ⚠️ 如需调整**单个任务内部**的 DNS 爆破发包并发度（通常在数百至上千量级），请在同一子页下方的 **「单任务内发包并发与默认扫描参数」** 区域设置。二者属于不同量级指标，请勿混填。
 </details>
 
 <details>
@@ -503,7 +440,7 @@ docker compose -f docker-compose.prod.yml ps
 # 实时查看扫描 Worker 执行日志
 docker compose -f docker-compose.prod.yml logs -f arl-worker
 
-# 平滑停止或重启核心容器服务
+# 平滑重启核心容器服务
 docker compose -f docker-compose.prod.yml restart
 ```
 </details>
@@ -512,43 +449,101 @@ docker compose -f docker-compose.prod.yml restart
 <summary><b>Q6: 在 CentOS 7 或 Linux 3.x 等老旧内核环境下部署，前端容器报错或端口无法访问？</b></summary>
 <br/>
 
-**A:** 在 Linux 3.10 等老旧内核上，Docker 默认 Seccomp 安全策略可能会拦截底层系统调用（如 `SYS_pwritev2` 等文件写调用），导致前端 Nginx 写入 PID 文件失败（报错 `pwrite() "/run/nginx.pid" failed (1: Operation not permitted)`）并反复崩溃重启。
+**A:** 在 Linux 3.10 等老旧内核上，Docker 默认 Seccomp 策略可能拦截部分系统调用（如 `SYS_pwritev2`），导致前端 Nginx 写入 PID 文件失败（`pwrite() "/run/nginx.pid" failed (1: Operation not permitted)`）并反复重启。
 
-**处置与排查建议**：
-1. **确认编排配置**：最新版 `docker-compose.prod.yml` 已为 `arl-frontend` 默认配置 `security_opt: [seccomp:unconfined]` 兜底。
-2. **存量环境快速修复**：若使用的是早期未包含该配置的部署编排，可在部署目录下执行以下命令追加并重载容器（内置幂等判断，多次执行无副作用）：
+**排查与处置**：
+1. **确认编排配置**：最新版 `docker-compose.prod.yml` 已默认为 `arl-frontend` 配置 `security_opt: [seccomp:unconfined]`。
+2. **存量环境快速修复**：若早期编排缺少该项，可在部署目录执行以下命令补齐并重建前端容器（幂等操作）：
    ```bash
-   # 为 arl-frontend 补充解除 Seccomp 限制配置（若尚未配置）
    grep -q "seccomp:unconfined" docker-compose.prod.yml || sed -i '/container_name: arl-frontend-prod/a \    security_opt:\n      - seccomp:unconfined' docker-compose.prod.yml
-   # 重建前端容器
    docker compose -f docker-compose.prod.yml up -d arl-frontend
    ```
-3. **重新执行部署校验**：执行 `bash start-prod.sh`，脚本内置的容器状态断言与端口连通性探针将自动验证服务健康就绪。
+3. **验证就绪**：执行 `bash start-prod.sh`，等待内置健康断言与端口探针校验通过。
 </details>
+
+---
+
+## <span id="architecture"></span>🏗️ 系统架构
+
+ARL-Next 采用前后端分离、多队列异步任务调度与轻量微服务隔离架构，所有外部流量均经由 Nginx HTTPS 网关统一接入，内部组件在私有 Docker 网络中隔离运行：
+
+```mermaid
+graph TD
+    %% 1. 接入层
+    User["👨‍💻 安全分析师 (浏览器)"] -->|"HTTPS (5173，Basic Auth 可选)"| Nginx["🖥️ Frontend (Nginx + Vue 3.5)"]
+    Agent["🤖 AI Agent (Claude / Cursor)"] -->|"轨道 1: 远程直连 (SSE /mcp/sse)"| Nginx
+    Agent -.->|"轨道 2: 本地脚本 (Stdio 桥接)"| MCP_Stdio["🤖 本地 Stdio 桥接 (mcp-server/server.py)"]
+
+    %% 2. API 网关与微服务层
+    Nginx -->|"REST API 反代 (5000)"| Backend["⚙️ Backend API (Gunicorn / Python 3.13)"]
+    Nginx -->|"SSE 长连接流式反代 (5005)"| MCP_Service["🚀 arl-mcp 异步微服务 (Python asyncio)"]
+    MCP_Stdio -->|"HTTPS / API Token (5173 反代)"| Nginx
+
+    %% 3. 调度与任务分流
+    Backend -->|"1. 同步 HTTP 调用 (16181)"| OSINT["🧩 OSINT 微服务"]
+    Backend -->|"2. 投递扫描任务"| MQ(("⚡ RabbitMQ 3 (轻重/威胁多队列)"))
+
+    %% 4. Celery Worker 扫描计算集群
+    subgraph WorkerCluster ["⚙️ Celery Worker 扫描与调度集群"]
+        MQ -->|"轻量队列 arltask_light"| W_Light["⚡ 轻任务 Worker (空间测绘/单点更新/WIH/同步)"]
+        MQ -->|"重载队列 arltask, arltask_heavy"| W_Heavy["🔥 重任务 Worker (常规扫描/风险巡航/Nuclei/PoC)"]
+        MQ -->|"威胁队列 arlgithub"| W_Git["🛡️ 威胁情报 Worker (CVE/代码泄露)"]
+
+        Scheduler["⏰ 监控调度引擎 (Scheduler & Beat)"] -.->|"周期触发"| MQ
+        W_Heavy -->|"HTTP 截图渲染 (3000)"| Puppeteer["🧩 Puppeteer 微服务 (无头截图/异常自动重启)"]
+    end
+
+    %% 5. 数据统一落库
+    Backend <-->|"查询 / 状态读写"| DB[("🗄️ MongoDB 7.0 (联合索引集合)")]
+    OSINT -->|"异步结果入库"| DB
+    W_Light -->|"safe_insert_asset_many 批量写入"| DB
+    W_Heavy -->|"bulk_write 批量写入"| DB
+    W_Git -->|"原子 upsert 写入"| DB
+
+    Autoheal["🛡️ Autoheal 守护探针"] -.->|"docker.sock 探活与异常重启"| WorkerCluster
+
+    classDef default fill:#fbfbfb,stroke:#e0e0e0,stroke-width:1px;
+    classDef core fill:#eef2ff,stroke:#6366f1,stroke-width:2px;
+    classDef ai fill:#f5f3ff,stroke:#8b5cf6,stroke-width:2px;
+    classDef db fill:#ecfdf5,stroke:#10b981,stroke-width:2px;
+    classDef micro fill:#fffbeb,stroke:#f59e0b,stroke-width:1px;
+
+    class Nginx,Backend,WorkerCluster,W_Light,W_Heavy,W_Git core;
+    class Agent,MCP_Stdio,MCP_Service ai;
+    class DB,MQ db;
+    class OSINT,Puppeteer,Autoheal,Scheduler micro;
+```
+
+### 架构要点
+
+1. 🖥️ **统一网关与交互层 (`Frontend / Nginx`)**：基于 **Vue 3.5 + Nginx**，对外仅暴露 `5173` HTTPS 入口，提供可选 **Basic Auth 前置防护**、流式无缓冲反代（服务于 MCP SSE 与大文件备份传输）及三语国际化交互界面。
+2. ⚙️ **业务接口与独立异步 MCP 容器 (`Backend / arl-mcp`)**：核心 API 基于 **Python 3.13 + Gunicorn**；SSE 长连接拆分至独立的 **`arl-mcp` (`asyncio`) 容器**承载，与主业务线程池物理隔离，降低长连接对控制台吞吐的影响。
+3. 🧩 **独立企业测绘服务 (`OSINT Service`)**：专职天眼查与工信部多源企业资产采集，由 Backend 经 HTTP 调用（含 5s 超时保护），与扫描队列隔离以避免长耗时测绘阻塞常规扫描。
+4. ⚡ **多队列 Worker 与内存控制 (`Celery Cluster`)**：按**轻量 / 重载 / 威胁情报**分队列消费，配合子进程生命周期回收与并发租约控制缓解内存增长与发包争抢；端口扫描引擎统一基于 **Nmap 7.95 稳定版**。
+5. 🛡️ **无头截图隔离与守护探针 (`Puppeteer / Autoheal`)**：站点截图由常驻无头浏览器微服务隔离渲染并支持请求计数轮转；**Autoheal** 定期检测 Worker 健康状态，在节点无响应时自动拉起恢复。
+6. 🗄️ **批量持久化存储 (`MongoDB 7.0`)**：高频资产写入通过 `safe_insert_asset_many` / `bulk_write` 批量接口完成，核心集合维护联合唯一索引并配置 WiredTiger 1GB 缓存池上限，兼顾高吞吐写入与资源平稳性。
 
 ---
 
 ## 📜 更新日志
 
-详细的版本演进历史、各版本特性与问题修复记录，请参阅 ➔ [**CHANGELOG.md**](./CHANGELOG.md)
+详细的版本迭代记录、新特性说明与问题修复历史，请参阅 ➔ [**CHANGELOG.md**](./CHANGELOG.md)
 
 ---
 
 ## 🤝 致谢
 
-本项目站在巨人的肩膀上，特此鸣谢以下项目与团队：
+本项目的发展离不开开源社区的启发与贡献，特此致谢：
 
-* **核心架构**：基于经典开源项目 [ARL 资产侦察灯塔](https://github.com/TophantTechnology/ARL) 深度重构，并参考了 [Aabyss-Team/ARL](https://github.com/Aabyss-Team/ARL) 与 [adysec/ARL](https://github.com/adysec/ARL) 等优秀实践。
+* **开源溯源**：早期架构脱胎并演进自开源项目 [ARL (资产侦察灯塔)](https://github.com/TophantTechnology/ARL)，并参考了 [Aabyss-Team/ARL](https://github.com/Aabyss-Team/ARL) 与 [adysec/ARL](https://github.com/adysec/ARL) 等社区实践。
 * **指纹数据**：特别鸣谢 **威零安全团队** (<img src="./img/weiling.jpg" width="18" height="18" align="absmiddle" /> 公众号) 提供的高质量 Web 指纹库支撑。
-* **功能灵感**：OSINT 企业查询深度借鉴了 [ICP_Query](https://github.com/HG-ha/ICP_Query)，威胁监控模块汲取了 [github-cve-monitor](https://github.com/yhy0/github-cve-monitor) 的优雅设计。
-
-ARL-Next 秉持开源互助的黑客初心，持续为网络安全攻防与企业防御建设贡献力量！
+* **模块参考**：企业测绘与威胁监控模块参考了 [ICP_Query](https://github.com/HG-ha/ICP_Query) 与 [github-cve-monitor](https://github.com/yhy0/github-cve-monitor) 的设计思路。
 
 ---
 
 ## 💖 赞助与支持
 
-ARL-Next 的持续高频迭代离不开社区伙伴的慷慨支持。特别致谢以下赞助者：
+ARL-Next 的持续维护与迭代离不开社区伙伴的支持，特别致谢以下赞助者：
 
 <p align="center">
   <img src="./img/buymeacoffee.png" width="180" alt="Buy Me A Coffee" />
@@ -588,15 +583,15 @@ ARL-Next 的持续高频迭代离不开社区伙伴的慷慨支持。特别致�
 ARL-Next 项目遵循 [GNU General Public License v3.0 (GPL-3.0)](./LICENSE) 开源许可证协议。
 
 * 🆓 **自由与开源**：您可以免费用于企业自建、安全研究、资产测绘与攻防演练，并享有自由阅读、修改与定制源码的权利。
-* 🌐 **传染与同协议共享**：若您在二次开发中修改或基于本项目构建衍生作品并向第三方分发，必须保持在相同的 GPL-3.0 许可证下完整开源相关代码。
+* 🌐 **同协议共享**：若您在二次开发中修改或基于本项目构建衍生作品并向第三方分发，必须保持在相同的 GPL-3.0 许可证下完整开源相关代码。
 * ⚖️ **署名与免责保留**：任何形式的源码复制与再分发，均须保留原始作者版权声明、许可证全文以及免责条款。
 
 ---
 
 ## 💬 交流群与反馈通道
 
-- 🐛 **Bug 提交与功能建议**：欢迎通过 [GitHub Issues](https://github.com/owl234/ARL-Next/issues) 提交反馈，通常 24 小时内跟进。
-- 💡 **技术交流与群聊**：欢迎扫码添加作者微信或加入 QQ 交流群，探讨资产测绘、红蓝对抗与 AI 自动化安全。
+- 🐛 **Bug 提交与功能建议**：欢迎通过 [GitHub Issues](https://github.com/owl234/ARL-Next/issues) 提交反馈，持续跟进处理。
+- 💡 **技术交流与群聊**：欢迎在 [GitHub Discussions](https://github.com/owl234/ARL-Next/discussions) 参与讨论，或扫码添加作者微信、加入 QQ 交流群，交流资产测绘、红蓝对抗与 AI 自动化安全实践。
 - 📢 **版本发布动态**：欢迎关注微信公众号【**owl安全**】，获取版本迭代说明、架构解析与更新通知。
 
 <table align="center">
@@ -627,5 +622,3 @@ ARL-Next 项目遵循 [GNU General Public License v3.0 (GPL-3.0)](./LICENSE) 开
 </a>
 
 </div>
-
-
