@@ -54,11 +54,10 @@ def rounded(img, radius):
     return img
 
 
-def pill(d, x, y, text, fnt, fg, bg=None, outline=None):
+def pill(d, x, y, text, fnt, fg, bg=None, outline=None, pad_left=34, pad_right=16, pad_y=9):
     bbox = d.textbbox((0, 0), text, font=fnt)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    px, py = 34, 9  # left pad reserves room for the dot
-    w, h = tw + px + 16, th + py * 2
+    w, h = tw + pad_left + pad_right, th + pad_y * 2
     if bg is not None:
         d.rounded_rectangle([x, y, x + w, y + h], h // 2, fill=bg)
     if outline is not None:
@@ -87,48 +86,52 @@ def main():
     base.paste(Image.blend(Image.new("RGB", (560, 340), BG_BOT), glow2, 0.28), (880, 420))
     d = ImageDraw.Draw(base)
 
-    f_title, f_sub, f_tag, f_badge, f_ver = font(72), font(24), font(22, cn=True), font(19), font(20)
-    d.text((64, 66), "ARL-Next", font=f_title, fill=TEXT_MAIN)
-    d.text((64, 156), "Modern Attack Surface Reconnaissance", font=f_sub, fill=TEXT_SUB)
-    d.text((64, 190), "& Asset Monitoring Platform", font=f_sub, fill=TEXT_SUB)
-    d.line([(64, 240), (240, 240)], fill=ACCENT, width=4)
+    left_x = 56
+    f_title, f_sub, f_tag, f_badge, f_ver = font(70), font(22), font(22, cn=True), font(18), font(20)
+    d.text((left_x, 66), "ARL-Next", font=f_title, fill=TEXT_MAIN)
+    d.text((left_x, 154), "Modern Attack Surface Reconnaissance", font=f_sub, fill=TEXT_SUB)
+    d.text((left_x, 186), "& Asset Monitoring Platform", font=f_sub, fill=TEXT_SUB)
+    d.line([(left_x, 234), (left_x + 176, 234)], fill=ACCENT, width=4)
 
     # selling points as filled pills (readable at thumbnail size)
     tags = ["企业资产关联", "异步解耦调度", "原生 MCP 集成", "容器化开箱部署"]
-    y = 258
+    y = 256
     for tag in tags:
-        w, h = pill(d, 64, y, tag, f_tag, TEXT_TAG, bg=PILL_BG)
-        d.ellipse([64 + 14, y + h // 2 - 5, 64 + 24, y + h // 2 + 5], fill=ACCENT)
-        d.text((64 + 34, y + 7), tag, font=f_tag, fill=TEXT_TAG)
+        w, h = pill(d, left_x, y, tag, f_tag, TEXT_TAG, bg=PILL_BG)
+        d.ellipse([left_x + 14, y + h // 2 - 5, left_x + 24, y + h // 2 + 5], fill=ACCENT)
+        d.text((left_x + 34, y + 7), tag, font=f_tag, fill=TEXT_TAG)
         y += h + 12
 
     # capability badges (timeless: no version number, see docstring)
     badges = ["Docker-Ready", "MCP-Native", "GPL-3.0"]
-    bx = 64
-    by = y + 8
+    bx = left_x
+    by = y + 10
     for b in badges:
-        w, h = pill(d, bx, by, b, f_badge, ACCENT, outline=ACCENT)
-        d.text((bx + 25, by + 8), b, font=f_badge, fill=ACCENT)
+        w, h = pill(d, bx, by, b, f_badge, ACCENT, outline=ACCENT, pad_left=16, pad_right=16, pad_y=9)
+        bbox = d.textbbox((0, 0), b, font=f_badge)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        d.text((bx + (w - tw) // 2 - bbox[0], by + (h - th) // 2 - bbox[1]), b, font=f_badge, fill=ACCENT)
         bx += w + 10
-    d.text((64, 572), "github.com/owl234/ARL-Next", font=f_ver, fill=TEXT_DIM)
+    d.text((left_x, 572), "github.com/owl234/ARL-Next", font=f_ver, fill=TEXT_DIM)
 
-    # screenshot card with drop shadow
+    # screenshot card with drop shadow (full aspect-ratio fit, no edge clipping)
     shot = Image.open(SRC).convert("RGB")
-    sw, sh = 700, 470
-    scale = max(sw / shot.width, sh / shot.height)
-    shot = shot.resize((int(shot.width * scale), int(shot.height * scale)))
-    x = (shot.width - sw) // 2
-    shot = shot.crop((x, 0, x + sw, sh))
-    shot = rounded(shot, 18)
+    card_x = 508
+    sw = W - card_x - left_x - 8  # symmetric right margin matching left_x
+    sh = round(sw * shot.height / shot.width)
+    card_y = (H - (sh + 8)) // 2
+    resample = getattr(Image, "Resampling", Image).LANCZOS
+    shot = shot.resize((sw, sh), resample)
+    shot = rounded(shot, 16)
     sh_w, sh_h = sw + 60, sh + 60
     shadow = Image.new("L", (sh_w, sh_h), 0)
-    ImageDraw.Draw(shadow).rounded_rectangle([0, 0, sh_w, sh_h], 26, fill=110)
+    ImageDraw.Draw(shadow).rounded_rectangle([0, 0, sh_w, sh_h], 24, fill=110)
     shadow = shadow.filter(ImageFilter.GaussianBlur(28))
-    base.paste(Image.new("RGB", (sh_w, sh_h), (0, 0, 0)), (512 - 22, 81 - 14), shadow)
+    base.paste(Image.new("RGB", (sh_w, sh_h), (0, 0, 0)), (card_x - 22, card_y - 14), shadow)
     card = Image.new("RGBA", (sw + 8, sh + 8), (0, 0, 0, 0))
-    ImageDraw.Draw(card).rounded_rectangle([0, 0, sw + 8, sh + 8], 22, outline=ACCENT, width=3)
-    base.paste(card, (512, 81), card)
-    base.paste(shot, (516, 85), shot)
+    ImageDraw.Draw(card).rounded_rectangle([0, 0, sw + 8, sh + 8], 20, outline=ACCENT, width=3)
+    base.paste(card, (card_x, card_y), card)
+    base.paste(shot, (card_x + 4, card_y + 4), shot)
 
     DST.parent.mkdir(parents=True, exist_ok=True)
     DST.unlink(missing_ok=True)
