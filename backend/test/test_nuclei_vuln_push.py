@@ -566,7 +566,7 @@ class MigrationAndConfigTests(unittest.TestCase):
             CELERY_BROKER_URL="", MONGO_URL="", MONGO_DB="", GEOIP_CITY="", GEOIP_ASN="",
             FOFA_KEY="", FOFA_URL="", FOFA_MAX_PAGE=5, FOFA_PAGE_SIZE=2000,
             SO_SEARCH_COOKIE="", BING_SEARCH_COOKIE="", GITHUB_TOKEN="",
-            TYC_ID="", TYC_TOKEN="", PROXY_URL="", TOP_10="",
+            TYC_ID="", TYC_TOKEN="", PROXY_URL="",
             DOMAIN_BRUTE_CONCURRENT=300, ALT_DNS_CONCURRENT=1500,
             FILE_LEAK_TOP_2k="", DOMAIN_DICT_2W="", AUTH=False, API_KEY="",
             WEB_HOOK_URL="", WEB_HOOK_TOKEN="", DINGDING_SECRET="", DINGDING_ACCESS_TOKEN="",

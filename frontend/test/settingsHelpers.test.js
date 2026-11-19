@@ -15,7 +15,6 @@ import {
   testTargetAgainstGuardrails,
   maskConnectionUri,
   generateStrongApiKey,
-  parsePortListInfo,
 } from '../src/utils/settingsHelpers.js';
 
 const plain = (v) => JSON.parse(JSON.stringify(v));
@@ -121,7 +120,7 @@ test('安全红线规则解析、统计、预设增删与 Dry-Run 命中对齐�
   assert.equal(r3.status, 'allowed');
 });
 
-test('基础设施连接串脱敏、随机 Key 生成与 Top10 端口校验', () => {
+test('基础设施连接串脱敏与随机 Key 生成', () => {
   assert.equal(
     maskConnectionUri('mongodb://admin:SecretPass123@127.0.0.1:27018/?authSource=admin'),
     'mongodb://admin:******@127.0.0.1:27018/?authSource=admin',
@@ -131,10 +130,6 @@ test('基础设施连接串脱敏、随机 Key 生成与 Top10 端口校验', ()
   const key = generateStrongApiKey(32);
   assert.equal(key.length, 32);
   assert.match(key, /^[A-Za-z0-9]+$/);
-
-  const ports = parsePortListInfo('80,443,8000-8002,bad,70000');
-  assert.equal(ports.count, 5);
-  assert.deepEqual(ports.invalidItems, ['bad', '70000']);
 });
 
 test('SystemSettings: 情报凭据检测在存在未保存改动时自动先保存再校验，保存失败则阻断检测', async () => {

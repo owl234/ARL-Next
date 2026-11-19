@@ -552,7 +552,7 @@ class DomainTask(CommonTask):
 
         self.wih_domain_set = set()  # 通过调用 WebInfoHunter 获取的域名集合
 
-        option_scan_port_type = self.options.get("port_scan_type", "test")
+        option_scan_port_type = self.options.get("port_scan_type", "top100")
         
         if option_scan_port_type == "custom" and self.options.get("port_custom"):
             actual_ports = self.options.get("port_custom")

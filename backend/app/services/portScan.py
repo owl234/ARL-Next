@@ -3,8 +3,7 @@ import re
 from app import utils
 from app.utils import nmap, is_valid_exclude_ports
 from app.utils.packet_lease import acquire_packet_slot
-from app.config import Config
-from app.modules import get_alive_ports
+from app.modules import get_alive_ports, get_scan_ports, ScanPortType
 
 logger = utils.get_logger()
 
@@ -393,7 +392,7 @@ def port_scan(targets, ports=None, service_detect=False, os_detect=False,
     会在调用底层 Nmap 前，做一次极速去重和黑名单过滤。
     """
     if ports is None:
-        ports = Config.TOP_10
+        ports = get_scan_ports(ScanPortType.TOP100)
     targets = list(set(targets)) # IP 去重
     targets = list(filter(utils.not_in_black_ips, targets)) # 过滤内部网段或黑名单
     ps = PortScan(targets=targets, ports=ports, service_detect=service_detect, os_detect=os_detect,

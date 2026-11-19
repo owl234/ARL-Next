@@ -50,7 +50,7 @@ domain_config_fields = ns.model('domainConfig', {
 '''IP 相关配置选项'''
 ip_config_fields = ns.model('ipConfig', {
     "port_scan": fields.Boolean(description="端口扫描", default=True),
-    "port_scan_type": fields.String(description="端口扫描类型(test|top100|top1000|all|custom)", example="test"),
+    "port_scan_type": fields.String(description="端口扫描类型(top100|top1000|all|custom，兼容历史别名 test=top100)", example="top100"),
     "service_detection": fields.Boolean(description="服务识别", default=False),
     "os_detection": fields.Boolean(description="操作系统识别", default=False),
     "ssl_cert": fields.Boolean(description="SSL 证书获取", default=False),
@@ -126,7 +126,7 @@ class AddARLPolicy(ARLResource):
         domain_config = policy.pop("domain_config", {}) or {}
         domain_config = self._update_arg(domain_config, domain_config_fields)
         ip_config = policy.pop("ip_config", {}) or {}
-        port_scan_type = ip_config.get("port_scan_type", "test")
+        port_scan_type = ip_config.get("port_scan_type", "top100")
         if port_scan_type == "custom":
             port_custom = ip_config.get("port_custom") or "80,443"
             port_list = utils.arl.build_port_custom(port_custom)

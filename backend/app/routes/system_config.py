@@ -611,7 +611,6 @@ class GeneralConfig(ARLResource):
             "tyc_token": Config.TYC_TOKEN,
 
             "proxy_url": masked_proxy_url,
-            "port_top_10": Config.TOP_10,
             "domain_brute_concurrent": Config.DOMAIN_BRUTE_CONCURRENT,
             "alt_dns_concurrent": Config.ALT_DNS_CONCURRENT,
 
@@ -693,7 +692,6 @@ class GeneralConfig(ARLResource):
             raw_proxy_val = str(req_data["proxy_url"] or "").strip()
             if "***@" not in raw_proxy_val:
                 doc["proxy_url"] = raw_proxy_val
-        if "port_top_10" in req_data: doc["port_top_10"] = req_data["port_top_10"]
         if "domain_brute_concurrent" in req_data and req_data["domain_brute_concurrent"] is not None: doc["domain_brute_concurrent"] = int(req_data["domain_brute_concurrent"] or 0)
         if "alt_dns_concurrent" in req_data and req_data["alt_dns_concurrent"] is not None: doc["alt_dns_concurrent"] = int(req_data["alt_dns_concurrent"] or 0)
 

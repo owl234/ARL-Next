@@ -224,15 +224,15 @@ test('SystemSettings: firstDirtyTabKey 与 goToFirstDirty 正确支持 5 大主�
   // 还原
   context.securityForm.value.blackIpsText = '';
 
-  // 3. 当 scan_params (port_top_10) 有脏字段时 -> scanning_arsenal / concurrency
-  context.generalForm.value.port_top_10 = '80,443,8443';
+  // 3. 当 scan_params (domain_brute_concurrent) 有脏字段时 -> scanning_arsenal / concurrency
+  context.generalForm.value.domain_brute_concurrent = 500;
   assert.equal(context.firstDirtyTabKey.value, 'scanning_arsenal');
   context.goToFirstDirty();
   assert.equal(context.activeKey.value, 'scanning_arsenal');
   assert.equal(context.arsenalSubTab.value, 'concurrency');
 
   // 还原
-  context.generalForm.value.port_top_10 = '';
+  context.generalForm.value.domain_brute_concurrent = 300;
 
   // 4. 当 system_auth (auth/api_key) 有脏字段时 -> system_ops / auth_infra
   context.generalForm.value.auth = true;

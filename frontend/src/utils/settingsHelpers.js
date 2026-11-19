@@ -3,7 +3,7 @@
  * - 代理 URI 一键解析
  * - 安全红线（IP/CIDR/IP段 & 禁扫域名）校验、预设增删与目标命中预检
  * - 基础设施连接串内嵌密码脱敏
- * - 高强度 API Key 生成与 Top10 端口串解析
+ * - 高强度 API Key 生成
  */
 
 const VALID_PROXY_PROTOCOLS = new Set(['socks5h', 'socks5', 'http', 'https']);
@@ -408,38 +408,4 @@ export function generateStrongApiKey(length = 32) {
     }
   }
   return out.join('');
-}
-
-/**
- * 解析逗号分隔的端口列表并校验合法性。
- * @param {string} raw
- * @returns {{count: number, invalidItems: string[]}}
- */
-export function parsePortListInfo(raw) {
-  const tokens = String(raw || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const invalidItems = [];
-  let count = 0;
-  for (const tok of tokens) {
-    if (/^\d+$/.test(tok)) {
-      const p = Number(tok);
-      if (p >= 1 && p <= 65535) {
-        count += 1;
-      } else {
-        invalidItems.push(tok);
-      }
-    } else if (/^\d+-\d+$/.test(tok)) {
-      const [a, b] = tok.split('-').map(Number);
-      if (a >= 1 && b <= 65535 && a <= b) {
-        count += b - a + 1;
-      } else {
-        invalidItems.push(tok);
-      }
-    } else {
-      invalidItems.push(tok);
-    }
-  }
-  return { count, invalidItems };
 }

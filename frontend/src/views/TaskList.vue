@@ -1987,7 +1987,8 @@ const getDetailedOptions = (options) => {
     detailed.push(taskText('tasks.subdomainWordlistName', { name: typeMap[options.domain_brute_type] || options.domain_brute_type }));
   }
   if (options.port_scan_type && options.port_scan_type !== 'null' && options.port_scan_type !== null) {
-    const typeMap = { test: taskText('tasks.test'), top100: 'TOP100', top1000: 'TOP1000', all: taskText('tasks.allPorts') };
+    // 'test' 为历史端口类型别名，后端实际映射到 port_top100.txt
+    const typeMap = { test: 'TOP100', top100: 'TOP100', top1000: 'TOP1000', all: taskText('tasks.allPorts') };
     detailed.push(taskText('tasks.portScanPolicyName', { name: typeMap[options.port_scan_type] || options.port_scan_type.toUpperCase() }));
   }
   if (options.host_discovery_mode && options.host_discovery_mode !== 'auto') {

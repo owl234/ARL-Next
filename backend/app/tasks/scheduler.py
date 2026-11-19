@@ -116,7 +116,7 @@ def wrap_domain_executors(base_domain=None, scheduler_id=None, scope_id=None, op
             'domain_brute_type': 'test',
             'alt_dns': False,
             'arl_search': True,
-            'port_scan_type': 'test',
+            'port_scan_type': 'top100',
             'port_scan': True,
             'service_detection': False,
             'service_brute': False,
@@ -193,7 +193,7 @@ def oneshot_domain_executors(base_domain=None, scope_id=None, options=None, name
             'domain_brute_type': 'test',
             'alt_dns': False,
             'arl_search': True,
-            'port_scan_type': 'test',
+            'port_scan_type': 'top100',
             'port_scan': True,
             'service_detection': False,
             'service_brute': False,
@@ -571,7 +571,7 @@ class IPExecutor(IPTask):
             'task_tag': 'monitor',  # 标记为监控任务
             'service': [],
             'options': {
-                "port_scan_type": "test",
+                "port_scan_type": "top100",
                 "port_scan": True,
                 "service_detection": False,
                 "os_detection": False,

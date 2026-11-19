@@ -93,7 +93,7 @@ add_task_fields = ns.model('AddTask', { # 创建添加任务命名空间。
     # 下面全是各种扫描策略的开关选项，example 代表在接口文档里显示的默认测试值
     "domain_brute": fields.Boolean(example=True),
     'domain_brute_type': fields.String(example="test"),
-    "port_scan_type": fields.String(example="test", description="端口扫描类型"),
+    "port_scan_type": fields.String(example="top100", description="端口扫描类型"),
     "port_scan": fields.Boolean(example=True),
     "host_discovery_mode": fields.String(example="auto", default="auto", description="主机存活探测策略(auto|skip|probe)"),
     "service_detection": fields.Boolean(example=False),

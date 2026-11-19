@@ -74,7 +74,7 @@ class AddFofaTask(ARLResource):
         policy_id = args.get('policy_id')
 
         task_options = {
-            "port_scan_type": "test",
+            "port_scan_type": "top100",
             "port_scan": True,
             "service_detection": False,
             "service_brute": False,

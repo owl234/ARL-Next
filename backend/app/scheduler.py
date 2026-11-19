@@ -17,7 +17,7 @@ domain_monitor_options = {
     'domain_brute_type': 'big',
     'alt_dns': False,
     'arl_search': True,
-    'port_scan_type': 'test',
+    'port_scan_type': 'top100',
     'port_scan': True,
     'dns_query_plugin': True,
     'site_identify': False,
@@ -25,7 +25,7 @@ domain_monitor_options = {
 }
 
 ip_monitor_options = {
-    'port_scan_type': 'test',
+    'port_scan_type': 'top100',
     'port_scan': True,
     'site_identify': False,
     'site_capture': True

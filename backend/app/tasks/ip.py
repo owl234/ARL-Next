@@ -60,7 +60,7 @@ class IPTask(CommonTask):
         raise NotImplementedError()
 
     def port_scan(self):
-        option_scan_port_type = self.options.get("port_scan_type", "test")
+        option_scan_port_type = self.options.get("port_scan_type", "top100")
         
         if option_scan_port_type == "custom" and self.options.get("port_custom"):
             actual_ports = self.options.get("port_custom")

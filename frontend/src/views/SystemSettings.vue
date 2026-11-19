@@ -703,7 +703,7 @@
             <a-card size="small" class="page-config-card">
               <a-row :gutter="24">
                 <a-col :xs="24" :md="12">
-                  <a-form-item data-setting-anchor="brute_concurrent" :label="pageText('pages.dnsQueryConcurrencyForRegularSubdomainDiscovery')">
+                  <a-form-item data-setting-anchor="brute_concurrent" :label="pageText('pages.dnsQueryConcurrencyForRegularSubdomainDiscovery')" class="page-flush-bottom">
                     <a-input-number v-model:value="generalForm.domain_brute_concurrent" :min="1" style="width: 100%" />
                     <div class="arl-field-hint">
                       {{ pageText('pages.dnsQueryConcurrencyWithinOneTaskTheMassdns') }} <code>-s</code> {{ pageText('pages.optionRatherThanAProcessOrThreadCountHigher') }}
@@ -711,7 +711,7 @@
                   </a-form-item>
                 </a-col>
                 <a-col :xs="24" :md="12">
-                  <a-form-item :label="pageText('pages.dnsQueryConcurrencyForSubdomainMutationDiscovery')">
+                  <a-form-item :label="pageText('pages.dnsQueryConcurrencyForSubdomainMutationDiscovery')" class="page-flush-bottom">
                     <a-input-number v-model:value="generalForm.alt_dns_concurrent" :min="1" style="width: 100%" />
                     <div class="arl-field-hint">
                       {{ pageText('pages.usedDuringAltdnsDiscoveryItsDefaultIsHigherBecause') }}
@@ -719,23 +719,6 @@
                   </a-form-item>
                 </a-col>
               </a-row>
-
-              <a-form-item data-setting-anchor="port_top_10" class="page-flush-bottom">
-                <template #label>
-                  <span>{{ pageText('pages.top10WebPortsUsedByFrontendPortScan') }}</span>
-                  <a-tag color="blue" style="margin-left: 8px;">
-                    {{ pageText('pages.portCountSummary', { count: portTop10Info.count }) }}
-                  </a-tag>
-                </template>
-                <a-input v-model:value="generalForm.port_top_10" :placeholder="pageText('pages.separateValuesWithCommas')" />
-                <a-alert
-                  v-if="portTop10Info.invalidItems.length > 0"
-                  type="warning"
-                  show-icon
-                  style="margin-top: 8px;"
-                  :message="pageText('pages.portInvalidWarning', { items: portTop10Info.invalidItems.join(', ') })"
-                />
-              </a-form-item>
             </a-card>
           </a-form>
         </a-spin>
@@ -1484,7 +1467,6 @@ import {
   testTargetAgainstGuardrails,
   maskConnectionUri,
   generateStrongApiKey,
-  parsePortListInfo,
 } from '@/utils/settingsHelpers';
 import { useRoute, onBeforeRouteLeave } from 'vue-router';
 import ArlEmpty from '@/components/ArlEmpty.vue';
@@ -2076,7 +2058,7 @@ const GENERAL_FIELD_GROUPS = {
     'tyc_id', 'tyc_token', 'so_search_cookie', 'bing_search_cookie', 'query_plugin_config'],
   message_push: ['push_options', 'nuclei_push_severities', 'dingding', 'feishu', 'wxwork', 'telegram', 'email',
     'webhook_url', 'webhook_token'],
-  scan_params: ['port_top_10', 'domain_brute_concurrent', 'alt_dns_concurrent'],
+  scan_params: ['domain_brute_concurrent', 'alt_dns_concurrent'],
   system_auth: ['auth', 'api_key'],
 };
 
@@ -2315,8 +2297,6 @@ const SETTINGS_INDEX = [
     get desc() { return pageText('pages.memoryConstrainedWorkerProcessCountsForHeavyLightAnd'); }, keywords: ['并发', '线程', '性能', '队列', 'celery', 'worker', '进程', '扩容', '缩容', 'concurrency'] },
   { tab: 'scanning_arsenal', subTab: 'concurrency', get tabLabel() { return pageText('pages.settingsSubConcurrency'); }, get label() { return pageText('pages.dnsQueryConcurrencyWithinATask'); }, anchor: 'brute_concurrent',
     get desc() { return pageText('pages.massdnsQueryConcurrencyForRegularAndMutationDiscoveryThis'); }, keywords: ['线程', '爆破', '并发', '并发度', 'dns', '域名', 'altdns', 'massdns', '发包', 'concurrency'] },
-  { tab: 'scanning_arsenal', subTab: 'concurrency', get tabLabel() { return pageText('pages.settingsSubConcurrency'); }, get label() { return pageText('pages.top10PortList'); }, anchor: 'port_top_10',
-    get desc() { return pageText('pages.defaultPortListUsedByFrontendTestOptions'); }, keywords: ['端口', 'port', 'top10', '扫描', '并发'] },
   { tab: 'scanning_arsenal', subTab: 'dict', get tabLabel() { return pageText('pages.settingsSubDict'); }, get label() { return pageText('pages.textDictionaries'); }, anchor: 'dict',
     get desc() { return pageText('pages.manageSubdomainPortDirectoryAndCredentialDictionaries'); }, keywords: ['字典', 'dict', '弱口令', '爆破', '子域名', '端口', '目录'] },
   { tab: 'scanning_arsenal', subTab: 'cdn', get tabLabel() { return pageText('pages.settingsSubCdn'); }, get label() { return pageText('pages.cdnFingerprintsAndRulesLabel2'); }, anchor: 'cdn',
@@ -2537,7 +2517,6 @@ const generalForm = ref({
   so_search_cookie: '',
   bing_search_cookie: '',
 
-  port_top_10: '',
   domain_brute_concurrent: 300,
   alt_dns_concurrent: 1500,
 
@@ -2569,8 +2548,6 @@ const channelStatus = computed(() => {
     email: !!(f.email?.host?.trim() && f.email?.username?.trim() && f.email?.to?.trim()),
   };
 });
-
-const portTop10Info = computed(() => parsePortListInfo(generalForm.value.port_top_10));
 
 const revealInfraSecrets = ref(false);
 const displayBrokerUri = computed(() => (

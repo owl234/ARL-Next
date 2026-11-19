@@ -150,7 +150,7 @@ def get_scan_ports(port_type):
         "alive": "port_alive.txt",
         "port_alive": "port_alive.txt",
         "port_alive.txt": "port_alive.txt",
-        "test": "port_top100.txt",
+        "test": "port_top100.txt",  # 历史别名，兼容存量任务/策略与外部 API 调用
     }
     
     path = None
