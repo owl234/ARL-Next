@@ -382,6 +382,9 @@ def run_tests():
             stdio_env = os.environ.copy()
             # 远端测试机为自签 IP 部署，临时在本地探活进程放行校验并绕过本机代理
             stdio_env["ARL_TLS_VERIFY"] = "false"
+            # 显式注入测试密钥，避免被工程目录下 ARL_auth.md 中的管理员凭据按优先级覆盖
+            stdio_env["ARL_HOST"] = host
+            stdio_env["ARL_TOKEN"] = raw_key
             proc = subprocess.run(
                 [sys.executable, tmp_script_path],
                 input=stdio_msgs,
