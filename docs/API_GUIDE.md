@@ -121,6 +121,23 @@
 {"name": "内网直扫", "target": "192.0.2.0/24", "port_scan": true, "port_scan_type": "top100", "host_discovery_mode": "skip"}
 ```
 
+### 站点截图开关 (`site_capture`)
+
+`POST /api/task/`（顶层字段 `site_capture`）、`POST /api/policy/add/` 与 `POST /api/policy/edit/`（位于 `policy.site_config.site_capture`）支持控制 ASM 任务是否执行无头浏览器页面截图；所有基于策略下发的任务（策略侦察、风险巡航、计划任务、资产组域名/IP 监控与一次性扫描、手动添加站点/域名、Fofa 及 MCP 调度）均自动继承策略中的 `site_capture` 配置：
+
+| 取值 | 行为说明 |
+| :--- | :--- |
+| `true`（默认，缺失或 `null` 时按此处理） | 对存活且未被识别为默认后端（`catch_all`）的站点执行无头浏览器截图并写入 `/image/<task_id>/<file>.jpg` |
+| `false` | 跳过截图阶段，站点文档 `screenshot` 字段写入空串 `""`；同步至资产组时若存量站点已有历史截图，将予以保留而不覆盖抹除 |
+
+> **边界说明**：WIH 独立监控（对新增子域的存活站点补截）与站点变更监控（轻量 HTTP 巡检，不截图）不绑定扫描策略，维持既有行为；被 `catch_all` 机制识别的默认后端站点即使开启 `site_capture` 也会跳过截图。
+
+示例（关闭截图以加快大批量侦察任务执行）：
+
+```json
+{"name": "快速资产探测", "target": "example.com", "port_scan": true, "site_identify": true, "site_capture": false}
+```
+
 ### 任务生命周期与删除最佳实践
 
 若需通过自动化脚本删除正在执行中的任务，必须严格执行两阶段操作：

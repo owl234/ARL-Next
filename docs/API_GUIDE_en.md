@@ -121,6 +121,23 @@ Example (force direct `-Pn` scan on an RFC 5737 block):
 {"name": "Direct segment scan", "target": "192.0.2.0/24", "port_scan": true, "port_scan_type": "top100", "host_discovery_mode": "skip"}
 ```
 
+### Website Screenshot Toggle (`site_capture`)
+
+`POST /api/task/` (top-level `site_capture`), `POST /api/policy/add/`, and `POST /api/policy/edit/` (`policy.site_config.site_capture`) control whether ASM tasks run headless-browser screenshots. Policy-driven tasks (policy scans, risk cruising, scheduled scans, asset-group domain/IP monitoring and one-shot scans, manual site/domain additions, Fofa tasks, and MCP dispatch) inherit `site_capture` from the selected policy:
+
+| Value | Behavior |
+| :--- | :--- |
+| `true` (default; omitted or `null` resolves to `true`) | Captures screenshots for alive sites not marked as default-backend (`catch_all`) and records `/image/<task_id>/<file>.jpg` |
+| `false` | Skips the screenshot stage and stores `screenshot: ""`; syncing to an asset group preserves any existing screenshot on the stored `asset_site` record rather than clearing it |
+
+> **Scope Notes**: Standalone WIH monitoring (which screenshots newly discovered subdomain sites) and website change monitoring (lightweight HTTP polling without screenshots) do not bind scan policies and keep their existing behavior. Sites marked as `catch_all` default backends skip screenshots even when `site_capture` is `true`.
+
+Example (disable screenshots to reduce runtime on large scans):
+
+```json
+{"name": "Fast asset recon", "target": "example.com", "port_scan": true, "site_identify": true, "site_capture": false}
+```
+
 ### Best Practices for Task Deletion
 
 To delete currently running tasks programmatically, execute a two-stage sequence:

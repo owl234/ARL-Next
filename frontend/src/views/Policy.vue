@@ -284,6 +284,7 @@ const getIpConfigText = (p) => {
 const getSiteConfigText = (p) => {
   if (!p) return '-'; const l = [];
   if (p.site_config?.site_identify) l.push(pageText('tasks.websiteDiscoveryAndFingerprinting'));
+  if (p.site_config?.site_capture !== false) l.push(pageText('tasks.websiteScreenshot'));
   if (p.file_leak || p.site_config?.file_leak) l.push(pageText('tasks.fileDisclosure'));
   if (p.site_config?.search_engines) l.push(pageText('tasks.searchEngines'));
   if (p.site_config?.site_spider) l.push(pageText('tasks.websiteCrawler'));

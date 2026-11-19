@@ -11,6 +11,7 @@ from contextlib import contextmanager
 import traceback
 import threading
 from app.modules import CollectSource, WebSiteFetchStatus, WebSiteFetchOption
+from app.helpers.policy import normalize_site_capture
 from app.services.nuclei_scan import nuclei_scan
 from app.services import run_risk_cruising, BaseUpdateTask
 try:
@@ -537,6 +538,20 @@ class WebSiteFetch(object):
 
         return self._task_domain_set
 
+    @property
+    def site_capture_enabled(self) -> bool:
+        if not isinstance(self.options, dict):
+            return True
+        return normalize_site_capture(self.options.get(WebSiteFetchOption.SITE_CAPTURE))
+
+    def _is_catch_all_site(self, site: str) -> bool:
+        if not site:
+            return False
+        if site in self.catch_all_sites:
+            return True
+        cut_target = utils.url.cut_filename(site)
+        return bool(cut_target and cut_target in self.catch_all_sites)
+
     def site_identify(self):
         # ** 调用指纹识别
         self.web_analyze_map = services.web_analyze(self.available_sites)
@@ -564,10 +579,13 @@ class WebSiteFetch(object):
             seen_sites_in_list.add(curr_site)
             deduplicated_site_info_list.append(site_info)
 
-            site_path = "/image/" + self.task_id
-            file_name = '{}/{}.jpg'.format(site_path, utils.gen_filename(curr_site))
             site_info["task_id"] = self.task_id
-            site_info["screenshot"] = file_name
+            if self.site_capture_enabled and not self._is_catch_all_site(curr_site):
+                site_path = "/image/" + self.task_id
+                file_name = '{}/{}.jpg'.format(site_path, utils.gen_filename(curr_site))
+                site_info["screenshot"] = file_name
+            else:
+                site_info["screenshot"] = ""
 
             # 调用读取站点识别的结果，并且去重
             if self.web_analyze_map:
@@ -613,9 +631,15 @@ class WebSiteFetch(object):
             logger.warning("sync_service_from_site error for task {}: {}".format(self.task_id, e))
 
     def site_screenshot(self):
-        # ***站点截图***
+        # ***站点截图（跳过泛解析/默认后端阻断集合）***
+        capture_targets = [
+            site for site in self.available_sites
+            if not self._is_catch_all_site(site)
+        ]
+        if not capture_targets:
+            return
         capture_save_dir = Config.SCREENSHOT_DIR + "/" + self.task_id
-        services.site_screenshot(self.available_sites, concurrency=4, capture_dir=capture_save_dir)
+        services.site_screenshot(capture_targets, concurrency=4, capture_dir=capture_save_dir)
 
     def site_spider(self):
         # *** 执行静态爬虫
@@ -1305,8 +1329,9 @@ class WebSiteFetch(object):
         # 清空，节省内存
         self.site_info_list = []
 
-        """ *** 站点截图（强制执行） *** """
-        self.run_func(WebSiteFetchStatus.SITE_CAPTURE, self.site_screenshot)
+        """ *** 站点截图 *** """
+        if self.site_capture_enabled:
+            self.run_func(WebSiteFetchStatus.SITE_CAPTURE, self.site_screenshot)
 
         """ ***调用站点爬虫发现URL """
         if self.options.get(WebSiteFetchOption.SITE_SPIDER):

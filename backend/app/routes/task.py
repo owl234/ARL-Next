@@ -1,3 +1,4 @@
+import re
 from flask_restx import fields, Namespace
 from bson import ObjectId
 from app import celerytask
@@ -5,7 +6,7 @@ from app.utils import get_logger, auth
 from . import base_query_fields, ARLResource, get_arl_parser, conn
 from app import utils
 from app.modules import TaskStatus, ErrorMsg, TaskSyncStatus, CeleryAction, TaskTag, CeleryRoutingKey
-from app.helpers import get_options_by_policy_id, submit_task_task,\
+from app.helpers import get_options_by_policy_id, normalize_site_capture, submit_task_task,\
     submit_risk_cruising, get_scope_by_scope_id, check_target_in_scope
 from app.helpers.task import get_task_data, restart_task
 from app.services.portScan import normalize_host_discovery_mode
@@ -99,7 +100,7 @@ add_task_fields = ns.model('AddTask', { # 创建添加任务命名空间。
     "service_brute": fields.Boolean(example=False),
     "os_detection": fields.Boolean(example=False),
     "site_identify": fields.Boolean(example=False),
-    "site_capture": fields.Boolean(example=False),
+    "site_capture": fields.Boolean(example=True, default=True, description="站点截图"),
     "file_leak": fields.Boolean(example=False),
     "search_engines": fields.Boolean(example=False),
     "site_spider": fields.Boolean(example=False),
@@ -222,6 +223,9 @@ class ARLTask(ARLResource): # 继承我们在阶段一拆解过的“大基类�
             )
         except ValueError as e:
             return utils.build_ret(ErrorMsg.Error, {"error": str(e)})
+
+        # 站点截图缺省值向下兼容默认开启（显式传 false 时跳过截图）
+        args["site_capture"] = normalize_site_capture(args.get("site_capture"))
 
         # 2. 分离核心参数：用 pop 把任务名和目标单独拿出来，
         #    这样 args 字典里剩下的就全是纯粹的“扫描选项(options)”了（比如 port_scan: True）
@@ -437,9 +441,14 @@ class DeleteTask(ARLResource):
                     utils.conn_db(name).delete_many(delete_query)
                     
                 # 【逻辑修正】：清理物理截图文件
-                # 由于部分站点可能已被同步至资产组（保留了 scope_id），此时不能盲目删除整个截图文件夹
-                # 我们需要检查该 task_id 下的截图是否还被资产组（asset_site）引用，如果没有，再安全删除文件夹以释放磁盘
-                remaining_asset = utils.conn_db('asset_site').find_one({'task_id': task_id})
+                # 由于部分站点可能已被同步至资产组（含后续无截图任务更新后仍保留旧截图路径的场景），
+                # 需同时检查 asset_site 是否按 task_id 或 screenshot 路径引用该目录，确认无引用后再删除
+                remaining_asset = utils.conn_db('asset_site').find_one({
+                    '$or': [
+                        {'task_id': task_id},
+                        {'screenshot': {'$regex': f'^/image/{re.escape(task_id)}/'}}
+                    ]
+                })
                 if not remaining_asset:
                     import shutil
                     from app.config import Config

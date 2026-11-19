@@ -277,6 +277,10 @@ class SyncAsset(object):
 
                     data["tag"] = merged_tags
 
+                    # 🛡️【截图防降级保护】：无截图任务同步更新存量站点时，保留资产组原有截图路径，避免覆盖抹除
+                    if not data.get("screenshot") and old.get("screenshot"):
+                        data["screenshot"] = old["screenshot"]
+
                 if category in self.update_asset_map:
                     if self.update_asset_counter[category] < self.max_record_asset_count:
                         self.update_asset_map[category].append(copy.deepcopy(data))

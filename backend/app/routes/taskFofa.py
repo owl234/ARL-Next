@@ -5,6 +5,7 @@ from app.services.fofaClient import FofaClient
 from app.services import fofa_query
 from app import celerytask
 from app.config import Config
+from app.helpers.policy import normalize_site_capture
 from bson import ObjectId
 from . import ARLResource
 
@@ -79,6 +80,7 @@ class AddFofaTask(ARLResource):
             "service_brute": False,
             "os_detection": False,
             "site_identify": False,
+            "site_capture": True,
             "file_leak": False,
             "ssl_cert": False
         }
@@ -116,11 +118,12 @@ def policy_2_task_options(policy_id):
     if not data:
         return options
 
-    policy_options = data["policy"]
-    policy_options.pop("domain_config")
+    policy_options = dict(data.get("policy") or {})
+    policy_options.pop("domain_config", None)
 
-    ip_config = policy_options.pop("ip_config")
-    site_config = policy_options.pop("site_config")
+    ip_config = dict(policy_options.pop("ip_config", None) or {})
+    site_config = dict(policy_options.pop("site_config", None) or {})
+    site_config["site_capture"] = normalize_site_capture(site_config.get("site_capture"))
 
     options.update(ip_config)
     options.update(site_config)

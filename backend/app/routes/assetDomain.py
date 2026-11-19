@@ -138,7 +138,7 @@ class ARLAssetDomain(ARLResource):
             'service_brute': False,
             'os_detection': False,
             'site_identify': False,
-            'site_capture': False,
+            'site_capture': True,
             'file_leak': False,
             'alt_dns': False,
             'site_spider': False,

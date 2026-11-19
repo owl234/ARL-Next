@@ -238,6 +238,14 @@
               </div>
             </div>
 
+            <!-- 站点截图 -->
+            <div v-show="matchSearch(pageText('tasks.websiteScreenshot'), siteSearch)" class="feature-item-block">
+              <div class="feature-switch-row">
+                <a-checkbox v-model:checked="policyForm.site_config.site_capture">{{ pageText('tasks.websiteScreenshot') }}</a-checkbox>
+                <span class="feature-hint">{{ pageText('pages.captureRenderedPageScreenshotsUsingHeadlessBrowser') }}</span>
+              </div>
+            </div>
+
             <!-- 文件泄露 + 内联字典 -->
             <div v-show="matchSearch(pageText('tasks.fileDisclosure'), siteSearch)" class="feature-item-block">
               <div class="feature-switch-row">
@@ -547,6 +555,7 @@ const initPolicyForm = () => ({
   },
   site_config: {
     site_identify: false,
+    site_capture: true,
     search_engines: false,
     site_spider: false,
     findvhost: false,
@@ -658,13 +667,13 @@ const toggleAllIp = (e) => {
 // ================= 面板 3：Web 探测全选联动 =================
 const isAllSiteSelected = computed(() => {
   const sc = policyForm.site_config;
-  return sc.site_identify && sc.search_engines && sc.site_spider &&
+  return sc.site_identify && sc.site_capture && sc.search_engines && sc.site_spider &&
       sc.findvhost && sc.web_info_hunter && policyForm.file_leak;
 });
 const toggleAllSite = (e) => {
   const val = e.target.checked;
   const sc = policyForm.site_config;
-  sc.site_identify = sc.search_engines = sc.site_spider = sc.findvhost = sc.web_info_hunter = val;
+  sc.site_identify = sc.site_capture = sc.search_engines = sc.site_spider = sc.findvhost = sc.web_info_hunter = val;
   policyForm.file_leak = val;
 };
 
@@ -916,6 +925,7 @@ onMounted(async () => {
         Object.assign(policyForm.domain_config, data.policy?.domain_config || {});
         Object.assign(policyForm.ip_config, data.policy?.ip_config || {});
         Object.assign(policyForm.site_config, data.policy?.site_config || {});
+        policyForm.site_config.site_capture = data.policy?.site_config?.site_capture !== false;
         if (!policyForm.site_config.nuclei_config) {
           policyForm.site_config.nuclei_config = {
             include_community: true,

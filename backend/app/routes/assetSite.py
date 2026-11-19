@@ -90,7 +90,7 @@ class ARLAssetSite(HttpStatusResource):
 
         options = {
             'site_identify': False,
-            'site_capture': False,
+            'site_capture': True,
             'file_leak': False,
             'site_spider': False,
             'search_engines': False,

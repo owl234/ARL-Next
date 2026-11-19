@@ -2,6 +2,7 @@ from flask_restx import fields, Namespace
 from app.utils import get_logger, auth
 from . import base_query_fields, ARLResource, get_arl_parser
 from app.modules import ErrorMsg
+from app.helpers.policy import normalize_site_capture
 from app.services.portScan import normalize_host_discovery_mode
 from app import utils
 from bson import ObjectId
@@ -66,7 +67,7 @@ ip_config_fields = ns.model('ipConfig', {
 '''站点相关配置选项'''
 site_config_fields = ns.model('siteConfig', {
     "site_identify": fields.Boolean(description="站点识别", default=False),
-    "site_capture": fields.Boolean(description="站点截图", default=False),
+    "site_capture": fields.Boolean(description="站点截图", default=True),
     "search_engines": fields.Boolean(description="搜索引擎调用", default=False),
     "site_spider": fields.Boolean(description="站点爬虫", default=False),
     "nuclei_scan": fields.Boolean(description="nuclei 扫描", default=False),
@@ -168,6 +169,7 @@ class AddARLPolicy(ARLResource):
         ip_config = self._update_arg(ip_config, ip_config_fields)
 
         site_config = policy.pop("site_config", {}) or {}
+        site_config["site_capture"] = normalize_site_capture(site_config.get("site_capture"))
         site_config = self._update_arg(site_config, site_config_fields)
         norm_nc, nc_err = _normalize_nuclei_config(
             site_config.get("nuclei_config"),
@@ -216,9 +218,8 @@ class AddARLPolicy(ARLResource):
 
         desc = args.pop("desc", "")
 
-        # 宽容处理并丢弃 scope_config / site_capture 死字段
+        # 宽容处理并丢弃 scope_config 死字段
         policy.pop("scope_config", None)
-        site_config.pop("site_capture", None)
 
         item = {
             "name": name,
@@ -373,11 +374,13 @@ class EditPolicy(ARLResource):
         policy_obj["npoc_service_detection"] = is_svc_detect
 
         policy_obj.pop("scope_config", None)
-        if "site_config" in policy_obj and isinstance(policy_obj["site_config"], dict):
-            policy_obj["site_config"].pop("site_capture", None)
 
         incoming_site = incoming_policy.get("site_config", {}) if isinstance(incoming_policy.get("site_config"), dict) else {}
         site_cfg = policy_obj.setdefault("site_config", {})
+        if "site_capture" in incoming_site and incoming_site["site_capture"] is not None:
+            site_cfg["site_capture"] = normalize_site_capture(incoming_site["site_capture"])
+        else:
+            site_cfg["site_capture"] = normalize_site_capture(site_cfg.get("site_capture"))
         if "nuclei_config" in incoming_site and isinstance(incoming_site["nuclei_config"], dict):
             site_cfg["nuclei_config"] = incoming_site["nuclei_config"]
         norm_nc, nc_err = _normalize_nuclei_config(

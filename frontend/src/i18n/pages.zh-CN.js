@@ -554,6 +554,7 @@ export default {
   "collectCertificatesFromHttpsAndTlsPortsIncludingSubject": "拉取 HTTPS 与 TLS 端口证书信息，解析域名主体与颁发机构",
   "searchWebDiscoveryOptions": "搜索 Web 探测项",
   "collectHttpHeadersPageTitlesServerBannersAndCms": "提取 HTTP 响应头、网页标题、Server Banner 及开源 CMS/组件框架指纹",
+  "captureRenderedPageScreenshotsUsingHeadlessBrowser": "通过无头浏览器渲染并保存存活站点页面截图；关闭后可收敛大批量扫描耗时与磁盘占用",
   "directoryAndFileDisclosureChecks": "目录文件泄露检测",
   "checkWebsitesForBackupFilesExposedSourceCodeSensitive": "探测目标 Web 站点的备份文件、源码泄露、敏感配置及未授权后台路径",
   "directoryAndFileDisclosureDictionary": "目录文件泄露字典",

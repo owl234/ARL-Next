@@ -3,6 +3,21 @@ from app import utils
 from app.modules import TaskTag
 
 
+def normalize_site_capture(value, default: bool = True) -> bool:
+    """归一化站点截图开关（缺省/None 返回 default；兼容布尔值与常见字符串布尔值）。"""
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("false", "0", "no", "off", ""):
+            return False
+        if normalized in ("true", "1", "yes", "on"):
+            return True
+    return bool(value)
+
+
 def get_options_by_policy_id(policy_id, task_tag):
     if not policy_id or not bson.ObjectId.is_valid(str(policy_id)):
         return None
@@ -22,9 +37,9 @@ def get_options_by_policy_id(policy_id, task_tag):
     ip_config = dict(policy.pop("ip_config", None) or {})
     site_config = dict(policy.pop("site_config", None) or {})
 
-    # 移除死字段与无效字段
+    # 移除死字段；site_capture 缺省默认开启以保持历史兼容
     policy.pop("scope_config", None)
-    site_config.pop("site_capture", None)
+    site_config["site_capture"] = normalize_site_capture(site_config.get("site_capture"))
 
     """仅仅资产发现任务需要这些"""
     if task_tag == TaskTag.TASK:

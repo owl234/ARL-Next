@@ -30,7 +30,7 @@ def create_index():
         "vuln": ["task_id", "save_date"],
         "nuclei_result": ["task_id", "vuln_severity", "template_source", "save_date"],
         "asset_ip": "scope_id",
-        "asset_site": ["scope_id", "tag", "is_catch_all"],
+        "asset_site": ["scope_id", "tag", "is_catch_all", "task_id", "screenshot"],
         "asset_domain": ["scope_id", "domain"],
         "github_result": ["github_task_id", "hash_md5", "repo_full_name", "triage_status"],
         "github_monitor_result": ["github_scheduler_id", "hash_md5", "repo_full_name", "triage_status"],
@@ -1234,20 +1234,36 @@ def normalize_threat_radar_configs():
 def update_policy_schema():
     """
     🛡️【策略配置架构平滑演进与死字段清理】
-    1. 物理清理 scope_config 死字段与 site_capture 失效字段，规避存量脏数据
-    2. 双向对齐服务识别：统一同步 ip_config.service_detection 与 npoc_service_detection
+    1. 物理清理 scope_config 死字段，规避存量脏数据
+    2. 为存量策略平滑补齐 site_config.site_capture 默认值（True），与历史默认截图行为保持兼容
+    3. 双向对齐服务识别：统一同步 ip_config.service_detection 与 npoc_service_detection
     """
     try:
         col = conn_db("policy")
         res_unset = col.update_many(
-            {"$or": [
-                {"policy.scope_config": {"$exists": True}},
-                {"policy.site_config.site_capture": {"$exists": True}}
-            ]},
+            {"policy.scope_config": {"$exists": True}},
             {"$unset": {
-                "policy.scope_config": "",
-                "policy.site_config.site_capture": ""
+                "policy.scope_config": ""
             }}
+        )
+
+        # 🛡️【平滑兼容】为存量策略补齐 site_capture=True，避免升级后既有策略静默失去截图；
+        # 仅匹配 policy 为对象且 site_config 缺失或为对象的文档，规避脏数据 null 父节点引发 WriteError 中断后续迁移
+        res_site_capture = col.update_many(
+            {
+                "policy": {"$type": "object"},
+                "$and": [
+                    {"$or": [
+                        {"policy.site_config": {"$exists": False}},
+                        {"policy.site_config": {"$type": "object"}},
+                    ]},
+                    {"$or": [
+                        {"policy.site_config.site_capture": {"$exists": False}},
+                        {"policy.site_config.site_capture": None},
+                    ]},
+                ],
+            },
+            {"$set": {"policy.site_config.site_capture": True}}
         )
 
         res_svc1 = col.update_many(
@@ -1281,10 +1297,11 @@ def update_policy_schema():
             {"$set": {"policy.site_config.nuclei_config.include_community": True}}
         )
 
-        if res_unset.modified_count or res_svc1.modified_count or res_svc2.modified_count or res_nuclei.modified_count or res_nuclei_comm.modified_count:
+        if res_unset.modified_count or res_site_capture.modified_count or res_svc1.modified_count or res_svc2.modified_count or res_nuclei.modified_count or res_nuclei_comm.modified_count:
             import logging
             logging.getLogger().info(
                 f"update_policy_schema synced: dead_fields={res_unset.modified_count}, "
+                f"site_capture={res_site_capture.modified_count}, "
                 f"npoc_to_svc={res_svc1.modified_count}, svc_to_npoc={res_svc2.modified_count}, "
                 f"nuclei_config={res_nuclei.modified_count}, include_community={res_nuclei_comm.modified_count}"
             )

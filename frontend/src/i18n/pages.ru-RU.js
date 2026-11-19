@@ -554,6 +554,7 @@ export default {
   "collectCertificatesFromHttpsAndTlsPortsIncludingSubject": "Сбор сертификатов с HTTPS- и TLS-портов, включая домены субъекта и издателя",
   "searchWebDiscoveryOptions": "Поиск параметров веб-обнаружения",
   "collectHttpHeadersPageTitlesServerBannersAndCms": "Сбор HTTP-заголовков, заголовков страниц, баннеров серверов и отпечатков CMS / фреймворков",
+  "captureRenderedPageScreenshotsUsingHeadlessBrowser": "Рендеринг и сохранение снимков экранов активных сайтов через headless-браузер; отключение ускоряет массовое сканирование и экономит место на диске",
   "directoryAndFileDisclosureChecks": "Проверки каталогов и утечек файлов",
   "checkWebsitesForBackupFilesExposedSourceCodeSensitive": "Поиск резервных файлов, открытого исходного кода, конфиденциальных настроек и административных путей без аутентификации",
   "directoryAndFileDisclosureDictionary": "Словарь каталогов и утечек файлов",

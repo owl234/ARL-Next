@@ -42,6 +42,9 @@ def _compute_update_diff(old_item, new_item):
     diff = {}
     for k, v in new_item.items():
         if k in ["task_id", "_id", "scope_id", "save_date", "update_date", "change_status", "update_diff"]: continue
+        # 无截图任务（site_capture=False 或 catch_all）写入空串时，SyncAsset 会保留存量截图，不应产生虚假变动
+        if k == "screenshot" and not v:
+            continue
         old_v = old_item.get(k)
         if old_v != v:
             diff[k] = {"before": old_v, "after": v}

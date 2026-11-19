@@ -554,6 +554,7 @@ export default {
   "collectCertificatesFromHttpsAndTlsPortsIncludingSubject": "Collect certificates from HTTPS and TLS ports, including subject domains and issuers",
   "searchWebDiscoveryOptions": "Search web discovery options",
   "collectHttpHeadersPageTitlesServerBannersAndCms": "Collect HTTP headers, page titles, server banners and CMS / framework fingerprints",
+  "captureRenderedPageScreenshotsUsingHeadlessBrowser": "Render and save screenshots of live websites via headless browser; disable to reduce runtime and storage on large scans",
   "directoryAndFileDisclosureChecks": "Directory and file disclosure checks",
   "checkWebsitesForBackupFilesExposedSourceCodeSensitive": "Check websites for backup files, exposed source code, sensitive configuration and unauthenticated administration paths",
   "directoryAndFileDisclosureDictionary": "Directory and file disclosure dictionary",

@@ -2433,6 +2433,7 @@ const pluginCategories = [
     get title() { return taskText('tasks.webDiscovery'); },
     plugins: [
       { key: 'site_identify', get label() { return taskText('tasks.websiteDiscoveryAndFingerprinting'); } },
+      { key: 'site_capture', get label() { return taskText('tasks.websiteScreenshot'); } },
       { key: 'search_engines', get label() { return taskText('tasks.searchEngines'); } },
       { key: 'site_spider', get label() { return taskText('tasks.websiteCrawler'); } },
       { key: 'web_info_hunter', get label() { return taskText('tasks.wihExtraction'); } },
@@ -2453,7 +2454,7 @@ const pluginList = pluginCategories.flatMap(cat => cat.plugins);
 const defaultPlugins = {
   domain_brute: true, alt_dns: true, dns_query_plugin: true, arl_search: true,
   port_scan: true, service_detection: false, os_detection: false, ssl_cert: false,
-  skip_scan_cdn_ip: true, site_identify: false, search_engines: false, site_spider: false,
+  skip_scan_cdn_ip: true, site_identify: false, site_capture: true, search_engines: false, site_spider: false,
   file_leak: false, findvhost: false, nuclei_scan: false, web_info_hunter: false,
   npoc_service_detection: false
 };
@@ -2522,12 +2523,14 @@ const toggleCategory = (category) => {
 
 const applyPreset = (type) => {
   if (type === 'fast') {
+    // 「快速侦察」默认关闭站点截图（site_capture: false），避免无头浏览器阻塞大批量探活
     Object.keys(defaultPlugins).forEach(k => { formState[k] = false; });
     formState.dns_query_plugin = true;
     formState.domain_brute = true;
     formState.port_scan = true;
     formState.skip_scan_cdn_ip = true;
     formState.site_identify = true;
+    formState.site_capture = false;
     formState.host_discovery_mode = 'auto';
     message.info(taskText('tasks.quickDiscoveryPresetApplied'));
   } else if (type === 'normal') {

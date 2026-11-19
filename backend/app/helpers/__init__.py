@@ -1,6 +1,6 @@
 # 从当前目录（注意那个小点 '.' 代表当前文件夹）下的 policy.py 文件中，
 # 导入名为 get_options_by_policy_id 的函数（通过策略ID获取配置选项）。
-from .policy import get_options_by_policy_id
+from .policy import get_options_by_policy_id, normalize_site_capture
 
 # 从当前目录下的 task.py 文件中，批量导入与任务调度和处理相关的核心函数。
 # 使用小括号 () 可以让代码分行写，更加整洁易读。
