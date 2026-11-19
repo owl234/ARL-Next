@@ -5,6 +5,7 @@ import json
 import shutil
 import zipfile
 import subprocess
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -345,6 +346,121 @@ def parse_and_validate_nuclei_yaml(content: str, run_nuclei_validate: bool = Fal
                     pass
 
     return True, metadata
+
+
+ASM_WEB_PROTOCOLS = frozenset({"http", "requests", "websocket"})
+ASM_NETWORK_PROTOCOLS = frozenset({"tcp", "network", "ssl", "javascript"})
+ASM_DNS_PROTOCOLS = frozenset({"dns", "whois"})
+ASM_UNSUPPORTED_PROTOCOLS = frozenset({"code", "headless", "file", "workflows"})
+
+
+def classify_asm_protocol(protocol: str) -> str:
+    """将 Nuclei 模板协议归类为 ASM 执行桶: web / network / dns / unsupported。"""
+    proto = str(protocol or "http").strip().lower()
+    if proto in ASM_WEB_PROTOCOLS:
+        return "web"
+    if proto in ASM_NETWORK_PROTOCOLS:
+        return "network"
+    if proto in ASM_DNS_PROTOCOLS:
+        return "dns"
+    if proto in ASM_UNSUPPORTED_PROTOCOLS:
+        return "unsupported"
+    return "web"
+
+
+def is_asm_supported_protocol(protocol: str) -> bool:
+    return classify_asm_protocol(protocol) != "unsupported"
+
+
+def _run_nuclei_validate_path(nuclei_bin: str, target_path: str, timeout: int = 15):
+    cmd = [nuclei_bin, "-duc", "-no-color", "-validate", "-t", target_path]
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+
+
+def validate_nuclei_templates_batch(entries: list):
+    """
+    批量执行 nuclei -validate 语义校验：
+    1. 整批落盘至临时目录一次校验，全部合法时 O(1) 通过；
+    2. 存在异常模板时自动二分定位具体失败文件并提取摘要，兼顾大 ZIP 导入耗时与精度；
+    3. 运行环境无 nuclei 可执行文件时降级放行（保留静态校验结果）。
+    返回: (passed_entries: list, failures: list[{"filename": str, "reason": str}])
+    """
+    if not entries:
+        return [], []
+
+    nuclei_bin = shutil.which("nuclei")
+    if not nuclei_bin:
+        return list(entries), []
+
+    passed = []
+    failures = []
+
+    def _validate_subset(subset: list, work_root: str, depth: int = 0):
+        if not subset:
+            return
+
+        if len(subset) == 1:
+            entry = subset[0]
+            single_path = os.path.join(work_root, f"single_{depth}_{utils.random_choices(6)}.yaml")
+            try:
+                with open(single_path, "w", encoding="utf-8") as f:
+                    f.write(entry["meta"]["content"])
+                res = _run_nuclei_validate_path(nuclei_bin, single_path, timeout=15)
+                if res.returncode == 0:
+                    passed.append(entry)
+                else:
+                    summary = _extract_nuclei_error_summary(res.stderr or res.stdout)
+                    failures.append({
+                        "filename": entry["filename"],
+                        "reason": f"Nuclei 语义验证不通过: {summary or f'退出码 {res.returncode}'}",
+                    })
+            except subprocess.TimeoutExpired:
+                failures.append({
+                    "filename": entry["filename"],
+                    "reason": "Nuclei 语义验证超时，请检查模板语法或稍后重试",
+                })
+            except OSError as e:
+                logger.warning(f"nuclei -validate unavailable during batch import, fallback to static check: {e}")
+                passed.append(entry)
+            finally:
+                if os.path.exists(single_path):
+                    try:
+                        os.unlink(single_path)
+                    except Exception:
+                        pass
+            return
+
+        batch_dir = os.path.join(work_root, f"batch_{depth}_{utils.random_choices(6)}")
+        os.makedirs(batch_dir, exist_ok=True)
+        try:
+            for idx, entry in enumerate(subset):
+                fpath = os.path.join(batch_dir, f"tpl_{idx:05d}.yaml")
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(entry["meta"]["content"])
+
+            timeout_sec = min(120, max(20, len(subset) * 2))
+            res = _run_nuclei_validate_path(nuclei_bin, batch_dir, timeout=timeout_sec)
+            if res.returncode == 0:
+                passed.extend(subset)
+                return
+        except subprocess.TimeoutExpired:
+            pass
+        except OSError as e:
+            logger.warning(f"nuclei -validate unavailable during batch import, fallback to static check: {e}")
+            passed.extend(subset)
+            return
+        finally:
+            shutil.rmtree(batch_dir, ignore_errors=True)
+
+        mid = len(subset) // 2
+        _validate_subset(subset[:mid], work_root, depth + 1)
+        _validate_subset(subset[mid:], work_root, depth + 1)
+
+    os.makedirs(Config.TMP_PATH, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=Config.TMP_PATH, prefix="nuclei_import_val_") as tmp_root:
+        _validate_subset(list(entries), tmp_root)
+
+    return passed, failures
 
 
 def load_community_index(force_refresh: bool = False):

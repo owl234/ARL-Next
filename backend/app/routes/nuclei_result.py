@@ -12,6 +12,7 @@ logger = get_logger()
 base_search_fields = {
     'template_url': fields.String(required=False, description="模版文件URL"),
     'template_id': fields.String(description="模版id"),
+    'template_source': fields.String(description="模版来源 (custom|community)"),
     'vuln_name': fields.String(description="漏洞名称"),
     'vuln_severity': fields.String(description="漏洞等级"),
     'vuln_url': fields.String(description="漏洞URL"),
@@ -27,6 +28,23 @@ base_search_fields.update(base_query_fields)
 @ns.route('/')
 class ARLUrl(ARLResource):
     parser = get_arl_parser(base_search_fields, location='args')
+
+    def build_db_query(self, args):
+        args_copy = dict(args)
+        source_val = args_copy.pop('template_source', None)
+        q = super().build_db_query(args_copy)
+        if source_val == 'community':
+            q.setdefault('$and', []).append({
+                '$or': [
+                    {'template_source': 'community'},
+                    {'template_source': {'$exists': False}},
+                    {'template_source': None},
+                    {'template_source': ''},
+                ]
+            })
+        elif source_val:
+            q['template_source'] = source_val
+        return q
 
     @auth
     @ns.expect(parser)

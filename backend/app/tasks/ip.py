@@ -319,8 +319,22 @@ class IPTask(CommonTask):
 
         # nuclei_scan 放在最后执行，防止高并发扫描把目标打挂或者触发IP封禁
         if self.options.get("nuclei_scan"):
+            ip_network_targets = []
+            for ip_info in self.ip_info_list:
+                raw_ip = str((ip_info.get("ip") if isinstance(ip_info, dict) else getattr(ip_info, "ip", "")) or "").strip("[] ")
+                if not raw_ip:
+                    continue
+                ip_host = f"[{raw_ip}]" if ":" in raw_ip else raw_ip
+                port_list = (ip_info.get("port_info") if isinstance(ip_info, dict) else getattr(ip_info, "port_info_list", [])) or []
+                for port_info in port_list:
+                    port_id = port_info.get("port_id") if isinstance(port_info, dict) else getattr(port_info, "port_id", None)
+                    if port_id is not None and str(port_id).strip():
+                        ip_network_targets.append(f"{ip_host}:{port_id}")
             with self.safe_phase("nuclei_scan", base_update):
-                web_site_fetch.run_func("nuclei_scan", web_site_fetch.nuclei_scan)
+                web_site_fetch.run_func(
+                    "nuclei_scan",
+                    lambda: web_site_fetch.nuclei_scan(extra_targets={"network": ip_network_targets}),
+                )
 
         # 执行统计和同步操作
         with self.safe_phase("task_stats", base_update):

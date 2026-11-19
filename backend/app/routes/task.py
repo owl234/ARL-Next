@@ -608,7 +608,8 @@ task_by_policy_fields = ns.model('TaskByPolicy', {
     "task_tag": fields.String(description="任务类型标签", enum=["task", "risk_cruising"], required=True), # task=侦察打野, risk_cruising=风险巡航
     "target": fields.String(description="任务目标", example="", required=False),
     "policy_id": fields.String(description="策略 ID", example="603c65316591e73dd717d176", required=True), # 核心：策略模板的ID
-    "result_set_id": fields.String(description="结果集 ID", example="603c65316591e73dd717d176", required=False)
+    "result_set_id": fields.String(description="结果集 ID", example="603c65316591e73dd717d176", required=False),
+    "related_scope_id": fields.String(description="可选资产组 ID，任务或风险巡航完成后自动同步结果", example="", required=False)
 })
 
 
@@ -627,6 +628,7 @@ class TaskByPolicy(ARLResource):
         target = args.pop("target")
         task_tag = args.pop("task_tag")
         result_set_id = args.pop("result_set_id")
+        req_related_scope_id = str(args.pop("related_scope_id", "") or "").strip()
         task_tag_enum = task_by_policy_fields["task_tag"].enum
 
         # 安全防御：限制任务类型只能是表单里规定的那两种
@@ -638,6 +640,14 @@ class TaskByPolicy(ARLResource):
 
         if not options:
             return utils.build_ret(ErrorMsg.PolicyIDNotFound, {"policy_id": policy_id})
+
+        if req_related_scope_id:
+            if not ObjectId.is_valid(req_related_scope_id):
+                return utils.build_ret(ErrorMsg.NotFoundScopeID, {"scope_id": req_related_scope_id})
+            scope_data = get_scope_by_scope_id(scope_id=req_related_scope_id)
+            if not scope_data:
+                return utils.build_ret(ErrorMsg.NotFoundScopeID, {"scope_id": req_related_scope_id})
+            options["related_scope_id"] = str(scope_data["_id"])
 
         task_data_list = []
         try:

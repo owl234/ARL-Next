@@ -1094,6 +1094,14 @@
                 </a-checkbox>
               </a-col>
             </a-row>
+            <div v-if="catIndex === pluginCategories.length - 1 && formState.nuclei_scan" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--arl-border-color); display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <span style="font-size: 12px; color: var(--arl-text-secondary);">{{ taskText('tasks.nucleiScanScopeLabel') }}</span>
+              <a-radio-group v-model:value="formState.nuclei_scope" size="small">
+                <a-radio-button value="both">{{ taskText('tasks.nucleiScopeBoth') }}</a-radio-button>
+                <a-radio-button value="custom_only">{{ taskText('tasks.nucleiScopeCustomOnly') }}</a-radio-button>
+                <a-radio-button value="community_only">{{ taskText('tasks.nucleiScopeCommunityOnly') }}</a-radio-button>
+              </a-radio-group>
+            </div>
           </div>
         </div>
       </a-form>
@@ -1203,6 +1211,7 @@ import TycTaskModal from '../components/TycTaskModal.vue';
 import SyncToScopeModal from '../components/SyncToScopeModal.vue';
 import AssetScopeSelect from '../components/AssetScopeSelect.vue';
 import { getTaskAssetGroupState, hasSyncSummary } from '../utils/taskAssetGroups';
+import { buildNucleiConfigFromScope } from '../utils/nucleiHelpers';
 
 const { t: taskText, locale: taskLocale } = useI18n({ useScope: 'global' });
 
@@ -2458,6 +2467,7 @@ const defaultFormState = {
   host_discovery_mode: 'auto',
   alt_dns_dict: undefined,
   file_leak_dict: undefined,
+  nuclei_scope: 'both',
   ...defaultPlugins
 };
 
@@ -2550,6 +2560,11 @@ const doSubmitTask = async () => {
   submitLoading.value = true;
   try {
     const payload = { ...formState };
+    const nucleiScope = payload.nuclei_scope;
+    delete payload.nuclei_scope;
+    if (payload.nuclei_scan) {
+      payload.nuclei_config = buildNucleiConfigFromScope(nucleiScope);
+    }
     // 🛡️ 服务识别双向严格协同（开启同开，关闭同关）
     payload.npoc_service_detection = !!payload.service_detection;
     const res = await request.post('/task/', payload);

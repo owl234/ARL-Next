@@ -209,7 +209,7 @@ def ip_asset_web_hook(task_id: str, scope_id: str):
 
 class NucleiVulnWebHook(BaseAssetWebHook):
     _RESULT_FIELDS = (
-        "template_id", "vuln_name", "vuln_severity", "vuln_url",
+        "template_id", "template_source", "vuln_name", "vuln_severity", "vuln_url",
         "target", "host", "template_url", "extracted_results",
         "curl_command", "save_date",
     )

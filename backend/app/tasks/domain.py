@@ -1277,14 +1277,25 @@ class DomainTask(CommonTask):
                                           sites=new_sites, options=self.options,
                                           scope_domain=[self.base_domain])
             web_site_fetch.run()
-            
+
+            # 将 WIH 增量站点的存活列表与默认后端阻断集合并回主体 web_site_fetch，确保 poc_sites 包含新增站点
+            if hasattr(self, 'web_site_fetch') and self.web_site_fetch:
+                existing_avail = set(self.web_site_fetch.available_sites)
+                for avail in web_site_fetch.available_sites:
+                    if avail not in existing_avail:
+                        self.web_site_fetch.available_sites.append(avail)
+                        existing_avail.add(avail)
+                self.web_site_fetch.catch_all_sites.update(web_site_fetch.catch_all_sites)
+                self.web_site_fetch._poc_sites = None
+
             self.wih_domain_set.update(web_site_fetch.wih_domain_set)
-            
+
             iteration += 1
 
-        # 更新主体 web_site_fetch 的 sites 列表，确保后续 poc_run 能扫描到新增的站点
+        # 更新主体 web_site_fetch 的 sites 列表并失效 poc_sites 缓存，确保后续 poc_run / file_leak / nuclei_scan 能扫描到新增站点
         if hasattr(self, 'web_site_fetch') and self.web_site_fetch:
             self.web_site_fetch.sites = self.site_list.copy()
+            self.web_site_fetch._poc_sites = None
 
         elapse = time.time() - t1
         self.update_services("wih_domain_update", elapse)

@@ -340,7 +340,7 @@ def test_real_nuclei_dry_run_against_loopback_http(app_env, monkeypatch):
 
 
 def test_nuclei_scan_custom_templates_bypass_cve_http_tag_filter_and_respect_none_mode(app_env, monkeypatch):
-    _, scan_mod, route_mod, _, _ = _load_nuclei_env(app_env)
+    svc, scan_mod, route_mod, _, _ = _load_nuclei_env(app_env)
 
     app_env.db.nuclei_template.insert_one({
         "template_id": "custom-rce-notag",
@@ -358,10 +358,11 @@ def test_nuclei_scan_custom_templates_bypass_cve_http_tag_filter_and_respect_non
     scan_none._materialize_custom_templates()
     assert scan_none.custom_templates_path is None
 
-    # 2. mode=all_enabled 且存在社区模板目录时：社区走 -tags cve,http，自建独立通道无 -tags 限制并合并结果
+    # 2. mode=all_enabled 且存在社区模板目录时：社区走 -tags cve,http，自建独立通道无 -tags/-severity/-eid 限制并合并结果
     comm_dir = app_env.tmp / "comm_templates"
     comm_dir.mkdir()
     (comm_dir / "demo.yaml").write_text("id: comm-demo\n", encoding="utf-8")
+    monkeypatch.setattr(svc, "get_community_templates_dir", lambda: str(comm_dir))
     monkeypatch.setattr(route_mod, "get_community_templates_dir", lambda: str(comm_dir))
 
     commands = []

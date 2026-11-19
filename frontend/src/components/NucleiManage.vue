@@ -494,8 +494,11 @@
           </template>
 
           <template v-if="column.key === 'template_id'">
-            <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
               <span class="arl-mono" style="font-weight: 600; color: var(--arl-text-color);">{{ record.template_id }}</span>
+              <a-tooltip v-if="record.protocol && !isAsmSupportedProtocol(record.protocol)" :title="pageText('pages.nucleiAsmUnsupportedTooltip', { protocol: record.protocol })">
+                <a-tag color="orange" size="small" style="margin: 0;">{{ pageText('pages.nucleiAsmUnsupportedTag') }}</a-tag>
+              </a-tooltip>
               <a-tooltip :title="pageText('pages.copyTemplateId')">
                 <copy-outlined style="cursor: pointer; opacity: 0.5; font-size: 12px;" @click="copyText(record.template_id)" />
               </a-tooltip>
@@ -938,6 +941,7 @@ import {
 import { Codemirror } from 'vue-codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
 import request from '../utils/request';
+import { isAsmSupportedProtocol } from '../utils/nucleiHelpers';
 import { downloadAuthenticated } from '../utils/authenticatedFiles';
 import { useSticky } from '../utils/useSticky';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';

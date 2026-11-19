@@ -20,7 +20,7 @@ base_query_fields = {
 # 只能用等号进行mongo查询的字段
 EQUAL_FIELDS = [
     "task_id", "task_tag", "ip_type", "scope_id", "group_id", "type", "query_type",
-    "status", "schedule_status", "schedule_type", "source",
+    "status", "schedule_status", "schedule_type", "source", "template_source",
     "plg_type", "plugin_type", "vuln_severity", "port_scan_type",
     "record_type", "sync_status"
 ]

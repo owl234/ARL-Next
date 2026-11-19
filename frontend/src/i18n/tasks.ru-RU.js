@@ -796,5 +796,12 @@ export default {
   "resumeFromCheckpointBtn": "Продолжить с точки остановки",
   "resumeFromCheckpointConfirm": "Продолжить сканирование оставшихся субъектов и измерений с сохранённой точки остановки, сохранив собранные активы. Продолжить?",
   "resumeFromCheckpointStarted": "Задача поставлена в очередь для продолжения с точки остановки",
-  "resumeFromCheckpointFailed": "Не удалось продолжить с точки остановки"
+  "resumeFromCheckpointFailed": "Не удалось продолжить с точки остановки",
+  "nucleiTemplateSource": "Источник шаблона",
+  "nucleiSourceCustom": "Свой",
+  "nucleiSourceCommunity": "Сообщество",
+  "nucleiScanScopeLabel": "Область шаблонов Nuclei",
+  "nucleiScopeBoth": "Сообщество + Свои (по умолч.)",
+  "nucleiScopeCustomOnly": "Только свои шаблоны",
+  "nucleiScopeCommunityOnly": "Только шаблоны сообщества"
 };

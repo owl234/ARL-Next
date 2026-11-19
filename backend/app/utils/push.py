@@ -526,10 +526,11 @@ def build_nuclei_vuln_report(task_name, task_target, results, scope_name="", max
     for idx, item in enumerate(display_items, 1):
         sev = str(item.get("vuln_severity") or "").strip().lower()
         sev_label = NUCLEI_SEVERITY_LABELS.get(sev, sev or "未知")
+        source_prefix = "[自建]" if str(item.get("template_source") or "").strip().lower() == "custom" else ""
         vuln_name = _shorten_text(item.get("vuln_name") or item.get("template_id") or "未命名漏洞", 120)
         template_id = str(item.get("template_id") or "-").strip()
         vuln_url = _shorten_text(item.get("vuln_url") or item.get("target") or item.get("host") or "-", 180)
-        lines.append(f"{idx}. [{sev_label}] {vuln_name} ({template_id})")
+        lines.append(f"{idx}. [{sev_label}]{source_prefix} {vuln_name} ({template_id})")
         lines.append(f"   命中地址：{vuln_url}")
 
     lines.append("-----------------------------")
@@ -561,6 +562,12 @@ def build_nuclei_vuln_report(task_name, task_target, results, scope_name="", max
         sev = str(item.get("vuln_severity") or "").strip().lower()
         sev_label = NUCLEI_SEVERITY_LABELS.get(sev, sev or "未知")
         fg, bg, border = NUCLEI_SEVERITY_BADGE_STYLES.get(sev, ("#595959", "#fafafa", "#d9d9d9"))
+        is_custom = str(item.get("template_source") or "").strip().lower() == "custom"
+        source_badge = (
+            '<span style="display: inline-block; padding: 1px 5px; margin-left: 4px; border-radius: 4px; '
+            'font-size: 11px; color: #531dab; background-color: #f9f0ff; border: 1px solid #d3adf7;">自建</span>'
+            if is_custom else ""
+        )
         template_id = html_lib.escape(str(item.get("template_id") or "-"))
         vuln_name = html_lib.escape(str(item.get("vuln_name") or item.get("template_id") or "未命名漏洞"))
         vuln_url = html_lib.escape(str(item.get("vuln_url") or item.get("target") or item.get("host") or "-"))
@@ -568,7 +575,7 @@ def build_nuclei_vuln_report(task_name, task_target, results, scope_name="", max
             f'<tr style="border-bottom: 1px solid #f0f0f0;">'
             f'<td style="padding: 8px 10px; color: #595959;">{idx}</td>'
             f'<td style="padding: 8px 10px;"><span style="display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 12px; color: {fg}; background-color: {bg}; border: 1px solid {border};">{html_lib.escape(sev_label)}</span></td>'
-            f'<td style="padding: 8px 10px; font-family: monospace; font-size: 12px; color: #262626;">{template_id}</td>'
+            f'<td style="padding: 8px 10px; font-family: monospace; font-size: 12px; color: #262626;">{template_id}{source_badge}</td>'
             f'<td style="padding: 8px 10px; color: #262626;">{vuln_name}</td>'
             f'<td style="padding: 8px 10px; color: #1890ff; word-break: break-all;">{vuln_url}</td>'
             f'</tr>'

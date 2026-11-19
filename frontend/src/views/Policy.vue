@@ -99,7 +99,7 @@
           <div class="policy-divider"></div>
           <div class="policy-section">
             <div class="policy-title">{{ pageText('tasks.vulnerabilityAndRiskScanning') }}</div>
-            <div class="policy-row"><span class="policy-label">{{ pageText('tasks.nucleiScanning') }}</span><span class="policy-val">{{ record.policy?.site_config?.nuclei_scan ? pageText('pages.enabled') : pageText('pages.disabled') }}</span></div>
+            <div class="policy-row"><span class="policy-label">{{ pageText('tasks.nucleiScanning') }}</span><span class="policy-val">{{ formatNucleiPolicySummary(record.policy?.site_config, pageText) }}</span></div>
             <div class="policy-row"><span class="policy-label">{{ pageText('pages.pocVerification') }}</span><span class="policy-val">{{ getPocConfigText(record.policy) }}</span></div>
             <div class="policy-row"><span class="policy-label">{{ pageText('tasks.stageWeakBrute') }}</span><span class="policy-val">{{ getBruteConfigText(record.policy) }}</span></div>
           </div>
@@ -167,6 +167,7 @@ import request from '../utils/request';
 import { message } from 'ant-design-vue';
 import { SearchOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons-vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
+import { formatNucleiPolicySummary } from '../utils/nucleiHelpers';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 

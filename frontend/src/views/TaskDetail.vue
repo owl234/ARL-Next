@@ -510,10 +510,19 @@
           <span v-else>-</span>
         </template>
 
+        <template v-else-if="column.key === 'template_id'">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span class="arl-mono">{{ record.template_id || '-' }}</span>
+            <a-tag v-if="isCustomNucleiResult(record)" color="purple" size="small" style="margin: 0;">{{ taskText('tasks.nucleiSourceCustom') }}</a-tag>
+            <a-tag v-else-if="record.template_id" color="default" size="small" style="margin: 0;">{{ taskText('tasks.nucleiSourceCommunity') }}</a-tag>
+          </div>
+        </template>
+
         <template v-else-if="column.key === 'fileleak_url' || column.key === 'url_link' || column.key === 'nuclei_vuln_url'">
-          <a :href="record.url || record.vuln_url" target="_blank" style="word-break: break-all;">
-            {{ record.url || record.vuln_url || '-' }}
+          <a v-if="isHttpUrl(record.url || record.vuln_url)" :href="record.url || record.vuln_url" target="_blank" style="word-break: break-all;">
+            {{ record.url || record.vuln_url }}
           </a>
+          <span v-else class="arl-mono" style="word-break: break-all;">{{ record.url || record.vuln_url || '-' }}</span>
         </template>
 
         <template v-else-if="column.key === 'verify_data'">
@@ -728,6 +737,7 @@ defineOptions({ name: 'TaskDetail' });
 import { ref, onMounted, onUnmounted, onActivated, onDeactivated, reactive, watch, nextTick, computed, createVNode } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
+import { isCustomNucleiResult, isHttpUrl, formatRiskPolicyLabel } from '../utils/nucleiHelpers';
 import AuthenticatedImage from '../components/AuthenticatedImage.vue';
 import HttpStatusFilter from '../components/HttpStatusFilter.vue';
 import { formatAssetFilterOperator, buildAssetFilterParams } from '../utils/assetFilters';
@@ -1338,6 +1348,16 @@ const tabConfig = reactive({
     deleteUrl: '/nuclei_result/delete/',
     searchFields: [
       { get label() { return taskText('tasks.templateId'); }, key: 'template_id', operator: '=' },
+      {
+        get label() { return taskText('tasks.nucleiTemplateSource'); },
+        key: 'template_source',
+        operator: '=',
+        type: 'select',
+        options: [
+          { get label() { return taskText('tasks.nucleiSourceCustom'); }, value: 'custom' },
+          { get label() { return taskText('tasks.nucleiSourceCommunity'); }, value: 'community' }
+        ]
+      },
       { get label() { return taskText('tasks.target'); }, key: 'target', operator: '=' },
       { get label() { return taskText('tasks.vulnerableUrl'); }, key: 'vuln_url', operator: '=' },
       { get label() { return taskText('tasks.vulnerabilityName'); }, key: 'vuln_name', operator: '=' }
@@ -1865,13 +1885,10 @@ const openRiskModal = async () => {
     const [policyRes, resultSetRes] = await Promise.all([policyPromise, resultSetPromise]);
 
     if (policyRes.code === 200) {
-      policyOptions.value = (policyRes.items || []).map(item => {
-        const pocCount = item.policy?.poc_config?.length || 0;
-        return {
-          value: item._id,
-          label: `${item.name} (PoC : ${pocCount})`
-        };
-      });
+      policyOptions.value = (policyRes.items || []).map(item => ({
+        value: item._id,
+        label: formatRiskPolicyLabel(item, taskText)
+      }));
     }
 
     if (resultSetRes.code === 200) {

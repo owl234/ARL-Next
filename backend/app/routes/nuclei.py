@@ -41,6 +41,9 @@ from app.services.nuclei_template_service import (
     load_community_index,
     get_current_sync_doc,
     run_community_sync_worker,
+    classify_asm_protocol,
+    is_asm_supported_protocol,
+    validate_nuclei_templates_batch,
 )
 from app.services.nuclei_scan import resolve_nuclei_proxy
 
@@ -94,6 +97,8 @@ class NucleiTemplateList(ARLResource):
             item['_id'] = str(item['_id'])
             # 列表视图省去大体积 content 字段，提高传输性能
             item.pop('content', None)
+            item['asm_bucket'] = classify_asm_protocol(item.get('protocol'))
+            item['asm_supported'] = is_asm_supported_protocol(item.get('protocol'))
 
         return utils.build_ret(ErrorMsg.Success, {
             "items": items,
@@ -308,34 +313,21 @@ class NucleiTemplateImport(ARLResource):
         success_count = 0
         fail_count = 0
         fail_details = []
+        valid_candidates = []
         col = utils.conn_db('nuclei_template')
 
         def _process_yaml_content(content_str: str, file_display_name: str):
-            nonlocal success_count, fail_count
+            nonlocal fail_count
             is_valid, meta = parse_and_validate_nuclei_yaml(content_str, run_nuclei_validate=False)
             if not is_valid:
                 fail_count += 1
                 fail_details.append({"filename": file_display_name, "reason": meta})
                 return
 
-            now_str = utils.curr_date()
-            doc = {
-                "template_id": meta['template_id'],
-                "name": meta['name'],
-                "severity": meta['severity'],
-                "tags": meta['tags'],
-                "protocol": meta['protocol'],
-                "author": meta['author'],
-                "description": meta['description'],
-                "reference": meta['reference'],
-                "content": meta['content'],
-                "enable": True,
-                "is_custom": True,
-                "updated_at": now_str
-            }
-            # 存在则覆盖更新，不存在则插入
-            col.update_one({'template_id': meta['template_id']}, {'$set': doc, '$setOnInsert': {'created_at': now_str}}, upsert=True)
-            success_count += 1
+            valid_candidates.append({
+                "filename": file_display_name,
+                "meta": meta,
+            })
 
         for f in files:
             if not f or not f.filename:
@@ -372,6 +364,32 @@ class NucleiTemplateImport(ARLResource):
             else:
                 fail_count += 1
                 fail_details.append({"filename": filename, "reason": "不支持的文件类型，仅支持 .yaml、.yml 或包含模板的 .zip 压缩包"})
+
+        passed_entries, semantic_failures = validate_nuclei_templates_batch(valid_candidates)
+        if semantic_failures:
+            fail_count += len(semantic_failures)
+            fail_details.extend(semantic_failures)
+
+        for entry in passed_entries:
+            meta = entry["meta"]
+            now_str = utils.curr_date()
+            doc = {
+                "template_id": meta['template_id'],
+                "name": meta['name'],
+                "severity": meta['severity'],
+                "tags": meta['tags'],
+                "protocol": meta['protocol'],
+                "author": meta['author'],
+                "description": meta['description'],
+                "reference": meta['reference'],
+                "content": meta['content'],
+                "enable": True,
+                "is_custom": True,
+                "updated_at": now_str
+            }
+            # 存在则覆盖更新，不存在则插入
+            col.update_one({'template_id': meta['template_id']}, {'$set': doc, '$setOnInsert': {'created_at': now_str}}, upsert=True)
+            success_count += 1
 
         return utils.build_ret(ErrorMsg.Success, {
             "success_count": success_count,

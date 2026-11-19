@@ -796,5 +796,12 @@ export default {
   "resumeFromCheckpointBtn": "断点续跑",
   "resumeFromCheckpointConfirm": "将从上次保存的断点继续执行剩余主体与维度测绘，保留已入库资产。确认继续？",
   "resumeFromCheckpointStarted": "任务已从断点进入调度队列，正在恢复执行",
-  "resumeFromCheckpointFailed": "断点续跑派发失败"
+  "resumeFromCheckpointFailed": "断点续跑派发失败",
+  "nucleiTemplateSource": "模板来源",
+  "nucleiSourceCustom": "自建",
+  "nucleiSourceCommunity": "社区",
+  "nucleiScanScopeLabel": "Nuclei 模板范围",
+  "nucleiScopeBoth": "社区 + 自建（默认）",
+  "nucleiScopeCustomOnly": "仅自建模板",
+  "nucleiScopeCommunityOnly": "仅社区模板"
 };

@@ -269,7 +269,14 @@ test('中英文提交的扫描策略保留端口、字典、插件和 Nuclei 参
   assert.equal(data.name, '用户策略');
   assert.equal(data.policy.ip_config.port_custom, '80,443,8443');
   assert.equal(data.policy.domain_config.domain_brute_type, 'domain_2w.txt');
-  assert.deepEqual(data.policy.site_config.nuclei_config, { severity: ['critical', 'high', 'medium', 'low'], custom_template_mode: 'all_enabled', exclude_blacklist: true });
+  assert.deepEqual(data.policy.site_config.nuclei_config, {
+    include_community: true,
+    severity: ['critical', 'high', 'medium', 'low'],
+    custom_template_mode: 'all_enabled',
+    selected_custom_templates: [],
+    selected_tags: [],
+    exclude_blacklist: true,
+  });
   assert.equal(data.policy.poc_config[0].vul_name, '用户漏洞名称');
 });
 

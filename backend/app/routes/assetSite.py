@@ -533,13 +533,21 @@ class ARLAssetSubdomainChain(ARLResource):
                 return self.build_return_items(vuln_cursor)
 
             def fetch_nuclei():
+                dom_hostport_pattern = f"^(?:[a-zA-Z0-9.-]+\\.)?{escaped_dom}(?::\\d+)?$"
                 nuclei_or = [
                     {"target": clean_domain},
+                    {"target": {"$regex": dom_hostport_pattern, "$options": "i"}},
                     {"target": {"$regex": dom_url_prefix, "$options": "i"}},
+                    {"vuln_url": {"$regex": dom_hostport_pattern, "$options": "i"}},
                     {"vuln_url": {"$regex": dom_url_prefix, "$options": "i"}}
                 ]
                 if resolved_ips:
                     nuclei_or.append({"target": {"$in": resolved_ips}})
+                    valid_ips = [re.escape(ip) for ip in resolved_ips[:15] if ip]
+                    if valid_ips:
+                        ip_hostport_pattern = f"^(?:\\[?(?:{'|'.join(valid_ips)})\\]?)(?::\\d+)?$"
+                        nuclei_or.append({"target": {"$regex": ip_hostport_pattern}})
+                        nuclei_or.append({"vuln_url": {"$regex": ip_hostport_pattern}})
                     if ips_url_prefix:
                         nuclei_or.append({"target": {"$regex": ips_url_prefix}})
                         nuclei_or.append({"vuln_url": {"$regex": ips_url_prefix}})

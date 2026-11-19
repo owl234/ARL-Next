@@ -522,6 +522,7 @@
               >
                 <div class="vuln-header">
                   <a-tag color="volcano">Nuclei</a-tag>
+                  <a-tag v-if="isCustomNucleiResult(n)" color="purple">{{ assetText('tasks.nucleiSourceCustom') }}</a-tag>
                   <span class="vuln-name">{{ n.vuln_name || n.template_id }}</span>
                   <a-tag :color="getSeverityColor(n.vuln_severity || n.vul_severity)">
                     {{ (n.vuln_severity || n.vul_severity || 'HIGH').toUpperCase() }}
@@ -579,6 +580,7 @@ import {
   VerticalAlignTopOutlined
 } from '@ant-design/icons-vue';
 import request from '../utils/request';
+import { isCustomNucleiResult } from '../utils/nucleiHelpers';
 import AuthenticatedImage from './AuthenticatedImage.vue';
 import { formatGeo } from '../utils/formatGeo';
 import { copyText } from '../utils/clipboard';

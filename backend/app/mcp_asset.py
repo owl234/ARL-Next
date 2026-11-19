@@ -304,6 +304,16 @@ def build_asset_profile(target: str, task_id: str = ""):
             {"target": {"$regex": combined_url_prefix, "$options": "i"}},
             {"vuln_url": {"$regex": combined_url_prefix, "$options": "i"}},
         ]
+        if hostname:
+            dom_hp = f"^(?:[a-zA-Z0-9.-]+\\.)?{re.escape(hostname)}(?::\\d+)?$"
+            nuclei_or.append({"target": {"$regex": dom_hp, "$options": "i"}})
+            nuclei_or.append({"vuln_url": {"$regex": dom_hp, "$options": "i"}})
+        if all_ips_to_query:
+            valid_ips = [re.escape(ip) for ip in all_ips_to_query[:15] if ip]
+            if valid_ips:
+                ip_hp = f"^(?:\\[?(?:{'|'.join(valid_ips)})\\]?)(?::\\d+)?$"
+                nuclei_or.append({"target": {"$regex": ip_hp}})
+                nuclei_or.append({"vuln_url": {"$regex": ip_hp}})
         nuclei_query = {"$or": nuclei_or, **task_filter}
         nuclei_docs = list(utils.conn_db('nuclei_result').find(nuclei_query).sort("_id", -1).limit(100))
         if not nuclei_docs and not task_filter:
@@ -313,6 +323,8 @@ def build_asset_profile(target: str, task_id: str = ""):
                 "name": n.get("vuln_name"),
                 "severity": n.get("vuln_severity"),
                 "target": n.get("vuln_url") or n.get("target"),
+                "template_id": n.get("template_id"),
+                "template_source": n.get("template_source") or "community",
                 "plugin": "nuclei"
             })
         return vulns_list

@@ -213,8 +213,23 @@ class RiskCruising(CommonTask):
 
         # nuclei_scan 放在漏洞探测最后执行，防止高并发扫描把目标打挂或者触发IP封禁，但须先于统计与同步完成
         if self.options.get("nuclei_scan"):
+            risk_network_targets = list(self.sniffer_target_set | self.npoc_service_target_set)
+            risk_dns_targets = []
+            for raw_target in (self.targets or []):
+                t_str = str(raw_target or "").strip()
+                if not t_str:
+                    continue
+                parsed = urlparse(t_str if "://" in t_str else f"http://{t_str}")
+                if parsed.hostname:
+                    risk_dns_targets.append(parsed.hostname)
             with self.safe_phase("nuclei_scan", self):
-                web_site_fetch.run_func("nuclei_scan", web_site_fetch.nuclei_scan)
+                web_site_fetch.run_func(
+                    "nuclei_scan",
+                    lambda: web_site_fetch.nuclei_scan(extra_targets={
+                        "network": risk_network_targets,
+                        "dns": risk_dns_targets,
+                    }),
+                )
 
         with self.safe_phase("common_run", self):
             self.common_run(push_flag=False)

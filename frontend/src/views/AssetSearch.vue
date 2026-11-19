@@ -415,10 +415,19 @@
           <span v-else>-</span>
         </template>
 
+        <template v-else-if="column.key === 'template_id'">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span class="arl-mono">{{ record.template_id || '-' }}</span>
+            <a-tag v-if="isCustomNucleiResult(record)" color="purple" size="small" style="margin: 0;">{{ assetText('tasks.nucleiSourceCustom') }}</a-tag>
+            <a-tag v-else-if="record.template_id" color="default" size="small" style="margin: 0;">{{ assetText('tasks.nucleiSourceCommunity') }}</a-tag>
+          </div>
+        </template>
+
         <template v-else-if="column.key === 'fileleak_url' || column.key === 'url_link' || column.key === 'nuclei_vuln_url'">
-          <a :href="record.url || record.vuln_url" target="_blank" style="word-break: break-all;">
-            {{ record.url || record.vuln_url || '-' }}
+          <a v-if="isHttpUrl(record.url || record.vuln_url)" :href="record.url || record.vuln_url" target="_blank" style="word-break: break-all;">
+            {{ record.url || record.vuln_url }}
           </a>
+          <span v-else class="arl-mono" style="word-break: break-all;">{{ record.url || record.vuln_url || '-' }}</span>
         </template>
 
         <template v-else-if="column.key === 'verify_data'">
@@ -566,6 +575,7 @@ const actionBarRef = ref(null);
 const { stickyConfig, actionBarHeight } = useSticky(actionBarRef);
 import { useRoute } from 'vue-router';
 import request from '../utils/request';
+import { isCustomNucleiResult, isHttpUrl, formatRiskPolicyLabel } from '../utils/nucleiHelpers';
 import AuthenticatedImage from '../components/AuthenticatedImage.vue';
 import HttpStatusFilter from '../components/HttpStatusFilter.vue';
 import { buildAssetFilterParams, formatAssetFilterOperator } from '../utils/assetFilters';
@@ -995,6 +1005,16 @@ const tabConfig = reactive({
     // 🚨 截图显示无导出按钮，不配置 exportUrl
     searchFields: [
       { get label() { return assetText('tasks.templateId'); }, key: 'template_id', operator: '=' },
+      {
+        get label() { return assetText('tasks.nucleiTemplateSource'); },
+        key: 'template_source',
+        operator: '=',
+        type: 'select',
+        options: [
+          { get label() { return assetText('tasks.nucleiSourceCustom'); }, value: 'custom' },
+          { get label() { return assetText('tasks.nucleiSourceCommunity'); }, value: 'community' }
+        ]
+      },
       { get label() { return assetText('tasks.target'); }, key: 'target', operator: '=' },
       { get label() { return assetText('tasks.vulnerableUrl'); }, key: 'vuln_url', operator: '=' },
       { get label() { return assetText('tasks.vulnerabilityName'); }, key: 'vuln_name', operator: '=' },
@@ -1014,10 +1034,10 @@ const tabConfig = reactive({
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
-      { get title() { return assetText('tasks.templateId'); }, dataIndex: 'template_id', key: 'template_id', width: 180 },
+      { get title() { return assetText('tasks.templateId'); }, dataIndex: 'template_id', key: 'template_id', width: 210 },
       { get title() { return assetText('tasks.target'); }, dataIndex: 'target', key: 'target', width: 200 },
       { get title() { return assetText('tasks.vulnerableUrl'); }, key: 'nuclei_vuln_url', width: 300 }, // 用专用 key 渲染超链接
-      { get title() { return assetText('tasks.vulnerabilityName'); }, dataIndex: 'vuln_name', key: 'vul_name', width: 200 },
+      { get title() { return assetText('tasks.vulnerabilityName'); }, dataIndex: 'vuln_name', key: 'vuln_name', width: 200 },
       { get title() { return assetText('tasks.severity'); }, dataIndex: 'vuln_severity', key: 'vuln_severity', width: 100, align: 'center' },
       { get title() { return assetText('tasks.savedAt'); }, dataIndex: 'insert_time', key: 'insert_time', width: 160 },
       { get title() { return assetText('tasks.verificationCommand'); }, key: 'verify_command', width: 350 } // 命令可能很长，用插槽防撑破
@@ -1338,7 +1358,8 @@ const openRiskModal = async () => {
 
     if (policyRes.code === 200) {
       policyOptions.value = (policyRes.items || []).map(item => ({
-        value: item._id, label: `${item.name} (PoC : ${item.policy?.poc_config?.length || 0})`
+        value: item._id,
+        label: formatRiskPolicyLabel(item, assetText)
       }));
     }
     if (resultSetRes.code === 200) currentResultSetId.value = resultSetRes.data.result_set_id;

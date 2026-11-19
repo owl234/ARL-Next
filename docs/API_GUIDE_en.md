@@ -446,6 +446,7 @@ Global notification settings are managed via `GET` / `POST /api/system_config/ge
   "nuclei_results": [
     {
       "template_id": "CVE-2026-0001",
+      "template_source": "community",
       "vuln_name": "Example Vulnerability",
       "vuln_severity": "high",
       "vuln_url": "https://arl.example.com/probe",
@@ -466,13 +467,18 @@ Custom template lifecycle and online debugging are exposed under `/api/nuclei/te
 | :--- | :--- | :--- |
 | `/api/nuclei/template/create/` | `POST` | Creates a custom YAML template; accepts `content` (required) and `enable` (optional boolean, default `true`), returning `template_id` and `enable` |
 | `/api/nuclei/template/update/` | `POST` | Updates an existing custom template with `template_id` and `content`; supports renaming via YAML `id` (returns `code: 999` on ID conflict) |
+| `/api/nuclei/template/import/` | `POST` | Bulk imports `.yaml`/`.yml` or `.zip` templates; runs static checks followed by batch `nuclei -duc -no-color -validate` semantic validation (invalid items are rejected into `fail_details`) |
 | `/api/nuclei/template/test/` | `POST` | Runs an online single-target dry run (30-second timeout); accepts `target` (required) and `content` (or stored `template_id`) |
 
 - **Template Static & Semantic Validation Contract**:
-  - `create` and `update` validate top-level YAML mapping, `id` (`a-zA-Z0-9_.-`), `info.name`, `info.author` (string or non-empty list of strings), `info.severity` allowlist (`info`, `low`, `medium`, `high`, `critical`, `unknown`), and at least one non-empty protocol/workflow section (`http`, `requests`, `dns`, `tcp`, `network`, `ssl`, `websocket`, `whois`, `code`, `javascript`, `headless`, `file`, `workflows`).
-  - When the `nuclei` binary is present on `PATH`, semantic validation additionally runs `nuclei -duc -no-color -validate` (falling back to static checks when absent). Validation errors and duplicate IDs return `code: 999` with an explicit `message`.
+  - `create`, `update`, and `import` validate top-level YAML mapping, `id` (`a-zA-Z0-9_.-`), `info.name`, `info.author` (string or non-empty list of strings), `info.severity` allowlist (`info`, `low`, `medium`, `high`, `critical`, `unknown`), and at least one non-empty protocol/workflow section (`http`, `requests`, `dns`, `tcp`, `network`, `ssl`, `websocket`, `whois`, `code`, `javascript`, `headless`, `file`, `workflows`).
+  - When the `nuclei` binary is present on `PATH`, semantic validation additionally runs `nuclei -duc -no-color -validate` (falling back to static checks when absent). Validation errors and duplicate IDs return `code: 999` on `create`/`update`, while failed items in `import` are rejected and reported in `fail_details`.
 - **Online Single-Target Dry Run (`POST /api/nuclei/template/test/`)**:
   - **Protocol-Aware Target Normalization**: Rejects whitespace, newlines/control characters, and leading `-` arguments. Prepends `http://` for `http`/`headless` targets without a scheme (preserving `ws(s)://`/`http(s)://` for `websocket`), and strips unintended `http(s)://` schemes and paths for `dns`/`tcp`/`network`/`ssl`/`whois` templates.
   - **Proxy Alignment & Output Cleaning**: Reuses the `scan` domain proxy policy (`apply_to_nuclei`) with credentials masked in logs and output; strips ANSI escape codes and extracts structured matches via `-jle` (falling back to plain stdout parsing on legacy Nuclei builds).
   - **Response Fields**: On success (`code: 200`), `data` contains `matched`, `matched_count`, `findings` (`template_id`, `name`, `severity`, `matched_at`, `curl_command`, `extracted_results`), `target`, `output`, `returncode`, and `cost_seconds`. When `nuclei` exits non-zero, the endpoint returns `code: 999` with a concise error summary in `message` while preserving diagnostic `output` and `returncode` in `data`.
-- **Isolated Custom Scan Channel**: During scheduled or ad-hoc task scans, community templates retain `-tags cve,http` filtering while materialized custom templates execute in a dedicated channel without `-tags cve,http` (still governed by policy `severity`, `exclude_blacklist` / `-eid`, and proxy rules). Setting `custom_template_mode: "none"` skips custom template materialization.
+- **ASM Channel Isolation & Protocol-Based Target Routing**:
+  - `nuclei_config` (supported by `POST /api/task/`, `POST /api/policy/add/`, and `POST /api/policy/edit/`) accepts `include_community` (boolean, default `true`; set `false` for custom-only scans), `severity` (community channel allowlist, default `["low","medium","high","critical"]`), `exclude_blacklist` (boolean, default `true`, community channel only), `custom_template_mode` (`all_enabled` / `selected` / `tags` / `none`), `selected_custom_templates`, `selected_tags`, and `extra_exclude_ids`.
+  - The community channel enforces `-tags cve,http`, policy `severity`, and global `-eid` blocklist rules. Custom template channels bypass community `-tags`, `severity` (allowing `info`/`unknown` templates to run), and the global blocklist, routing ASM assets by protocol: `http`/`websocket` target alive web sites (including WIH-discovered sites), `tcp`/`network`/`ssl`/`javascript` also target discovered open `ip:port` endpoints, and `dns`/`whois` also target discovered subdomains. `code`, `headless`, `file`, and `workflows` templates are currently supported for dry runs only and are skipped before automated ASM execution with warning logs.
+  - Channels are fault-isolated: an error in one channel preserves findings from succeeded channels, and channels with zero runnable templates or zero targets are skipped cleanly.
+  - Findings record `template_source` (`custom` or `community`), filterable via `GET /api/nuclei_result/` and `GET /api/asset_nuclei_result/`. `POST /api/task/policy/` accepts an optional `related_scope_id` so risk cruising tasks launched from an asset group sync findings back to `asset_nuclei_result` and `asset_vuln`.

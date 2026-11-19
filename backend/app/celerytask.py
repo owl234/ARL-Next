@@ -315,7 +315,12 @@ def nuclei_template_sync_task(zip_file_path=None, target_version=None):
     """
     logger.info("Executing Worker nuclei_template_sync_task...")
     try:
-        from app.routes.nuclei import get_community_templates_dir, extract_templates_zip_to_dir, update_templates_config_version, load_community_index
+        from app.services.nuclei_template_service import (
+            get_community_templates_dir,
+            extract_templates_zip_to_dir,
+            update_templates_config_version,
+            load_community_index,
+        )
         import os
         import requests
         from app.config import Config

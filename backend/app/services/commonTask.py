@@ -1159,9 +1159,67 @@ class WebSiteFetch(object):
                     item["vuln_url"] = item.get("target")
             utils.safe_insert_asset_many('vuln', ['task_id', 'vuln_url', 'plugin_name'], result)
 
-    def nuclei_scan(self):
-        logger.info("start nuclei_scan， poc_sites:{}".format(len(self.poc_sites)))
-        scan_results = nuclei_scan(list(self.poc_sites), options=self.options)
+    def _collect_nuclei_extra_targets(self, extra_targets: dict = None) -> dict:
+        """聚合当前任务已发现的开放端口 (ip:port) 与域名，供非 HTTP 协议自建模板分流扫描。"""
+        network_set = set()
+        dns_set = set()
+
+        if isinstance(extra_targets, dict):
+            for item in (extra_targets.get("network") or []):
+                val = str(item or "").strip()
+                if val:
+                    network_set.add(val)
+            for item in (extra_targets.get("dns") or []):
+                val = str(item or "").strip().rstrip(".").lower()
+                if val:
+                    dns_set.add(val)
+
+        if self.task_id:
+            try:
+                for ip_doc in utils.conn_db('ip').find({"task_id": self.task_id}, {"ip": 1, "port_info": 1}):
+                    raw_ip = str(ip_doc.get("ip") or "").strip("[] ")
+                    if not raw_ip:
+                        continue
+                    ip_host = f"[{raw_ip}]" if ":" in raw_ip else raw_ip
+                    for port_item in (ip_doc.get("port_info") or []):
+                        port_id = port_item.get("port_id") if isinstance(port_item, dict) else None
+                        if port_id is not None and str(port_id).strip():
+                            network_set.add(f"{ip_host}:{port_id}")
+            except Exception as exc:
+                logger.debug(f"collect nuclei network targets from ip failed: {exc}")
+
+            try:
+                for svc_doc in utils.conn_db('npoc_service').find({"task_id": self.task_id}, {"target": 1}):
+                    svc_target = str(svc_doc.get("target") or "").strip()
+                    if svc_target:
+                        network_set.add(svc_target)
+            except Exception as exc:
+                logger.debug(f"collect nuclei network targets from npoc_service failed: {exc}")
+
+            try:
+                for dom_doc in utils.conn_db('domain').find({"task_id": self.task_id}, {"domain": 1}):
+                    dom = str(dom_doc.get("domain") or "").strip().rstrip(".").lower()
+                    if dom:
+                        dns_set.add(dom)
+            except Exception as exc:
+                logger.debug(f"collect nuclei dns targets from domain failed: {exc}")
+
+        return {
+            "network": sorted(network_set),
+            "dns": sorted(dns_set),
+        }
+
+    def nuclei_scan(self, extra_targets: dict = None):
+        collector = getattr(self, "_collect_nuclei_extra_targets", None)
+        collected_extra = collector(extra_targets) if callable(collector) else (extra_targets or {})
+        net_cnt = len(collected_extra.get("network") or []) if isinstance(collected_extra, dict) else 0
+        dns_cnt = len(collected_extra.get("dns") or []) if isinstance(collected_extra, dict) else 0
+        logger.info("start nuclei_scan， poc_sites:{}, network_targets:{}, dns_targets:{}".format(
+            len(self.poc_sites), net_cnt, dns_cnt))
+        if collected_extra and (net_cnt or dns_cnt):
+            scan_results = nuclei_scan(list(self.poc_sites), options=self.options, extra_targets=collected_extra)
+        else:
+            scan_results = nuclei_scan(list(self.poc_sites), options=self.options)
         if scan_results:
             for item in scan_results:
                 item["task_id"] = self.task_id

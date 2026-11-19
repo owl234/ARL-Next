@@ -625,8 +625,16 @@
           </div>
           <span v-else>-</span>
         </template>
+        <template v-else-if="column.key === 'template_id'">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span class="arl-mono">{{ record.template_id || '-' }}</span>
+            <a-tag v-if="isCustomNucleiResult(record)" color="purple" size="small" style="margin: 0;">{{ assetText('tasks.nucleiSourceCustom') }}</a-tag>
+            <a-tag v-else-if="record.template_id" color="default" size="small" style="margin: 0;">{{ assetText('tasks.nucleiSourceCommunity') }}</a-tag>
+          </div>
+        </template>
         <template v-else-if="column.key === 'fileleak_url' || column.key === 'url_link' || column.key === 'nuclei_vuln_url'">
-          <a :href="record.url || record.vuln_url" target="_blank" style="word-break: break-all;">{{ record.url || record.vuln_url || '-' }}</a>
+          <a v-if="isHttpUrl(record.url || record.vuln_url)" :href="record.url || record.vuln_url" target="_blank" style="word-break: break-all;">{{ record.url || record.vuln_url }}</a>
+          <span v-else class="arl-mono" style="word-break: break-all;">{{ record.url || record.vuln_url || '-' }}</span>
         </template>
         <template v-else-if="column.key === 'verify_data'">
           <div style="max-height: 100px; overflow-y: auto; color: #e57373; font-family: monospace; font-size: 12px; word-break: break-all;">{{ record.verify_data || record.proof || '-' }}</div>
@@ -788,7 +796,7 @@
         <a-form-item :label="assetText('tasks.policyName')" name="policy_id">
           <a-select v-model:value="riskForm.policy_id" :placeholder="assetText('tasks.selectAPolicy')" @change="handleRiskPolicyChange">
             <a-select-option v-for="p in policies" :key="p._id" :value="p._id">
-              {{ p.name }} (PoC : {{ getPocCount(p) }})
+              {{ formatRiskPolicyLabel(p, assetText) }}
             </a-select-option>
           </a-select>
         </a-form-item>
@@ -981,6 +989,7 @@ onUnmounted(() => {
 
 import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
+import { isCustomNucleiResult, isHttpUrl, formatRiskPolicyLabel } from '../utils/nucleiHelpers';
 import AuthenticatedImage from '../components/AuthenticatedImage.vue';
 import HttpStatusFilter from '../components/HttpStatusFilter.vue';
 import { buildAssetFilterParams, formatAssetFilterOperator } from '../utils/assetFilters';
@@ -1968,16 +1977,26 @@ const tabConfig = reactive({
     tabName: 'nuclei',
     searchFields: [
       { get label() { return assetText('tasks.templateId'); }, key: 'template_id', operator: '=' },
+      {
+        get label() { return assetText('tasks.nucleiTemplateSource'); },
+        key: 'template_source',
+        operator: '=',
+        type: 'select',
+        options: [
+          { get label() { return assetText('tasks.nucleiSourceCustom'); }, value: 'custom' },
+          { get label() { return assetText('tasks.nucleiSourceCommunity'); }, value: 'community' }
+        ]
+      },
       { get label() { return assetText('tasks.target'); }, key: 'target', operator: '=' },
       { get label() { return assetText('tasks.vulnerableUrl'); }, key: 'vuln_url', operator: '=' },
       { get label() { return assetText('tasks.vulnerabilityName'); }, key: 'vuln_name', operator: '=' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
-      { get title() { return assetText('tasks.templateId'); }, dataIndex: 'template_id', key: 'template_id', width: 180 },
+      { get title() { return assetText('tasks.templateId'); }, dataIndex: 'template_id', key: 'template_id', width: 210 },
       { get title() { return assetText('tasks.target'); }, dataIndex: 'target', key: 'target', width: 200 },
       { get title() { return assetText('tasks.vulnerableUrl'); }, key: 'nuclei_vuln_url', width: 300 },
-      { get title() { return assetText('tasks.vulnerabilityName'); }, dataIndex: 'vuln_name', key: 'vul_name', width: 200 },
+      { get title() { return assetText('tasks.vulnerabilityName'); }, dataIndex: 'vuln_name', key: 'vuln_name', width: 200 },
       { get title() { return assetText('tasks.severity'); }, dataIndex: 'vuln_severity', key: 'vul_severity', width: 100, align: 'center' },
       { get title() { return assetText('tasks.savedAt'); }, dataIndex: 'insert_time', key: 'insert_time', width: 160 },
       { get title() { return assetText('tasks.verificationCommand'); }, key: 'verify_command', width: 350 }
@@ -2460,9 +2479,7 @@ const openRiskModal = async () => {
 const handleRiskPolicyChange = (val) => {
   const selected = policies.value.find(p => p._id === val);
   if (selected) {
-    // 🚨 调用公共函数获取 PoC 数量
-    const pocCount = getPocCount(selected);
-    riskForm.name = `风险巡航任务-${selected.name} (PoC : ${pocCount})`;
+    riskForm.name = `风险巡航任务-${formatRiskPolicyLabel(selected, assetText)}`;
   }
 };
 
@@ -2474,7 +2491,8 @@ const submitRiskTask = async () => {
     const payload = {
       name: riskForm.name,
       task_tag: 'risk_cruising',
-      policy_id: riskForm.policy_id
+      policy_id: riskForm.policy_id,
+      related_scope_id: scope_id.value || ''
     };
 
     if (selectedRiskTargets.value.length > 0) {

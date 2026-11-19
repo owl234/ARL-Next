@@ -299,28 +299,76 @@
               <span class="feature-hint">{{ pageText('pages.runNucleiTemplateChecksAgainstDiscoveredWebsites') }}</span>
             </div>
 
-            <!-- Nuclei 细粒度过滤与自建模板配置 (纯开关矩阵，极简交互) -->
+            <!-- Nuclei 细粒度过滤与自建模板配置 -->
             <div v-if="policyForm.site_config.nuclei_scan" class="sub-config-box" style="margin-top: 12px;">
-              <a-row :gutter="16">
-                <a-col :span="13">
-                  <a-form-item :label="pageText('pages.scanSeverity')" class="inline-form-item">
-                    <a-checkbox-group v-model:value="policyForm.site_config.nuclei_config.severity" :options="nucleiSeverityOptions" />
+              <a-row :gutter="[16, 12]">
+                <a-col :span="24">
+                  <a-form-item :label="pageText('pages.nucleiCommunityLibrary')" class="inline-form-item">
+                    <a-checkbox v-model:checked="policyForm.site_config.nuclei_config.include_community">
+                      {{ pageText('pages.enableCommunityTemplates') }}
+                    </a-checkbox>
                   </a-form-item>
                 </a-col>
-                <a-col :span="11">
-                  <a-form-item :label="pageText('pages.blocklistAndCustomTemplates')" class="inline-form-item">
-                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                <template v-if="policyForm.site_config.nuclei_config.include_community">
+                  <a-col :xs="24" :md="14">
+                    <a-form-item :label="pageText('pages.scanSeverity')" class="inline-form-item">
+                      <a-checkbox-group v-model:value="policyForm.site_config.nuclei_config.severity" :options="nucleiSeverityOptions" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="24" :md="10">
+                    <a-form-item :label="pageText('pages.falsePositiveBlocklist')" class="inline-form-item">
                       <a-checkbox v-model:checked="policyForm.site_config.nuclei_config.exclude_blacklist">
                         {{ pageText('pages.excludeTheGlobalFalsePositiveBlocklistRecommended') }}
                       </a-checkbox>
-                      <a-checkbox
-                        :checked="policyForm.site_config.nuclei_config.custom_template_mode === 'all_enabled'"
-                        @change="(e) => policyForm.site_config.nuclei_config.custom_template_mode = e.target.checked ? 'all_enabled' : 'none'"
-                      >
-                        {{ pageText('pages.loadAllEnabledCustomTemplatesRecommended') }}
-                      </a-checkbox>
+                    </a-form-item>
+                  </a-col>
+                </template>
+                <a-col :span="24">
+                  <a-form-item :label="pageText('pages.customTemplatesModeLabel')" class="inline-form-item">
+                    <a-radio-group v-model:value="policyForm.site_config.nuclei_config.custom_template_mode">
+                      <a-radio value="all_enabled">{{ pageText('pages.customModeAllEnabled') }}</a-radio>
+                      <a-radio value="selected">{{ pageText('pages.customModeSelected') }}</a-radio>
+                      <a-radio value="tags">{{ pageText('pages.customModeTags') }}</a-radio>
+                      <a-radio value="none">{{ pageText('pages.customModeNone') }}</a-radio>
+                    </a-radio-group>
+                    <div class="feature-hint" style="margin-top: 6px;">
+                      {{ pageText('pages.customTemplatesBypassHint') }}
                     </div>
                   </a-form-item>
+                </a-col>
+                <a-col v-if="policyForm.site_config.nuclei_config.custom_template_mode === 'selected'" :span="24">
+                  <a-select
+                    v-model:value="policyForm.site_config.nuclei_config.selected_custom_templates"
+                    mode="multiple"
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    :placeholder="pageText('pages.selectCustomTemplatesPlaceholder')"
+                    style="width: 100%;"
+                  >
+                    <a-select-option
+                      v-for="tpl in customTemplateList"
+                      :key="tpl.template_id"
+                      :value="tpl.template_id"
+                      :label="`${tpl.template_id} ${tpl.name || ''}`"
+                    >
+                      <span>{{ tpl.template_id }}</span>
+                      <span v-if="tpl.name && tpl.name !== tpl.template_id" style="opacity: 0.65; margin-left: 6px;">{{ tpl.name }}</span>
+                      <a-tag v-if="tpl.protocol" size="small" style="margin-left: 6px;">{{ tpl.protocol }}</a-tag>
+                      <a-tag v-if="!tpl.enable" color="default" size="small" style="margin-left: 4px;">{{ pageText('pages.templateDisabledTag') }}</a-tag>
+                      <a-tag v-if="!isAsmSupportedProtocol(tpl.protocol)" color="orange" size="small" style="margin-left: 4px;">{{ pageText('pages.nucleiAsmUnsupportedTag') }}</a-tag>
+                    </a-select-option>
+                  </a-select>
+                </a-col>
+                <a-col v-else-if="policyForm.site_config.nuclei_config.custom_template_mode === 'tags'" :span="24">
+                  <a-select
+                    v-model:value="policyForm.site_config.nuclei_config.selected_tags"
+                    mode="tags"
+                    allowClear
+                    :options="customTagOptions"
+                    :placeholder="pageText('pages.selectCustomTagsPlaceholder')"
+                    style="width: 100%;"
+                  />
                 </a-col>
               </a-row>
             </div>
@@ -455,6 +503,7 @@ import request from '../utils/request';
 import { message } from 'ant-design-vue';
 import { ArrowLeftOutlined, SearchOutlined } from '@ant-design/icons-vue';
 import { useRouter, useRoute } from 'vue-router';
+import { isAsmSupportedProtocol } from '../utils/nucleiHelpers';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 
@@ -503,8 +552,11 @@ const initPolicyForm = () => ({
     findvhost: false,
     nuclei_scan: false,
     nuclei_config: {
+      include_community: true,
       severity: ['critical', 'high', 'medium', 'low'],
       custom_template_mode: 'all_enabled',
+      selected_custom_templates: [],
+      selected_tags: [],
       exclude_blacklist: true
     },
     web_info_hunter: false
@@ -525,6 +577,19 @@ const policyForm = reactive(initPolicyForm());
 
 const pocList = shallowRef([]);
 const bruteList = shallowRef([]);
+const customTemplateList = ref([]);
+const customTagOptions = computed(() => {
+  const tagSet = new Set();
+  for (const tpl of customTemplateList.value) {
+    if (Array.isArray(tpl.tags)) {
+      for (const tg of tpl.tags) {
+        const clean = String(tg || '').trim().toLowerCase();
+        if (clean) tagSet.add(clean);
+      }
+    }
+  }
+  return Array.from(tagSet).sort().map(tag => ({ label: tag, value: tag }));
+});
 const selectedPocNames = ref(new Set());
 const selectedBruteNames = ref(new Set());
 const domainDicts = ref([]);
@@ -785,11 +850,16 @@ const toggleAllBrute = (e) => {
 // ================= 生命周期：数据加载与编辑回填 =================
 onMounted(async () => {
   try {
-    const [pocRes, bruteRes, dictRes] = await Promise.all([
+    const [pocRes, bruteRes, dictRes, customTplRes] = await Promise.all([
       request.get('/poc/', { params: { plugin_type: 'poc', size: 100000 } }),
       request.get('/poc/', { params: { plugin_type: 'brute', size: 100000 } }),
-      request.get('/dictionary/list')
+      request.get('/dictionary/list'),
+      request.get('/nuclei/template/', { params: { size: 1000 } }).catch(() => ({ code: 0, data: { items: [] } }))
     ]);
+
+    if (customTplRes?.code === 200) {
+      customTemplateList.value = customTplRes.data?.items || customTplRes.items || [];
+    }
 
     if (dictRes.code === 200 && dictRes.data) {
       domainDicts.value = dictRes.data.filter(item => item.category && item.category.includes(pageText('pages.subdomainDiscovery')) && !item.category.includes(pageText('pages.smart')));
@@ -848,17 +918,21 @@ onMounted(async () => {
         Object.assign(policyForm.site_config, data.policy?.site_config || {});
         if (!policyForm.site_config.nuclei_config) {
           policyForm.site_config.nuclei_config = {
+            include_community: true,
             severity: ['critical', 'high', 'medium', 'low'],
             custom_template_mode: 'all_enabled',
+            selected_custom_templates: [],
+            selected_tags: [],
             exclude_blacklist: true
           };
         } else {
-          if (policyForm.site_config.nuclei_config.exclude_blacklist === undefined) {
-            policyForm.site_config.nuclei_config.exclude_blacklist = true;
-          }
-          if (!policyForm.site_config.nuclei_config.custom_template_mode) {
-            policyForm.site_config.nuclei_config.custom_template_mode = 'all_enabled';
-          }
+          const nc = policyForm.site_config.nuclei_config;
+          if (nc.include_community === undefined) nc.include_community = true;
+          if (nc.exclude_blacklist === undefined) nc.exclude_blacklist = true;
+          if (!nc.custom_template_mode) nc.custom_template_mode = 'all_enabled';
+          if (!Array.isArray(nc.severity) || nc.severity.length === 0) nc.severity = ['critical', 'high', 'medium', 'low'];
+          if (!Array.isArray(nc.selected_custom_templates)) nc.selected_custom_templates = [];
+          if (!Array.isArray(nc.selected_tags)) nc.selected_tags = [];
         }
 
         // 字典历史别名归一化回填
@@ -947,6 +1021,20 @@ const submitPolicy = async () => {
   if (policyForm.file_leak && !policyForm.file_leak_dict) {
     return message.warning(pageText('pages.selectADictionaryWhenFileDisclosureChecksAreEnabled'));
   }
+  if (policyForm.site_config.nuclei_scan) {
+    const nc = policyForm.site_config.nuclei_config || {};
+    const incComm = nc.include_community !== false;
+    const mode = nc.custom_template_mode || 'all_enabled';
+    if (!incComm && mode === 'none') {
+      return message.warning(pageText('pages.nucleiRequiresAtLeastOneSource'));
+    }
+    if (mode === 'selected' && (!Array.isArray(nc.selected_custom_templates) || nc.selected_custom_templates.length === 0)) {
+      return message.warning(pageText('pages.selectAtLeastOneCustomTemplate'));
+    }
+    if (mode === 'tags' && (!Array.isArray(nc.selected_tags) || nc.selected_tags.length === 0)) {
+      return message.warning(pageText('pages.selectAtLeastOneCustomTag'));
+    }
+  }
 
   submitLoading.value = true;
   try {
@@ -1007,7 +1095,15 @@ const submitPolicy = async () => {
         domain_config: { ...policyForm.domain_config },
         ip_config: { ...policyForm.ip_config },
         npoc_service_detection: policyForm.ip_config.service_detection,
-        site_config: { ...policyForm.site_config },
+        site_config: {
+          ...policyForm.site_config,
+          nuclei_config: {
+            ...policyForm.site_config.nuclei_config,
+            include_community: policyForm.site_config.nuclei_config?.include_community !== false,
+            selected_custom_templates: [...(policyForm.site_config.nuclei_config?.selected_custom_templates || [])],
+            selected_tags: [...(policyForm.site_config.nuclei_config?.selected_tags || [])]
+          }
+        },
         file_leak: policyForm.file_leak,
         file_leak_dict: policyForm.file_leak_dict || 'file_top_2000.txt',
         poc_config,

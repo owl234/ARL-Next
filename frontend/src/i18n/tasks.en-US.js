@@ -796,5 +796,12 @@ export default {
   "resumeFromCheckpointBtn": "Resume from Checkpoint",
   "resumeFromCheckpointConfirm": "Resume remaining entities and dimensions from the last saved checkpoint while keeping already ingested assets. Continue?",
   "resumeFromCheckpointStarted": "Task entered scheduling queue to resume from checkpoint",
-  "resumeFromCheckpointFailed": "Failed to trigger checkpoint resume"
+  "resumeFromCheckpointFailed": "Failed to trigger checkpoint resume",
+  "nucleiTemplateSource": "Template source",
+  "nucleiSourceCustom": "Custom",
+  "nucleiSourceCommunity": "Community",
+  "nucleiScanScopeLabel": "Nuclei template scope",
+  "nucleiScopeBoth": "Community + Custom (Default)",
+  "nucleiScopeCustomOnly": "Custom templates only",
+  "nucleiScopeCommunityOnly": "Community templates only"
 };

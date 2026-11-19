@@ -169,6 +169,13 @@ class AddARLPolicy(ARLResource):
 
         site_config = policy.pop("site_config", {}) or {}
         site_config = self._update_arg(site_config, site_config_fields)
+        norm_nc, nc_err = _normalize_nuclei_config(
+            site_config.get("nuclei_config"),
+            nuclei_scan_enabled=bool(site_config.get("nuclei_scan", False)),
+        )
+        if nc_err:
+            return utils.build_ret(nc_err, {})
+        site_config["nuclei_config"] = norm_nc
 
         poc_config = policy.pop("poc_config", [])
         if poc_config is None:
@@ -370,9 +377,16 @@ class EditPolicy(ARLResource):
             policy_obj["site_config"].pop("site_capture", None)
 
         incoming_site = incoming_policy.get("site_config", {}) if isinstance(incoming_policy.get("site_config"), dict) else {}
+        site_cfg = policy_obj.setdefault("site_config", {})
         if "nuclei_config" in incoming_site and isinstance(incoming_site["nuclei_config"], dict):
-            site_cfg = policy_obj.setdefault("site_config", {})
             site_cfg["nuclei_config"] = incoming_site["nuclei_config"]
+        norm_nc, nc_err = _normalize_nuclei_config(
+            site_cfg.get("nuclei_config"),
+            nuclei_scan_enabled=bool(site_cfg.get("nuclei_scan", False)),
+        )
+        if nc_err:
+            return utils.build_ret(nc_err, {})
+        site_cfg["nuclei_config"] = norm_nc
 
         # 🛡️ 排除端口格式校验（防非法字符入库）
         incoming_exclude_ports = incoming_ip.get("exclude_ports")
@@ -429,6 +443,61 @@ class EditPolicy(ARLResource):
         item.pop('_id')
 
         return utils.build_ret(ErrorMsg.Success, {"data": item})
+
+
+def _normalize_nuclei_config(raw_cfg, nuclei_scan_enabled: bool = False):
+    """归一化并校验 Nuclei 策略细粒度配置，保持对历史策略的向下兼容。"""
+    cfg = dict(raw_cfg) if isinstance(raw_cfg, dict) else {}
+
+    raw_inc = cfg.get("include_community", True)
+    if isinstance(raw_inc, str):
+        include_community = raw_inc.strip().lower() not in ("false", "0", "no", "")
+    else:
+        include_community = bool(raw_inc)
+
+    valid_modes = ("all_enabled", "selected", "tags", "none")
+    mode = str(cfg.get("custom_template_mode") or "all_enabled").strip().lower()
+    if mode not in valid_modes:
+        return None, f"无效的自建模板模式: {mode}"
+
+    raw_sevs = cfg.get("severity")
+    if isinstance(raw_sevs, list) and raw_sevs:
+        valid_sevs = {"critical", "high", "medium", "low", "info"}
+        severities = [str(s).strip().lower() for s in raw_sevs if str(s).strip().lower() in valid_sevs]
+        if not severities:
+            severities = ["critical", "high", "medium", "low"]
+    else:
+        severities = ["critical", "high", "medium", "low"]
+
+    selected_templates = list(dict.fromkeys(
+        str(x).strip() for x in (cfg.get("selected_custom_templates") or []) if str(x).strip()
+    ))
+    selected_tags = list(dict.fromkeys(
+        str(x).strip().lower() for x in (cfg.get("selected_tags") or []) if str(x).strip()
+    ))
+    extra_exclude_ids = list(dict.fromkeys(
+        str(x).strip() for x in (cfg.get("extra_exclude_ids") or []) if str(x).strip()
+    ))
+
+    if nuclei_scan_enabled:
+        if not include_community and mode == "none":
+            return None, "启用 Nuclei 扫描时，社区模板库与自建模板不能同时关闭"
+        if mode == "selected" and not selected_templates:
+            return None, "自建模板选择为「指定模板」时，请至少选择 1 个自建模板"
+        if mode == "tags" and not selected_tags:
+            return None, "自建模板选择为「按标签筛选」时，请至少选择 1 个标签"
+
+    normalized = {
+        "include_community": include_community,
+        "severity": severities,
+        "exclude_blacklist": bool(cfg.get("exclude_blacklist", True)),
+        "custom_template_mode": mode,
+        "selected_custom_templates": selected_templates,
+        "selected_tags": selected_tags,
+    }
+    if extra_exclude_ids:
+        normalized["extra_exclude_ids"] = extra_exclude_ids
+    return normalized, None
 
 
 def _update_plugin_config(config):

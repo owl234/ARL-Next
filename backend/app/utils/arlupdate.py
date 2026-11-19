@@ -28,7 +28,7 @@ def create_index():
         "task": ["status", "start_time"],
         "icp_task": ["status", "start_time", "end_time", "synced_scope_id"],
         "vuln": ["task_id", "save_date"],
-        "nuclei_result": ["task_id", "vuln_severity", "save_date"],
+        "nuclei_result": ["task_id", "vuln_severity", "template_source", "save_date"],
         "asset_ip": "scope_id",
         "asset_site": ["scope_id", "tag", "is_catch_all"],
         "asset_domain": ["scope_id", "domain"],
@@ -44,7 +44,7 @@ def create_index():
         "asset_vuln": ["scope_id", "vul_name"],
         "asset_npoc_service": "scope_id",
         "asset_cip": "scope_id",
-        "asset_nuclei_result": "scope_id",
+        "asset_nuclei_result": ["scope_id", "template_source"],
         "asset_stat_finger": "scope_id",
         "asset_wih": ["scope_id", "record_type", "fnv_hash"],
         "dict_upload_task": "task_id",
@@ -1264,20 +1264,29 @@ def update_policy_schema():
             {"policy.site_config.nuclei_config": {"$exists": False}},
             {"$set": {
                 "policy.site_config.nuclei_config": {
-                    "severity": ["critical", "high", "medium"],
+                    "include_community": True,
+                    "severity": ["critical", "high", "medium", "low"],
+                    "exclude_blacklist": True,
                     "custom_template_mode": "all_enabled",
                     "selected_custom_templates": [],
                     "selected_tags": []
                 }
             }}
         )
+        res_nuclei_comm = col.update_many(
+            {
+                "policy.site_config.nuclei_config": {"$exists": True},
+                "policy.site_config.nuclei_config.include_community": {"$exists": False},
+            },
+            {"$set": {"policy.site_config.nuclei_config.include_community": True}}
+        )
 
-        if res_unset.modified_count or res_svc1.modified_count or res_svc2.modified_count or res_nuclei.modified_count:
+        if res_unset.modified_count or res_svc1.modified_count or res_svc2.modified_count or res_nuclei.modified_count or res_nuclei_comm.modified_count:
             import logging
             logging.getLogger().info(
                 f"update_policy_schema synced: dead_fields={res_unset.modified_count}, "
                 f"npoc_to_svc={res_svc1.modified_count}, svc_to_npoc={res_svc2.modified_count}, "
-                f"nuclei_config={res_nuclei.modified_count}"
+                f"nuclei_config={res_nuclei.modified_count}, include_community={res_nuclei_comm.modified_count}"
             )
     except Exception as e:
         import logging
@@ -1497,6 +1506,57 @@ def migrate_nuclei_push_options():
         log.error(f"migrate_nuclei_push_options error: {e}")
 
 
+def migrate_nuclei_result_template_source():
+    """
+    平滑补齐存量 nuclei_result / asset_nuclei_result 文档的 template_source 字段：
+    - 已有 template_url 的归为 community；
+    - 缺失 template_url 且 template_id 存在于 nuclei_template 表的归为 custom；
+    - 其余归为 community。
+    """
+    import logging
+    log = logging.getLogger()
+    try:
+        custom_ids = [
+            d.get("template_id")
+            for d in conn_db("nuclei_template").find({}, {"template_id": 1})
+            if d.get("template_id")
+        ]
+        missing_cond = {
+            "$or": [
+                {"template_source": {"$exists": False}},
+                {"template_source": None},
+                {"template_source": ""},
+            ]
+        }
+        total_custom = 0
+        total_comm = 0
+        for coll_name in ("nuclei_result", "asset_nuclei_result"):
+            coll = conn_db(coll_name)
+            if custom_ids:
+                r_custom = coll.update_many(
+                    {
+                        "$and": [
+                            missing_cond,
+                            {"template_id": {"$in": custom_ids}},
+                            {"$or": [{"template_url": {"$exists": False}}, {"template_url": ""}, {"template_url": None}]},
+                        ]
+                    },
+                    {"$set": {"template_source": "custom"}},
+                )
+                total_custom += r_custom.modified_count
+            r_comm = coll.update_many(missing_cond, {"$set": {"template_source": "community"}})
+            total_comm += r_comm.modified_count
+
+        if total_custom or total_comm:
+            log.info(
+                "migrate_nuclei_result_template_source backfilled: custom=%s, community=%s",
+                total_custom,
+                total_comm,
+            )
+    except Exception as e:
+        log.error(f"migrate_nuclei_result_template_source error: {e}")
+
+
 def arl_update():
     if is_run_flask_routes():
         return
@@ -1575,6 +1635,7 @@ def arl_update():
         _run_step("ensure_packet_lease_schema", ensure_packet_lease_schema)
         _run_step("ensure_proxy_config_schema", ensure_proxy_config_schema)
         _run_step("migrate_nuclei_push_options", migrate_nuclei_push_options)
+        _run_step("migrate_nuclei_result_template_source", migrate_nuclei_result_template_source)
         db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
     except Exception as e:
         import logging

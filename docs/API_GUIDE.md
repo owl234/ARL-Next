@@ -448,6 +448,7 @@ Worker 不可达、控制指令没有完整确认或停止超时，均中止恢�
   "nuclei_results": [
     {
       "template_id": "CVE-2026-0001",
+      "template_source": "community",
       "vuln_name": "Example Vulnerability",
       "vuln_severity": "high",
       "vuln_url": "https://arl.example.com/probe",
@@ -468,13 +469,18 @@ Worker 不可达、控制指令没有完整确认或停止超时，均中止恢�
 | :--- | :--- | :--- |
 | `/api/nuclei/template/create/` | `POST` | 新建自建 YAML 模板，接收 `content`（必填）与 `enable`（可选布尔值，默认 `true`），返回 `template_id` 与 `enable` |
 | `/api/nuclei/template/update/` | `POST` | 更新已有自建模板，接收 `template_id` 与 `content`；支持在 YAML 中修改 `id` 完成重命名（与存量冲突时返回 `code: 999`） |
+| `/api/nuclei/template/import/` | `POST` | 批量导入 `.yaml` / `.yml` 或 `.zip` 模板；先完成静态校验，再批量调用 `nuclei -duc -no-color -validate` 语义校验（失败条目写入 `fail_details` 且不落库） |
 | `/api/nuclei/template/test/` | `POST` | 在线单目标即时调试（Dry Run），限时 30 秒执行；接收 `target`（必填）与 `content`（或已入库的 `template_id`） |
 
 - **模板静态与语义校验契约**：
-  - `create` / `update` 强制校验顶层 YAML 映射、`id`（仅限 `a-zA-Z0-9_.-`）、`info.name`、`info.author`（字符串或非空字符串列表）、`info.severity` 白名单（`info` / `low` / `medium` / `high` / `critical` / `unknown`）及至少一个非空协议/工作流块（`http`、`requests`、`dns`、`tcp`、`network`、`ssl`、`websocket`、`whois`、`code`、`javascript`、`headless`、`file`、`workflows`）。
-  - 当运行环境检测到 `nuclei` 二进制时，额外执行 `nuclei -duc -no-color -validate` 深度语义校验（缺失二进制时自动降级为静态校验）；校验失败或 `template_id` 重复均返回 `code: 999` 与明确提示。
+  - `create` / `update` / `import` 强制校验顶层 YAML 映射、`id`（仅限 `a-zA-Z0-9_.-`）、`info.name`、`info.author`（字符串或非空字符串列表）、`info.severity` 白名单（`info` / `low` / `medium` / `high` / `critical` / `unknown`）及至少一个非空协议/工作流块（`http`、`requests`、`dns`、`tcp`、`network`、`ssl`、`websocket`、`whois`、`code`、`javascript`、`headless`、`file`、`workflows`）。
+  - 当运行环境检测到 `nuclei` 二进制时，额外执行 `nuclei -duc -no-color -validate` 深度语义校验（缺失二进制时自动降级为静态校验）；`create` / `update` 校验失败或 `template_id` 重复均返回 `code: 999` 与明确提示，`import` 校验失败条目被拒收并汇总至 `fail_details`。
 - **在线单目标即时调试（`POST /api/nuclei/template/test/`）规范**：
   - **目标协议自适应与防注入**：拒绝空白符、换行/控制字符及以 `-` 开头的目标输入；对 `http` / `headless` 自动补齐 `http://`（`websocket` 保留 `ws(s)://` / `http(s)://`），对 `dns` / `tcp` / `network` / `ssl` / `whois` 自动剥离多余的 `http(s)://` 前缀与路径段。
   - **代理与输出清洗**：复用全局 `scan` 域代理策略（`apply_to_nuclei`）并在日志与回显中对代理凭据脱敏；移除终端 ANSI 颜色转义序列并优先基于 `-jle` 解析结构化命中（旧版引擎自动回退无 ANSI 文本行判定）。
   - **响应字段**：成功（`code: 200`）时 `data` 包含 `matched`、`matched_count`、`findings`（每项含 `template_id`、`name`、`severity`、`matched_at`、`curl_command`、`extracted_results`）、`target`、`output`、`returncode`、`cost_seconds`；当 `nuclei` 退出码非 0 时返回 `code: 999`，`message` 给出核心错误摘要，`data.output` 与 `data.returncode` 仍保留完整诊断日志。
-- **真实扫描任务通道隔离**：任务执行阶段社区模板保持 `-tags cve,http` 过滤，已物化的自建模板通过独立通道执行且不附加 `-tags cve,http`（仍受策略 `severity`、`exclude_blacklist` / `-eid` 与扫描代理约束）；当策略配置 `custom_template_mode: "none"` 时跳过自建模板物化。
+- **ASM 任务通道隔离与按协议分流**：
+  - `nuclei_config`（可用于 `POST /api/task/`、`POST /api/policy/add/`、`POST /api/policy/edit/`）支持字段：`include_community`（布尔值，默认 `true`；设为 `false` 可仅运行自建模板）、`severity`（社区通道等级过滤，默认 `["low","medium","high","critical"]`）、`exclude_blacklist`（布尔值，默认 `true`，仅作用于社区通道）、`custom_template_mode`（`all_enabled` / `selected` / `tags` / `none`）、`selected_custom_templates`、`selected_tags`、`extra_exclude_ids`。
+  - 社区模板通道保持 `-tags cve,http`、策略 `severity` 与全局黑名单 `-eid` 约束；自建模板通道不受社区 `-tags`、`severity` 与全局黑名单限制（含 `info`/`unknown` 级别均执行），并按协议自动分流投喂 ASM 资产：`http`/`websocket` 扫描存活 Web 站点（含 WIH 衍生站点），`tcp`/`network`/`ssl`/`javascript` 额外投喂开放端口 `ip:port`，`dns`/`whois` 额外投喂发现的子域名；`code`/`headless`/`file`/`workflows` 协议当前仅支持单目标调试，ASM 任务执行前自动跳过并记录告警日志。
+  - 双通道与分桶执行相互隔离：单通道异常不会丢弃其余已成功通道的命中结果；无可执行模板或无匹配目标时安全跳过。
+  - 命中结果写入 `template_source`（`custom` / `community`），`GET /api/nuclei_result/` 与 `GET /api/asset_nuclei_result/` 均支持按 `template_source` 筛选；`POST /api/task/policy/` 支持可选字段 `related_scope_id`，用于资产组风险巡航任务完成后将命中结果同步回 `asset_nuclei_result` / `asset_vuln`。
