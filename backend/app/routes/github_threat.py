@@ -134,14 +134,59 @@ def add_tools_target():
     return utils.build_ret(ErrorMsg.Success, {"msg": "添加成功"})
 
 
+def _extract_valid_str_list(raw_values):
+    """严格提取非空字符串列表，拒绝嵌套对象以防 MongoDB 查询操作符注入。"""
+    if not isinstance(raw_values, list):
+        return None
+    cleaned = []
+    for item in raw_values:
+        if not isinstance(item, str):
+            return None
+        val = item.strip()
+        if val:
+            cleaned.append(val)
+    return cleaned
+
+
+def _extract_valid_str(raw_value):
+    if not isinstance(raw_value, str):
+        return None
+    val = raw_value.strip()
+    return val or None
+
+
+def _parse_radar_config_payload(raw_json):
+    if not isinstance(raw_json, dict):
+        return None, None, "请求体必须为 JSON 对象"
+    enabled = bool(raw_json.get('enabled', False))
+    raw_interval = raw_json.get('interval', 6)
+    if isinstance(raw_interval, bool):
+        return None, None, "interval 必须为有效正数"
+    try:
+        interval_val = float(raw_interval)
+    except (TypeError, ValueError):
+        return None, None, "interval 必须为有效正数"
+    if not (0.5 <= interval_val <= 720):
+        return None, None, "interval 必须在 0.5 到 720 小时之间"
+    interval_norm = int(interval_val) if interval_val.is_integer() else round(interval_val, 2)
+    return enabled, interval_norm, None
+
+
 @github_threat_bp.route('/tools_target/delete', methods=['POST'])
 def delete_tools_target():
-    req_data = request.json or {}
-    repo_urls = req_data.get('repo_urls')
-    if isinstance(repo_urls, list):
-        utils.conn_db("github_tools_target").delete_many({"repo_url": {"$in": repo_urls}})
+    req_data = request.get_json(silent=True)
+    if not isinstance(req_data, dict):
+        return utils.build_ret(ErrorMsg.Error, {"error": "无效的请求体"})
+    if 'repo_urls' in req_data:
+        repo_urls = _extract_valid_str_list(req_data.get('repo_urls'))
+        if repo_urls is None:
+            return utils.build_ret(ErrorMsg.Error, {"error": "repo_urls 必须为字符串列表"})
+        if repo_urls:
+            utils.conn_db("github_tools_target").delete_many({"repo_url": {"$in": repo_urls}})
     else:
-        repo_url = req_data.get('repo_url')
+        repo_url = _extract_valid_str(req_data.get('repo_url'))
+        if not repo_url:
+            return utils.build_ret(ErrorMsg.Error, {"error": "repo_url 必须为非空字符串"})
         utils.conn_db("github_tools_target").delete_one({"repo_url": repo_url})
     return utils.build_ret(ErrorMsg.Success, {"msg": "删除成功"})
 
@@ -226,12 +271,19 @@ def add_hackers_target():
 
 @github_threat_bp.route('/hackers_target/delete', methods=['POST'])
 def delete_hackers_target():
-    req_data = request.json or {}
-    github_ids = req_data.get('github_ids')
-    if isinstance(github_ids, list):
-        utils.conn_db("github_hackers_target").delete_many({"github_id": {"$in": github_ids}})
+    req_data = request.get_json(silent=True)
+    if not isinstance(req_data, dict):
+        return utils.build_ret(ErrorMsg.Error, {"error": "无效的请求体"})
+    if 'github_ids' in req_data:
+        github_ids = _extract_valid_str_list(req_data.get('github_ids'))
+        if github_ids is None:
+            return utils.build_ret(ErrorMsg.Error, {"error": "github_ids 必须为字符串列表"})
+        if github_ids:
+            utils.conn_db("github_hackers_target").delete_many({"github_id": {"$in": github_ids}})
     else:
-        github_id = req_data.get('github_id')
+        github_id = _extract_valid_str(req_data.get('github_id'))
+        if not github_id:
+            return utils.build_ret(ErrorMsg.Error, {"error": "github_id 必须为非空字符串"})
         utils.conn_db("github_hackers_target").delete_one({"github_id": github_id})
     return utils.build_ret(ErrorMsg.Success, {"msg": "删除成功"})
 
@@ -248,12 +300,19 @@ def get_cve_history():
 
 @github_threat_bp.route('/cve_history/delete', methods=['POST'])
 def delete_cve_history():
-    req_data = request.json or {}
-    cve_names = req_data.get('cve_names')
-    if isinstance(cve_names, list):
-        utils.conn_db("github_cve_history").delete_many({"cve_name": {"$in": cve_names}})
+    req_data = request.get_json(silent=True)
+    if not isinstance(req_data, dict):
+        return utils.build_ret(ErrorMsg.Error, {"error": "无效的请求体"})
+    if 'cve_names' in req_data:
+        cve_names = _extract_valid_str_list(req_data.get('cve_names'))
+        if cve_names is None:
+            return utils.build_ret(ErrorMsg.Error, {"error": "cve_names 必须为字符串列表"})
+        if cve_names:
+            utils.conn_db("github_cve_history").delete_many({"cve_name": {"$in": cve_names}})
     else:
-        cve_name = req_data.get('cve_name')
+        cve_name = _extract_valid_str(req_data.get('cve_name'))
+        if not cve_name:
+            return utils.build_ret(ErrorMsg.Error, {"error": "cve_name 必须为非空字符串"})
         utils.conn_db("github_cve_history").delete_one({"cve_name": cve_name})
     return utils.build_ret(ErrorMsg.Success, {"msg": "删除成功"})
 
@@ -275,8 +334,9 @@ def get_cve_config():
 
 @github_threat_bp.route('/cve_config', methods=['POST'])
 def set_cve_config():
-    enabled = request.json.get('enabled', False)
-    interval = request.json.get('interval', 6)
+    enabled, interval, err = _parse_radar_config_payload(request.get_json(silent=True))
+    if err:
+        return utils.build_ret(ErrorMsg.Error, {"error": err})
     utils.conn_db("system_config").update_one(
         {"_id": "cve_radar_config"},
         {"$set": {"enabled": enabled, "interval": interval}},
@@ -316,8 +376,9 @@ def get_tools_config():
 
 @github_threat_bp.route('/tools_config', methods=['POST'])
 def set_tools_config():
-    enabled = request.json.get('enabled', False)
-    interval = request.json.get('interval', 6)
+    enabled, interval, err = _parse_radar_config_payload(request.get_json(silent=True))
+    if err:
+        return utils.build_ret(ErrorMsg.Error, {"error": err})
     utils.conn_db("system_config").update_one(
         {"_id": "tools_radar_config"},
         {"$set": {"enabled": enabled, "interval": interval}},
@@ -357,8 +418,9 @@ def get_hackers_config():
 
 @github_threat_bp.route('/hackers_config', methods=['POST'])
 def set_hackers_config():
-    enabled = request.json.get('enabled', False)
-    interval = request.json.get('interval', 6)
+    enabled, interval, err = _parse_radar_config_payload(request.get_json(silent=True))
+    if err:
+        return utils.build_ret(ErrorMsg.Error, {"error": err})
     utils.conn_db("system_config").update_one(
         {"_id": "hackers_radar_config"},
         {"$set": {"enabled": enabled, "interval": interval}},

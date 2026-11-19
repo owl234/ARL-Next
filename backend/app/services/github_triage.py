@@ -89,11 +89,17 @@ def set_triage_status(
         }
         if note_val is not None:
             update_doc["note"] = note_val
-        triage_col.update_one(
-            {"hash_md5": h},
-            {"$set": update_doc},
-            upsert=True,
-        )
+        try:
+            triage_col.update_one(
+                {"hash_md5": h},
+                {"$set": update_doc},
+                upsert=True,
+            )
+        except Exception as exc:
+            if getattr(exc, "code", None) == 11000 or exc.__class__.__name__ == "DuplicateKeyError":
+                triage_col.update_one({"hash_md5": h}, {"$set": update_doc})
+            else:
+                raise
 
     sync_fields: Dict[str, Any] = {
         "triage_status": triage_status,
@@ -149,15 +155,22 @@ def manage_ignored_repos(action: str, repo_full_names: List[str], reason: str = 
     now_str = utils.curr_date()
     if action == "add":
         for repo in clean_repos:
-            col.update_one(
-                {"repo_full_name": repo},
-                {"$set": {
-                    "repo_full_name": repo,
-                    "reason": (reason or "").strip(),
-                    "created_at": now_str,
-                }},
-                upsert=True,
-            )
+            repo_doc = {
+                "repo_full_name": repo,
+                "reason": (reason or "").strip(),
+                "created_at": now_str,
+            }
+            try:
+                col.update_one(
+                    {"repo_full_name": repo},
+                    {"$set": repo_doc},
+                    upsert=True,
+                )
+            except Exception as exc:
+                if getattr(exc, "code", None) == 11000 or exc.__class__.__name__ == "DuplicateKeyError":
+                    col.update_one({"repo_full_name": repo}, {"$set": repo_doc})
+                else:
+                    raise
     elif action == "remove":
         col.delete_many({"repo_full_name": {"$in": clean_repos}})
     else:

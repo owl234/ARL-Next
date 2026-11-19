@@ -684,31 +684,41 @@ def _stop_single_icp_task(task_id: str):
     except Exception:
         return "not_found", {"task_id": task_id, "error": "无效的任务 ID 格式"}
 
-    task = conn_db('icp_task').find_one({"_id": obj_id}, {"_id": 1, "status": 1})
+    task = conn_db('icp_task').find_one({"_id": obj_id}, {"_id": 1, "status": 1, "stop_unconfirmed": 1})
     if not task:
         return "not_found", {"task_id": task_id, "error": "任务不存在"}
 
     terminal_statuses = ("done", "stop", "error", TaskStatus.STOP)
-    if task.get("status") in terminal_statuses:
+    is_unconfirmed_stop_retry = (
+        task.get("status") in ("stop", TaskStatus.STOP) and bool(task.get("stop_unconfirmed"))
+    )
+    if task.get("status") in terminal_statuses and not is_unconfirmed_stop_retry:
         return "skipped", {"task_id": task_id, "status": task.get("status")}
 
-    # 仅对未结束任务落库 stop，避免与已完成任务的并发写回冲突
-    res = conn_db('icp_task').update_one(
-        {"_id": obj_id, "status": {"$in": [TaskStatus.WAITING, TaskStatus.RUNNING, "waiting", "running"]}},
-        {"$set": {"status": TaskStatus.STOP, "end_time": curr_date()}}
-    )
-    if getattr(res, "matched_count", 1) == 0:
-        latest = conn_db('icp_task').find_one({"_id": obj_id}, {"_id": 1, "status": 1})
-        if not latest:
-            return "not_found", {"task_id": task_id, "error": "任务不存在"}
-        if latest.get("status") in terminal_statuses:
-            return "skipped", {"task_id": task_id, "status": latest.get("status")}
+    if not is_unconfirmed_stop_retry:
+        # 仅对未结束任务落库 stop，避免与已完成任务的并发写回冲突
+        res = conn_db('icp_task').update_one(
+            {"_id": obj_id, "status": {"$in": [TaskStatus.WAITING, TaskStatus.RUNNING, "waiting", "running"]}},
+            {
+                "$set": {"status": TaskStatus.STOP, "end_time": curr_date()},
+                "$unset": {"detail_backfill_running": "", "detail_backfill_prev_status": ""},
+            }
+        )
+        if getattr(res, "matched_count", 1) == 0:
+            latest = conn_db('icp_task').find_one({"_id": obj_id}, {"_id": 1, "status": 1, "stop_unconfirmed": 1})
+            if not latest:
+                return "not_found", {"task_id": task_id, "error": "任务不存在"}
+            if latest.get("status") in terminal_statuses and not latest.get("stop_unconfirmed"):
+                return "skipped", {"task_id": task_id, "status": latest.get("status")}
 
     # 及时通知微服务终止正在执行或等待的协程任务释放锁
     try:
         _request_recon("stop", {"task_id": task_id})
+        if is_unconfirmed_stop_retry:
+            conn_db('icp_task').update_one({"_id": obj_id}, {"$unset": {"stop_unconfirmed": ""}})
     except Exception as e:
         logger.error(f"Failed to stop osint-service task {task_id}: {e}")
+        conn_db('icp_task').update_one({"_id": obj_id}, {"$set": {"stop_unconfirmed": True}})
         return "failed", {"task_id": task_id, "error": "微服务未确认停止，请稍后重试停止操作"}
 
     conn_db('asset_scope').update_many(

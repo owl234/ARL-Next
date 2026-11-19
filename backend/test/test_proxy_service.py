@@ -43,7 +43,34 @@ class _FakeCollection:
             return
         cur = dict(self.docs.get(doc_id) or {"_id": doc_id})
         if "$set" in update:
-            cur.update(update["$set"])
+            for k, v in update["$set"].items():
+                if "." in k:
+                    parts = k.split(".")
+                    node = cur
+                    for p in parts[:-1]:
+                        if not isinstance(node.get(p), dict):
+                            node[p] = {}
+                        else:
+                            node[p] = dict(node[p])
+                        node = node[p]
+                    node[parts[-1]] = v
+                else:
+                    cur[k] = v
+        if "$unset" in update:
+            for k in update["$unset"].keys():
+                if "." in k:
+                    parts = k.split(".")
+                    node = cur
+                    for p in parts[:-1]:
+                        if not isinstance(node.get(p), dict):
+                            node = None
+                            break
+                        node[p] = dict(node[p])
+                        node = node[p]
+                    if isinstance(node, dict):
+                        node.pop(parts[-1], None)
+                else:
+                    cur.pop(k, None)
         if "$inc" in update:
             for k, v in update["$inc"].items():
                 cur[k] = cur.get(k, 0) + v
@@ -460,16 +487,23 @@ class TestUnifiedProxyService(unittest.TestCase):
         self.assertEqual(recorded_proxies[0], {"http": "http://192.0.2.61:8080", "https": "http://192.0.2.61:8080"})
         self.assertIsNone(recorded_proxies[1])
 
-        # 2. NucleiScan 注入 -proxy（socks5h -> socks5）并在日志中屏蔽密码
+        # 2. NucleiScan 注入 -proxy（socks5h -> socks5）：含认证代理通过 0o600 临时文件传递，CLI 与日志均不暴露明文密码
         nuclei_mod = _load_module("app.services.nuclei_scan_under_test", NUCLEI_SCAN_PATH)
         scanner = nuclei_mod.NucleiScan(targets=["https://example.com"])
         scanner.nuclei_json_flag = "-jsonl"
         scanner.exec_nuclei()
         cmd_str = " ".join(self.exec_calls[-1])
         self.assertIn("-proxy", cmd_str)
-        self.assertIn("socks5://scanuser:TopSecretPassword@192.0.2.60:1080", cmd_str)
+        self.assertNotIn("TopSecretPassword", cmd_str)
+        proxy_files = [p for p, _ in scanner._extra_tmp_files if "nuclei_proxy_" in os.path.basename(p)]
+        self.assertEqual(len(proxy_files), 1)
+        with open(proxy_files[0], "r", encoding="utf-8") as pf:
+            self.assertEqual(pf.read().strip(), "socks5://scanuser:TopSecretPassword@192.0.2.60:1080")
+        self.assertEqual(os.stat(proxy_files[0]).st_mode & 0o777, 0o600)
         self.assertTrue(any("***@192.0.2.60:1080" in line for line in self.log_records))
         self.assertFalse(any("TopSecretPassword" in line for line in self.log_records))
+        scanner._delete_file()
+        self.assertFalse(os.path.exists(proxy_files[0]))
 
         # 全部为内网 CIDR 目标时自动跳过 -proxy
         self.exec_calls.clear()

@@ -268,7 +268,9 @@ def test_real_nuclei_dry_run_against_loopback_http(app_env, monkeypatch):
     if not nuclei_bin:
         pytest.skip("nuclei binary not installed")
 
-    _, _, _, client, headers = _load_nuclei_env(app_env)
+    svc, _, _, client, headers = _load_nuclei_env(app_env)
+    # 生产环境默认禁止调试 127.0.0.1 回环地址，本用例专测真实 Nuclei 回环命中链路，显式放行测试回环目标
+    monkeypatch.setattr(svc, "_validate_dry_run_target_safety", lambda target: (True, ""))
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):

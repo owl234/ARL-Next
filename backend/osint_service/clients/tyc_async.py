@@ -160,17 +160,20 @@ class AsyncTycClient:
             cands = self.proxy_router.get_candidates()
             if cands:
                 return cands
-            # 若天眼查出口全部短期标记冷却，兜底保留主直连+绑定备机让调用方做最后一次尝试并吐出明确提示
+            # 若天眼查出口全部短期标记冷却，兜底保留允许出口让调用方做最后一次尝试并吐出明确提示；
+            # 但当策略为 fixed_proxy 且无任何启用代理节点时，严禁回退主服务器直连
             allowed = self.proxy_router._all_allowed_exits()
             if allowed:
                 return allowed
+            return []
         if self.proxy:
-            ip = extract_proxy_ip(self.proxy) or self.proxy
+            ip = extract_proxy_ip(self.proxy) or mask_proxy_url_secret(self.proxy)
+            safe_eid = re.sub(r"[.$]+", "_", str(ip or "proxy"))
             return [ExitCandidate(
-                exit_id=f"explicit:{ip}",
+                exit_id=f"explicit:{safe_eid}",
                 name=mask_proxy_url_secret(self.proxy),
                 proxy_url=self.proxy,
-                ip=ip,
+                ip=extract_proxy_ip(self.proxy) or "",
             )]
         return [ExitCandidate(exit_id=DIRECT_EXIT_ID, name="主服务器直连", proxy_url=None, ip="")]
 
@@ -182,6 +185,8 @@ class AsyncTycClient:
 
         url = urljoin(self.base_url, path)
         candidates = self._get_candidates()
+        if not candidates:
+            raise AsyncTycException("OSINT 固定代理节点均已禁用或不可用，已阻止直连请求以保护服务器出口 IP。")
 
         for cand_idx, cand in enumerate(candidates):
             has_next_cand = cand_idx + 1 < len(candidates)
@@ -252,6 +257,21 @@ class AsyncTycClient:
                                 "请在「系统设置 -> 代理与出口策略」中配置中国大陆境内代理。"
                             )
                         elif status in [403, 429]:
+                            if self.proxy_router:
+                                self.proxy_router.mark_exit_blocked(
+                                    cand.exit_id,
+                                    reason=f"天眼查限流或风控 (HTTP {status})",
+                                    ip=cand.ip,
+                                    cooldown_sec=180,
+                                )
+                                await self.proxy_router.persist_runtime_status()
+                            if has_next_cand:
+                                if self.proxy_router:
+                                    await self.proxy_router.emit_syslog(
+                                        "warning", "天眼查出口切换",
+                                        f"出口 [{cand.name}] 触发天眼查限流 (HTTP {status})，已隔离并切换至 [{next_cand.name}] 重试"
+                                    )
+                                break
                             if attempt < max_retries - 1:
                                 logger.warning(f"触发限流(HTTP {status})，挂起 {15 * (attempt + 1)} 秒后重试 (Attempt {attempt+1}/{max_retries})...")
                                 await asyncio.sleep(15 * (attempt + 1))
@@ -300,6 +320,21 @@ class AsyncTycClient:
                             if any(kw in message for kw in ["请登录", "未登录", "登录失效", "登录已过期", "登录"]):
                                 raise TycAuthRequiredError(f"天眼查鉴权拦截: {message}")
                             if any(kw in message for kw in ["频繁", "验证码", "异常", "机器人", "操作过快", "校验"]):
+                                if self.proxy_router:
+                                    self.proxy_router.mark_exit_blocked(
+                                        cand.exit_id,
+                                        reason=f"天眼查风控 ({message[:80]})",
+                                        ip=cand.ip,
+                                        cooldown_sec=180,
+                                    )
+                                    await self.proxy_router.persist_runtime_status()
+                                if has_next_cand:
+                                    if self.proxy_router:
+                                        await self.proxy_router.emit_syslog(
+                                            "warning", "天眼查出口切换",
+                                            f"出口 [{cand.name}] 触发天眼查风控 ({message})，已隔离并切换至 [{next_cand.name}] 重试"
+                                        )
+                                    break
                                 if attempt < max_retries - 1:
                                     logger.warning(f"触发风控 ({message})，挂起 {15 * (attempt + 1)} 秒后重试 (Attempt {attempt+1}/{max_retries})...")
                                     await asyncio.sleep(15 * (attempt + 1))

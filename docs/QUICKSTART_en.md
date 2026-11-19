@@ -5,12 +5,12 @@
 
 ---
 
-## What changed in this release (v1.4.3)
+## Core Capabilities Overview
 
-- **Full-system data backup & restore**: "System Settings → System Ops → Backup & Restore" and the host CLI `python3 tools/arl_backup.py` support one-click full database & environment snapshot export/restore, guarded by a full-stack maintenance lock and automatic rollback on failure.
-- **Trilingual UI & MCP Governance Center**: switch between 简体中文 / English / Русский from the top navigation bar; the new sidebar "MCP Center" manages fine-grained scoped keys, tool-level permission switches, rate quotas, and invocation audit logs.
-- **WIH API endpoint probing & group workflow**: site details now extract static API endpoint candidates from JS assets and probe same-origin reachability; "New Asset Group" supports automated enterprise panorama recon filing and task-to-group linking.
-- Full changes: [`CHANGELOG_en.md`](../CHANGELOG_en.md).
+- **Attack Surface Mapping & Vulnerability Detection**: Covers subdomain enumeration, port scanning (with adaptive host discovery), web fingerprinting and optional screenshots, WIH JS API endpoint discovery with same-origin probing, and Nuclei community/custom multi-protocol templates with online dry-run debugging.
+- **Enterprise Panorama Recon & Asset Group Governance**: Combines Tianyancha and MIIT filing sources (websites, mobile apps, mini-programs, fast apps) with auto-grouping, checkpoint resume, in-place detail backfill, and incremental asset group monitoring.
+- **Multi-Protocol Proxy Pool & Trilingual Console**: Provides HTTP/HTTPS/SOCKS5 proxy pooling with `scan` / `osint` / `intel` domain routing, instant 简体中文 / English / Русский switching, an MCP Governance Center, and full-system backup and restore.
+- Full release history: [`CHANGELOG_en.md`](../CHANGELOG_en.md).
 
 ---
 

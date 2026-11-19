@@ -492,7 +492,7 @@ test('GitHub 页面完整初始化后，五个分页控件继续共享每页条�
     defineOptions: () => {}, useI18n: () => ({ t: pageText }),
     useRouter: () => ({ push() {} }), useRoute: () => ({ query: {} }),
     useGlobalPageSize: () => size, onMounted: fn => mounted.push(fn),
-    onDeactivated: () => {}, onUnmounted: () => {},
+    onActivated: () => {}, onDeactivated: () => {}, onUnmounted: () => {},
     request: { get: async path => { calls.push(path); return { code: 200, data: [], items: [], total: 0 }; } },
     message: { success() {}, error() {}, warning() {} }, Modal: {},
   });

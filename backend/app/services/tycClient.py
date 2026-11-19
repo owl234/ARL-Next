@@ -72,7 +72,7 @@ class TycClient:
             candidates = [fallback.get("https") if isinstance(fallback, dict) else None]
 
         if not candidates:
-            candidates = [None]
+            raise TycException("OSINT 固定代理节点均已禁用或不可用，已阻止直连请求以保护服务器出口 IP。")
 
         for idx, candidate_proxy in enumerate(candidates):
             has_next = idx + 1 < len(candidates)
@@ -116,6 +116,11 @@ class TycClient:
                     "请在「系统设置 -> 代理与出口策略」中配置中国大陆境内代理。"
                 )
             elif res.status_code in [403, 429]:
+                if record_osint_exit_event:
+                    record_osint_exit_event(candidate_proxy, blocked=True, cooldown_sec=180, reason=f"天眼查风控或限流 (HTTP {res.status_code})")
+                if has_next:
+                    logger.warning("TycClient exit [%s] hit HTTP %s, failing over to next exit", exit_label, res.status_code)
+                    continue
                 raise TycRiskControlException("触发天眼查风控拦截或限流，请更换 Token 或稍后再试。")
             elif res.status_code != 200:
                 raise TycException(f"天眼查 API 请求失败, HTTP {res.status_code}, {body_text[:100]}")
@@ -145,6 +150,11 @@ class TycClient:
                     if any(k in message for k in ("请登录", "未登录", "登录失效", "登录")):
                         raise TycTokenExpiredException(f"TYC Token 已失效或未登录: {message}")
                     if any(k in message for k in ("频繁", "验证码", "机器人", "操作过快")):
+                        if record_osint_exit_event:
+                            record_osint_exit_event(candidate_proxy, blocked=True, cooldown_sec=180, reason=f"天眼查风控: {message[:80]}")
+                        if has_next:
+                            logger.warning("TycClient exit [%s] hit risk control (%s), failing over to next exit", exit_label, message)
+                            continue
                         raise TycRiskControlException(f"触发天眼查风控拦截: {message}")
 
             if record_osint_exit_event:

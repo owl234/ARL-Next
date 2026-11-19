@@ -361,16 +361,24 @@ def dispatch_threat_task(task_type: str, force: bool = False):
         }
     }
 
-    if force:
-        db.update_one({"_id": config_id}, update, upsert=True)
-        acquired = True
-    else:
-        if not conf:
-            db.update_one({"_id": config_id}, {"$setOnInsert": {"enabled": False, "interval": 6}, **update}, upsert=True)
+    if not conf:
+        try:
+            db.update_one(
+                {"_id": config_id},
+                {"$setOnInsert": {"enabled": False, "interval": 6}, **update},
+                upsert=True,
+            )
             acquired = True
-        else:
-            res = db.update_one(query, update)
-            acquired = res.modified_count > 0
+        except Exception as exc:
+            if getattr(exc, "code", None) == 11000 or exc.__class__.__name__ == "DuplicateKeyError":
+                res = db.update_one(query, update)
+                acquired = res.modified_count > 0
+            else:
+                raise
+    else:
+        # 无论定时或手动 force 触发，均遵循原子互斥锁（仅在未运行或锁超时时抢锁），防并发重跑与重复推送
+        res = db.update_one(query, update)
+        acquired = res.modified_count > 0
 
     if not acquired:
         return False, f"{meta['name']} 正在后台执行中，请稍后刷新"

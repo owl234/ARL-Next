@@ -99,18 +99,40 @@ def _schedule_syslog(task_id, level, title, message):
 
 
 def _schedule_abort(task_id, message):
-    """协程崩溃后显式将任务收敛到 error 终态，避免长期滞留 running。"""
+    """协程崩溃后显式将任务收敛到终态并清理 detail_backfill_running / 资产组更新锁，避免长期滞留 running。"""
     if not task_id:
         return
 
     async def _abort():
         try:
+            import sys
             from clients.job_runner import db, curr_date
             from bson import ObjectId
-            await db['icp_task'].update_one(
-                {"_id": ObjectId(str(task_id)), "status": {"$in": ["waiting", "running"]}},
-                {"$set": {"status": "error", "end_time": curr_date(), "error_msg": message}}
-            )
+            job_runner_mod = sys.modules.get("clients.job_runner")
+            sync_scope_fn = getattr(job_runner_mod, "_sync_scope_after_task_completion", None)
+            obj_id = ObjectId(str(task_id))
+            doc = await db['icp_task'].find_one({"_id": obj_id})
+            if doc and doc.get("detail_backfill_running"):
+                restore_status = doc.get("detail_backfill_prev_status") or "done"
+                if restore_status not in ("done", "stop", "error"):
+                    restore_status = "done"
+                await db['icp_task'].update_one(
+                    {"_id": obj_id},
+                    {
+                        "$set": {"status": restore_status, "error_msg": message},
+                        "$unset": {"detail_backfill_running": "", "detail_backfill_prev_status": ""},
+                    },
+                )
+            else:
+                await db['icp_task'].update_one(
+                    {"_id": obj_id, "status": {"$in": ["waiting", "running"]}},
+                    {
+                        "$set": {"status": "error", "end_time": curr_date(), "error_msg": message},
+                        "$unset": {"detail_backfill_running": "", "detail_backfill_prev_status": ""},
+                    },
+                )
+                if inspect.iscoroutinefunction(sync_scope_fn):
+                    await sync_scope_fn(str(task_id), "error", message)
         except Exception as abort_err:
             logger.error(f"Failed to abort crashed task {task_id}: {abort_err}")
 
@@ -210,26 +232,45 @@ async def reconcile_orphan_tasks(app):
         from clients.job_runner import db, curr_date
         job_runner_mod = sys.modules.get("clients.job_runner")
 
-        # 1. 处置服务异常重启前中断的 running 任务 -> 置为已停止 (stop)，并同步清理资产组更新锁定指针
+        # 1. 处置服务异常重启前中断的 running 任务（含详情补全中断任务），同步清理资产组更新锁与 detail_backfill_running 标记
         interrupted_tasks = await db['icp_task'].find({"status": "running"}).to_list(length=200)
         sync_scope_fn = getattr(job_runner_mod, "_sync_scope_after_task_completion", None)
         for it in interrupted_tasks:
             try:
                 it_id = str(it["_id"])
-                logger.warning(f"Reconciling interrupted running task {it_id} -> stop")
-                await db['icp_task'].update_one(
-                    {"_id": it["_id"]},
-                    {"$set": {
-                        "status": "stop",
-                        "end_time": curr_date(),
-                        "error_msg": "服务异常重启中断，已自动置为已停止，可按需手动重启"
-                    }}
-                )
-                if inspect.iscoroutinefunction(sync_scope_fn):
+                was_backfill = bool(it.get("detail_backfill_running"))
+                prev_st = it.get("detail_backfill_prev_status")
+                if was_backfill and prev_st in ("done", "stop", "error"):
+                    target_status = prev_st
+                elif was_backfill and it.get("status") in ("done", "stop", "error"):
+                    target_status = it.get("status")
+                else:
+                    target_status = "stop"
+                logger.warning(f"Reconciling interrupted task {it_id} (backfill={was_backfill}) -> {target_status}")
+                if was_backfill:
+                    await db['icp_task'].update_one(
+                        {"_id": it["_id"]},
+                        {
+                            "$set": {"status": target_status},
+                            "$unset": {"detail_backfill_running": "", "detail_backfill_prev_status": ""},
+                        }
+                    )
+                else:
+                    await db['icp_task'].update_one(
+                        {"_id": it["_id"]},
+                        {"$set": {
+                            "status": "stop",
+                            "end_time": curr_date(),
+                            "error_msg": "服务异常重启中断，已自动置为已停止，可按需手动重启"
+                        }}
+                    )
+                if not was_backfill and inspect.iscoroutinefunction(sync_scope_fn):
                     await sync_scope_fn(it_id, "stop")
                 _schedule_syslog(
                     it_id, "warning", "任务中断",
-                    "osint-service 异常重启导致本次测绘中断，任务已自动置为已停止，可按需手动重启。"
+                    "osint-service 异常重启导致原位详情补全中断，已自动释放补全锁，可再次点击补全详情。"
+                    if was_backfill
+                    else "osint-service 异常重启导致本次测绘中断，任务已自动置为已停止，可按需手动重启。"
                 )
             except Exception as it_err:
                 logger.error(f"Failed to reconcile interrupted task {it.get('_id')}: {it_err}")
@@ -313,6 +354,17 @@ async def reconcile_orphan_tasks(app):
                     str(wt.get("_id")), "error", "任务自愈",
                     f"服务重启后自动恢复该排队任务失败：{wt_err}"
                 )
+
+        # 3. 兜底清理已处于非 running 态但仍残留 detail_backfill_running=True 的孤儿锁
+        try:
+            stray_update = db['icp_task'].update_many(
+                {"detail_backfill_running": True, "status": {"$ne": "running"}},
+                {"$unset": {"detail_backfill_running": "", "detail_backfill_prev_status": ""}},
+            )
+            if inspect.isawaitable(stray_update):
+                await stray_update
+        except Exception:
+            pass
 
     except Exception as e:
         logger.error(f"Failed to reconcile orphan tasks: {e}", exc_info=True)

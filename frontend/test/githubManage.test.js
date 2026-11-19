@@ -51,6 +51,7 @@ function loadGithubManageContext(initial = {}) {
     useRoute: () => ({ query: {} }),
     useGlobalPageSize: () => ref(10),
     onMounted: () => {},
+    onActivated: () => {},
     onDeactivated: () => {},
     onUnmounted: () => {},
     TASK_STATUS_LABEL: { running: '进行中', waiting: '排队中', done: '已完成', stop: '已停止', error: '异常失败' },

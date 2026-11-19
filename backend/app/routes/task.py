@@ -6,7 +6,7 @@ from app.utils import get_logger, auth
 from . import base_query_fields, ARLResource, get_arl_parser, conn
 from app import utils
 from app.modules import TaskStatus, ErrorMsg, TaskSyncStatus, CeleryAction, TaskTag, CeleryRoutingKey
-from app.helpers import get_options_by_policy_id, normalize_site_capture, submit_task_task,\
+from app.helpers import get_options_by_policy_id, normalize_site_capture, normalize_nuclei_config, submit_task_task,\
     submit_risk_cruising, get_scope_by_scope_id, check_target_in_scope
 from app.helpers.task import get_task_data, restart_task
 from app.services.portScan import normalize_host_discovery_mode
@@ -226,6 +226,17 @@ class ARLTask(ARLResource): # 继承我们在阶段一拆解过的“大基类�
 
         # 站点截图缺省值向下兼容默认开启（显式传 false 时跳过截图）
         args["site_capture"] = normalize_site_capture(args.get("site_capture"))
+
+        # 强白名单归一化 nuclei_config，防止任意 CLI 参数经 severity 等字段注入
+        if args.get("nuclei_config") is not None or args.get("nuclei_scan"):
+            norm_nc, nc_err = normalize_nuclei_config(
+                args.get("nuclei_config"),
+                nuclei_scan_enabled=bool(args.get("nuclei_scan", False)),
+                strict_severity=True,
+            )
+            if nc_err:
+                return utils.build_ret(ErrorMsg.Error, {"error": nc_err})
+            args["nuclei_config"] = norm_nc
 
         # 2. 分离核心参数：用 pop 把任务名和目标单独拿出来，
         #    这样 args 字典里剩下的就全是纯粹的“扫描选项(options)”了（比如 port_scan: True）

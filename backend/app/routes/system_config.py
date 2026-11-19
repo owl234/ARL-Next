@@ -582,6 +582,14 @@ class GeneralConfig(ARLResource):
         获取常规全局配置 (混合数据库与yaml默认配置)
         """
         from app.config import Config
+        raw_proxy_url = str(Config.PROXY_URL or "").strip()
+        masked_proxy_url = raw_proxy_url
+        if raw_proxy_url and "@" in raw_proxy_url:
+            try:
+                from app.services.proxy_service import mask_proxy_url_secret
+                masked_proxy_url = mask_proxy_url_secret(raw_proxy_url)
+            except Exception:
+                masked_proxy_url = "***"
 
         data = {
             "celery_broker_url": Config.CELERY_BROKER_URL,
@@ -602,7 +610,7 @@ class GeneralConfig(ARLResource):
             "tyc_id": Config.TYC_ID,
             "tyc_token": Config.TYC_TOKEN,
 
-            "proxy_url": Config.PROXY_URL,
+            "proxy_url": masked_proxy_url,
             "port_top_10": Config.TOP_10,
             "domain_brute_concurrent": Config.DOMAIN_BRUTE_CONCURRENT,
             "alt_dns_concurrent": Config.ALT_DNS_CONCURRENT,
@@ -680,8 +688,11 @@ class GeneralConfig(ARLResource):
         if "tyc_id" in req_data: doc["tyc_id"] = req_data["tyc_id"]
         if "tyc_token" in req_data: doc["tyc_token"] = req_data["tyc_token"]
 
-        # 代理与并发
-        if "proxy_url" in req_data: doc["proxy_url"] = req_data["proxy_url"]
+        # 代理与并发（忽略脱敏占位串回传，避免覆盖真实密码）
+        if "proxy_url" in req_data:
+            raw_proxy_val = str(req_data["proxy_url"] or "").strip()
+            if "***@" not in raw_proxy_val:
+                doc["proxy_url"] = raw_proxy_val
         if "port_top_10" in req_data: doc["port_top_10"] = req_data["port_top_10"]
         if "domain_brute_concurrent" in req_data and req_data["domain_brute_concurrent"] is not None: doc["domain_brute_concurrent"] = int(req_data["domain_brute_concurrent"] or 0)
         if "alt_dns_concurrent" in req_data and req_data["alt_dns_concurrent"] is not None: doc["alt_dns_concurrent"] = int(req_data["alt_dns_concurrent"] or 0)
@@ -731,18 +742,18 @@ class GeneralConfig(ARLResource):
                 "message": "未检测到变更字段，配置未改动"
             }
 
+        if "proxy_url" in doc:
+            try:
+                from app.services.proxy_service import sync_legacy_proxy_url
+                sync_legacy_proxy_url(doc["proxy_url"])
+            except ValueError as e:
+                return {"code": 400, "message": str(e)}, 400
+
         conn_db('system_config').update_one(
             {"_id": "general_config"},
             {"$set": doc},
             upsert=True
         )
-
-        if "proxy_url" in doc:
-            try:
-                from app.services.proxy_service import sync_legacy_proxy_url
-                sync_legacy_proxy_url(doc["proxy_url"])
-            except Exception:
-                pass
 
         # 清除本进程缓存，并递增跨进程版本号让其他 gunicorn worker 的缓存同步作废，
         # 否则用户保存后立即刷新可能仍看到旧值（多 worker 各自持有进程内缓存）。

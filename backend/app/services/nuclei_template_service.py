@@ -1,5 +1,7 @@
+import ipaddress
 import os
 import re
+import socket
 import yaml
 import json
 import shutil
@@ -149,7 +151,10 @@ def extract_templates_zip_to_dir(zip_file_path: str, target_dir: str) -> int:
                 continue
 
             dest_path = os.path.abspath(os.path.join(abs_target, rel_name))
-            if not dest_path.startswith(abs_target):
+            try:
+                if os.path.commonpath([abs_target, dest_path]) != abs_target:
+                    continue
+            except ValueError:
                 continue
 
             if member.is_dir():
@@ -172,8 +177,87 @@ def strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
 
 
+_DRY_RUN_BLOCKED_HOSTS = frozenset({
+    "localhost",
+    "host.docker.internal",
+    "metadata.google.internal",
+    "metadata.goog",
+    "mongodb",
+    "rabbitmq",
+    "osint-service",
+    "arl-puppeteer",
+    "arl-web",
+    "arl-worker",
+    "arl-mcp",
+    "arl-frontend",
+    "arl-mongodb-prod",
+    "arl-rabbitmq-prod",
+    "arl-osint-service-prod",
+    "arl-puppeteer-prod",
+    "arl-worker-prod",
+    "arl-web-prod",
+    "arl-mcp-prod",
+    "arl-frontend-prod",
+    "arl-autoheal",
+})
+
+
+def _is_forbidden_dry_run_ip(ip_obj) -> bool:
+    ip_obj = getattr(ip_obj, "ipv4_mapped", None) or ip_obj
+    if ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_unspecified or ip_obj.is_multicast:
+        return True
+    try:
+        not_in_black = getattr(utils, "not_in_black_ips", None)
+        if callable(not_in_black) and not not_in_black(str(ip_obj)):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _validate_dry_run_target_safety(target: str):
+    """校验在线调试目标安全性：阻断回环/云元数据/容器内部服务名，并复用系统安全策略。"""
+    parsed = urlsplit(target if "://" in target else f"http://{target}")
+    host = (parsed.hostname or "").strip().strip(".").lower()
+    if not host:
+        return False, "无效的目标主机或端口"
+
+    if host in _DRY_RUN_BLOCKED_HOSTS or host.endswith(".localhost"):
+        return False, f"禁止对本机或内部基础服务执行在线调试: {host}"
+
+    try:
+        forbidden_domain_fn = getattr(utils, "is_forbidden_domain", None)
+        if callable(forbidden_domain_fn) and forbidden_domain_fn(host):
+            return False, f"目标命中系统禁止扫描域名策略: {host}"
+    except Exception:
+        pass
+
+    try:
+        ip_obj = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        ip_obj = None
+
+    if ip_obj is not None:
+        if _is_forbidden_dry_run_ip(ip_obj):
+            return False, f"禁止对本机回环、云元数据或黑名单 IP 执行在线调试: {host}"
+        return True, ""
+
+    # 域名目标：尽力解析并检查是否指向回环/链路本地/黑名单 IP（解析失败时交由 Nuclei 正常报错）
+    try:
+        for entry in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM):
+            resolved = ipaddress.ip_address(entry[4][0])
+            if _is_forbidden_dry_run_ip(resolved):
+                return False, f"目标域名解析到受限地址 ({resolved})，已拒绝在线调试"
+    except OSError:
+        pass
+    except Exception:
+        pass
+
+    return True, ""
+
+
 def normalize_dry_run_target(raw_target: str, protocol: str = "http"):
-    """根据模板协议规范化单目标输入，防止参数注入与跨协议误拼前缀。"""
+    """根据模板协议规范化单目标输入，防止参数注入、跨协议误拼前缀与本机/内部服务 SSRF。"""
     if not isinstance(raw_target, str):
         return False, "目标格式非法"
     target = raw_target.strip()
@@ -188,13 +272,10 @@ def normalize_dry_run_target(raw_target: str, protocol: str = "http"):
     if proto in {"http", "headless"}:
         if not target.lower().startswith(("http://", "https://")):
             target = "http://" + target
-        return True, target
-    if proto == "websocket":
+    elif proto == "websocket":
         if not target.lower().startswith(("ws://", "wss://", "http://", "https://")):
             target = "http://" + target
-        return True, target
-
-    if proto in {"dns", "tcp", "network", "ssl", "whois"}:
+    elif proto in {"dns", "tcp", "network", "ssl", "whois"}:
         if target.lower().startswith(("http://", "https://")):
             parsed = urlsplit(target)
             if not parsed.netloc:
@@ -204,8 +285,10 @@ def normalize_dry_run_target(raw_target: str, protocol: str = "http"):
             target = target.split("/", 1)[0]
         if not target:
             return False, "无效的目标地址"
-        return True, target
 
+    safe_ok, safe_err = _validate_dry_run_target_safety(target)
+    if not safe_ok:
+        return False, safe_err
     return True, target
 
 
@@ -301,7 +384,9 @@ def parse_and_validate_nuclei_yaml(content: str, run_nuclei_validate: bool = Fal
     if not found_protocols:
         return False, "模板缺少有效的协议探测块（如 http、dns、tcp、ssl、network、workflows 等）"
 
-    protocol = "http" if found_protocols[0] == "requests" else found_protocols[0]
+    normalized_protocols = list(dict.fromkeys("http" if p == "requests" else p for p in found_protocols))
+    unsupported_found = [p for p in normalized_protocols if p in ASM_UNSUPPORTED_PROTOCOLS]
+    protocol = unsupported_found[0] if unsupported_found else normalized_protocols[0]
 
     description = str(info.get("description", "")).strip() if info.get("description") is not None else ""
     reference = info.get("reference", [])
@@ -316,6 +401,7 @@ def parse_and_validate_nuclei_yaml(content: str, run_nuclei_validate: bool = Fal
         "severity": severity,
         "tags": tags,
         "protocol": protocol,
+        "protocols": normalized_protocols,
         "author": author,
         "description": description,
         "reference": reference,
@@ -352,23 +438,77 @@ ASM_WEB_PROTOCOLS = frozenset({"http", "requests", "websocket"})
 ASM_NETWORK_PROTOCOLS = frozenset({"tcp", "network", "ssl", "javascript"})
 ASM_DNS_PROTOCOLS = frozenset({"dns", "whois"})
 ASM_UNSUPPORTED_PROTOCOLS = frozenset({"code", "headless", "file", "workflows"})
+_KNOWN_TEMPLATE_PROTOCOLS = (
+    "http", "requests", "dns", "tcp", "network", "ssl",
+    "websocket", "whois", "code", "javascript", "headless", "file", "workflows",
+)
 
 
-def classify_asm_protocol(protocol: str) -> str:
-    """将 Nuclei 模板协议归类为 ASM 执行桶: web / network / dns / unsupported。"""
-    proto = str(protocol or "http").strip().lower()
-    if proto in ASM_WEB_PROTOCOLS:
-        return "web"
-    if proto in ASM_NETWORK_PROTOCOLS:
-        return "network"
-    if proto in ASM_DNS_PROTOCOLS:
-        return "dns"
-    if proto in ASM_UNSUPPORTED_PROTOCOLS:
+def extract_template_protocols(doc_or_content) -> list:
+    """提取模板中实际出现的全部协议块（规范化 requests -> http），防止多协议模板绕过危险协议校验。"""
+    found = []
+    content = ""
+    if isinstance(doc_or_content, dict):
+        raw_list = doc_or_content.get("protocols")
+        if isinstance(raw_list, list):
+            for p in raw_list:
+                np = "http" if str(p or "").strip().lower() == "requests" else str(p or "").strip().lower()
+                if np and np not in found:
+                    found.append(np)
+        content = doc_or_content.get("content") or ""
+        if content:
+            try:
+                parsed = yaml.safe_load(content)
+                if isinstance(parsed, dict):
+                    for p in _KNOWN_TEMPLATE_PROTOCOLS:
+                        val = parsed.get(p)
+                        if isinstance(val, (list, dict)) and len(val) > 0:
+                            np = "http" if p == "requests" else p
+                            if np not in found:
+                                found.append(np)
+            except Exception:
+                pass
+        if not found:
+            raw_proto = str(doc_or_content.get("protocol") or "").strip().lower()
+            if raw_proto:
+                found.append("http" if raw_proto == "requests" else raw_proto)
+    elif isinstance(doc_or_content, str) and doc_or_content.strip():
+        try:
+            parsed = yaml.safe_load(doc_or_content)
+            if isinstance(parsed, dict):
+                for p in _KNOWN_TEMPLATE_PROTOCOLS:
+                    val = parsed.get(p)
+                    if isinstance(val, (list, dict)) and len(val) > 0:
+                        np = "http" if p == "requests" else p
+                        if np not in found:
+                            found.append(np)
+        except Exception:
+            pass
+    return found or ["http"]
+
+
+def classify_asm_protocol(protocol) -> str:
+    """将 Nuclei 模板协议（单个字符串、协议列表或模板文档）归类为 ASM 执行桶: web / network / dns / unsupported。"""
+    if isinstance(protocol, dict):
+        protos = extract_template_protocols(protocol)
+    elif isinstance(protocol, (list, tuple, set, frozenset)):
+        protos = [str(p or "").strip().lower() for p in protocol if str(p or "").strip()] or ["http"]
+    else:
+        protos = [str(protocol or "http").strip().lower()]
+
+    if any(p in ASM_UNSUPPORTED_PROTOCOLS for p in protos):
         return "unsupported"
+    first = protos[0]
+    if first in ASM_WEB_PROTOCOLS:
+        return "web"
+    if first in ASM_NETWORK_PROTOCOLS:
+        return "network"
+    if first in ASM_DNS_PROTOCOLS:
+        return "dns"
     return "web"
 
 
-def is_asm_supported_protocol(protocol: str) -> bool:
+def is_asm_supported_protocol(protocol) -> bool:
     return classify_asm_protocol(protocol) != "unsupported"
 
 
@@ -673,7 +813,6 @@ def run_community_sync_worker(mode: str = "online", offline_zip_path: str = None
                             target_url,
                             stream=True,
                             timeout=60,
-                            verify=False,
                             allow_redirects=True,
                             proxies=req_proxies,
                             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}

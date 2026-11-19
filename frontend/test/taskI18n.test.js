@@ -11,6 +11,7 @@ import allZh from '../src/i18n/zh-CN.js';
 import allEn from '../src/i18n/en-US.js';
 import { TASK_STATUS_LABEL, PLUGIN_NAME_MAP, formatTaskStatus, formatTaskStatusColor } from '../src/constants/taskStatus.js';
 import { buildAssetFilterParams, formatAssetFilterOperator } from '../src/utils/assetFilters.js';
+import { buildEnterpriseOsintColumns } from '../src/utils/enterpriseOsint.js';
 import { describeTaskFanout } from '../src/utils/targetParse.js';
 import { getTaskAssetGroupState } from '../src/utils/taskAssetGroups.js';
 
@@ -94,8 +95,7 @@ test('已创建的任务表格、计划表格和企业结果列名随语言切�
   const cases = [
     ['views/TaskList.vue', 'enterpriseColumns'], ['views/TaskList.vue', 'columns'],
     ['views/PlanningTasks.vue', 'columns'], ['views/PlanningTasks.vue', 'monitorColumns'],
-    ['components/EnterpriseTaskDetailPanel.vue', 'webColumns'], ['components/ServiceDetailModal.vue', 'columns'],
-    ['components/EnterpriseTaskDetailPanel.vue', 'kappColumns'],
+    ['components/ServiceDetailModal.vue', 'columns'],
   ];
   for (const [file, name] of cases) {
     i18n.global.locale.value = 'zh-CN';
@@ -108,6 +108,23 @@ test('已创建的任务表格、计划表格和企业结果列名随语言切�
     assert.deepEqual(columns.map(({ key, dataIndex }) => ({ key, dataIndex })), fields);
     i18n.global.locale.value = 'zh-CN';
     assert.deepEqual(titles.value, chinese, file);
+  }
+  for (const tab of ['web', 'kapp']) {
+    i18n.global.locale.value = 'zh-CN';
+    const dynamicColumns = component('components/EnterpriseTaskDetailPanel.vue', {
+      buildEnterpriseOsintColumns,
+      activeTab: ref(tab),
+      assetList: ref([]),
+      sortState: reactive({ field: '', order: null }),
+    }).read('dynamicColumns');
+    const titles = computed(() => dynamicColumns.value.map(column => column.title));
+    const chinese = titles.value;
+    const fields = plain(dynamicColumns.value.map(({ key, dataIndex }) => ({ key, dataIndex })));
+    i18n.global.locale.value = 'en-US';
+    assert.notDeepEqual(titles.value, chinese, `EnterpriseTaskDetailPanel:${tab}`);
+    assert.deepEqual(plain(dynamicColumns.value.map(({ key, dataIndex }) => ({ key, dataIndex }))), fields);
+    i18n.global.locale.value = 'zh-CN';
+    assert.deepEqual(titles.value, chinese, `EnterpriseTaskDetailPanel:${tab}`);
   }
 });
 

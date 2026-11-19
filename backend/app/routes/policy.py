@@ -2,7 +2,7 @@ from flask_restx import fields, Namespace
 from app.utils import get_logger, auth
 from . import base_query_fields, ARLResource, get_arl_parser
 from app.modules import ErrorMsg
-from app.helpers.policy import normalize_site_capture
+from app.helpers.policy import normalize_site_capture, normalize_nuclei_config
 from app.services.portScan import normalize_host_discovery_mode
 from app import utils
 from bson import ObjectId
@@ -450,6 +450,8 @@ class EditPolicy(ARLResource):
 
 def _normalize_nuclei_config(raw_cfg, nuclei_scan_enabled: bool = False):
     """归一化并校验 Nuclei 策略细粒度配置，保持对历史策略的向下兼容。"""
+    if raw_cfg is not None and not isinstance(raw_cfg, dict):
+        return None, "无效的 nuclei_config 格式，必须为对象"
     cfg = dict(raw_cfg) if isinstance(raw_cfg, dict) else {}
 
     raw_inc = cfg.get("include_community", True)
@@ -464,9 +466,21 @@ def _normalize_nuclei_config(raw_cfg, nuclei_scan_enabled: bool = False):
         return None, f"无效的自建模板模式: {mode}"
 
     raw_sevs = cfg.get("severity")
+    if raw_sevs is not None and not isinstance(raw_sevs, list):
+        return None, "无效的 severity 参数，必须为列表"
     if isinstance(raw_sevs, list) and raw_sevs:
         valid_sevs = {"critical", "high", "medium", "low", "info"}
-        severities = [str(s).strip().lower() for s in raw_sevs if str(s).strip().lower() in valid_sevs]
+        severities = []
+        seen_sevs = set()
+        for item in raw_sevs:
+            s_val = str(item).strip().lower()
+            if not s_val:
+                continue
+            if s_val not in valid_sevs:
+                return None, f"无效的 Nuclei 危害级别: {item}"
+            if s_val not in seen_sevs:
+                seen_sevs.add(s_val)
+                severities.append(s_val)
         if not severities:
             severities = ["critical", "high", "medium", "low"]
     else:

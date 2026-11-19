@@ -16,6 +16,7 @@ _ASM_WEB_PROTOCOLS = frozenset({"http", "requests", "websocket"})
 _ASM_NETWORK_PROTOCOLS = frozenset({"tcp", "network", "ssl", "javascript"})
 _ASM_DNS_PROTOCOLS = frozenset({"dns", "whois"})
 _ASM_UNSUPPORTED_PROTOCOLS = frozenset({"code", "headless", "file", "workflows"})
+_VALID_NUCLEI_SEVERITIES = frozenset({"critical", "high", "medium", "low", "info"})
 _KNOWN_YAML_PROTOCOLS = (
     "http", "requests", "websocket",
     "tcp", "network", "ssl", "javascript",
@@ -24,24 +25,26 @@ _KNOWN_YAML_PROTOCOLS = (
 )
 
 
-def _classify_protocol_bucket(protocol: str) -> str:
-    proto = str(protocol or "http").strip().lower()
+def _classify_protocol_bucket(protocol) -> str:
+    if isinstance(protocol, (list, tuple, set, frozenset)):
+        protos = [str(p or "").strip().lower() for p in protocol if str(p or "").strip()] or ["http"]
+    else:
+        protos = [str(protocol or "http").strip().lower()]
+    if any(p in _ASM_UNSUPPORTED_PROTOCOLS for p in protos):
+        return "unsupported"
+    proto = protos[0]
     if proto in _ASM_WEB_PROTOCOLS:
         return "web"
     if proto in _ASM_NETWORK_PROTOCOLS:
         return "network"
     if proto in _ASM_DNS_PROTOCOLS:
         return "dns"
-    if proto in _ASM_UNSUPPORTED_PROTOCOLS:
-        return "unsupported"
     return "web"
 
 
-def _detect_doc_protocol(doc: dict) -> str:
-    proto = str(doc.get("protocol") or "").strip().lower()
-    if proto:
-        return "http" if proto == "requests" else proto
-
+def _detect_doc_protocols(doc: dict) -> list:
+    """提取模板文档中全部协议块（优先解析 YAML 内容以防多协议模板伪装绕过受限协议拦截）。"""
+    found = []
     content = doc.get("content") or ""
     if content:
         try:
@@ -51,10 +54,34 @@ def _detect_doc_protocol(doc: dict) -> str:
                 for p in _KNOWN_YAML_PROTOCOLS:
                     val = parsed.get(p)
                     if isinstance(val, (list, dict)) and len(val) > 0:
-                        return "http" if p == "requests" else p
+                        np = "http" if p == "requests" else p
+                        if np not in found:
+                            found.append(np)
         except Exception:
             pass
-    return "http"
+
+    raw_list = doc.get("protocols")
+    if isinstance(raw_list, list):
+        for p in raw_list:
+            np = "http" if str(p or "").strip().lower() == "requests" else str(p or "").strip().lower()
+            if np and np not in found:
+                found.append(np)
+
+    proto = str(doc.get("protocol") or "").strip().lower()
+    if proto:
+        np = "http" if proto == "requests" else proto
+        if np not in found:
+            found.append(np)
+
+    return found or ["http"]
+
+
+def _detect_doc_protocol(doc: dict) -> str:
+    protos = _detect_doc_protocols(doc)
+    for p in protos:
+        if p in _ASM_UNSUPPORTED_PROTOCOLS:
+            return p
+    return protos[0]
 
 
 def _is_ip_literal(value: str) -> bool:
@@ -160,6 +187,30 @@ def resolve_nuclei_proxy(targets):
     except Exception as exc:
         logger.debug(f"resolve nuclei proxy failed: {exc}")
     return nuclei_proxy, masked_proxy
+
+
+def _partition_nuclei_targets_by_proxy(targets):
+    """将目标按代理旁路规则拆分为 (需走代理目标列表, 直连旁路目标列表)。"""
+    cleaned = list(targets or [])
+    if not cleaned:
+        return [], []
+    try:
+        from app.services.proxy_service import load_proxy_config, should_bypass_url
+        proxy_cfg = load_proxy_config()
+        scan_pol = (proxy_cfg.get("policies") or {}).get("scan") or {}
+        if not scan_pol.get("apply_to_nuclei", True):
+            return [], cleaned
+        bypass_cfg = proxy_cfg.get("bypass")
+        proxied = []
+        direct = []
+        for t in cleaned:
+            if should_bypass_url(str(t), bypass_cfg, domain="scan"):
+                direct.append(t)
+            else:
+                proxied.append(t)
+        return proxied, direct
+    except Exception:
+        return cleaned, []
 
 
 def _dir_has_yaml_templates(directory: str) -> bool:
@@ -489,15 +540,29 @@ class NucleiScan(object):
             command.append(f"-eid {shlex.quote(exclude_file)}")
 
         if nuclei_proxy:
-            command.append(f"-proxy {shlex.quote(nuclei_proxy)}")
+            if "@" in nuclei_proxy:
+                proxy_file = os.path.join(Config.TMP_PATH, f"nuclei_proxy_{utils.random_choices(8)}.txt")
+                fd = os.open(proxy_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as pf:
+                    pf.write(nuclei_proxy + "\n")
+                self._extra_tmp_files.append((proxy_file, False))
+                command.append(f"-proxy {shlex.quote(proxy_file)}")
+            else:
+                command.append(f"-proxy {shlex.quote(nuclei_proxy)}")
 
-        log_cmd = " ".join(command)
+        masked_command = list(command)
         if nuclei_proxy and masked_proxy:
-            log_cmd = log_cmd.replace(shlex.quote(nuclei_proxy), shlex.quote(masked_proxy)).replace(nuclei_proxy, masked_proxy)
+            masked_command = [
+                part.replace(shlex.quote(nuclei_proxy), shlex.quote(masked_proxy)).replace(nuclei_proxy, masked_proxy)
+                for part in masked_command
+            ]
+        log_cmd = " ".join(masked_command)
+        if nuclei_proxy and masked_proxy and "@" in nuclei_proxy:
+            log_cmd = f"{log_cmd} (proxy={masked_proxy})"
         logger.info(log_cmd)
         completed = utils.exec_system(command, timeout=15 * 24 * 60 * 60)
         if completed.returncode != 0:
-            raise subprocess.CalledProcessError(completed.returncode, command)
+            raise subprocess.CalledProcessError(completed.returncode, masked_command)
 
     def exec_nuclei(self):
         self._result_sources = []
@@ -516,7 +581,11 @@ class NucleiScan(object):
 
         severities = nuclei_config.get("severity") or ["low", "medium", "high", "critical"]
         if isinstance(severities, list) and severities:
-            cleaned_sevs = [str(s).strip().lower() for s in severities if str(s).strip()]
+            cleaned_sevs = list(dict.fromkeys(
+                str(s).strip().lower()
+                for s in severities
+                if str(s).strip().lower() in _VALID_NUCLEI_SEVERITIES
+            ))
             sev_arg = "-severity " + ",".join(cleaned_sevs) if cleaned_sevs else "-severity low,medium,high,critical"
         else:
             sev_arg = "-severity low,medium,high,critical"
@@ -615,32 +684,62 @@ class NucleiScan(object):
 
         for run_spec in planned_runs:
             run_targets = run_spec["targets"]
-            if run_spec["use_primary_target"]:
-                target_file = self.nuclei_target_path
-            else:
-                target_file = os.path.join(
-                    Config.TMP_PATH, f"nuclei_target_{run_spec['name'].replace(':', '_')}_{utils.random_choices()}.txt"
-                )
-                self._gen_target_file(run_targets, target_file)
-                self._extra_tmp_files.append((target_file, False))
-
             nuclei_proxy, masked_proxy = resolve_nuclei_proxy(run_targets)
-            try:
-                self._run_nuclei_command(
-                    run_spec["result_path"],
-                    template_dir=run_spec["template_dir"],
-                    tags_arg=run_spec["tags_arg"],
-                    sev_arg=run_spec["sev_arg"],
-                    exclude_file=run_spec["exclude_file"],
-                    target_path=target_file,
-                    nuclei_proxy=nuclei_proxy,
-                    masked_proxy=masked_proxy,
-                )
-                succeeded_runs += 1
-                self._result_sources.append((run_spec["result_path"], run_spec["template_source"]))
-            except Exception as exc:
-                logger.error(f"Nuclei channel [{run_spec['name']}] execution failed: {exc}")
-                errors.append((run_spec["name"], exc))
+            sub_batches = []
+            if nuclei_proxy:
+                proxied_t, direct_t = _partition_nuclei_targets_by_proxy(run_targets)
+                if proxied_t and direct_t:
+                    sub_batches.append((
+                        f"{run_spec['name']}:proxy", proxied_t, False, nuclei_proxy, masked_proxy, run_spec["result_path"]
+                    ))
+                    direct_res_path = os.path.join(
+                        Config.TMP_PATH,
+                        f"nuclei_direct_{run_spec['name'].replace(':', '_')}_{utils.random_choices()}.json",
+                    )
+                    self._extra_tmp_files.append((direct_res_path, False))
+                    sub_batches.append((
+                        f"{run_spec['name']}:direct", direct_t, False, "", "", direct_res_path
+                    ))
+                elif proxied_t:
+                    sub_batches.append((
+                        run_spec["name"], proxied_t, run_spec["use_primary_target"], nuclei_proxy, masked_proxy, run_spec["result_path"]
+                    ))
+                else:
+                    sub_batches.append((
+                        run_spec["name"], direct_t or run_targets, run_spec["use_primary_target"], "", "", run_spec["result_path"]
+                    ))
+            else:
+                sub_batches.append((
+                    run_spec["name"], run_targets, run_spec["use_primary_target"], "", "", run_spec["result_path"]
+                ))
+
+            for batch_name, batch_targets, use_primary_flag, b_proxy, b_masked_proxy, b_res_path in sub_batches:
+                if use_primary_flag and batch_targets == web_targets:
+                    target_file = self.nuclei_target_path
+                else:
+                    target_file = os.path.join(
+                        Config.TMP_PATH,
+                        f"nuclei_target_{batch_name.replace(':', '_')}_{utils.random_choices()}.txt",
+                    )
+                    self._gen_target_file(batch_targets, target_file)
+                    self._extra_tmp_files.append((target_file, False))
+
+                try:
+                    self._run_nuclei_command(
+                        b_res_path,
+                        template_dir=run_spec["template_dir"],
+                        tags_arg=run_spec["tags_arg"],
+                        sev_arg=run_spec["sev_arg"],
+                        exclude_file=run_spec["exclude_file"],
+                        target_path=target_file,
+                        nuclei_proxy=b_proxy,
+                        masked_proxy=b_masked_proxy,
+                    )
+                    succeeded_runs += 1
+                    self._result_sources.append((b_res_path, run_spec["template_source"]))
+                except Exception as exc:
+                    logger.error(f"Nuclei channel [{batch_name}] execution failed: {exc}")
+                    errors.append((batch_name, exc))
 
         if succeeded_runs == 0 and errors:
             raise errors[0][1]

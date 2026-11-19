@@ -63,7 +63,16 @@ sys.exit(mode.get('code', 0))
         self.binary.chmod(0o755)
         self.scan.nuclei_bin_path = str(self.binary)
         self.set_mode()
-        imported = patch.dict(sys.modules, {'app.routes.nuclei': types.SimpleNamespace(get_community_templates_dir=lambda: '')})
+        imported = patch.dict(sys.modules, {
+            'app.routes.nuclei': types.SimpleNamespace(get_community_templates_dir=lambda: ''),
+            'app.services.nuclei_template_service': types.SimpleNamespace(get_community_templates_dir=lambda: ''),
+            'app.services.proxy_service': types.SimpleNamespace(
+                load_proxy_config=lambda: {'policies': {'scan': {'apply_to_nuclei': False}}, 'bypass': {}},
+                mask_proxy_url_secret=lambda u: u,
+                resolve_proxy_url=lambda domain='scan', target_url=None: '',
+                should_bypass_url=lambda url, bypass=None, domain=None: False,
+            ),
+        })
         imported.start()
         self.addCleanup(imported.stop)
 

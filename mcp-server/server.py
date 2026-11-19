@@ -844,18 +844,17 @@ def _fetch_enterprise_profile(target: str, category: str = "all", page: int = 1,
 
 
 def _fetch_remote_tools() -> list:
-    """从后端 /api/mcp/tools 获取按策略与 Key 权限裁剪后的可用工具清单"""
+    """从后端 /api/mcp/tools 获取按策略与 Key 权限裁剪后的可用工具清单（异常时安全降级为只读工具集）"""
     if os.environ.get("ARL_MCP_SYNC_TOOLS", "1").strip() == "0":
         return list(ALL_TOOLS)
+    readonly_fallback = [TOOL_GET_ASSET_PROFILE, TOOL_GET_ENTERPRISE_PROFILE]
     _, token = _get_auth()
     if not token:
-        return list(ALL_TOOLS)
+        return readonly_fallback
     code, data = _request_api("/mcp/tools")
     if code == 200 and isinstance(data, dict) and isinstance(data.get("tools"), list):
         return data["tools"]
-    if code in (404, 405):
-        return [TOOL_GET_ASSET_PROFILE, TOOL_GET_ENTERPRISE_PROFILE]
-    return list(ALL_TOOLS)
+    return readonly_fallback
 
 
 def _execute_remote_tool(method: str, endpoint: str, payload: dict) -> tuple:

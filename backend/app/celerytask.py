@@ -336,7 +336,7 @@ def nuclei_template_sync_task(zip_file_path=None, target_version=None):
             tmp_zip = os.path.join(Config.TMP_PATH, "worker_nuclei_sync.zip")
             for m in mirrors:
                 try:
-                    resp = requests.get(f"{m}{raw_url}", stream=True, timeout=30, verify=False)
+                    resp = requests.get(f"{m}{raw_url}", stream=True, timeout=30)
                     if resp.status_code == 200:
                         with open(tmp_zip, "wb") as f:
                             for chunk in resp.iter_content(chunk_size=128 * 1024):

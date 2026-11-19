@@ -395,6 +395,9 @@ class beian:
                     for c in cands
                 ]
                 return min(rems) if rems else 0.0
+            router_rem = float(router.earliest_unblock_delay() or 0.0)
+            if router_rem > 0.0:
+                return router_rem
         return max(0.0, float(self._detail_waf_block_ts) + float(self.detail_waf_cooldown) - now_ts)
 
     def reset_detail_waf(self):
@@ -641,12 +644,13 @@ class beian:
             return []
         resolved = self._resolve_proxy(explicit_proxy)
         if resolved:
-            ip_val = self._extract_proxy_ip(resolved) or resolved
+            ip_val = self._extract_proxy_ip(resolved) or mask_proxy_url_secret(resolved)
+            safe_eid = re.sub(r"[.$]+", "_", str(ip_val or "proxy"))
             return [ExitCandidate(
-                exit_id=f"explicit:{ip_val}",
+                exit_id=f"explicit:{safe_eid}",
                 name=mask_proxy_url_secret(resolved),
                 proxy_url=resolved,
-                ip=ip_val,
+                ip=self._extract_proxy_ip(resolved) or "",
             )]
         return [ExitCandidate(exit_id=DIRECT_EXIT_ID, name="主服务器直连", proxy_url=None, ip="")]
 
@@ -1143,15 +1147,48 @@ class beian:
                             next_cand=next_cand,
                             scene="详情补全",
                         )
+                        last_err = {
+                            "code": 403 if ctx_err.blocked_ip else 500,
+                            "msg": str(ctx_err.reason or "详情验证码刷新失败"),
+                            "success": False,
+                        }
                         if next_cand is not None:
                             continue
                         return False, last_err
                 else:
-                    tok_ok, new_tok, new_hdr = await self.get_token(proxy, force=(idx > 0), exit_candidate=cand)
-                    if tok_ok:
-                        cur_token = new_tok
-                        cur_header = new_hdr
-                        cur_sign = cur_sign or self.sign
+                    try:
+                        tok_ok, new_tok, new_hdr = await self.get_token(
+                            cand.proxy_url or "",
+                            force=(idx > 0),
+                            exit_candidate=cand,
+                            _raise_on_exit_err=True,
+                        )
+                        if tok_ok:
+                            cur_token = new_tok
+                            cur_header = new_hdr
+                            cur_sign = cur_sign or self.sign
+                        else:
+                            last_err = {"code": 500, "msg": "详情 Token 获取失败", "success": False}
+                            if next_cand is not None:
+                                continue
+                            return False, last_err
+                    except _ExitAttemptError as tok_err:
+                        await self._handle_exit_failure(
+                            cand,
+                            blocked_ip=tok_err.blocked_ip,
+                            reason=tok_err.reason,
+                            cooldown_sec=tok_err.cooldown_sec,
+                            next_cand=next_cand,
+                            scene="详情补全",
+                        )
+                        last_err = {
+                            "code": 403 if tok_err.blocked_ip else 500,
+                            "msg": str(tok_err.reason or "详情 Token 获取失败"),
+                            "success": False,
+                        }
+                        if next_cand is not None:
+                            continue
+                        return False, last_err
             detail_header = dict(cur_header)
             detail_header.update({"Content-Length": length, "uuid": cur_uuid, "token": cur_token, "sign": cur_sign})
             if not captcha_enabled:
@@ -1580,17 +1617,33 @@ class beian:
                     if self._detail_waf_open() or state["circuit_broken"]:
                         return False, {"code": 403, "msg": "详情熔断中", "success": False}
                     await ensure_token_valid()
+                    async with context_lock:
+                        local_ctx = {
+                            "p_uuid": detail_context.get("p_uuid", ""),
+                            "token": detail_context.get("token", ""),
+                            "sign": detail_context.get("sign", ""),
+                            "base_header": dict(detail_context.get("base_header") or {}),
+                            "exit_id": detail_context.get("exit_id"),
+                        }
                     args = (
                         item["dataId"],
                         serviceType,
-                        detail_context.get("p_uuid", ""),
-                        detail_context.get("token", ""),
-                        detail_context.get("sign", ""),
-                        detail_context.get("base_header", {}),
+                        local_ctx["p_uuid"],
+                        local_ctx["token"],
+                        local_ctx["sign"],
+                        local_ctx["base_header"],
                         proxy,
                     )
                     if accepts_detail_ctx:
-                        return await self.getAppAndMiniDetail(*args, detail_context=detail_context)
+                        ok_d, data_d = await self.getAppAndMiniDetail(*args, detail_context=local_ctx)
+                        if ok_d and (
+                            local_ctx.get("exit_id") != detail_context.get("exit_id")
+                            or local_ctx.get("p_uuid") != detail_context.get("p_uuid")
+                            or local_ctx.get("token") != detail_context.get("token")
+                        ):
+                            async with context_lock:
+                                detail_context.update(local_ctx)
+                        return ok_d, data_d
                     return await self.getAppAndMiniDetail(*args)
 
             def _record_success(merged_item):

@@ -1912,7 +1912,7 @@
 <script setup>
 import { useI18n } from 'vue-i18n';
 defineOptions({ name: 'GithubManage' });
-import { ref, reactive, onMounted, onDeactivated, onUnmounted, computed, watch, nextTick, createVNode } from 'vue';
+import { ref, reactive, onMounted, onActivated, onDeactivated, onUnmounted, computed, watch, nextTick, createVNode } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import request from '../utils/request';
 import { message, Modal } from 'ant-design-vue';
@@ -3548,6 +3548,10 @@ onMounted(() => {
   fetchToolsConfig();
   fetchHackersConfig();
   fetchTokenStatus();
+  startBackgroundPoll();
+});
+
+onActivated(() => {
   startBackgroundPoll();
 });
 

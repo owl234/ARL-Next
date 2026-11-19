@@ -98,7 +98,7 @@ async def _claim_recon_task(task_id, allowed_statuses=("waiting",), is_resume=Fa
     return result.matched_count == 1
 
 
-async def _build_osint_proxy_router(options=None, syslog_cb=None):
+async def _build_osint_proxy_router(options=None, syslog_cb=None, service_scope=""):
     """初始化任务级 OSINT 多节点路由器，兼容 proxy_bundle 与 MongoDB 兜底同步。"""
     import os
     import sys
@@ -106,9 +106,48 @@ async def _build_osint_proxy_router(options=None, syslog_cb=None):
     from proxy_router import OsintProxyRouter
     bundle = options.get("proxy_bundle") if isinstance(options, dict) else None
     legacy_proxy = options.get("proxy_url") if isinstance(options, dict) else None
-    router = OsintProxyRouter(bundle=bundle, db=db, legacy_proxy=legacy_proxy, syslog_cb=syslog_cb)
+    router = OsintProxyRouter(
+        bundle=bundle,
+        db=db,
+        legacy_proxy=legacy_proxy,
+        syslog_cb=syslog_cb,
+        service_scope=service_scope,
+    )
     await router.sync_from_db(db)
     return router
+
+
+def _sanitize_options_for_log(options):
+    """脱敏 run_recon_job 入口日志，严禁将代理明文密码或 tyc_token 写入控制台/日志文件。"""
+    if not isinstance(options, dict):
+        return options
+    import os
+    import sys
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        from proxy_router import mask_proxy_url_secret
+    except Exception:
+        mask_proxy_url_secret = lambda u: "***" if u else ""
+
+    safe = {}
+    for k, v in options.items():
+        if k in ("tyc_token", "token", "password", "secret"):
+            safe[k] = "***" if v else ""
+        elif k == "tyc_id":
+            s_val = str(v or "")
+            safe[k] = (s_val[:3] + "***") if len(s_val) > 3 else ("***" if s_val else "")
+        elif k == "proxy_url":
+            safe[k] = mask_proxy_url_secret(v) if v else ""
+        elif k == "proxy_bundle" and isinstance(v, dict):
+            pol = v.get("policy") or {}
+            nodes = v.get("nodes") or []
+            safe[k] = {
+                "mode": pol.get("mode", "direct_only"),
+                "node_count": len(nodes) if isinstance(nodes, list) else 0,
+            }
+        else:
+            safe[k] = v
+    return safe
 
 
 async def _task_is_running(task_id):
@@ -116,7 +155,7 @@ async def _task_is_running(task_id):
     return task is not None and task.get("status") == "running"
 
 async def run_recon_job(options):
-    logger.info(f"Entering run_recon_job with options: {options}")
+    logger.info(f"Entering run_recon_job with options: {_sanitize_options_for_log(options)}")
     action = options.get("action") or ("resume" if options.get("resume") else "start")
     if action == "backfill_details":
         await run_backfill_details_job(options)
@@ -259,9 +298,23 @@ async def run_icp_job(options):
         task_doc = await db['icp_task'].find_one({"_id": ObjectId(task_id)}, {"recon_checkpoint": 1, "statistic": 1})
         cp = (task_doc or {}).get("recon_checkpoint") or {}
         completed_qts = set(cp.get("completed_qts") or [])
+        # 清理未完成维度的半成品记录并按已完成维度精确重算计数，防止中途中断维度在续跑时产生重复记录与统计双计
+        uncompleted_qts = [q for q in query_types if q not in completed_qts]
+        if uncompleted_qts:
+            try:
+                await db['icp_asset'].delete_many({"task_id": task_id, "query_type": {"$in": uncompleted_qts}})
+            except Exception as del_err:
+                logger.warning(f"Failed to clean partial icp_asset for resume {task_id}: {del_err}")
         stat = (task_doc or {}).get("statistic") or {}
         for k in counts:
-            counts[k] = int(stat.get(f"{k}_cnt") or 0)
+            if k in completed_qts:
+                try:
+                    existing_cnt = await db['icp_asset'].count_documents({"task_id": task_id, "query_type": k})
+                except Exception:
+                    existing_cnt = int(stat.get(f"{k}_cnt") or 0)
+                counts[k] = existing_cnt if existing_cnt > 0 else int(stat.get(f"{k}_cnt") or 0)
+            else:
+                counts[k] = 0
         total_assets = sum(counts.values())
     
     # We must import ymicp dynamically since we are in clients/
@@ -310,7 +363,7 @@ async def run_icp_job(options):
         }}})
 
     sys_proxy = await _resolve_system_proxy(options)
-    proxy_router = await _build_osint_proxy_router(options, syslog_cb=insert_syslog)
+    proxy_router = await _build_osint_proxy_router(options, syslog_cb=insert_syslog, service_scope="miit")
     if hasattr(myicp, "attach_proxy_router"):
         myicp.attach_proxy_router(proxy_router)
     if proxy_router.has_structured_policy and proxy_router.get_mode() != "direct_only":
@@ -493,6 +546,7 @@ async def run_icp_job(options):
     # 只要成功抓取到资产即视为完成，确保前端【同步】资产组按钮畅通；
     # 仅当未入库任何资产且存在致命错误时，才标记为异常失败。
     task_status = "done" if total_assets > 0 else ("error" if error_msg else "done")
+    all_qts_completed = all(q in completed_qts for q in query_types)
     update_data = {
         "$set": {
             "status": task_status,
@@ -503,7 +557,12 @@ async def run_icp_job(options):
                 "app_cnt": counts["app"],
                 "mapp_cnt": counts["mapp"],
                 "kapp_cnt": counts["kapp"]
-            }
+            },
+            "recon_checkpoint": {
+                "completed_qts": sorted(completed_qts),
+                "completed": bool(task_status == "done" and all_qts_completed),
+                "updated_at": curr_date(),
+            },
         }
     }
     if error_msg:
@@ -1275,7 +1334,8 @@ async def run_tyc_job(options):
             gid_to_name.update({str(k): str(v) for k, v in checkpoint["gid_to_name"].items() if v})
 
     sys_proxy = await _resolve_system_proxy(options)
-    proxy_router = await _build_osint_proxy_router(options, syslog_cb=insert_syslog)
+    proxy_router = await _build_osint_proxy_router(options, syslog_cb=insert_syslog, service_scope="tyc")
+    miit_proxy_router = await _build_osint_proxy_router(options, syslog_cb=insert_syslog, service_scope="miit")
     client = AsyncTycClient(gid=tyc_id, token=tyc_token, proxy=sys_proxy, proxy_router=proxy_router)
 
     truncation_notes = []
@@ -1321,7 +1381,7 @@ async def run_tyc_job(options):
             truncation_notes.append(f"tyc_token 已于 {expired_at} 过期")
 
     if myicp and hasattr(myicp, "attach_proxy_router"):
-        myicp.attach_proxy_router(proxy_router)
+        myicp.attach_proxy_router(miit_proxy_router)
     if proxy_router.has_structured_policy and proxy_router.get_mode() != "direct_only":
         await insert_syslog(
             "info", "出口策略",
@@ -1462,8 +1522,8 @@ async def run_tyc_job(options):
                     if not await _task_is_running(task_id):
                         stopped_flag[0] = True
                         break
-                    if hasattr(proxy_router, "allow_primary_failback"):
-                        proxy_router.allow_primary_failback()
+                    if hasattr(miit_proxy_router, "allow_primary_failback"):
+                        miit_proxy_router.allow_primary_failback()
                     if c_name:
                         await _run_company_icp_enrichment(
                             task_id=task_id,
@@ -2039,7 +2099,11 @@ async def run_backfill_details_job(options):
 
     claim_res = await db['icp_task'].update_one(
         {"_id": ObjectId(task_id), "status": prev_status},
-        {"$set": {"status": "running", "detail_backfill_running": True}},
+        {"$set": {
+            "status": "running",
+            "detail_backfill_running": True,
+            "detail_backfill_prev_status": prev_status,
+        }},
     )
     if getattr(claim_res, "matched_count", 0) != 1:
         return
@@ -2278,11 +2342,11 @@ async def run_backfill_details_job(options):
                 {"_id": ObjectId(task_id), "status": "running"},
                 {
                     "$set": {"status": prev_status, "detail_backfill_last_time": curr_date()},
-                    "$unset": {"detail_backfill_running": ""},
+                    "$unset": {"detail_backfill_running": "", "detail_backfill_prev_status": ""},
                 },
             )
         else:
             await db['icp_task'].update_one(
                 {"_id": ObjectId(task_id)},
-                {"$unset": {"detail_backfill_running": ""}},
+                {"$unset": {"detail_backfill_running": "", "detail_backfill_prev_status": ""}},
             )

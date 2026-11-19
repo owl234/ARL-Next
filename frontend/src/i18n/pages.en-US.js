@@ -704,7 +704,7 @@ export default {
   "systemStatusIsHealthySelectACdnOnThe": "System status is healthy. Select a CDN on the left to manage it.",
   "cdnFingerprints": "CDN fingerprints",
   "saveChanges": "Save changes",
-  "deleteThisCdnTheDeletionTakesEffectAfterSaving": "Delete this CDN? The deletion takes effect after saving all changes.",
+  "deleteThisCdnTheDeletionTakesEffectAfterSaving": "Delete this CDN rule? Deletion takes effect immediately upon confirmation.",
   "deleteFingerprint": "Delete fingerprint",
   "editFingerprint": "Edit fingerprint",
   "cnameRulesLabel2": "CNAME rules (",

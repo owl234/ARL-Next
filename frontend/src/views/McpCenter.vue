@@ -2191,7 +2191,10 @@ onBeforeRouteLeave(() => {
       okText: pageText('pages.discardChangesAndLeave'),
       okType: 'danger',
       cancelText: pageText('tasks.stayOnThisPage'),
-      onOk: () => resolve(true),
+      onOk: () => {
+        resetPolicyChanges();
+        resolve(true);
+      },
       onCancel: () => resolve(false)
     });
   });
@@ -2286,6 +2289,10 @@ onActivated(() => {
 
 onDeactivated(() => {
   clearAutoRefreshTimer();
+  createKeyModalVisible.value = false;
+  keySuccessModalVisible.value = false;
+  isLogDrawerVisible.value = false;
+  promptDrawerVisible.value = false;
 });
 
 onUnmounted(() => {

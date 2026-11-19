@@ -548,6 +548,13 @@ class SyncAsset(object):
             asset_site_coll.bulk_write(asset_bulk_ops, ordered=False)
 
 def sync_asset(task_id, scope_id, update_flag=False,  category=None, push_flag=False, task_name="", details_out=None):
+    if not task_name and task_id:
+        try:
+            task_doc = conn_db('task').find_one({"_id": ObjectId(str(task_id))}, {"name": 1})
+            if task_doc and task_doc.get("name"):
+                task_name = str(task_doc.get("name"))
+        except Exception:
+            pass
     sync = SyncAsset(task_id=task_id, scope_id=scope_id,
                      update_flag=update_flag, category=category, task_name=task_name)
     ret = sync.run()

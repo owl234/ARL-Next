@@ -43,6 +43,8 @@ from app.services.nuclei_template_service import (
     run_community_sync_worker,
     classify_asm_protocol,
     is_asm_supported_protocol,
+    extract_template_protocols,
+    ASM_UNSUPPORTED_PROTOCOLS,
     validate_nuclei_templates_batch,
 )
 from app.services.nuclei_scan import resolve_nuclei_proxy
@@ -95,10 +97,11 @@ class NucleiTemplateList(ARLResource):
         items = list(col.find(query).sort(sort_key, sort_dir).skip((page - 1) * size).limit(size))
         for item in items:
             item['_id'] = str(item['_id'])
+            item_protos = extract_template_protocols(item)
             # 列表视图省去大体积 content 字段，提高传输性能
             item.pop('content', None)
-            item['asm_bucket'] = classify_asm_protocol(item.get('protocol'))
-            item['asm_supported'] = is_asm_supported_protocol(item.get('protocol'))
+            item['asm_bucket'] = classify_asm_protocol(item_protos)
+            item['asm_supported'] = is_asm_supported_protocol(item_protos)
 
         return utils.build_ret(ErrorMsg.Success, {
             "items": items,
@@ -510,6 +513,14 @@ class NucleiTemplateTest(ARLResource):
         if not is_valid:
             return utils.build_ret(f"模板静态校验失败: {meta}", {})
 
+        meta_protos = meta.get("protocols") or [meta.get("protocol", "http")]
+        blocked_protos = [p for p in meta_protos if p in ASM_UNSUPPORTED_PROTOCOLS]
+        if blocked_protos:
+            return utils.build_ret(
+                f"在线调试禁止执行包含受限协议 ({', '.join(blocked_protos)}) 的模板",
+                {},
+            )
+
         ok_target, target_or_err = normalize_dry_run_target(raw_target, meta['protocol'])
         if not ok_target:
             return utils.build_ret(target_or_err, {})
@@ -523,6 +534,7 @@ class NucleiTemplateTest(ARLResource):
         rand_str = utils.random_choices(8)
         tmp_file = os.path.join(Config.TMP_PATH, f"dryrun_{rand_str}.yaml")
         tmp_jsonl = os.path.join(Config.TMP_PATH, f"dryrun_{rand_str}.jsonl")
+        tmp_proxy = None
 
         def _build_cmd(with_jle=True):
             cmd_list = [
@@ -537,13 +549,20 @@ class NucleiTemplateTest(ARLResource):
             ]
             if with_jle:
                 cmd_list.extend(["-jle", tmp_jsonl])
-            if nuclei_proxy:
+            if tmp_proxy:
+                cmd_list.extend(["-proxy", tmp_proxy])
+            elif nuclei_proxy:
                 cmd_list.extend(["-proxy", nuclei_proxy])
             return cmd_list
 
         try:
             with open(tmp_file, "w", encoding="utf-8") as f:
                 f.write(content)
+            if nuclei_proxy and "@" in nuclei_proxy:
+                tmp_proxy = os.path.join(Config.TMP_PATH, f"dryrun_proxy_{rand_str}.txt")
+                fd = os.open(tmp_proxy, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as pf:
+                    pf.write(nuclei_proxy + "\n")
 
             cmd = _build_cmd(with_jle=True)
             log_cmd = " ".join(cmd)
@@ -597,8 +616,8 @@ class NucleiTemplateTest(ARLResource):
             logger.error(f"Nuclei Dry Run exception: {e}")
             return utils.build_ret(f'执行失败: {e}', {})
         finally:
-            for p in (tmp_file, tmp_jsonl):
-                if os.path.exists(p):
+            for p in (tmp_file, tmp_jsonl, tmp_proxy):
+                if p and os.path.exists(p):
                     try:
                         os.unlink(p)
                     except Exception:
@@ -792,11 +811,17 @@ class NucleiCommunitySource(ARLResource):
         if not c_dir or not os.path.isdir(c_dir):
             return utils.build_ret(ErrorMsg.Error, {'error': '未找到官方社区模板目录'})
 
+        def _is_within_c_dir(path_candidate):
+            try:
+                return os.path.commonpath([c_dir, path_candidate]) == c_dir
+            except ValueError:
+                return False
+
         target_file = None
         if file_path:
             candidate = os.path.abspath(os.path.join(c_dir, file_path))
             # 严格防止目录遍历攻击 (Path Traversal Protection)
-            if candidate.startswith(c_dir) and os.path.isfile(candidate):
+            if _is_within_c_dir(candidate) and os.path.isfile(candidate):
                 target_file = candidate
 
         if not target_file and template_id:
@@ -804,7 +829,7 @@ class NucleiCommunitySource(ARLResource):
             for t in templates:
                 if t['template_id'] == template_id and t.get('file_path'):
                     cand = os.path.abspath(os.path.join(c_dir, t['file_path']))
-                    if cand.startswith(c_dir) and os.path.isfile(cand):
+                    if _is_within_c_dir(cand) and os.path.isfile(cand):
                         target_file = cand
                         break
 
@@ -815,7 +840,7 @@ class NucleiCommunitySource(ARLResource):
                     for root, dirs, files in os.walk(c_dir):
                         if cand_name in files:
                             cand = os.path.abspath(os.path.join(root, cand_name))
-                            if cand.startswith(c_dir) and os.path.isfile(cand):
+                            if _is_within_c_dir(cand) and os.path.isfile(cand):
                                 target_file = cand
                                 break
                     if target_file:

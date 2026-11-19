@@ -704,7 +704,7 @@ export default {
   "systemStatusIsHealthySelectACdnOnThe": "状态良好，请在左侧选择特定 CDN 进行管理",
   "cdnFingerprints": "CDN特征",
   "saveChanges": "保存更改",
-  "deleteThisCdnTheDeletionTakesEffectAfterSaving": "确定要删除该 CDN 吗？需保存全量更改后生效。",
+  "deleteThisCdnTheDeletionTakesEffectAfterSaving": "确定要删除该 CDN 规则吗？确认后将立即删除并生效。",
   "deleteFingerprint": "删除特征",
   "editFingerprint": "编辑特征",
   "cnameRulesLabel2": "CNAME 规则 (",

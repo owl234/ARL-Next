@@ -1422,7 +1422,7 @@
         <a-button :disabled="batchSaving" @click="() => resolveLeaveGuard(false)">
           {{ pageText('tasks.stayOnThisPage') }}
         </a-button>
-        <a-button danger :disabled="batchSaving" @click="() => resolveLeaveGuard(true)">
+        <a-button danger :disabled="batchSaving" @click="handleLeaveDiscardAndGo">
           {{ pageText('pages.discardChangesAndLeave') }}
         </a-button>
         <a-button type="primary" :loading="batchSaving" @click="handleLeaveSaveAndGo">
@@ -1472,7 +1472,7 @@ import {
   EyeInvisibleOutlined,
   AimOutlined,
 } from '@ant-design/icons-vue';
-import { ref, reactive, onMounted, onUnmounted, onDeactivated, computed, nextTick, watch, createVNode } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, onActivated, onDeactivated, computed, nextTick, watch, createVNode } from 'vue';
 import { message, Modal } from 'ant-design-vue';
 import request from '@/utils/request';
 import { copyText } from '@/utils/clipboard';
@@ -3482,12 +3482,26 @@ const handleDocumentClick = (e) => {
   }
 };
 
-onMounted(async () => {
-  probeActiveBackupTask();
-  applyRouteDeepLink(route.query);
+let globalListenersBound = false;
+const bindGlobalListeners = () => {
+  if (globalListenersBound) return;
   window.addEventListener('beforeunload', handleBeforeUnload);
   window.addEventListener('keydown', handleGlobalKeydown);
   document.addEventListener('click', handleDocumentClick);
+  globalListenersBound = true;
+};
+const unbindGlobalListeners = () => {
+  if (!globalListenersBound) return;
+  window.removeEventListener('beforeunload', handleBeforeUnload);
+  window.removeEventListener('keydown', handleGlobalKeydown);
+  document.removeEventListener('click', handleDocumentClick);
+  globalListenersBound = false;
+};
+
+onMounted(async () => {
+  probeActiveBackupTask();
+  applyRouteDeepLink(route.query);
+  bindGlobalListeners();
 
   fetchCapacityProbe();
   fetchDictList();
@@ -3503,6 +3517,10 @@ onMounted(async () => {
   }
 });
 
+onActivated(() => {
+  bindGlobalListeners();
+});
+
 const resolveLeaveGuard = (allowLeave) => {
   if (allowLeave) allowDirtyDeactivateOnce = true;
   leaveConfirmVisible.value = false;
@@ -3511,6 +3529,11 @@ const resolveLeaveGuard = (allowLeave) => {
     pendingLeaveResolver = null;
     resolve(allowLeave);
   }
+};
+
+const handleLeaveDiscardAndGo = () => {
+  resetAllDirtySections();
+  resolveLeaveGuard(true);
 };
 
 const handleLeaveSaveAndGo = async () => {
@@ -3523,11 +3546,13 @@ onDeactivated(() => {
     message.warning(pageText('pages.thereAreCountUnsavedConfigurationChangesSaveThemBefore', { count: unsavedCount.value }), 5);
   }
   allowDirtyDeactivateOnce = false;
+  unbindGlobalListeners();
   createDictDrawerVisible.value = false;
   appendDrawerVisible.value = false;
   searchDrawerVisible.value = false;
   cdnPanelRef.value?.closeDrawer?.();
   proxyPanelRef.value?.closeModals?.();
+  proxyPanelRef.value?.stopTimers?.();
   updatePanelRef.value?.closeModals?.();
   backupPanelRef.value?.closeModals?.();
   clearAllDictPollTimers();
@@ -3535,9 +3560,7 @@ onDeactivated(() => {
 
 onUnmounted(() => {
   resolveLeaveGuard(false);
-  window.removeEventListener('beforeunload', handleBeforeUnload);
-  window.removeEventListener('keydown', handleGlobalKeydown);
-  document.removeEventListener('click', handleDocumentClick);
+  unbindGlobalListeners();
   proxyPanelRef.value?.stopTimers?.();
   updatePanelRef.value?.stopUpdateTimers?.();
   clearAllDictPollTimers();

@@ -470,17 +470,20 @@ def format_node_display_url(node):
 
 
 def mask_proxy_url_secret(proxy_url):
-    """隐藏 URL 中的账号密码用于日志安全记录。"""
+    """隐藏 URL 中的账号密码用于日志安全记录（兼容无协议头 user:pass@host:port）。"""
     text = str(proxy_url or "").strip()
     if not text or "@" not in text:
         return text
+    has_scheme = "://" in text
     try:
-        p = urlsplit(text)
+        p = urlsplit(text if has_scheme else f"http://{text}")
         if not p.hostname:
-            return text
+            return "***"
         host_fmt = f"[{p.hostname}]" if ":" in p.hostname else p.hostname
         port_part = f":{p.port}" if p.port else ""
-        return f"{p.scheme}://***@{host_fmt}{port_part}"
+        if has_scheme:
+            return f"{p.scheme}://***@{host_fmt}{port_part}"
+        return f"***@{host_fmt}{port_part}"
     except Exception:
         return "***"
 
@@ -782,14 +785,16 @@ def _match_host_pattern(host, pattern):
 
 
 def should_bypass_url(url, bypass_cfg=None, *, domain=None):
-    """判断目标 URL 是否应当命中旁路直连规则。"""
+    """判断目标 URL / host[:port] 是否应当命中旁路直连规则。"""
     if domain == "bypass":
         return True
     if not url:
         return False
     text = str(url).strip()
+    if not text:
+        return False
     try:
-        parsed = urlsplit(text)
+        parsed = urlsplit(text if "://" in text else f"http://{text}")
     except Exception:
         return False
     host = (parsed.hostname or "").strip().lower()
@@ -899,16 +904,26 @@ def resolve_proxy_candidates(domain="scan", target_url=None):
     nodes_by_id = {n["id"]: n for n in cfg.get("nodes", []) if n.get("enabled", True)}
     bound_nodes = [nodes_by_id[nid] for nid in (pol.get("node_ids") or []) if nid in nodes_by_id]
 
-    if mode == "direct_only" or (not bound_nodes and not pol.get("include_direct")):
+    if mode == "direct_only":
+        return [None]
+
+    if mode == "fixed_proxy":
+        urls = [build_node_proxy_url(n) for n in bound_nodes if build_node_proxy_url(n)]
+        if urls:
+            return urls
+        if domain == "osint":
+            # OSINT 域固定代理无可用启用节点时严格 Fail-Closed，严禁静默暴露宿主机真实出口 IP
+            logger.warning("OSINT fixed_proxy policy has no enabled node; refusing direct fallback")
+            return []
+        logger.warning(f"Proxy domain '{domain}' fixed_proxy policy has no enabled node; falling back to direct connection")
+        return [None]
+
+    if not bound_nodes and not pol.get("include_direct"):
         return [None]
 
     blocked_exits = {}
     if domain == "osint":
         blocked_exits, _ = _load_active_osint_blocked_map()
-
-    if mode == "fixed_proxy":
-        urls = [build_node_proxy_url(n) for n in bound_nodes if build_node_proxy_url(n)]
-        return urls or [None]
 
     if mode == "failover":
         ordered = []
@@ -1126,7 +1141,10 @@ def record_osint_exit_event(
                     node_name = node["name"]
                     break
             if not target_exit_id:
-                target_exit_id = f"ext:{mask_proxy_url_secret(proxy_url)}"
+                safe_masked = re.sub(r"[.$]+", "_", mask_proxy_url_secret(proxy_url))
+                target_exit_id = f"ext:{safe_masked}"
+
+    safe_exit_key = re.sub(r"[.$]+", "_", str(target_exit_id or "__direct__"))
 
     if target_exit_id != "__direct__" and not node_name:
         for node in nodes:
@@ -1137,38 +1155,36 @@ def record_osint_exit_event(
     now = int(time.time())
     try:
         col = _get_conn_db()("system_config")
-        rt_doc = col.find_one({"_id": PROXY_RUNTIME_DOC_ID}) or {}
-        blocked_exits = dict(rt_doc.get("blocked_exits") or {})
+        rt_doc = col.find_one({"_id": PROXY_RUNTIME_DOC_ID}, {"active_exit_id": 1}) or {}
+        set_ops = {"updated_at": now}
+        unset_ops = {}
         if blocked:
-            blocked_exits[target_exit_id] = {
+            set_ops[f"blocked_exits.{safe_exit_key}"] = {
                 "until_ts": now + max(10, int(cooldown_sec or 300)),
                 "reason": str(reason or "触发风控冷却")[:200],
                 "ip": "",
                 "updated_at": now,
             }
-            update_fields = {
-                "blocked_exits": blocked_exits,
-                "last_switch_at": now,
-                "last_switch_reason": f"{'主服务器直连' if target_exit_id == '__direct__' else (node_name or target_exit_id)} 冷却 {int(cooldown_sec or 300)}s: {str(reason or '风控限制')[:120]}",
-                "updated_at": now,
-            }
+            set_ops["last_switch_at"] = now
+            set_ops["last_switch_reason"] = (
+                f"{'主服务器直连' if target_exit_id == '__direct__' else (node_name or target_exit_id)} "
+                f"冷却 {int(cooldown_sec or 300)}s: {str(reason or '风控限制')[:120]}"
+            )
         else:
-            if target_exit_id in blocked_exits:
-                blocked_exits.pop(target_exit_id, None)
+            unset_ops[f"blocked_exits.{safe_exit_key}"] = ""
             prev_active = rt_doc.get("active_exit_id")
-            update_fields = {
-                "blocked_exits": blocked_exits,
-                "active_exit_id": target_exit_id,
-                "updated_at": now,
-            }
+            set_ops["active_exit_id"] = target_exit_id
             if prev_active != target_exit_id:
-                update_fields["last_switch_at"] = now
-                update_fields["last_switch_reason"] = reason or (
+                set_ops["last_switch_at"] = now
+                set_ops["last_switch_reason"] = reason or (
                     "切换至主服务器直连" if target_exit_id == "__direct__" else f"切换至代理节点 {node_name or target_exit_id}"
                 )
+        update_doc = {"$set": set_ops}
+        if unset_ops:
+            update_doc["$unset"] = unset_ops
         col.update_one(
             {"_id": PROXY_RUNTIME_DOC_ID},
-            {"$set": update_fields},
+            update_doc,
             upsert=True,
         )
     except Exception as e:

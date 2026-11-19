@@ -68,9 +68,9 @@ class MCPTaskDetailExport(Resource):
         task_id = request.args.get('task_id', '')
         tab = request.args.get('tab', 'site')
         try:
-            page = int(request.args.get('page', 1))
-            limit = int(request.args.get('limit', 100))
-        except ValueError:
+            page = max(1, int(request.args.get('page', 1)))
+            limit = max(1, min(500, int(request.args.get('limit', 100))))
+        except (TypeError, ValueError):
             page = 1
             limit = 100
             

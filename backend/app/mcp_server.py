@@ -137,13 +137,19 @@ class MCPServer:
         return authenticate_mcp_token(token, config=Config)
 
     def _extract_token_from_request(self, headers: dict, query_params: dict) -> str:
-        """优先提取 Header，兜底提取 Query 参数"""
-        # 1. 优先从 Header 提取
-        auth_header = headers.get("authorization", "") or headers.get("token", "")
-        if auth_header:
+        """优先提取 Header（显式 Token 或非 Basic 的 Authorization），兜底提取 Query 参数"""
+        # 1. 优先从 Header 提取（跳过 Basic 认证头，避免反代网关的 Basic Auth 遮蔽 Token 或 ?token=）
+        explicit_token = (headers.get("token", "") or "").strip()
+        auth_header = (headers.get("authorization", "") or "").strip()
+        if auth_header and not auth_header.lower().startswith("basic "):
             if auth_header.lower().startswith("bearer "):
-                return auth_header[7:].strip()
-            return auth_header.strip()
+                token_val = auth_header[7:].strip()
+                if token_val:
+                    return token_val
+            else:
+                return auth_header
+        if explicit_token:
+            return explicit_token
 
         # 2. 兜底从 URL Query 提取 (供 EventSource 或浏览器 Agent 使用)
         q_token = query_params.get("token", "") or query_params.get("api_key", "")
@@ -424,7 +430,11 @@ class MCPServer:
                 await writer.wait_closed()
                 return
 
-            client_ip = headers.get("x-forwarded-for", "").split(",")[0].strip() or headers.get("x-real-ip", "").strip()
+            # 优先采信由 Nginx 网关权威注入的 X-Real-IP，规避客户端伪造 X-Forwarded-For 首段污染审计日志
+            client_ip = headers.get("x-real-ip", "").strip()
+            if not client_ip:
+                xff_parts = [p.strip() for p in headers.get("x-forwarded-for", "").split(",") if p.strip()]
+                client_ip = xff_parts[-1] if xff_parts else ""
             if not client_ip:
                 client_ip = peer_name[0] if peer_name and isinstance(peer_name, tuple) else ""
             auth_user["client_ip"] = client_ip

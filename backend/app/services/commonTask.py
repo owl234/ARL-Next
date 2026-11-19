@@ -292,10 +292,8 @@ class CommonTask(object):
                         scope_id=ctx.get("scope_id", ""),
                     )
             elif mode == "nuclei_only_fallback":
-                nuclei_items = list(utils.conn_db('nuclei_result').find({"task_id": self.task_id}))
-                if nuclei_items:
-                    from app.utils.push import nuclei_vuln_push
-                    nuclei_vuln_push(task_id=self.task_id, results=nuclei_items, scope_id="")
+                # 同步资产组失败时仍需兜底发出任务完成汇总与 Nuclei 漏洞推送，避免静默丢通知
+                self._push_task_result_only()
         except Exception as e:
             logger.warning(f"dispatch_completion_notifications error for task {self.task_id}: {e}")
 

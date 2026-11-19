@@ -997,7 +997,10 @@ def create_mcp_scan_task(name: str, target: str, policy_id: str = ""):
     options = get_options_by_policy_id(pol_id, TaskTag.TASK)
     if not options:
         return {"status": "error", "message": "Scan policy not found"}, True
-    tasks = submit_task_task(target=target_str, name=task_name, options=options)
+    try:
+        tasks = submit_task_task(target=target_str, name=task_name, options=options)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}, True
     if not tasks:
         return {"status": "error", "message": "No valid scan targets"}, True
     task_ids = [str(task['task_id']) for task in tasks]

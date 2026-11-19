@@ -510,7 +510,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { message } from 'ant-design-vue';
 import { DownOutlined, PlusOutlined } from '@ant-design/icons-vue';
@@ -1141,12 +1141,21 @@ const handleResetCooldown = async () => {
   }
 };
 
+let lastCooldownRefreshAt = 0;
+
 const startTickTimer = () => {
   stopTimers();
   tickTimer = setInterval(() => {
     if (runtime.cooldown_remaining_sec > 0 || (runtime.blocked_exits || []).length > 0) {
       cooldownTickOffset.value += 1;
-      if (displayCooldownSec.value === 0 && blockedExitsList.value.length === 0 && !refreshLoading.value) {
+      const now = Date.now();
+      if (
+        displayCooldownSec.value === 0
+        && blockedExitsList.value.length === 0
+        && !refreshLoading.value
+        && (now - lastCooldownRefreshAt >= 10000)
+      ) {
+        lastCooldownRefreshAt = now;
         fetchProxyConfig(false);
       }
     }
@@ -1181,6 +1190,15 @@ const focusSection = (anchor, retries = 3) => {
 onMounted(() => {
   fetchProxyConfig(true);
   startTickTimer();
+});
+
+onActivated(() => {
+  startTickTimer();
+});
+
+onDeactivated(() => {
+  stopTimers();
+  closeModals();
 });
 
 onUnmounted(() => {

@@ -30,6 +30,9 @@ TRANSPORT_COOLDOWN_SEC = 60
 
 _GLOBAL_STATE_LOCK = threading.Lock()
 _GLOBAL_RESET_EPOCH = 0
+_PROCESS_RATE_LOCK_GUARD = threading.Lock()
+_PROCESS_RATE_LOCKS = {}
+_PROCESS_LAST_REQ_TS = {}
 
 
 def bump_global_reset_epoch():
@@ -59,17 +62,30 @@ def normalize_proxy_url(raw):
 def mask_proxy_url_secret(proxy_url):
     if not proxy_url:
         return ""
+    text = str(proxy_url).strip()
+    if not text:
+        return ""
+    has_scheme = "://" in text
     try:
-        parsed = urlsplit(str(proxy_url))
-        if parsed.username or parsed.password:
+        parsed = urlsplit(text if has_scheme else f"http://{text}")
+        if not parsed.hostname:
+            return "***" if "@" in text else text
+        if parsed.username or parsed.password or "@" in text:
             host = parsed.hostname or ""
             if ":" in host and not host.startswith("["):
                 host = f"[{host}]"
             port = f":{parsed.port}" if parsed.port else ""
-            return f"{parsed.scheme}://{parsed.username or '***'}:******@{host}{port}"
+            user_label = parsed.username or "***"
+            if has_scheme:
+                return f"{parsed.scheme}://{user_label}:******@{host}{port}"
+            return f"{user_label}:******@{host}{port}"
+        return text
     except Exception:
-        pass
-    return str(proxy_url)
+        return "***"
+
+
+def _safe_exit_id_key(raw_id):
+    return re.sub(r"[.$]+", "_", str(raw_id or DIRECT_EXIT_ID))
 
 
 def extract_proxy_ip(proxy_url):
@@ -150,9 +166,10 @@ class ExitCandidate:
 class OsintProxyRouter:
     """支持多节点故障切换、回切、轮询以及每出口物理速率槽的 OSINT 路由器。"""
 
-    def __init__(self, bundle=None, *, db=None, legacy_proxy=None, syslog_cb=None):
+    def __init__(self, bundle=None, *, db=None, legacy_proxy=None, syslog_cb=None, service_scope=""):
         self.db = db
         self.syslog_cb = syslog_cb
+        self.service_scope = str(service_scope or "").strip().lower()
         self.policy = {}
         self.nodes = []
         self.has_structured_policy = False
@@ -166,8 +183,11 @@ class OsintProxyRouter:
         self._sticky_backup_exit_id = None
         self._seen_reset_epoch = get_global_reset_epoch()
         self._lock = threading.Lock()
-        self._rate_locks = {}
-        self._last_req_ts_by_exit = {}
+        self._rate_locks = _PROCESS_RATE_LOCKS
+        self._last_req_ts_by_exit = _PROCESS_LAST_REQ_TS
+        self._dirty_blocked_keys = set()
+        self._dirty_cleared_keys = set()
+        self._full_reset_pending = False
         if bundle:
             self.load_bundle(bundle)
 
@@ -260,16 +280,24 @@ class OsintProxyRouter:
             for eid, info in raw_blocked.items():
                 if not isinstance(info, dict):
                     continue
+                entry_scope = str(info.get("service_scope") or "").strip().lower()
+                if self.service_scope and entry_scope and entry_scope != self.service_scope:
+                    continue
                 try:
                     until_ts = float(info.get("until_ts") or 0)
                 except (TypeError, ValueError):
                     until_ts = 0
                 if until_ts > now:
-                    cleaned[str(eid)] = {
+                    entry = {
                         "until_ts": until_ts,
                         "reason": str(info.get("reason") or ""),
                         "ip": str(info.get("ip") or ""),
                     }
+                    if entry_scope:
+                        entry["service_scope"] = entry_scope
+                    if info.get("streak"):
+                        entry["streak"] = int(info.get("streak") or 1)
+                    cleaned[str(eid)] = entry
             self.blocked_exits = cleaned
             if rt_doc.get("active_exit_id"):
                 self.active_exit_id = str(rt_doc.get("active_exit_id"))
@@ -303,6 +331,9 @@ class OsintProxyRouter:
         with self._lock:
             self.blocked_exits.clear()
             self._fail_streak.clear()
+            self._dirty_blocked_keys.clear()
+            self._dirty_cleared_keys.clear()
+            self._full_reset_pending = True
             self._sticky_backup_exit_id = None
             self.active_exit_id = DIRECT_EXIT_ID
             self.last_switch_reason = "管理员手动重置冷却"
@@ -341,9 +372,10 @@ class OsintProxyRouter:
             return [direct] + node_cands
         if mode == "round_robin":
             pool = ([direct] if self.policy.get("include_direct") else []) + node_cands
-            return pool or [direct]
+            return pool
         if mode == "fixed_proxy":
-            return node_cands or [direct]
+            # OSINT 域固定代理无可用启用节点时严格 Fail-Closed，严禁静默回退主服务器直连
+            return node_cands
         return [direct]
 
     def get_candidates(self, explicit_proxy=None, sticky=False):
@@ -358,7 +390,8 @@ class OsintProxyRouter:
         self._check_reset_epoch()
         explicit = normalize_proxy_url(explicit_proxy)
         if not self.has_structured_policy and explicit:
-            eid = f"explicit:{extract_proxy_ip(explicit) or explicit}"
+            ip_or_masked = extract_proxy_ip(explicit) or mask_proxy_url_secret(explicit)
+            eid = f"explicit:{_safe_exit_id_key(ip_or_masked)}"
             if self.is_exit_blocked(eid):
                 return []
             return [ExitCandidate(exit_id=eid, name=mask_proxy_url_secret(explicit), proxy_url=explicit, ip=extract_proxy_ip(explicit) or "")]
@@ -421,12 +454,17 @@ class OsintProxyRouter:
                 cd = max(10, int(cooldown_sec))
             if self._sticky_backup_exit_id == exit_id:
                 self._sticky_backup_exit_id = None
-            self.blocked_exits[exit_id] = {
+            entry = {
                 "until_ts": now + cd,
                 "reason": str(reason or "触发风控限制")[:200],
                 "ip": str(ip or ""),
                 "streak": streak,
             }
+            if self.service_scope:
+                entry["service_scope"] = self.service_scope
+            self.blocked_exits[exit_id] = entry
+            self._dirty_blocked_keys.add(exit_id)
+            self._dirty_cleared_keys.discard(exit_id)
             self.last_switch_at = int(now)
             self.last_switch_reason = f"{exit_id} 冷却 {cd}s: {str(reason or '风控限制')[:120]}"
         return cd
@@ -435,8 +473,12 @@ class OsintProxyRouter:
         with self._lock:
             prev = self.active_exit_id
             self.active_exit_id = exit_id
+            was_blocked = exit_id in self.blocked_exits
             self.blocked_exits.pop(exit_id, None)
             self._fail_streak.pop(exit_id, None)
+            if was_blocked:
+                self._dirty_cleared_keys.add(exit_id)
+                self._dirty_blocked_keys.discard(exit_id)
             if self.get_mode() == "failover":
                 self._sticky_backup_exit_id = exit_id if exit_id != DIRECT_EXIT_ID else None
             if prev != exit_id:
@@ -447,18 +489,44 @@ class OsintProxyRouter:
         if self.db is None:
             return
         with self._lock:
-            self._prune_expired_locked()
-            payload = {
-                "blocked_exits": dict(self.blocked_exits),
+            now_int = int(time.time())
+            now_flt = time.time()
+            expired = [k for k, v in self.blocked_exits.items() if float(v.get("until_ts") or 0) <= now_flt]
+            for k in expired:
+                self.blocked_exits.pop(k, None)
+                self._dirty_cleared_keys.add(k)
+                self._dirty_blocked_keys.discard(k)
+
+            full_reset = self._full_reset_pending
+            self._full_reset_pending = False
+            dirty_blocked = {k: dict(self.blocked_exits[k]) for k in list(self._dirty_blocked_keys) if k in self.blocked_exits}
+            dirty_cleared = list(self._dirty_cleared_keys)
+            self._dirty_blocked_keys.clear()
+            self._dirty_cleared_keys.clear()
+
+            set_ops = {
                 "active_exit_id": self.active_exit_id,
                 "last_switch_at": self.last_switch_at,
                 "last_switch_reason": self.last_switch_reason,
-                "updated_at": int(time.time()),
+                "updated_at": now_int,
             }
+            unset_ops = {}
+            if full_reset or (not dirty_blocked and not dirty_cleared and not self.blocked_exits):
+                set_ops["blocked_exits"] = dict(self.blocked_exits)
+            else:
+                for k, v in dirty_blocked.items():
+                    set_ops[f"blocked_exits.{_safe_exit_id_key(k)}"] = v
+                for k in dirty_cleared:
+                    if k not in dirty_blocked:
+                        unset_ops[f"blocked_exits.{_safe_exit_id_key(k)}"] = ""
+
+        update_doc = {"$set": set_ops}
+        if unset_ops:
+            update_doc["$unset"] = unset_ops
         try:
             await self.db["system_config"].update_one(
                 {"_id": PROXY_RUNTIME_DOC_ID},
-                {"$set": payload},
+                update_doc,
                 upsert=True,
             )
         except Exception as exc:
@@ -476,11 +544,16 @@ class OsintProxyRouter:
 
     def _get_exit_rate_lock(self, exit_id):
         key = str(exit_id or DIRECT_EXIT_ID)
-        with self._lock:
-            lock = self._rate_locks.get(key)
+        try:
+            loop_id = id(asyncio.get_running_loop())
+        except RuntimeError:
+            loop_id = 0
+        lock_key = (loop_id, key)
+        with _PROCESS_RATE_LOCK_GUARD:
+            lock = self._rate_locks.get(lock_key)
             if lock is None:
                 lock = asyncio.Lock()
-                self._rate_locks[key] = lock
+                self._rate_locks[lock_key] = lock
             return lock
 
     async def acquire_rate_slot(self, exit_id=DIRECT_EXIT_ID, interval_range=(2.6, 3.2)):

@@ -8,6 +8,7 @@ import { i18n } from '../src/i18n/index.js';
 import zh from '../src/i18n/zh-CN.js';
 import en from '../src/i18n/en-US.js';
 import { buildAssetFilterParams, formatAssetFilterOperator } from '../src/utils/assetFilters.js';
+import { buildEnterpriseOsintColumns } from '../src/utils/enterpriseOsint.js';
 import { formatTaskStatus } from '../src/constants/taskStatus.js';
 
 const assetText = (...args) => i18n.global.t(...args);
@@ -105,8 +106,12 @@ test('已创建的资产列和分类选项随语言变化，数据字段和分�
     i18n.global.locale.value = 'zh-CN';
     assert.deepEqual(labels.value, chinese, file);
   }
-  const columns = component('components/EnterpriseOsintPanel.vue').read('columnConfigs');
-  const titles = computed(() => columns.invest.map(column => column.title));
+  const dynamicColumns = component('components/EnterpriseOsintPanel.vue', {
+    buildEnterpriseOsintColumns,
+    activeTab: ref('invest'),
+    assetList: ref([]),
+  }).read('dynamicColumns');
+  const titles = computed(() => dynamicColumns.value.map(column => column.title));
   const chinese = titles.value;
   i18n.global.locale.value = 'en-US';
   assert.notDeepEqual(titles.value, chinese);

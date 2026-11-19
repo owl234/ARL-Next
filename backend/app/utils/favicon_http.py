@@ -1,12 +1,15 @@
 """Bounded favicon GETs with address validation and DNS pinning."""
 
 import ipaddress
+import logging
 import socket
 import ssl
 from types import SimpleNamespace
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import urllib3
+
+logger = logging.getLogger(__name__)
 
 
 def fetch_favicon_response(url, *, allowed_ip, forbidden_domain, proxy_url=''):
@@ -43,15 +46,28 @@ def fetch_favicon_response(url, *, allowed_ip, forbidden_domain, proxy_url=''):
         # Self-signed certificates are expected on scanned assets. Preserve SNI.
         pool_options.update(cert_reqs=ssl.CERT_NONE, assert_hostname=False, server_hostname=host)
     if proxy_url:
-        lower_proxy = str(proxy_url).strip().lower()
+        raw_proxy = str(proxy_url).strip()
+        lower_proxy = raw_proxy.lower()
         if lower_proxy.startswith('socks'):
             try:
                 from urllib3.contrib.socks import SOCKSProxyManager
-                manager = SOCKSProxyManager(proxy_url, **pool_options)
-            except Exception:
+                p_socks = urlsplit(raw_proxy)
+                socks_kwargs = {}
+                clean_proxy = raw_proxy
+                if p_socks.username is not None or p_socks.password is not None:
+                    if p_socks.username is not None:
+                        socks_kwargs['username'] = unquote(p_socks.username)
+                    if p_socks.password is not None:
+                        socks_kwargs['password'] = unquote(p_socks.password)
+                    host_fmt = f'[{p_socks.hostname}]' if p_socks.hostname and ':' in p_socks.hostname else (p_socks.hostname or '')
+                    netloc = f'{host_fmt}:{p_socks.port}' if p_socks.port else host_fmt
+                    clean_proxy = urlunsplit((p_socks.scheme, netloc, p_socks.path, p_socks.query, ''))
+                manager = SOCKSProxyManager(clean_proxy, **socks_kwargs, **pool_options)
+            except Exception as exc:
+                logger.warning("SOCKSProxyManager initialization failed for favicon fetch (%s); falling back to direct", exc)
                 manager = urllib3.PoolManager(**pool_options)
         else:
-            manager = urllib3.ProxyManager(proxy_url, **pool_options)
+            manager = urllib3.ProxyManager(raw_proxy, **pool_options)
     else:
         manager = urllib3.PoolManager(**pool_options)
     response = None

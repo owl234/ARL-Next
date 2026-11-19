@@ -704,7 +704,7 @@ export default {
   "systemStatusIsHealthySelectACdnOnThe": "Система работает нормально. Выберите CDN слева для управления.",
   "cdnFingerprints": "Отпечатки CDN",
   "saveChanges": "Сохранить изменения",
-  "deleteThisCdnTheDeletionTakesEffectAfterSaving": "Удалить этот CDN? Удаление вступит в силу после сохранения всех изменений.",
+  "deleteThisCdnTheDeletionTakesEffectAfterSaving": "Удалить это правило CDN? Удаление вступит в силу сразу после подтверждения.",
   "deleteFingerprint": "Удалить отпечаток",
   "editFingerprint": "Изменить отпечаток",
   "cnameRulesLabel2": "Правила CNAME (",

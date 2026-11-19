@@ -49,12 +49,21 @@ def submit_github_task(task_data, action, delay_flag=True):
 
 # Github 监控任务下发
 def github_cron_run(item):
+    scheduler_id = str(item["_id"])
+    # 防止同一监控策略在上一轮任务仍处于排队或运行态时重叠触发导致重复采集与重复推送
+    active_task = utils.conn_db("github_task").find_one({
+        "github_scheduler_id": scheduler_id,
+        "status": {"$in": [TaskStatus.WAITING, TaskStatus.RUNNING, "waiting", "running"]},
+    })
+    if active_task:
+        return f"监控策略 {item.get('name', scheduler_id)} 已有任务正在执行中，请等待本轮完成"
+
     task_data = {
         "name": "GitHub监控-" + item["name"],
         "keyword": item["keyword"],
         "start_time": "-",
         "end_time": "-",
-        "github_scheduler_id": str(item["_id"]),
+        "github_scheduler_id": scheduler_id,
         "status": TaskStatus.WAITING,
     }
     # 下发周期运行任务

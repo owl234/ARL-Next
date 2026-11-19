@@ -161,7 +161,7 @@ To delete currently running tasks programmatically, execute a two-stage sequence
   ```
   - `active`: Total active tasks (`running + waiting`).
   - `abnormal`: Total abnormally terminated tasks (`error + stop`).
-  - `running`: Includes intermediate stages (port scan, service recognition, risk巡航, etc.).
+  - `running`: Includes intermediate stages (port scan, service recognition, risk cruising, etc.).
   - **Scope**: Statistics represent the entire collection and do not change with page number or keyword filters.
 - **Degradation Resilience**: If metric aggregation encounters an error, the core task list is still returned, annotated with `statistics_error: true` (and `statistics` omitted). Clients should retain previous valid statistics rather than zeroing them out.
 
@@ -329,7 +329,7 @@ Existing list queries, filters, counts, exports, deletion permissions and scans 
 ARL-Next integrates the Model Context Protocol (MCP 2024-11-05 specification) for AI agent collaboration. It supports both **Remote Native SSE** and **Local Stdio Bridge** integration modes.
 
 > [!NOTE]
-> For full-lifecycle penetration testing test case specifications and observability verification matrices, see [MCP Penetration Testing Test Cases](./MCP_PENTEST_TEST_CASES_en.md). The accompanying automated test suite is located at [verify_mcp_pentest.py](file:///Users/sienchen/Documents/github_project/ARL-Next/tools/verify_mcp_pentest.py).
+> For full-lifecycle penetration testing test case specifications and observability verification matrices, see [MCP Penetration Testing Test Cases](./MCP_PENTEST_TEST_CASES_en.md). The accompanying automated test suite is located at [verify_mcp_pentest.py](../tools/verify_mcp_pentest.py).
 
 ### Endpoint Matrix
 
