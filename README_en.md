@@ -126,10 +126,16 @@
     <img src="./img/threat-intel-radar.png" alt="Threat Intelligence Radar" width="800">
   </p>
 
-* **System Settings & Modern Wordlist Manager**: Modern 3-pane wordlist manager with instant file preview and health indicators, dynamic worker concurrency scaling, and alert channel configurations.
+* **MCP Service Governance Center**: Visual management of AI Agent integration and security policies, supporting fine-grained scoped keys (`asset:read` read-only intelligence vs. `task:dispatch` scan scheduling), tool-level switches, query size and rate-limit quotas, and invocation monitoring.
   
   <p align="center">
-    <img src="./img/system-settings.png" alt="System Settings and Wordlist Management" width="800">
+    <img src="./img/mcp-center.png" alt="MCP Service Governance Center" width="800">
+  </p>
+
+* **System Settings & Wordlist Arsenal**: Organized into five workflow domains (Intel & APIs, Proxy & Guardrails, Scan & Arsenal, Alerts & Webhooks, System Ops) with `/` quick search; provides a 3-pane wordlist manager (cross-category search, tiered preview, export, and inline editing), worker concurrency scaling, and alert webhook configurations.
+  
+  <p align="center">
+    <img src="./img/system-settings.png" alt="System Settings and Wordlist Arsenal" width="800">
   </p>
 
 </details>

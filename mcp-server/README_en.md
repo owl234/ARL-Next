@@ -28,6 +28,10 @@
 > [!TIP]
 > **💡 Recommended Practice**: Log in to the ARL-Next Web Console and open **「MCP Center」** in the left sidebar (or click **「MCP」** in the top navigation bar) to issue least-privilege scoped MCP keys (`asset:read` read-only intelligence vs. `task:dispatch` task scheduling), configure per-tool switches and rate quotas, inspect invocation audit logs, and copy or export ready-to-use client configurations with one click. For manual configuration, copy the snippet matching your client below:
 
+<p align="center">
+  <img src="../img/mcp-center.png" alt="MCP Service Governance Center" width="850">
+</p>
+
 ### <span id="cursor"></span>1. Cursor
 
 - **Configuration File Path**: Project root `.cursor/mcp.json` or Global Settings (Features ➔ MCP Servers)

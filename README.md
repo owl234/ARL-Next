@@ -128,10 +128,16 @@
     <img src="./img/threat-intel-radar.png" alt="威胁情报雷达" width="800">
   </p>
 
-* **系统设置与现代字典管理**：全新现代三栏式字典管理（支持在线预览/呼吸灯提示）、队列并发热扩缩容及告警通道。
+* **MCP 服务治理中心**：可视化管理 AI Agent 接入配置与安全策略，支持签发细粒度 Scope 专用密钥（`asset:read` 只读情报与 `task:dispatch` 扫描调度分级授权）、工具级启用开关、检索条数与调用频率配额及调用监控。
   
   <p align="center">
-    <img src="./img/system-settings.png" alt="系统设置与字典管理" width="800">
+    <img src="./img/mcp-center.png" alt="MCP 服务治理中心" width="800">
+  </p>
+
+* **系统设置与字典武器库**：按情报凭据、代理与红线、扫描与武器库、告警与回调、系统运维五域分区并支持 `/` 快捷检索；内置三栏式字典武器库（跨分类检索、分级预览、导出与在线维护）、Worker 并发扩缩容及告警回调通道配置。
+  
+  <p align="center">
+    <img src="./img/system-settings.png" alt="系统设置与字典武器库" width="800">
   </p>
 
 </details>

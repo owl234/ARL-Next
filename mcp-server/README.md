@@ -28,6 +28,10 @@
 > [!TIP]
 > **💡 最省心的做法**：登录 ARL-Next Web 控制台，进入左侧菜单 **「MCP 中心」**（或点击顶部导航栏右上角 **「MCP」**），可按需签发最小权限的 MCP 专用密钥（支持 `asset:read` 只读情报与 `task:dispatch` 任务调度分级授权）、配置单工具开关与速率配额、查看调用审计日志，并一键复制或导出预生成配置。若手动配置，请直接对号入座复制下方卡片：
 
+<p align="center">
+  <img src="../img/mcp-center.png" alt="MCP 服务治理中心" width="850">
+</p>
+
 ### <span id="cursor"></span>1. Cursor
 
 - **配置文件路径**：项目根目录 `.cursor/mcp.json` 或 全局设置（Features ➔ MCP Servers）
