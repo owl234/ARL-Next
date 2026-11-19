@@ -167,8 +167,8 @@ check_and_install_docker() {
             run_with_spinner "下载并运行 Docker 安装脚本" bash -c "wget -qO- https://get.docker.com | bash -s docker --mirror Aliyun" || true
         fi
         
-        # 启动并使能 Docker 服务
-        if run_cmd_with_timeout 30 systemctl enable --now docker &>/dev/null || run_cmd_with_timeout 30 service docker start &>/dev/null; then
+        # 启动并使能 Docker 服务（兼容 systemd 219：未引入 enable --now，拆分为 enable + start）
+        if (command -v systemctl &>/dev/null && { run_cmd_with_timeout 30 systemctl enable docker &>/dev/null || true; run_cmd_with_timeout 30 systemctl start docker &>/dev/null; }) || run_cmd_with_timeout 30 service docker start &>/dev/null; then
             echo "✅ Docker 服务已启动！"
         fi
     else
@@ -607,11 +607,161 @@ configure_firewall_and_network() {
 configure_firewall_and_network
 
 # 3. 部署并启动系统更新服务 (updater)
+
+# 兼容 systemd 219+ 获取指定服务的 MainPID（避免使用 systemd 230 才引入的 --value）
+# 返回 0 表示成功输出纯数字 PID（未运行/未加载时为 0）；返回非 0 表示查询失败（fail-closed）
+get_systemd_service_main_pid() {
+    local service_name="$1"
+    local show_out=""
+    local main_pid=""
+    if ! command -v systemctl &>/dev/null; then
+        return 1
+    fi
+    if ! show_out=$(systemctl show -p MainPID "$service_name" 2>/dev/null); then
+        return 1
+    fi
+    main_pid=$(printf '%s\n' "$show_out" | awk -F= '/^MainPID=/ {print $2; exit}')
+    if [[ "$main_pid" =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "$main_pid"
+        return 0
+    fi
+    return 1
+}
+
+# 判断目标 PID 是否为当前脚本自身或其祖先进程（防止误杀拉起脚本的父级 updater 进程）
+is_ancestor_or_self_pid() {
+    local target_pid="$1"
+    local cur_pid="$$"
+    local depth=0
+    local parent_pid=""
+
+    if ! [[ "$target_pid" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+
+    while [ -n "$cur_pid" ] && [ "$cur_pid" -gt 1 ] 2>/dev/null && [ "$depth" -lt 64 ]; do
+        if [ "$cur_pid" = "$target_pid" ]; then
+            return 0
+        fi
+        parent_pid=""
+        if [ -r "/proc/$cur_pid/stat" ]; then
+            # /proc/<pid>/stat 第 2 字段 (comm) 可能含空格或右括号，从最后一个 ')' 后取第 2 字段即 ppid
+            parent_pid=$(awk '{sub(/^.*\) /, ""); print $2}' "/proc/$cur_pid/stat" 2>/dev/null || true)
+        fi
+        if ! [[ "$parent_pid" =~ ^[0-9]+$ ]]; then
+            parent_pid=$(ps -o ppid= -p "$cur_pid" 2>/dev/null | tr -d '[:space:]' || true)
+        fi
+        if ! [[ "$parent_pid" =~ ^[0-9]+$ ]] || [ "$parent_pid" = "$cur_pid" ] || [ "$parent_pid" -le 1 ] 2>/dev/null; then
+            break
+        fi
+        cur_pid="$parent_pid"
+        depth=$((depth + 1))
+    done
+    return 1
+}
+
+# 收集监听 8888 端口的去重 PID 列表（兼容新版 iproute2 pid= 与旧版 CentOS 7 iproute2 3.10 格式，并支持 netstat 回退）
+get_port_8888_listener_pids() {
+    local ss_out=""
+    local pids=""
+    if command -v ss &>/dev/null && ss_out=$(ss -tlnp 2>/dev/null); then
+        pids=$(printf '%s\n' "$ss_out" | awk '
+            ($1 == "LISTEN" && $4 ~ /:8888$/) || ($1 ~ /^tcp/ && $2 == "LISTEN" && $5 ~ /:8888$/) {
+                rest = $0
+                found = 0
+                while (match(rest, /pid=[0-9]+/)) {
+                    pid = substr(rest, RSTART + 4, RLENGTH - 4)
+                    if (!seen[pid]++) print pid
+                    rest = substr(rest, RSTART + RLENGTH)
+                    found = 1
+                }
+                if (!found) {
+                    rest = $0
+                    while (match(rest, /"[^"]*",[0-9]+,[0-9]+/)) {
+                        seg = substr(rest, RSTART, RLENGTH)
+                        sub(/^"[^"]*",/, "", seg)
+                        sub(/,[0-9]+$/, "", seg)
+                        if (!seen[seg]++) print seg
+                        rest = substr(rest, RSTART + RLENGTH)
+                    }
+                }
+            }
+        ' || true)
+        if [ -n "$pids" ]; then
+            printf '%s\n' "$pids"
+            return 0
+        fi
+    fi
+
+    local netstat_out=""
+    if command -v netstat &>/dev/null && netstat_out=$(netstat -tlnp 2>/dev/null); then
+        printf '%s\n' "$netstat_out" | awk '
+            $1 ~ /^tcp/ && $4 ~ /:8888$/ && $6 == "LISTEN" {
+                if (match($7, /^[0-9]+\//)) {
+                    pid = substr($7, 1, RLENGTH - 1)
+                    if (!seen[pid]++) print pid
+                }
+            }
+        ' || true
+    fi
+    return 0
+}
+
+# 清理占用 8888 端口的非 systemd 托管冲突进程（三层防误杀 + systemctl fail-closed）
+cleanup_port_8888_conflicts() {
+    # 护栏 1：由 updater 自身触发的在线更新不重启服务，直接跳过端口清理
+    if [ "${ARL_UPDATER_SKIP_RESTART:-0}" = "1" ]; then
+        return 0
+    fi
+
+    local pids=""
+    pids=$(get_port_8888_listener_pids || true)
+    if [ -z "$pids" ]; then
+        return 0
+    fi
+
+    # 护栏 2：兼容 systemd 219 读取 MainPID；查询失败时 fail-closed，避免误杀
+    local current_main_pid=""
+    if ! current_main_pid=$(get_systemd_service_main_pid "arl-updater.service"); then
+        echo "⚠️ 警告：检测到 8888 端口已被占用，但无法通过 systemctl 读取 arl-updater.service 的 MainPID，为防止误杀已跳过自动清理。"
+        return 0
+    fi
+
+    local pid=""
+    local proc_cmd=""
+    while IFS= read -r pid; do
+        [ -z "$pid" ] && continue
+        if ! [[ "$pid" =~ ^[0-9]+$ ]] || [ "$pid" -le 10 ] 2>/dev/null; then
+            continue
+        fi
+
+        # 属于当前 systemd 托管的 arl-updater 主进程，交由后续 systemctl restart 平滑接管
+        if [ "$pid" = "$current_main_pid" ]; then
+            continue
+        fi
+
+        # 护栏 3：禁止终止当前脚本自身或其任何祖先进程（防自杀兜底）
+        if is_ancestor_or_self_pid "$pid"; then
+            echo "ℹ️  检测到 8888 端口占用进程 (PID: $pid) 属于当前部署脚本的祖先进程，跳过清理。"
+            continue
+        fi
+
+        proc_cmd=$(ps -p "$pid" -o args= 2>/dev/null || true)
+        echo "⚠️ 警告：检测到 8888 端口被外部/遗留进程占用 (PID: $pid, 命令: $proc_cmd)，正在清理以解除端口冲突..."
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+    done <<< "$pids"
+}
+
 deploy_and_start_updater() {
     echo "🔄 正在配置并启动系统底层更新服务 (arl-updater)..."
     local updater_dir="$(pwd)/updater"
     local updater_script="$updater_dir/updater.py"
-    local service_file="/etc/systemd/system/arl-updater.service"
+    local systemd_dir="${ARL_SYSTEMD_DIR:-/etc/systemd/system}"
+    local service_file="$systemd_dir/arl-updater.service"
 
     if [ ! -f "$updater_script" ]; then
         echo "⚠️ 警告：未找到更新服务脚本 $updater_script，将跳过更新服务的配置。"
@@ -620,29 +770,7 @@ deploy_and_start_updater() {
 
     # Firewalld 端口放行已在 configure_firewall_and_network 中统一管理与加固
 
-    # 检查 8888 端口是否被非 arl-updater 外部/遗留进程占用
-    local occupied_pid=""
-    if command -v ss &>/dev/null; then
-        # 补充 head -n 1 截断，防止 IPv4/IPv6 双栈多行导致数组越界抛出 integer expression expected 语法错误
-        occupied_pid=$(ss -tlnp 2>/dev/null | awk '/:8888 / {print $NF}' | sed -E 's/.*pid=([0-9]+).*/\1/' | head -n 1 || true)
-    elif command -v netstat &>/dev/null; then
-        occupied_pid=$(netstat -tlnp 2>/dev/null | awk '/:8888 / {print $NF}' | cut -d'/' -f1 | head -n 1 || true)
-    fi
-
-    if [ -n "$occupied_pid" ] && [ "$occupied_pid" -gt 10 ] 2>/dev/null; then
-        local current_main_pid
-        current_main_pid=$(systemctl show -p MainPID --value arl-updater.service 2>/dev/null || echo "0")
-        if [ "$occupied_pid" != "$current_main_pid" ]; then
-            local proc_cmd
-            proc_cmd=$(ps -p "$occupied_pid" -o cmd= 2>/dev/null || true)
-            echo "⚠️ 警告：检测到 8888 端口被外部/遗留进程占用 (PID: $occupied_pid, 命令: $proc_cmd)，正在清理以解除端口冲突..."
-            kill "$occupied_pid" 2>/dev/null || true
-            sleep 1
-            kill -9 "$occupied_pid" 2>/dev/null || true
-        fi
-    fi
-
-    if [ -d "/etc/systemd/system" ] && command -v systemctl &>/dev/null; then
+    if [ -d "$systemd_dir" ] && command -v systemctl &>/dev/null; then
         cat > "$service_file" <<EOF
 [Unit]
 Description=ARL-Next Update Service
@@ -661,7 +789,9 @@ WantedBy=multi-user.target
 EOF
 
         systemctl daemon-reload
-        if [ "$ARL_UPDATER_SKIP_RESTART" != "1" ]; then
+        if [ "${ARL_UPDATER_SKIP_RESTART:-0}" != "1" ]; then
+            # 仅在即将重启 systemd 托管服务前检查并清理非托管 8888 端口冲突
+            cleanup_port_8888_conflicts
             systemctl enable arl-updater.service >/dev/null 2>&1
             systemctl restart arl-updater.service
 
