@@ -6,6 +6,30 @@
 
 ---
 
+## [v1.5.0] - 2026-11-19
+
+### 🚀 新增功能
+- **统一多协议代理池与三域分流调度**：新增 `proxy_service.py`、`osint_service/proxy_router.py` 与 `ProxyManagePanel.vue`，支持 `http`/`https`/`socks5`/`socks5h` 节点池管理及 `scan`（扫描探针）、`osint`（企业测绘）、`intel`（威胁情报与模板同步）三域独立策略（`direct_only`、`fixed_proxy`、`failover`、`round_robin`）、内网 CIDR/国内 Webhook/自定义 `NO_PROXY` 旁路白名单与行内多预设探针测活；抽取 `proxyStatus.js` 统一全站 5 态出口运行态展示。
+- **Nuclei 漏洞独立推送、自建模板 ASM 多协议分流与在线单目标调试**：新增 `nuclei_vuln` 独立推送开关与 `nuclei_push_severities` 严重级别过滤，统一收口于任务终态落库后分发；自建模板接入 ASM 多协议分桶（`web` / `network` / `dns`），支持纯自建模板策略（`include_community=False`）、社区与自建通道隔离执行及 `template_source` 来源溯源；补齐在线单目标即时调试（`/api/nuclei/template/test/`）与任务列表独立 Nuclei 漏洞统计胶囊。
+- **端口扫描存活探测策略与任务/策略级站点截图开关（`site_capture`）**：端口扫描新增 `host_discovery_mode`（`auto` 自适应决策矩阵 / `skip` 强制 `-Pn` / `probe` 强制存活探测）；新增任务与策略级 `site_capture` 站点截图开关（缺省默认开启，关闭时跳过无头浏览器截图，开启时自动剔除 `catch_all_sites` 默认后端），并在 `SyncAsset`、`monitor_diff` 与 `DeleteTask` 中实现存量站点截图防降级与物理截图引用保护。
+- **企业 OSINT 测绘批量停止、断点续跑、原位详情补全与快应用维度**：新增 `/api/icp/batch_stop/`、`/api/icp/resume/` 与 `/api/icp/backfill_details/` 接口及前端工作流；支持快应用（`kapp`）维度采集、跨源（`tyc+icp`）合并去重与自适应动态列展示。
+- **GitHub 监控研判去重链路与 MCP 全链路工具治理升级**：新增 `github_triage.py`、`/api/github_result/*` 研判状态流转、噪音仓库屏蔽列表、CSV 导出、周期策略手动触发及内置正则阅读器 `GithubCodeReader.vue`；MCP 中心统一 `/api/mcp/tools`、`search_assets`、`task_status`、`create_scan_task`、`stop_scan_task` 五项工具治理接口、Scope 权限开关与双副本 Stdio 桥接脚本。
+
+### 🛠️ 性能与重构
+- **系统设置五域胶囊架构与离开防护重构**：重构 `SystemSettings.vue` 为五大渗透工作流分区，建立 `SECTION_SPECS` / `dirtySections` 脏状态单一事实源与三选一路由离开确认弹窗（留在本页 / 放弃修改并离开 / 保存全部并离开）；移除冗余凭据状态条、高级扫描页代理占位卡与废弃 `/merged_general` 接口；统一多列表页右上角「新建」主按钮位置与三语动词口径。
+- **企业测绘分页进度心跳、逐页落库与有界详情补全**：`job_runner.py` 与 `ymicp.py` 实现分页采集进度心跳日志、逐页增量落库与单批有界详情补全（`detail_max_items=100`），降低长耗时任务中断导致的数据丢失风险并支持事后原位全量补全。
+
+### 🐛 问题修复与加固
+- **OSINT 多出口隔离、断点续跑清理与崩溃自愈加固**：`run_tyc_job` 为天眼查与工信部拆分独立 `service_scope` 冷却路由器并共享进程级物理出口限速锁；`blocked_exits` 改为 MongoDB 点路径原子更新；`run_icp_job` 续跑前自动清理未完成维度半成品记录并在完成时标记 `recon_checkpoint.completed=True`；`reconcile_orphan_tasks` 与 `_schedule_abort` 同步清理残留 `detail_backfill_running` 锁并恢复原终态；加固 `ymicp` 无验证码分支、详情 WAF 冷却计算、并发 `detail_context` 快照隔离、天眼查 `403/429` 切备及 `_stop_single_icp_task` 停止失败重试；隔离资产组主体资产更新状态（`updating_icp_task_id` / `last_update_error`）。
+- **生产部署脚本 systemd 219 兼容与系统更新日志缓存修复**：修复 `start-prod.sh` 在 CentOS 7 `systemd 219` 下 `systemctl show` 不支持 `--value` 导致 `MainPID` 提取失败及 8888 端口自更新服务误杀问题；修复 `SystemUpdatePanel.vue` 与 `/api/system_config/check_update` 空更新日志框、跨 Worker 共享缓存及双语回退。
+- **前端 KeepAlive 生命周期与通知完整性修复**：修复 `SystemSettings.vue`、`ProxyManagePanel.vue`、`McpCenter.vue`、`GithubManage.vue` 在 KeepAlive 切页下的全局监听/定时器清理、放弃修改表单重置与后台轮询恢复；对齐 `CdnRulePanel.vue` 删除确认文案与即时持久化行为；`sync_asset` 自动回填 `task_name` 并在 `nuclei_only_fallback` 路径兜底发送任务完成汇总。
+
+### 🛡️ 安全与配置
+- **Nuclei 参数白名单、多协议模板校验与在线调试 SSRF 防护**：在 `/api/task/`、`/api/policy/*` 与 `NucleiScan` 中强制校验 `nuclei_config.severity` 白名单；自建模板静态校验与 ASM 分桶遍历全部协议块以拦截包含 `code`/`headless`/`file`/`workflows` 的复合模板；在线单目标调试默认阻断本机回环、云元数据（`169.254.169.254`）、容器内部服务名并复用 `BLACK_IPS`/`FORBIDDEN_DOMAINS`；含认证代理改经 `0o600` 临时文件下发并在 `CalledProcessError` 中脱敏；社区模板目录边界校验改用 `os.path.commonpath` 并启用 ZIP 同步 TLS 证书校验。
+- **代理凭据脱敏、GitHub 雷达参数校验与 MCP 边界加固**：`GET /api/system_config/general` 与 `run_recon_job` 日志全面脱敏代理口令与天眼查 Token；OSINT 域 `fixed_proxy` 无启用节点时严格 Fail-Closed 拒绝回退直连；`github_threat` 删除与配置接口补充字符串类型及 `interval` 范围校验；MCP `MCPTaskDetailExport` 钳制分页参数、SSE 优先采信 `X-Real-IP` 且忽略 `Basic` 认证头遮蔽、Stdio 桥接在拉取工具清单异常时安全降级为只读工具集；同步更新中英文 `README`、`docs/QUICKSTART*.md`、`docs/API_GUIDE*.md` 与 `mcp-server` 文档。
+
+---
+
 ## [v1.4.6] - 2026-11-14
 
 ### 🚀 新增功能
