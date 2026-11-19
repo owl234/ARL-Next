@@ -52,7 +52,7 @@
 
 | Use Case | Challenge | How ARL-Next Helps |
 | :--- | :--- | :--- |
-| **Enterprise Attack Surface Inventory & Governance** | Assets across subsidiaries are fragmented; shadow web apps, mobile apps, and mini-programs are hard to track continuously | Correlates websites, mobile apps, mini-programs, and quick apps via corporate OSINT (Tianyancha / MIIT ICP) into hierarchical asset groups with a 13-dimensional asset profile drawer |
+| **Enterprise Attack Surface Inventory & Governance** | Assets across subsidiaries are fragmented; shadow web apps, mobile apps, and mini-programs are hard to track continuously | Correlates websites, mobile apps, mini-programs, and quick apps via corporate OSINT (Tianyancha / MIIT ICP) into hierarchical asset groups with a 12-dimensional asset profile drawer |
 | **Authorized Pentesting & Bug Bounty Recon** | Chaining subdomain, port, fingerprint, JS extraction, and vulnerability scanners manually yields scattered outputs | Orchestrates subdomain brute-forcing, adaptive port scanning, 8,800+ Web fingerprints, WIH JS endpoint extraction, and Nuclei / PoC scanning in one workspace with unified search and export |
 | **Continuous Exposure & Leak Monitoring** | Newly exposed services, emerging CVEs, and GitHub credential leaks often go unnoticed until exploitation | Combines scheduled scans and incremental asset group monitoring with CVE feeds, a GitHub leak triage workbench, and severity-filtered Nuclei webhook alerts |
 | **AI Agent-Assisted Security Analysis** | Analysts spend repetitive time pivoting across pages to assemble exposure summaries for a host or organization | Connects Cursor, Claude Desktop, and other MCP clients through the built-in **MCP Center** for natural-language asset profiling, enterprise lookups, and scoped scan dispatch |
@@ -63,7 +63,7 @@
 
 ### 1. Enterprise Asset Mapping & Hierarchical Asset Groups
 * **Flexible Group Creation**: Create asset groups immediately by entering IPs, CIDRs, and domains manually, or run multi-source corporate reconnaissance (Tianyancha & MIIT ICP) covering **websites, mobile apps, mini-programs, and quick apps** with automatic group creation, batch stop, checkpoint resume, and in-place detail backfill.
-* **Multi-Tier Groups & Panoramic Profiling**: Manage multi-tier corporate hierarchies (including group dissolution and transfer); drill down via the **13-dimensional asset profile drawer** inside Asset Group details, or query across tasks in **Asset search** (**12 asset tab dimensions**, excluding Nuclei results).
+* **Multi-Tier Groups & Panoramic Profiling**: Manage multi-tier corporate hierarchies (including group dissolution and transfer); drill down via the **12-dimensional asset profile drawer** inside Asset Group details, or query across tasks in **Asset search** across the same **12 asset tab dimensions** (including Nuclei results, with port services and Python plugin services unified under Services).
 
 ### 2. Attack Surface Discovery & Vulnerability Detection
 * **Full Reconnaissance Pipeline**: Covers subdomain discovery and dictionary brute-forcing, Nmap 7.95 port scanning (with adaptive host discovery modes), an **8,800+ Web technology fingerprint repository**, and task/policy-level optional headless site screenshots.
@@ -99,7 +99,7 @@
 
 <br/>
 
-* **Hierarchical Asset Groups & Panoramic Asset Profile**: Manage multi-tier group hierarchies, correlate corporate OSINT assets, map external attack surfaces (ASM), and drill down via the 13-dimensional asset profile drawer.
+* **Hierarchical Asset Groups & Panoramic Asset Profile**: Manage multi-tier group hierarchies, correlate corporate OSINT assets, map external attack surfaces (ASM), and drill down via the 12-dimensional asset profile drawer.
 
   <p align="center">
     <img src="./img/asset-group-overview.png" alt="Hierarchical Asset Groups and Coverage" width="850">
@@ -114,7 +114,7 @@
   </p>
 
   <p align="center">
-    <img src="./img/asset-group-profile.png" alt="13-Dimensional Asset Profile Drawer" width="850">
+    <img src="./img/asset-group-profile.png" alt="12-Dimensional Asset Profile Drawer" width="850">
   </p>
 
 * **Task Dispatch & Full Lifecycle Management**: Quick scan presets (Quick discovery / Standard discovery / Full discovery) and custom policies integrated with Nuclei, Python plugins, and 8,800+ Web fingerprints, tracking task stages and incremental group sync summaries.

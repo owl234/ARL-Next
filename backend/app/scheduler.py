@@ -631,7 +631,7 @@ def cleanup_zombie_tasks(window_seconds=1800):
             f"celery_id: {celery_id}, elapsed since activity: {now - (latest_act or 0):.1f}s"
         )
 
-        # 仅物理清理该任务在磁盘上的临时文件与截图，严禁删除 MongoDB 13 维已入库资产
+        # 仅物理清理该任务在磁盘上的临时文件与截图，严禁删除 MongoDB 13 个已入库资产集合数据
         try:
             utils.clean_task_tmp_files(task_id)
         except Exception as e:

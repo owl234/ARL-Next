@@ -30,7 +30,7 @@
                 {{ assetText('assets.chainHitSummary', { hit: hitCategoryCount, totalCategories: metricChips.length, totalRecords }) }}
               </template>
               <template v-else>
-                {{ assetText('assets.explore13AssetAndSecurityCategoriesClickA') }}
+                {{ assetText('assets.explore12AssetAndSecurityCategoriesClickA') }}
               </template>
             </div>
           </div>
@@ -119,7 +119,7 @@
           </ArlEmpty>
         </div>
 
-        <!-- 3. 全部 13 维均无记录且未开启显示空维度时，提供一键展开入口 -->
+        <!-- 3. 全部 12 维均无记录且未开启显示空维度时，提供一键展开入口 -->
         <div v-else-if="totalRecords === 0 && !showEmptySections" class="drawer-empty-box">
           <ArlEmpty :description="assetText('assets.noRelatedAssetRecordsFoundForThisTarget')">
             <div class="drawer-empty-subtip">
@@ -276,23 +276,60 @@
             </div>
           </a-card>
 
-          <!-- 5. 系统服务 -->
-          <a-card v-if="shouldShowSection(chainData.service?.length)" id="chain-sec-service" :bordered="false" class="drawer-chain-card">
+          <!-- 5. 系统服务（合并端口服务 Nmap 与 Python 插件服务） -->
+          <a-card v-if="shouldShowSection(mergedServiceCount)" id="chain-sec-service" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
                 <api-outlined style="color: #fa8c16;" />
                 <span>{{ assetText('assets.openNetworkServices') }}</span>
-                <a-badge :count="chainData.service?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.service?.length, '#fa8c16')" />
+                <a-badge :count="mergedServiceCount" :show-zero="true" :number-style="getBadgeStyle(mergedServiceCount, '#fa8c16')" />
               </div>
             </template>
-            <ArlEmpty v-if="!chainData.service || chainData.service.length === 0" compact :description="assetText('assets.noOpenNetworkServicesFound')" />
-            <div v-else class="drawer-services-grid">
-              <div v-for="(srv, idx) in chainData.service" :key="idx" class="service-pill">
-                <div class="service-name-tag">{{ srv.service_name || 'service' }}</div>
-                <div v-for="(inf, i) in (srv.service_info || [])" :key="i" class="service-endpoint">
-                  <span class="font-mono">{{ inf.ip }}:{{ inf.port_id }}</span>
-                  <span v-if="inf.product" class="service-product">{{ inf.product }}</span>
+            <ArlEmpty v-if="mergedServiceCount === 0" compact :description="assetText('assets.noOpenNetworkServicesFound')" />
+            <div v-else class="drawer-service-sections">
+              <div v-if="shouldShowSection(nmapServiceCount)" class="drawer-service-subsection">
+                <div class="drawer-service-subtitle">
+                  <api-outlined style="color: #fa8c16;" />
+                  <span>{{ assetText('tasks.portServicesNmap') }}</span>
+                  <a-badge :count="nmapServiceCount" :show-zero="true" :number-style="getBadgeStyle(nmapServiceCount, '#fa8c16')" />
                 </div>
+                <ArlEmpty v-if="nmapServiceCount === 0" compact :description="assetText('assets.noPortServicesFound')" />
+                <div v-else class="drawer-services-grid">
+                  <div v-for="(srv, idx) in chainData.service" :key="idx" class="service-pill">
+                    <div class="service-name-tag">{{ srv.service_name || 'service' }}</div>
+                    <div v-for="(inf, i) in (srv.service_info || [])" :key="i" class="service-endpoint">
+                      <span class="font-mono">{{ inf.ip }}:{{ inf.port_id }}</span>
+                      <span v-if="inf.product" class="service-product">{{ inf.product }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="shouldShowSection(npocServiceCount)" class="drawer-service-subsection">
+                <div class="drawer-service-subtitle">
+                  <code-outlined style="color: #722ed1;" />
+                  <span>{{ assetText('assets.pythonPluginServicesLabel') }}</span>
+                  <a-badge :count="npocServiceCount" :show-zero="true" :number-style="getBadgeStyle(npocServiceCount, '#722ed1')" />
+                </div>
+                <ArlEmpty v-if="npocServiceCount === 0" compact :description="assetText('assets.noPythonPluginServicesFound')" />
+                <a-table
+                  v-else
+                  :dataSource="chainData.npoc_service"
+                  :columns="npocCols"
+                  :pagination="tablePagination"
+                  :scroll="{ x: 'max-content' }"
+                  size="small"
+                  :rowKey="(r, i) => r._id || i"
+                >
+                  <template #bodyCell="{ column, record }">
+                    <template v-if="column.key === 'scheme'">
+                      <a-tag color="purple">{{ record.scheme || '-' }}</a-tag>
+                    </template>
+                    <template v-else-if="column.key === 'target'">
+                      <span class="font-mono drawer-break-link">{{ record.target || '-' }}</span>
+                    </template>
+                  </template>
+                </a-table>
               </div>
             </div>
           </a-card>
@@ -473,37 +510,7 @@
             </div>
           </a-card>
 
-          <!-- 12. 服务 (Python NPOC) -->
-          <a-card v-if="shouldShowSection(chainData.npoc_service?.length)" id="chain-sec-npoc" :bordered="false" class="drawer-chain-card">
-            <template #title>
-              <div class="drawer-card-title">
-                <code-outlined style="color: #722ed1;" />
-                <span>{{ assetText('assets.serviceDetectionPythonNpoc') }}</span>
-                <a-badge :count="chainData.npoc_service?.length || 0" :show-zero="true" :number-style="getBadgeStyle(chainData.npoc_service?.length, '#722ed1')" />
-              </div>
-            </template>
-            <ArlEmpty v-if="!chainData.npoc_service || chainData.npoc_service.length === 0" compact :description="assetText('assets.noPythonNpocServiceRecordsFound')" />
-            <a-table
-              v-else
-              :dataSource="chainData.npoc_service"
-              :columns="npocCols"
-              :pagination="tablePagination"
-              :scroll="{ x: 'max-content' }"
-              size="small"
-              :rowKey="(r, i) => r._id || i"
-            >
-              <template #bodyCell="{ column, record }">
-                <template v-if="column.key === 'scheme'">
-                  <a-tag color="purple">{{ record.scheme || '-' }}</a-tag>
-                </template>
-                <template v-else-if="column.key === 'target'">
-                  <span class="font-mono drawer-break-link">{{ record.target || '-' }}</span>
-                </template>
-              </template>
-            </a-table>
-          </a-card>
-
-          <!-- 13. Nuclei 扫描发现 -->
+          <!-- 12. Nuclei 扫描发现 -->
           <a-card v-if="shouldShowSection(chainData.nuclei_result?.length)" id="chain-sec-nuclei" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
@@ -789,7 +796,11 @@ const statFingerList = computed(() => {
     .sort((a, b) => b.cnt - a.cnt);
 });
 
-// 13 维统计指标与锚点导航列表
+const nmapServiceCount = computed(() => chainData.value?.service?.length || 0);
+const npocServiceCount = computed(() => chainData.value?.npoc_service?.length || 0);
+const mergedServiceCount = computed(() => nmapServiceCount.value + npocServiceCount.value);
+
+// 12 维统计指标与锚点导航列表（端口服务 Nmap 与 Python 插件服务归入「服务」维度）
 const metricChips = computed(() => {
   if (!chainData.value) return [];
   const d = chainData.value;
@@ -798,14 +809,13 @@ const metricChips = computed(() => {
     { id: 'chain-sec-domain', label: assetText('tasks.subdomains'), count: d.domain_records?.length || 0, icon: LinkOutlined, color: '#52c41a' },
     { id: 'chain-sec-ip', label: 'IP', count: d.ip?.length || 0, icon: CloudServerOutlined, color: '#722ed1' },
     { id: 'chain-sec-cert', label: assetText('assets.sslCertificates'), count: d.cert?.length || 0, icon: SafetyCertificateOutlined, color: '#13c2c2' },
-    { id: 'chain-sec-service', label: assetText('tasks.services'), count: d.service?.length || 0, icon: ApiOutlined, color: '#fa8c16' },
+    { id: 'chain-sec-service', label: assetText('tasks.services'), count: mergedServiceCount.value, icon: ApiOutlined, color: '#fa8c16' },
     { id: 'chain-sec-fileleak', label: assetText('tasks.fileDisclosure'), count: d.fileleak?.length || 0, icon: FileSearchOutlined, color: '#faad14' },
     { id: 'chain-sec-url', label: assetText('tasks.urls'), count: d.url?.length || 0, icon: DeploymentUnitOutlined, color: '#2f54eb' },
     { id: 'chain-sec-cip', label: assetText('tasks.cClassNetworks'), count: d.cip?.length || 0, icon: ClusterOutlined, color: '#eb2f96' },
     { id: 'chain-sec-stat-finger', label: assetText('tasks.fingerprintStatistics'), count: statFingerList.value.length, icon: TagOutlined, color: '#1d39c4' },
     { id: 'chain-sec-wih', label: 'WIH', count: d.wih?.length || 0, icon: RadarChartOutlined, color: '#fa8c16' },
     { id: 'chain-sec-vuln', label: assetText('tasks.risks'), count: d.vuln?.length || 0, icon: BugOutlined, color: '#f5222d' },
-    { id: 'chain-sec-npoc', label: assetText('assets.pythonPluginServicesLabel'), count: d.npoc_service?.length || 0, icon: CodeOutlined, color: '#722ed1' },
     { id: 'chain-sec-nuclei', label: 'nuclei', count: d.nuclei_result?.length || 0, icon: FireOutlined, color: '#fa541c' }
   ];
 });
@@ -1526,6 +1536,27 @@ const downloadChainJson = () => {
   overflow-y: auto;
   word-break: break-all;
   color: var(--arl-text-secondary);
+}
+
+.drawer-service-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.drawer-service-subsection + .drawer-service-subsection {
+  padding-top: 12px;
+  border-top: 1px dashed var(--arl-border-color);
+}
+
+.drawer-service-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--arl-text-color);
 }
 
 .drawer-services-grid {

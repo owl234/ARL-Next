@@ -279,8 +279,9 @@ Example response:
 
 > [!IMPORTANT]
 > - The counts are **global aggregates** and are **not** the same scope as the `task_id` / `scope_id` filtered list endpoints. Do not use them to infer the asset volume of a single task or asset group;
+> - `counts` returns totals for all **13 underlying asset collections**; the UI views (**Asset search**, **Asset group details**, **Task details**, and the asset relationship profile drawer) consistently present **12 asset dimensions** (including `nuclei_result`), unifying `service` (Port services / Nmap) and `npoc_service` (Python plugin services) under the single **Services** dimension (tab/chip badge sums both engines, with per-engine breakdown inside);
 > - Each dimension's counting rule matches its corresponding list endpoint — for example `cip` counts distinct C-blocks and `stat_finger` counts distinct fingerprint names, rather than raw document counts;
-> - A dimension whose count fails is returned as `null`. Clients should treat it as "unknown" and avoid rendering it as `0`.
+> - A dimension whose count fails is returned as `null`. Clients should treat it as "unknown" and avoid rendering it as `0` (for the merged **Services** dimension, if either `service` or `npoc_service` is `null`, treat the combined badge as unknown as well).
 
 ### Multiple HTTP Status Code Filtering for Asset Lists
 

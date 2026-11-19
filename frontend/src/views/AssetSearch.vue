@@ -12,10 +12,10 @@
             <span class="asm-tab-item">
               <span>{{ t.label }}</span>
               <span
-                v-if="overviewCounts[t.key] !== undefined"
+                v-if="getOverviewTabCount(t.key) !== undefined"
                 class="asm-tab-badge"
-                :class="{ 'has-data': (overviewCounts[t.key] || 0) > 0 }"
-              >{{ overviewCounts[t.key] === null ? '-' : overviewCounts[t.key] }}</span>
+                :class="{ 'has-data': (getOverviewTabCount(t.key) || 0) > 0 }"
+              >{{ getOverviewTabCount(t.key) === null ? '-' : getOverviewTabCount(t.key) }}</span>
             </span>
           </template>
         </a-tab-pane>
@@ -24,8 +24,16 @@
       <div v-if="activeTab === 'service'" style="margin-top: 8px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; background: var(--arl-bg-light); padding: 6px 12px; border-radius: 6px; border: 1px solid var(--arl-border-color);">
         <span class="asset-engine-label">{{ assetText('tasks.detectionEngine') }}</span>
         <a-radio-group v-model:value="serviceEngineType" button-style="solid" size="small" @change="onServiceEngineChange">
-          <a-radio-button value="nmap">{{ assetText('tasks.portServicesNmap') }}</a-radio-button>
-          <a-radio-button value="npoc">{{ assetText('assets.pythonPluginServicesLabel') }}</a-radio-button>
+          <a-radio-button value="nmap">
+            {{ overviewCounts.service !== undefined
+              ? assetText('assets.portServiceCount', { count: overviewCounts.service === null ? '-' : overviewCounts.service })
+              : assetText('tasks.portServicesNmap') }}
+          </a-radio-button>
+          <a-radio-button value="npoc">
+            {{ overviewCounts.npoc_service !== undefined
+              ? assetText('assets.pluginServiceCount', { count: overviewCounts.npoc_service === null ? '-' : overviewCounts.npoc_service })
+              : assetText('assets.pythonPluginServicesLabel') }}
+          </a-radio-button>
         </a-radio-group>
       </div>
 
@@ -655,9 +663,20 @@ const assetTabList = [
   { key: 'nuclei_result', label: 'nuclei' }
 ];
 
-// 各维度总量徽标：一次请求取回全部维度计数，避免为 12 个页签各发一次计数请求
+// 各维度总量徽标：一次请求取回底层 13 个资产集合计数，供 12 个页签展示（服务页签合并 service + npoc_service）
 // 取值为 null 表示该维度计数失败，徽标显示 "-" 而非 0
 const overviewCounts = ref({});
+
+const getOverviewTabCount = (key) => {
+  if (key === 'service') {
+    const nmapCount = overviewCounts.value.service;
+    const npocCount = overviewCounts.value.npoc_service;
+    if (nmapCount === undefined && npocCount === undefined) return undefined;
+    if (nmapCount === null || npocCount === null) return null;
+    return (Number(nmapCount) || 0) + (Number(npocCount) || 0);
+  }
+  return overviewCounts.value[key];
+};
 
 const fetchOverviewCounts = async () => {
   try {

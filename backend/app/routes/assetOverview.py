@@ -6,8 +6,8 @@ ns = Namespace('asset_overview', description="资产维度总览计数")
 
 logger = get_logger()
 
-# 资产维度 → 集合映射。
-# 与前端「资产搜索」页 12 个维度页签一一对应，名称需与该页 tab key 保持一致。
+# 资产维度 → 集合映射（底层共 13 个资产集合）。
+# 供前端「资产搜索」页 12 个维度页签渲染数量徽标，其中 service 与 npoc_service 合并归入「服务」页签。
 OVERVIEW_COLLECTIONS = [
     ("site", "site"),
     ("domain", "domain"),
@@ -57,7 +57,8 @@ class AssetOverviewCount(ARLResource):
         一次性返回各资产维度的总量，供前端渲染页签数量徽标使用，
         避免前端为每个维度单独发起一次计数请求。
 
-        返回结构中 counts 的键与「资产搜索」页 tab key 对应；
+        返回结构中 counts 包含底层 13 个资产集合的计数（前端「资产搜索」页共 12 个维度页签，
+        其中 service 与 npoc_service 合并归入「服务」页签）；
         计数失败的维度以 null 返回，前端应视为「未知」而非 0。
         """
         counts = {}
