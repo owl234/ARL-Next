@@ -82,7 +82,7 @@ For isolated regression checks, install the backend dependencies plus `pytest` a
 | **Batch Stop Enterprise Tasks** | `POST /api/icp/batch_stop/` | JSON: `{"task_ids": ["<task_id>"]}` (`task_id` alias also accepted) | Stops active enterprise OSINT tasks, clears group update locks, skips finished tasks, and returns `stopped_ids`, `skipped_ids`, and `failed_ids` |
 | **Resume Enterprise Task** | `POST /api/icp/resume/<task_id>` | URL path param: `task_id` | Requires terminal state (`stop` or `error`) with an incomplete `recon_checkpoint`; resumes remaining entities/dimensions in place while preserving existing assets |
 | **Backfill Missing Details** | `POST /api/icp/backfill_details/<task_id>` | URL path param: `task_id`; optional JSON: `{"query_types": ["app", "mapp", "kapp"]}` | Requires terminal task state; backfills empty `serviceName` entries without a 100-item batch cap (refreshing `dataId=0` or rotated IDs by filing number), merges cross-source duplicates, and recalculates statistics in place |
-| **Delete Task** | `POST /api/task/delete/` | JSON: `{"task_id": ["<task_id>"], "del_task_data": false}` | ⚠️ **State Constraint**: Only tasks in terminal states (`done`, `stop`, `error`) can be deleted. Running tasks return error code `104` ("Task is running") |
+| **Delete Task** | `POST /api/task/delete/` | JSON: `{"task_id": ["<task_id>"], "del_task_data": false, "del_synced_asset": false}` | ⚠️ **State Constraint**: Only tasks in terminal states (`done`, `stop`, `error`) can be deleted; active tasks return error code `104`. `del_synced_asset` defaults to `false` (preserving asset group archives) and only takes effect when `del_task_data: true`, removing `asset_*` records exclusively produced by the deleted task(s) and rebuilding derived collections |
 | **Restart Task** | `POST /api/task/restart/` | JSON: `{"task_id": ["<task_id>"]}` | Only stopped/finished tasks can be restarted |
 
 ### Associate New Scan Tasks with Asset Groups
@@ -258,9 +258,12 @@ Existing `/api/wih/` and `/api/asset_wih/` JSON lists return observations under 
 
 With no received HTTP response, `state=error` uses `timeout`, `connection_error`, `tls_error`, `request_error` or `time_budget`, without raw exception messages. Unattempted candidates use `state=skipped` with `reason` set to `unsupported_method`, `unresolved_url`, `outside_origin`, `excluded`, `site_quota` or `site_budget`. Asset-group monitoring refreshes existing observations without repeating new-record notifications. Passive scans after disabling probes preserve earlier observations; use `checked_at` for their age. All nested fields are optional and require no historical migration or backfill.
 
-### Global Dimension Counts
+### Dimension Counts
 
-`GET /api/asset_overview/count` returns the **global totals** for every asset dimension listed above in a single response. It is intended for rendering per-tab count badges without issuing one count request per dimension.
+`GET /api/asset_overview/count` returns counts for all 13 underlying asset collections in a single response to render per-tab badges without issuing one count request per dimension. An optional `scope_id` query parameter selects the counting scope:
+
+- **Omitted `scope_id`**: Returns global aggregate totals across the 13 unprefixed collections (`site`, `domain`, `ip`, etc.).
+- **With `scope_id=<asset_scope_id>`**: Returns per-dimension totals across the 13 `asset_*` collections (`asset_site`, `asset_domain`, etc.) for that asset group, matching the `total` of each `/api/asset_*/` list endpoint.
 
 Example response:
 
@@ -278,10 +281,25 @@ Example response:
 ```
 
 > [!IMPORTANT]
-> - The counts are **global aggregates** and are **not** the same scope as the `task_id` / `scope_id` filtered list endpoints. Do not use them to infer the asset volume of a single task or asset group;
+> - Omitting `scope_id` returns **global unprefixed collection aggregates**, whereas providing `scope_id` returns **asset-group `asset_*` totals**; do not conflate the two scopes;
 > - `counts` returns totals for all **13 underlying asset collections**; the UI views (**Asset search**, **Asset group details**, **Task details**, and the asset relationship profile drawer) consistently present **12 asset dimensions** (including `nuclei_result`), unifying `service` (Port services / Nmap) and `npoc_service` (Python plugin services) under the single **Services** dimension (tab/chip badge sums both engines, with per-engine breakdown inside);
 > - Each dimension's counting rule matches its corresponding list endpoint — for example `cip` counts distinct C-blocks and `stat_finger` counts distinct fingerprint names, rather than raw document counts;
 > - A dimension whose count fails is returned as `null`. Clients should treat it as "unknown" and avoid rendering it as `0` (for the merged **Services** dimension, if either `service` or `npoc_service` is `null`, treat the combined badge as unknown as well).
+
+### Asset Cascade Deletion & Derived Collection Recalculation
+
+All 26 dimension delete endpoints (13 unprefixed `/api/<dim>/delete/`, including `POST /api/stat_finger/delete/`; and 13 prefixed `/api/asset_<dim>/delete/`) follow unified hierarchy cascading, scope isolation, and derived-collection rebuild rules:
+
+- **Batch Limit & Input Validation**: Each delete call accepts at most **500** target identifiers (`_id` / `name` / CIDR); empty lists, invalid IDs, or oversized batches fail fast with code `400`. Both `GET /api/stat_finger/` and `GET /api/asset_stat_finger/` project `"_id"` equal to the fingerprint `name`, and their delete endpoints accept `_id` or `name`. `POST /api/cip/delete/` and `POST /api/asset_cip/delete/` accept both 24-hex ObjectIds and CIDR strings.
+- **Scope Isolation (`source_type`)**:
+  - **Asset Group Namespace (`/api/asset_<dim>/delete/`)**: Accepts optional `scope_id`; deletes strictly within that group's `asset_*` collections and tasks explicitly bound to it (`scope_id`, `sync_scope_id`, `synced_scope_id`, `options.scope_id`, `options.related_scope_id`, `options.scheduler_id`), leaving other asset groups and unbound standalone tasks intact.
+  - **Task & Global Namespace (`/api/<dim>/delete/`)**: Accepts optional `task_id` and `source_type` (`"task"` default or `"global"`). Under `"task"`, deletion stays scoped to the target task (plus its explicitly bound asset group and sibling bound tasks if bound); pass `"source_type": "global"` explicitly to cascade across all asset groups and tasks.
+- **Hierarchy Cascade & Derived Rebuilds**:
+  - Deleting higher-level entities cascades down the asset hierarchy (e.g., deleting a domain removes its subdomains, sites, URLs, file leaks, vulns, Nuclei findings, WIH records, and orphan IPs unreferenced by surviving domains or CIDR configs; deleting an IP unbinds `domain.ips` while preserving the domain; deleting a `service` strips only the exact `(service_name, ip, port_id)` endpoints in that document without wiping unrelated IPs sharing the same service name; deleting `stat_finger` pulls the fingerprint entry from host sites while retaining the sites).
+  - After mutation, derived collections (`cip` / `asset_cip`, `stat_finger` / `asset_stat_finger`, `service` / `asset_service`) are rebuilt from surviving host tables, affected `task.statistic` counters are recalculated, and cross-process dashboard/monitor caches are invalidated.
+- **Asset Group & Scheduler Linkage**:
+  - Deleting an asset group (`POST /api/asset_scope/delete/`) or removing seed targets (`GET /api/asset_scope/delete/`, `POST /api/asset_scope/update/`) synchronously cleans up its 13 `asset_*` collections, schedulers, and explicitly bound tasks; any in-flight enterprise recon update (`updating_icp_task_id`) is terminated and `icp_task.synced_scope_id`/`synced_scope_name` are unset while preserving `icp_task` and `icp_asset`. Renaming an asset group updates default-named `scheduler.name`, `icp_task.synced_scope_name`, and bound task scope-name fields.
+  - Stopping or deleting continuous monitors (`POST /api/scheduler/stop/`, `POST /api/scheduler/stop/batch`, `POST /api/scheduler/delete/`) revokes active or queued tasks spawned by those schedulers and refreshes `asset_scope.domain_status`, while retaining historical completed tasks and archived assets.
 
 ### Multiple HTTP Status Code Filtering for Asset Lists
 

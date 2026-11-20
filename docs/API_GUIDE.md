@@ -82,7 +82,7 @@
 | **批量停止企业任务** | `POST /api/icp/batch_stop/` | JSON：`{"task_ids": ["<task_id>"]}`（兼容 `task_id` 字段） | 逐项终止活跃企业测绘任务并释放关联资产组更新锁，自动跳过已结束任务，返回 `stopped_ids` / `skipped_ids` / `failed_ids` 明细 |
 | **断点续跑企业任务** | `POST /api/icp/resume/<task_id>` | URL 路径参数：`task_id` | 仅允许处于 `stop` 或 `error` 且存在未完成 `recon_checkpoint` 的任务；原位恢复剩余主体与维度测绘，保留已入库资产 |
 | **原位补全缺失详情** | `POST /api/icp/backfill_details/<task_id>` | URL 路径参数：`task_id`；可选 JSON：`{"query_types": ["app", "mapp", "kapp"]}` | 仅允许终态任务；取消单批 100 条截断上限，原位补全 `serviceName` 为空的条目（对 `dataId=0` 或已轮换失效记录按备案号重刷最新 `dataId`），并执行跨源同名合并与统计校准，不新建任务 |
-| **删除任务** | `POST /api/task/delete/` | JSON：`{"task_id": ["<task_id>"], "del_task_data": false}` | ⚠️ **前置条件约束**：仅允许删除处于 `done`、`stop` 或 `error` 结束态的任务；运行中任务将返回错误码 `104`（“任务运行中”） |
+| **删除任务** | `POST /api/task/delete/` | JSON：`{"task_id": ["<task_id>"], "del_task_data": false, "del_synced_asset": false}` | ⚠️ **前置条件约束**：仅允许删除处于 `done`、`stop` 或 `error` 结束态的任务；进行中任务将返回错误码 `104`。`del_synced_asset` 默认为 `false`（保留资产组台账），仅在同时指定 `del_task_data: true` 时生效，清理仅由被删任务独占同步至资产组的记录并重算派生统计 |
 | **重启任务** | `POST /api/task/restart/` | JSON：`{"task_id": ["<task_id>"]}` | 仅允许重启已结束的任务 |
 
 ### 新建任务关联资产组
@@ -260,9 +260,12 @@ rules:
 
 未收到任何 HTTP 响应时 `state=error`，`error` 区分 `timeout`、`connection_error`、`tls_error`、`request_error`、`time_budget`，不保存异常原文。未尝试的候选为 `state=skipped`，`reason` 区分 `unsupported_method`、`unresolved_url`、`outside_origin`、`excluded`、`site_quota`、`site_budget`。资产组监控会刷新已有候选的本次采集状态，不因状态变化重复发送新增通知；关闭主动采集后的静态扫描保留先前响应，响应时间以 `checked_at` 为准。新增嵌套字段均为可选，不需迁移或回填历史数据。
 
-### 全局维度计数接口
+### 维度计数接口
 
-`GET /api/asset_overview/count` 一次性返回上述各资产维度的**全库总量**，用于客户端渲染维度页签的数量徽标，避免为每个维度单独发起一次计数请求。
+`GET /api/asset_overview/count` 一次性返回底层 13 个资产集合的维度计数，用于客户端渲染维度页签的数量徽标，避免为每个维度单独发起计数请求。支持可选查询参数 `scope_id`：
+
+- **省略 `scope_id`**：统计全局无前缀资产集合（`site`、`domain`、`ip` 等 13 个集合）的聚合总量；
+- **传入 `scope_id=<asset_scope_id>`**：统计指定资产组下 `asset_*` 集合（`asset_site`、`asset_domain` 等 13 个集合）的维度总量，口径与各 `/api/asset_*/` 列表接口的 `total` 严格一致。
 
 响应示例：
 
@@ -280,10 +283,25 @@ rules:
 ```
 
 > [!IMPORTANT]
-> - 该接口返回的是**全局聚合口径**，与按 `task_id` / `scope_id` 过滤的列表接口**不是同一统计范围**，不可用于推导单个任务或单个资产组的资产量；
+> - 省略 `scope_id` 返回的是**全局无前缀集合聚合口径**，传入 `scope_id` 返回的是**指定资产组 `asset_*` 集合口径**，二者统计范围不同，不可混用推导；
 > - `counts` 返回底层 **13 个资产集合**的计数；前端「资产搜索」「资产组详情」「任务详情」与全链路资产画像抽屉统一展示 **12 个资产维度**（含 `nuclei_result`），其中 `service`（端口服务 Nmap）与 `npoc_service`（Python 插件服务）合并归入「服务」维度（总徽标取二者之和，页签/卡片内再区分两个引擎）；
 > - 各维度计数口径与其对应列表接口保持一致，例如 `cip` 统计去重后的 C 段数、`stat_finger` 统计去重后的指纹名数量，而非底层集合文档数；
 > - 单个维度计数失败时该字段返回 `null`，客户端应视为「未知」并避免渲染为 `0`（合并展示的「服务」维度在 `service` 或 `npoc_service` 任一为 `null` 时同样视为未知）。
+
+### 资产级联删除与派生重算约定
+
+平台 26 个维度删除接口（13 个无前缀 `/api/<dim>/delete/`，含 `POST /api/stat_finger/delete/`；13 个前缀 `/api/asset_<dim>/delete/`）共用统一的层级级联、作用域隔离与派生集合重算规则：
+
+- **批量上限与参数校验**：单次删除请求最多接受 **500** 项待删标识（`_id` / `name` / CIDR），空列表、非法 ID 或超过上限统一返回错误码 `400`。`GET /api/stat_finger/` 与 `GET /api/asset_stat_finger/` 的返回项均包含 `"_id"` 字段（与指纹 `name` 等值），删除时支持传入 `_id` 或 `name`；`POST /api/cip/delete/` 与 `POST /api/asset_cip/delete/` 同时接受 24 位 ObjectId 与 CIDR 字符串。
+- **作用域隔离（`source_type`）**：
+  - **资产组视图（`/api/asset_<dim>/delete/`）**：支持传入 `scope_id`，仅清理该资产组 `asset_*` 台账及显式绑定至该组的任务（`scope_id`、`sync_scope_id`、`synced_scope_id`、`options.scope_id`、`options.related_scope_id`、`options.scheduler_id`）内的对应记录，不影响其他存活资产组或未绑定该组的独立扫描任务。
+  - **任务与全局视图（`/api/<dim>/delete/`）**：支持可选字段 `task_id` 与 `source_type`（可选 `"task"` 或 `"global"`，缺省为 `"task"`）。`source_type: "task"` 时仅作用于对应任务（若任务已显式绑定资产组，则同步清理所属资产组及关联绑定任务）；仅当显式传入 `source_type: "global"` 时，才执行跨资产组、跨任务的全局级联清理。
+- **层级级联与派生重算**：
+  - 根实体删除自动向下清理关联记录（例如删域名级联清理同域站点、URL、文件泄露、漏洞、Nuclei、WIH 与不再被其他存活域名或网段配置引用的孤儿 IP；删 IP 解除 `domain.ips` 关联但保留域名文档；删服务仅精准剥离该记录所含 `(service_name, ip, port_id)` 端点而不误删同服务名下的其他 IP；删指纹统计仅从宿主站点 `finger` 数组中剥离对应指纹标签而保留站点本身）。
+  - 删除完成后自动从存活主表重算受影响范围的派生集合（`cip` / `asset_cip`、`stat_finger` / `asset_stat_finger`、`service` / `asset_service`），校准受影响任务的 `statistic` 计数，并失效跨进程仪表盘与监控缓存。
+- **资产组与持续监控联动**：
+  - 删除资产组（`POST /api/asset_scope/delete/`）或移除范围目标（`GET /api/asset_scope/delete/`、`POST /api/asset_scope/update/`）同步清理该组 13 个 `asset_*` 集合、关联监控计划及显式绑定任务；若资产组存在进行中的企业测绘更新任务（`updating_icp_task_id`），将先尝试终止并解除 `icp_task` 的 `synced_scope_id`/`synced_scope_name` 绑定（保留 `icp_task` 与 `icp_asset` 原始记录）。资产组改名时同步刷新默认命名的 `scheduler.name`、`icp_task.synced_scope_name` 及绑定任务中的资产组名称字段。
+  - 暂停或删除持续监控计划（`POST /api/scheduler/stop/`、`POST /api/scheduler/stop/batch`、`POST /api/scheduler/delete/`）会同步终止该计划派生的进行中与排队中监控任务并刷新 `asset_scope.domain_status`，历史已完成任务与已入库资产保持保留。
 
 ### 资产列表 HTTP 状态码多选筛选
 
