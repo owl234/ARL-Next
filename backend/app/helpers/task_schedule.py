@@ -101,11 +101,44 @@ def run_future_scan(item):
         "_id": item["_id"]
     }
     item["run_number"] = item.get("run_number", 0) + 1
+    item["last_run_time"] = int(time.time())
+    item["last_run_date"] = utils.curr_date()
     item["status"] = TaskScheduleStatus.DONE
+    item["next_run_date"] = "-"
     utils.conn_db('task_schedule').find_one_and_replace(query, item)
 
     # 为了防止多次运行，后提交任务
     submit_task_schedule(item)
+
+
+# 立即手动触发计划任务执行
+def run_task_schedule(_id):
+    query = {'_id': bson.ObjectId(_id)}
+    item = find_task_schedule(_id)
+    if not item:
+        return None
+
+    item["run_number"] = item.get("run_number", 0) + 1
+    item["last_run_time"] = int(time.time())
+    item["last_run_date"] = utils.curr_date()
+
+    if item.get("schedule_type") == "recurrent_scan":
+        if item.get("status") == TaskScheduleStatus.SCHEDULED and item.get("cron"):
+            item["next_run_date"] = get_next_run_date(item["cron"])
+    elif item.get("schedule_type") == "future_scan":
+        start_time = item.get("start_time", 0)
+        if 0 < start_time <= time.time():
+            item["status"] = TaskScheduleStatus.DONE
+            item["next_run_date"] = "-"
+
+    utils.conn_db('task_schedule').find_one_and_replace(query, item)
+
+    try:
+        submit_task_schedule(item)
+    except Exception as e:
+        return str(e)
+
+    return item
 
 
 # 查找计划任务

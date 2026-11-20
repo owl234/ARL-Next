@@ -42,6 +42,30 @@ class ARLScheduler(ARLResource):
         args = self.parser.parse_args()
         data = self.build_data(args=args, collection='scheduler')
 
+        try:
+            items = data.get("items") if isinstance(data, dict) else None
+            if items:
+                scope_ids = []
+                for item in items:
+                    sid = item.get("scope_id")
+                    if sid and len(str(sid)) == 24:
+                        try:
+                            scope_ids.append(ObjectId(str(sid)))
+                        except Exception:
+                            pass
+                if scope_ids:
+                    scope_docs = utils.conn_db('asset_scope').find(
+                        {"_id": {"$in": scope_ids}},
+                        {"name": 1}
+                    )
+                    scope_name_map = {str(doc["_id"]): doc.get("name", "") for doc in scope_docs}
+                    for item in items:
+                        sid = str(item.get("scope_id", ""))
+                        if not item.get("scope_name"):
+                            item["scope_name"] = scope_name_map.get(sid, "")
+        except Exception:
+            pass
+
         return data
 
 

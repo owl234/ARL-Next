@@ -84,6 +84,7 @@
 | **原位补全缺失详情** | `POST /api/icp/backfill_details/<task_id>` | URL 路径参数：`task_id`；可选 JSON：`{"query_types": ["app", "mapp", "kapp"]}` | 仅允许终态任务；取消单批 100 条截断上限，原位补全 `serviceName` 为空的条目（对 `dataId=0` 或已轮换失效记录按备案号重刷最新 `dataId`），并执行跨源同名合并与统计校准，不新建任务 |
 | **删除任务** | `POST /api/task/delete/` | JSON：`{"task_id": ["<task_id>"], "del_task_data": false, "del_synced_asset": false}` | ⚠️ **前置条件约束**：仅允许删除处于 `done`、`stop` 或 `error` 结束态的任务；进行中任务将返回错误码 `104`。`del_synced_asset` 默认为 `false`（保留资产组台账），仅在同时指定 `del_task_data: true` 时生效，清理仅由被删任务独占同步至资产组的记录并重算派生统计 |
 | **重启任务** | `POST /api/task/restart/` | JSON：`{"task_id": ["<task_id>"]}` | 仅允许重启已结束的任务 |
+| **立即执行计划任务** | `POST /api/task_schedule/run/` | JSON：`{"_id": ["<schedule_id>"]}` | 立即触发所选扫描计划任务派发进入调度队列，并递增 `run_number`、刷新 `last_run_date`（周期计划处于 `scheduled` 时同步重算 `next_run_date`） |
 
 ### 新建任务关联资产组
 
@@ -301,7 +302,7 @@ rules:
   - 删除完成后自动从存活主表重算受影响范围的派生集合（`cip` / `asset_cip`、`stat_finger` / `asset_stat_finger`、`service` / `asset_service`），校准受影响任务的 `statistic` 计数，并失效跨进程仪表盘与监控缓存。
 - **资产组与持续监控联动**：
   - 删除资产组（`POST /api/asset_scope/delete/`）或移除范围目标（`GET /api/asset_scope/delete/`、`POST /api/asset_scope/update/`）同步清理该组 13 个 `asset_*` 集合、关联监控计划及显式绑定任务；若资产组存在进行中的企业测绘更新任务（`updating_icp_task_id`），将先尝试终止并解除 `icp_task` 的 `synced_scope_id`/`synced_scope_name` 绑定（保留 `icp_task` 与 `icp_asset` 原始记录）。资产组改名时同步刷新默认命名的 `scheduler.name`、`icp_task.synced_scope_name` 及绑定任务中的资产组名称字段。
-  - 暂停或删除持续监控计划（`POST /api/scheduler/stop/`、`POST /api/scheduler/stop/batch`、`POST /api/scheduler/delete/`）会同步终止该计划派生的进行中与排队中监控任务并刷新 `asset_scope.domain_status`，历史已完成任务与已入库资产保持保留。
+  - 暂停或删除持续监控计划（`POST /api/scheduler/stop/`、`POST /api/scheduler/stop/batch`、`POST /api/scheduler/delete/`）会同步终止该计划派生的进行中与排队中监控任务（暂停时将 `next_run_date` 置为 `"-"`）并刷新 `asset_scope.domain_status`，历史已完成任务与已入库资产保持保留；`GET /api/scheduler/` 返回列表项时自动关联 `asset_scope` 补齐可读的 `scope_name` 字段。
 
 ### 资产列表 HTTP 状态码多选筛选
 

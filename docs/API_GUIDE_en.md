@@ -84,6 +84,7 @@ For isolated regression checks, install the backend dependencies plus `pytest` a
 | **Backfill Missing Details** | `POST /api/icp/backfill_details/<task_id>` | URL path param: `task_id`; optional JSON: `{"query_types": ["app", "mapp", "kapp"]}` | Requires terminal task state; backfills empty `serviceName` entries without a 100-item batch cap (refreshing `dataId=0` or rotated IDs by filing number), merges cross-source duplicates, and recalculates statistics in place |
 | **Delete Task** | `POST /api/task/delete/` | JSON: `{"task_id": ["<task_id>"], "del_task_data": false, "del_synced_asset": false}` | ⚠️ **State Constraint**: Only tasks in terminal states (`done`, `stop`, `error`) can be deleted; active tasks return error code `104`. `del_synced_asset` defaults to `false` (preserving asset group archives) and only takes effect when `del_task_data: true`, removing `asset_*` records exclusively produced by the deleted task(s) and rebuilding derived collections |
 | **Restart Task** | `POST /api/task/restart/` | JSON: `{"task_id": ["<task_id>"]}` | Only stopped/finished tasks can be restarted |
+| **Run Scheduled Task Now** | `POST /api/task_schedule/run/` | JSON: `{"_id": ["<schedule_id>"]}` | Immediately dispatches the selected scheduled scan(s) into the scheduling queue, incrementing `run_number` and updating `last_run_date` (recalculates `next_run_date` when a recurring schedule is in `scheduled` state) |
 
 ### Associate New Scan Tasks with Asset Groups
 
@@ -299,7 +300,7 @@ All 26 dimension delete endpoints (13 unprefixed `/api/<dim>/delete/`, including
   - After mutation, derived collections (`cip` / `asset_cip`, `stat_finger` / `asset_stat_finger`, `service` / `asset_service`) are rebuilt from surviving host tables, affected `task.statistic` counters are recalculated, and cross-process dashboard/monitor caches are invalidated.
 - **Asset Group & Scheduler Linkage**:
   - Deleting an asset group (`POST /api/asset_scope/delete/`) or removing seed targets (`GET /api/asset_scope/delete/`, `POST /api/asset_scope/update/`) synchronously cleans up its 13 `asset_*` collections, schedulers, and explicitly bound tasks; any in-flight enterprise recon update (`updating_icp_task_id`) is terminated and `icp_task.synced_scope_id`/`synced_scope_name` are unset while preserving `icp_task` and `icp_asset`. Renaming an asset group updates default-named `scheduler.name`, `icp_task.synced_scope_name`, and bound task scope-name fields.
-  - Stopping or deleting continuous monitors (`POST /api/scheduler/stop/`, `POST /api/scheduler/stop/batch`, `POST /api/scheduler/delete/`) revokes active or queued tasks spawned by those schedulers and refreshes `asset_scope.domain_status`, while retaining historical completed tasks and archived assets.
+  - Stopping or deleting continuous monitors (`POST /api/scheduler/stop/`, `POST /api/scheduler/stop/batch`, `POST /api/scheduler/delete/`) revokes active or queued tasks spawned by those schedulers (resetting `next_run_date` to `"-"` when stopped) and refreshes `asset_scope.domain_status`, while retaining historical completed tasks and archived assets; `GET /api/scheduler/` automatically enriches each returned item with its resolved `scope_name`.
 
 ### Multiple HTTP Status Code Filtering for Asset Lists
 

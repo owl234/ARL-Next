@@ -236,3 +236,36 @@ class RecoverARLTaskScheduler(ARLResource):
 
         return utils.build_ret(ErrorMsg.Success, ret_data)
 
+
+run_task_schedule_fields = ns.model('runTaskSchedule',  {
+    "_id": fields.List(fields.String(description="计划任务ID列表"))
+})
+
+
+@ns.route('/run/')
+class RunARLTaskScheduler(ARLResource):
+
+    @auth
+    @ns.expect(run_task_schedule_fields)
+    def post(self):
+        """
+        立即执行计划任务
+        """
+        args = self.parse_args(run_task_schedule_fields)
+        job_id_list = args.get("_id", [])
+
+        ret_data = {"_id": job_id_list}
+
+        for scheduler_id in job_id_list:
+            item = task_schedule.find_task_schedule(scheduler_id)
+            if not item:
+                return utils.build_ret(ErrorMsg.TaskScheduleNotFound, ret_data)
+
+        for scheduler_id in job_id_list:
+            res = task_schedule.run_task_schedule(scheduler_id)
+            if isinstance(res, str):
+                return utils.build_ret(ErrorMsg.Error, {"error": res})
+
+        return utils.build_ret(ErrorMsg.Success, ret_data)
+
+

@@ -1501,7 +1501,11 @@ def cascade_delete_schedulers(scheduler_ids, stop_only=False):
     if stop_only:
         _db("scheduler").update_many(
             {"_id": {"$in": sch_obj_ids}},
-            {"$set": {"status": SchedulerStatus.STOP}},
+            {"$set": {
+                "status": SchedulerStatus.STOP,
+                "next_run_date": "-",
+                "next_run_time": sys.maxsize,
+            }},
         )
     else:
         _db("scheduler").delete_many({"_id": {"$in": sch_obj_ids}})
