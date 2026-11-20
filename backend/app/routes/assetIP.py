@@ -1,4 +1,3 @@
-from bson import ObjectId
 from flask_restx import fields, Namespace
 from app.utils import get_logger, auth
 from . import base_query_fields, ARLResource, get_arl_parser
@@ -118,7 +117,8 @@ class ARLIPExportDomain(ARLResource):
 # 接口 E：删除 IP 记录 (POST /delete/)
 # ==========================================
 delete_ip_fields = ns.model('deleteAssetIP',  {
-    '_id': fields.List(fields.String(required=True, description="数据_id"))
+    '_id': fields.List(fields.String(required=True, description="数据_id")),
+    'scope_id': fields.String(required=False, description="可选资产组 ID")
 })
 
 
@@ -128,14 +128,11 @@ class DeleteARLAssetIP(ARLResource):
     @ns.expect(delete_ip_fields)
     def post(self):
         """
-        删除资产组中的IP
+        删除资产组中的IP（含下级级联并向上解绑保留子域名）
         """
         args = self.parse_args(delete_ip_fields)
-        id_list = args.pop('_id', "")
-
-        # 挨个物理删除
-        for _id in id_list:
-            query = {'_id': ObjectId(_id)}
-            utils.conn_db('asset_ip').delete_one(query)
-
-        return utils.build_ret(ErrorMsg.Success, {'_id': id_list})
+        from app.services.asset_cascade_service import handle_dimension_delete
+        return handle_dimension_delete(
+            "ip", True, args,
+            build_ret_fn=utils.build_ret, success_msg=ErrorMsg.Success, db_getter=utils.conn_db,
+        )

@@ -174,6 +174,37 @@ def wrap_domain_executors(base_domain=None, scheduler_id=None, scope_id=None, op
 
 
 def oneshot_domain_executors(base_domain=None, scope_id=None, options=None, name="", task_id=None):
+    # 消费前资产组与目标存活校验（与周期 domain_executors 保持一致的 Fail-Closed 防护）
+    if scope_id:
+        try:
+            scope_obj = utils.conn_db('asset_scope').find_one({"_id": ObjectId(str(scope_id))})
+            if not scope_obj or (base_domain and base_domain not in scope_obj.get("scope_array", [])):
+                logger.warning("stop oneshot_domain_executors: target {} is no longer in scope {}, dropping task.".format(base_domain, scope_id))
+                if task_id:
+                    conn('task').delete_one({"_id": ObjectId(task_id)})
+                return
+        except InvalidId as ex:
+            logger.error(f"stop oneshot_domain_executors: invalid scope_id '{scope_id}': {ex}. Dropping task.")
+            if task_id:
+                conn('task').delete_one({"_id": ObjectId(task_id)})
+            return
+        except PyMongoError as ex:
+            logger.warning(f"retry oneshot_domain_executors: MongoDB error checking scope {scope_id}: {ex}")
+            task_obj = current_task._get_current_object() if current_task else None
+            if task_obj:
+                try:
+                    task_obj.retry(exc=ex, countdown=30, max_retries=3)
+                except MaxRetriesExceededError:
+                    if task_id:
+                        conn('task').delete_one({"_id": ObjectId(task_id)})
+                    return
+            return
+        except Exception as ex:
+            logger.error(f"stop oneshot_domain_executors: unexpected error checking scope {scope_id}: {ex}. Dropping task.")
+            if task_id:
+                conn('task').delete_one({"_id": ObjectId(task_id)})
+            return
+
     celery_id = "celery_id_placeholder"
 
     if current_task._get_current_object():
@@ -621,15 +652,27 @@ class IPExecutor(IPTask):
                 self.asset_ip_port_set.add(ip_port)
 
     def async_ip_info(self):
+        from app.services.asset_cascade_service import is_scope_target_alive
+
+        if not is_scope_target_alive(self.scope_id):
+            logger.warning(f"abort IPExecutor.async_ip_info: scope {self.scope_id} is no longer alive")
+            self.ip_info_list = []
+            return
+
         new_ip_info_list = []
         for ip_info in self.ip_info_list:
             curr_ip = ip_info["ip"]
+            if not is_scope_target_alive(self.scope_id, curr_ip, strict_ip=True):
+                logger.warning(f"skip IPExecutor.async_ip_info for {curr_ip}: removed from scope {self.scope_id}")
+                continue
+
             curr_date_obj = utils.curr_date_obj()
 
-            # 新发现的IP ，直接入资产集合
+            # 新发现的IP ，直接入资产集合（补齐 task_id 溯源）
             if curr_ip not in self.asset_ip_info_map:
                 asset_ip_info = ip_info.copy()
                 asset_ip_info["scope_id"] = self.scope_id
+                asset_ip_info["task_id"] = self.task_id
                 asset_ip_info["domain"] = []
                 asset_ip_info["save_date"] = curr_date_obj
                 asset_ip_info["update_date"] = curr_date_obj
@@ -652,6 +695,7 @@ class IPExecutor(IPTask):
                 update_info = dict()
                 update_info["update_date"] = utils.curr_date_obj()
                 update_info["port_info"] = asset_ip_info["port_info"]
+                update_info["task_id"] = self.task_id
                 query = {"_id": asset_ip_info["_id"]}
                 utils.conn_db('asset_ip').update_one(query, {"$set": update_info})
 
@@ -782,6 +826,45 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options, task_id=None
             update_scope_domain_status(scope_id, ip, "error", getattr(executor, 'task_id', None))
 
 def oneshot_ip_executors(target, scope_id, task_name, options, task_id=None):
+    # 消费前资产组与 IP 目标存活校验（与周期 ip_executor 保持一致的 Fail-Closed 防护）
+    if scope_id:
+        try:
+            scope_obj = utils.conn_db('asset_scope').find_one({"_id": ObjectId(str(scope_id))})
+            if not scope_obj:
+                logger.warning(f"stop oneshot_ip_executors: scope {scope_id} not found, dropping task.")
+                if task_id:
+                    conn('task').delete_one({"_id": ObjectId(task_id)})
+                return
+            valid_scopes = set(scope_obj.get("scope_array", []))
+            valid_targets = [t for t in str(target or "").split() if t in valid_scopes]
+            if not valid_targets:
+                logger.warning(f"stop oneshot_ip_executors: target(s) '{target}' no longer in scope {scope_id}, dropping task.")
+                if task_id:
+                    conn('task').delete_one({"_id": ObjectId(task_id)})
+                return
+            target = " ".join(valid_targets)
+        except InvalidId as ex:
+            logger.error(f"stop oneshot_ip_executors: invalid scope_id '{scope_id}': {ex}. Dropping task.")
+            if task_id:
+                conn('task').delete_one({"_id": ObjectId(task_id)})
+            return
+        except PyMongoError as ex:
+            logger.warning(f"retry oneshot_ip_executors: MongoDB error checking scope {scope_id}: {ex}")
+            task_obj = current_task._get_current_object() if current_task else None
+            if task_obj:
+                try:
+                    task_obj.retry(exc=ex, countdown=30, max_retries=3)
+                except MaxRetriesExceededError:
+                    if task_id:
+                        conn('task').delete_one({"_id": ObjectId(task_id)})
+                    return
+            return
+        except Exception as ex:
+            logger.error(f"stop oneshot_ip_executors: unexpected error checking scope {scope_id}: {ex}. Dropping task.")
+            if task_id:
+                conn('task').delete_one({"_id": ObjectId(task_id)})
+            return
+
     # This is a one-time execution, no scheduler_id
     executor = IPExecutor(target, scope_id, task_name, "oneshot", options)
     try:

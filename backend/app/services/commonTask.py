@@ -139,15 +139,19 @@ class CommonTask(object):
         finger_stat_map = utils.arl.gen_stat_finger_map(self.task_id)
         logger.info("insert finger stat {}".format(len(finger_stat_map)))
 
+        items = []
         for key in finger_stat_map:
             data = finger_stat_map[key].copy()
             data["task_id"] = self.task_id
-            utils.safe_insert_asset('stat_finger', ['task_id', 'name'], data)
+            items.append(data)
+        if items:
+            utils.safe_insert_asset_many('stat_finger', ['task_id', 'name'], items)
 
     def insert_cip_stat(self):
         cip_map = utils.arl.gen_cip_map(self.task_id)
         logger.info("insert cip stat {}".format(len(cip_map)))
 
+        items = []
         for cidr_ip in cip_map:
             item = cip_map[cidr_ip]
             ip_list = list(item["ip_set"])
@@ -161,8 +165,9 @@ class CommonTask(object):
                 "domain_list": domain_list,
                 "task_id": self.task_id
             }
-
-            utils.safe_insert_asset('cip', ['task_id', 'cidr_ip'], data)
+            items.append(data)
+        if items:
+            utils.safe_insert_asset_many('cip', ['task_id', 'cidr_ip'], items)
 
     # 资产同步
     def sync_asset(self, push_flag=True):

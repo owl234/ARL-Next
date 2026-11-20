@@ -181,9 +181,31 @@ class ConnMongo(object):
         pid = os.getpid()
         if not hasattr(cls, 'instance') or getattr(cls, '_pid', None) != pid:
             cls.instance = super(ConnMongo, cls).__new__(cls)
-            cls.instance.conn = MongoClient(Config.MONGO_URL, connect=False)
+            cls.instance.conn = MongoClient(
+                Config.MONGO_URL,
+                connect=False,
+                maxPoolSize=40,
+                minPoolSize=2,
+                maxIdleTimeMS=300000,
+                connectTimeoutMS=10000,
+                serverSelectionTimeoutMS=15000,
+                retryWrites=True,
+                retryReads=True,
+            )
+            cls.instance._proxy_cache = {}
             cls._pid = pid
         return cls.instance
+
+    def get_collection_proxy(self, collection, db_name=None):
+        import os
+        pid = os.getpid()
+        target_db = db_name or Config.MONGO_DB
+        cache_key = (pid, target_db, collection)
+        proxy = self._proxy_cache.get(cache_key)
+        if proxy is None:
+            proxy = SafeCollectionProxy(self.conn[target_db][collection])
+            self._proxy_cache[cache_key] = proxy
+        return proxy
 
 
 class SafeCollectionProxy:
@@ -228,11 +250,12 @@ class SafeCollectionProxy:
             return wrapper
         return attr
 
-def conn_db(collection, db_name = None):
 
-    conn = ConnMongo().conn
+def conn_db(collection, db_name=None):
+    mongo = ConnMongo()
+    if hasattr(mongo, 'get_collection_proxy'):
+        return mongo.get_collection_proxy(collection, db_name=db_name)
+    conn = mongo.conn
     if db_name:
         return SafeCollectionProxy(conn[db_name][collection])
-
-    else:
-        return SafeCollectionProxy(conn[Config.MONGO_DB][collection])
+    return SafeCollectionProxy(conn[Config.MONGO_DB][collection])

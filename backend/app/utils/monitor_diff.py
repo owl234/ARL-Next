@@ -1,17 +1,65 @@
 from functools import lru_cache
+import threading
+import time
 from bson import ObjectId
 from app.utils.conn import conn_db
 
-@lru_cache(maxsize=1024)
-def _get_task_scope_id(task_id):
-    if not task_id: return None
+_TASK_SCOPE_CACHE_VERSION_ID = "_task_scope_cache_version"
+_TASK_SCOPE_VER_LOCK = threading.Lock()
+_TASK_SCOPE_VER_STATE = {"ver": None, "checked_at": 0.0}
+_TASK_SCOPE_VER_CHECK_INTERVAL = 2.0
+
+
+def _read_task_scope_cache_version():
     try:
-        item = conn_db('task').find_one({"_id": ObjectId(task_id)})
-        if item and item.get("options", {}).get("scope_id"):
-            return item.get("options", {}).get("scope_id")
+        doc = conn_db('system_config').find_one({"_id": _TASK_SCOPE_CACHE_VERSION_ID}, {"version": 1})
+        if doc:
+            return doc.get("version")
     except Exception:
         pass
     return None
+
+
+def _sync_task_scope_cache_version(force=False):
+    now = time.time()
+    if not force and (now - _TASK_SCOPE_VER_STATE["checked_at"] < _TASK_SCOPE_VER_CHECK_INTERVAL):
+        return
+    with _TASK_SCOPE_VER_LOCK:
+        now = time.time()
+        if not force and (now - _TASK_SCOPE_VER_STATE["checked_at"] < _TASK_SCOPE_VER_CHECK_INTERVAL):
+            return
+        current_ver = _read_task_scope_cache_version()
+        _TASK_SCOPE_VER_STATE["checked_at"] = now
+        if current_ver is not None and _TASK_SCOPE_VER_STATE["ver"] != current_ver:
+            _get_task_scope_id_cached.cache_clear()
+            _TASK_SCOPE_VER_STATE["ver"] = current_ver
+
+
+def clear_task_scope_cache():
+    with _TASK_SCOPE_VER_LOCK:
+        _get_task_scope_id_cached.cache_clear()
+        _TASK_SCOPE_VER_STATE["checked_at"] = 0.0
+
+
+@lru_cache(maxsize=1024)
+def _get_task_scope_id_cached(task_id):
+    if not task_id:
+        return None
+    try:
+        item = conn_db('task').find_one({"_id": ObjectId(task_id)}, {"options.scope_id": 1, "scope_id": 1})
+        if item:
+            opts = item.get("options") if isinstance(item.get("options"), dict) else {}
+            return opts.get("scope_id") or item.get("scope_id")
+    except Exception:
+        pass
+    return None
+
+
+def _get_task_scope_id(task_id):
+    if not task_id:
+        return None
+    _sync_task_scope_cache_version()
+    return _get_task_scope_id_cached(task_id)
 
 def _get_baseline_query(category, item, scope_id):
     if category == "wih":

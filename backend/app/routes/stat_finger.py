@@ -1,5 +1,6 @@
 from flask_restx import fields, Namespace
 from app.utils import get_logger, auth
+from app.modules import ErrorMsg
 from . import base_query_fields, ARLResource, get_arl_parser
 from app import utils
 
@@ -40,8 +41,8 @@ class ARLStatFingerprint(ARLResource):
                 "update_diff": {"$first": "$update_diff"}
             }},
             {"$project": {
-                "_id": 0, 
-                "name": "$_id", 
+                "_id": "$_id",
+                "name": "$_id",
                 "cnt": 1,
                 "change_status": 1,
                 "update_diff": 1
@@ -64,3 +65,27 @@ class ARLStatFingerprint(ARLResource):
             "items": items,
             "code": 200
         }
+
+
+delete_result_fields = ns.model('deleteStatFinger', {
+    '_id': fields.List(fields.String, required=False, description="指纹记录 _id 或指纹名称列表"),
+    'name': fields.List(fields.String, required=False, description="指纹名称列表"),
+    'task_id': fields.String(required=False, description="可选任务 ID（限定任务作用域）"),
+    'source_type': fields.String(required=False, description="可选删除作用域：task | global")
+})
+
+
+@ns.route('/delete/')
+class DeleteARLStatFingerprint(ARLResource):
+    @auth
+    @ns.expect(delete_result_fields)
+    def post(self):
+        """
+        删除指纹统计信息（同时从对应作用域站点的 finger 数组中剥离该指纹，保留宿主站点）
+        """
+        args = self.parse_args(delete_result_fields)
+        from app.services.asset_cascade_service import handle_dimension_delete
+        return handle_dimension_delete(
+            "stat_finger", False, args,
+            build_ret_fn=utils.build_ret, success_msg=ErrorMsg.Success, db_getter=utils.conn_db,
+        )

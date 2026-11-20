@@ -7,8 +7,9 @@ logger = get_logger()
 
 
 class AssetWihMonitor(object):
-    def __init__(self, scope_id: str):
+    def __init__(self, scope_id: str, task_id: str = None):
         self.scope_id = scope_id
+        self.task_id = task_id
         self.scope_domains = []  # 资产组中的域名范围
         self.scope_name = None  # 资产组名称
         self.sites = []
@@ -31,11 +32,21 @@ class AssetWihMonitor(object):
 
 
     def _batch_save_wih_results(self, wih_results) -> list:
+        from app.services.asset_cascade_service import is_scope_target_alive
+
         results = []
         from pymongo import UpdateOne
         batch_size = 1000
 
+        if not is_scope_target_alive(self.scope_id):
+            logger.warning("abort AssetWihMonitor._batch_save_wih_results: scope {} no longer exists".format(self.scope_id))
+            return results
+
         for i in range(0, len(wih_results), batch_size):
+            if not is_scope_target_alive(self.scope_id):
+                logger.warning("stop AssetWihMonitor batch write: scope {} deleted".format(self.scope_id))
+                break
+
             batch_items = wih_results[i:i + batch_size]
             bulk_operations = []
 
@@ -55,6 +66,8 @@ class AssetWihMonitor(object):
 
             # 3. 遍历批次构建原子操作
             for item in batch_items:
+                if item.site and not is_scope_target_alive(self.scope_id, item.site):
+                    continue
                 dedup_key = (item.site, str(item.fnv_hash))
                 query = {"scope_id": self.scope_id, "site": item.site, "fnv_hash": item.fnv_hash}
 
@@ -67,15 +80,17 @@ class AssetWihMonitor(object):
                         update["api_request.verified"] = api_request.get("verified", False)
                     bulk_operations.append(UpdateOne(query, {"$set": update}))
                 else:
-                    # 预过滤逻辑（黑名单、合规性检查）
+                    # 预过滤逻辑（黑名单、合规性检查与最新资产组范围存活校验）
                     if item.recordType == "domain":
+                        if not is_scope_target_alive(self.scope_id, item.content):
+                            continue
                         if self.scope_domains:
                             if not domain_in_scope_domain(item.content, self.scope_domains):
                                 continue
                         if utils.check_domain_black(item.content) or utils.is_forbidden_domain(item.content):
                             continue
                     
-                    # 确定为新增漏洞
+                    # 确定为新增情报
                     record_dict = item.dump_json()
                     curr_date = utils.curr_date_obj()
                     record_dict.update({
@@ -83,6 +98,8 @@ class AssetWihMonitor(object):
                         "save_date": curr_date,
                         "update_date": curr_date
                     })
+                    if self.task_id:
+                        record_dict["task_id"] = self.task_id
                     
                     bulk_operations.append(UpdateOne(query, {"$set": record_dict}, upsert=True))
                     results.append(item)
@@ -111,8 +128,8 @@ class AssetWihMonitor(object):
         return results
 
 
-def asset_wih_monitor(scope_id: str):
-    monitor = AssetWihMonitor(scope_id)
+def asset_wih_monitor(scope_id: str, task_id: str = None):
+    monitor = AssetWihMonitor(scope_id, task_id=task_id)
     results = monitor.run()
     return results
 

@@ -148,8 +148,16 @@ class TaskResultTests(unittest.TestCase):
         body = self.get('stat_finger/', task_id='task-a', name__eq='task-a-value').get_json()
         self.assertEqual(body['total'], 1)
         self.assertEqual(body['items'][0]['cnt'], 7)
-        self.assertNotIn('_id', body['items'][0])
-        self.assertEqual(self.client.post('/api/stat_finger/delete/', json={}, headers=self.headers).status_code, 404)
+        self.assertEqual(body['items'][0]['_id'], 'task-a-value')
+        self.assertEqual(self.client.post('/api/stat_finger/delete/', json={}, headers=self.headers).get_json()['code'], 400)
+        del_resp = self.client.post(
+            '/api/stat_finger/delete/',
+            json={'name': ['task-a-value'], 'task_id': 'task-a'},
+            headers=self.headers,
+        ).get_json()
+        self.assertEqual(del_resp['code'], 200)
+        self.assertEqual(self.db.stat_finger.count_documents({'task_id': 'task-a', 'name': 'task-a-value'}), 0)
+        self.assertEqual(self.db.asset_stat_finger.count_documents({}), 2)
 
 
 if __name__ == '__main__':

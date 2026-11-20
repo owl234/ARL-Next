@@ -1,4 +1,3 @@
-from bson import ObjectId
 from flask_restx import fields, Namespace
 from app.utils import get_logger, auth
 from . import base_query_fields, ARLResource, get_arl_parser
@@ -40,7 +39,9 @@ class ARLFileLeak(HttpStatusResource):
 
 
 delete_fileleak_fields = ns.model('deleteFileleakFields',  {
-    '_id': fields.List(fields.String(required=True, description="文件泄漏 _id"))
+    '_id': fields.List(fields.String(required=True, description="文件泄漏 _id")),
+    'task_id': fields.String(required=False, description="可选任务 ID"),
+    'source_type': fields.String(required=False, description="可选删除作用域：task | global")
 })
 
 
@@ -53,10 +54,9 @@ class DeleteARLFileleak(ARLResource):
         删除 文件泄漏
         """
         args = self.parse_args(delete_fileleak_fields)
-        id_list = args.pop('_id', [])
-        for _id in id_list:
-            query = {'_id': ObjectId(_id)}
-            utils.conn_db('fileleak').delete_one(query)
-
-        return utils.build_ret(ErrorMsg.Success, {'_id': id_list})
+        from app.services.asset_cascade_service import handle_dimension_delete
+        return handle_dimension_delete(
+            "fileleak", False, args,
+            build_ret_fn=utils.build_ret, success_msg=ErrorMsg.Success, db_getter=utils.conn_db,
+        )
 

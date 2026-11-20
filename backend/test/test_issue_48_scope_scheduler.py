@@ -34,11 +34,11 @@ class MockCollection:
         self.update_calls = []
         self.delete_calls = []
 
-    def find(self, query=None):
+    def find(self, query=None, projection=None):
         query = query or {}
         return [doc for doc in self.docs if self._matches(doc, query)]
 
-    def find_one(self, query=None):
+    def find_one(self, query=None, projection=None):
         query = query or {}
         for doc in self.docs:
             if self._matches(doc, query):
@@ -53,6 +53,16 @@ class MockCollection:
                     doc.update(update["$set"])
                 return MagicMock(modified_count=1)
         return MagicMock(modified_count=0)
+
+    def update_many(self, query, update):
+        self.update_calls.append((query, update))
+        cnt = 0
+        for doc in self.docs:
+            if self._matches(doc, query):
+                if "$set" in update:
+                    doc.update(update["$set"])
+                cnt += 1
+        return MagicMock(modified_count=cnt)
 
     def delete_one(self, query):
         self.delete_calls.append(query)
@@ -71,26 +81,58 @@ class MockCollection:
     def count_documents(self, query):
         return len(self.find(query))
 
-    def bulk_write(self, requests):
+    def bulk_write(self, requests, ordered=False):
         return MagicMock(modified_count=len(requests))
 
     def _matches(self, doc, query):
         for k, v in query.items():
-            if k == "_id":
-                if str(doc.get("_id")) != str(v):
+            if k == "$and":
+                if not all(self._matches(doc, sub) for sub in v):
                     return False
-            elif k == "status" and isinstance(v, dict) and "$nin" in v:
-                if doc.get("status") in v["$nin"]:
+                continue
+            if k == "$or":
+                if not any(self._matches(doc, sub) for sub in v):
                     return False
-            elif k == "next_run_time" and isinstance(v, dict) and "$lte" in v:
-                if doc.get("next_run_time", 0) > v["$lte"]:
-                    return False
-            elif k.startswith("options."):
-                sub_key = k.split(".", 1)[1]
-                if doc.get("options", {}).get(sub_key) != v:
+                continue
+            if "." in k:
+                curr = doc
+                for part in k.split("."):
+                    curr = curr.get(part) if isinstance(curr, dict) else None
+                doc_val = curr
+            else:
+                doc_val = doc.get(k)
+
+            if isinstance(v, dict):
+                if "$in" in v:
+                    in_vals = v["$in"]
+                    if k == "_id":
+                        if not any(str(doc_val) == str(iv) for iv in in_vals):
+                            return False
+                    elif isinstance(doc_val, list):
+                        if not any(item in in_vals for item in doc_val):
+                            return False
+                    elif doc_val not in in_vals:
+                        return False
+                if "$nin" in v:
+                    if doc_val in v["$nin"]:
+                        return False
+                if "$lte" in v:
+                    if doc_val is None or doc_val > v["$lte"]:
+                        return False
+                if "$gte" in v:
+                    if doc_val is None or doc_val < v["$gte"]:
+                        return False
+                if "$lt" in v:
+                    if doc_val is None or doc_val >= v["$lt"]:
+                        return False
+                if "$gt" in v:
+                    if doc_val is None or doc_val <= v["$gt"]:
+                        return False
+            elif k == "_id":
+                if str(doc_val) != str(v):
                     return False
             else:
-                if doc.get(k) != v:
+                if doc_val != v:
                     return False
         return True
 

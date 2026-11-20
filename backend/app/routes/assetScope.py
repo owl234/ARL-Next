@@ -362,25 +362,15 @@ class DeleteARLAssetScope(ARLResource):
             update_fields["domain_status"] = scope_data["domain_status"]
 
         try:
+            # 先写后清原子顺序：先更新 asset_scope 使存活栅栏立即生效，再执行 L1->L2->L3 级联清理
             utils.conn_db(self._table).update_one(query, {"$set": update_fields})
-            
-            # --- 新增：深度级联清理孤儿记录 (级联删除属于该资产的所有子资产) ---
-            # 清理由于将该主干目标踢出 Scope 而产生的废弃监控状态和指纹历史
-            utils.conn_db("asset_domain").delete_many({"scope_id": str(scope_id), "domain": scope})
-            utils.conn_db("asset_ip").delete_many({"scope_id": str(scope_id), "ip": scope})
-            
-            # 站点与WIH不仅通过 scope_id 关联，还需要过滤出归属于刚被删除的 scope (即基准 domain/ip) 的记录
-            # 我们这里采用以 domain/ip 作为精确匹配 (通常子系统收集资产时会保存关联的 base_domain/ip 到 domain 字段)
-            utils.conn_db("asset_site").delete_many({"scope_id": str(scope_id), "domain": scope})
-            utils.conn_db("asset_wih").delete_many({"scope_id": str(scope_id), "domain": scope})
-
-            # 级联物理清理周期监控任务，规避脱节盲派发 (Issue #48)
-            utils.conn_db("scheduler").delete_many({"scope_id": str(scope_id), "domain": scope})
+            from app.services.asset_cascade_service import cascade_remove_scope_targets
+            cascade_remove_scope_targets(str(scope_id), [scope])
         except Exception as e:
             logger.error(f"delete asset_scope target error, scope_id={scope_id}, scope={scope}, detail={e}")
             return utils.build_ret(ErrorMsg.Error, {"error": "数据库操作异常，请查看服务端日志"})
 
-        return utils.build_ret(ErrorMsg.Success, {"scope_id": scope_id, "scope":scope})
+        return utils.build_ret(ErrorMsg.Success, {"scope_id": scope_id, "scope": scope})
 
     def get_scope_data(self, scope_id):
         try:
@@ -390,38 +380,30 @@ class DeleteARLAssetScope(ARLResource):
         except Exception:
             return None
 
-    # 接口 B：整体销毁 (POST) - 连锅端！
+    # 接口 B：整体销毁 (POST) - 统一级联清理
     @auth
     @ns.expect(delete_task_post_fields)
     def post(self):
         """
-        删除资产组和资产组中的资产 (极其危险的操作)
+        删除资产组和资产组中的资产（含显式绑定任务与监控级联清理）
         """
         args = self.parse_args(delete_task_post_fields)
         scope_id_list = args.pop('scope_id')
 
-        # 1. 第一轮循环：纯校验
-        for scope_id in scope_id_list:
-            if not self.get_scope_data(scope_id):
-                return utils.build_ret(ErrorMsg.NotFoundScopeID, {"scope_id": scope_id})
-
-        # 2. 定义受牵连的表（因为你把地契烧了，那这块地上的所有财产全得清空）
-        table_list = ["asset_domain", "asset_site", "asset_ip", "scheduler", "asset_wih"]
-
-        # 3. 第二轮循环：大清洗 (级联删除)
         try:
-            for scope_id in scope_id_list:
-                # 删地契本身
-                utils.conn_db(self._table).delete_many({'_id': ObjectId(scope_id)})
-
-                # 删牵连的战利品
-                for name in table_list:
-                    utils.conn_db(name).delete_many({'scope_id': str(scope_id)})
+            from app.services.asset_cascade_service import cascade_delete_scopes
+            res = cascade_delete_scopes(scope_id_list)
+            if not res.get("ok"):
+                return utils.build_ret(res.get("error", ErrorMsg.NotFoundScopeID), res.get("data", {}))
         except Exception as e:
             logger.error(f"batch delete asset_scope error, scope_ids={scope_id_list}, detail={e}")
             return utils.build_ret(ErrorMsg.Error, {"error": "数据库操作异常，请查看服务端日志"})
 
-        return utils.build_ret(ErrorMsg.Success, {"scope_id": scope_id_list})
+        return utils.build_ret(ErrorMsg.Success, {
+            "scope_id": scope_id_list,
+            "deleted_tasks": res.get("deleted_tasks", 0),
+            "deleted_schedulers": res.get("deleted_schedulers", 0),
+        })
 
 
 # ==========================================
@@ -560,6 +542,8 @@ class UpdateARLAssetScope(ARLResource):
             scope_data["ip_array"] = list(sa) if st == AssetScopeType.IP else []
 
         update_fields = {}
+        old_name = scope_data.get("name")
+        removed_scopes = set()
         
         name = args.pop('name', None)
         if name:
@@ -631,15 +615,8 @@ class UpdateARLAssetScope(ARLResource):
             if not isinstance(domain_status, dict):
                 domain_status = {}
 
-            # 级联深度清理被移除主干目标的孤儿数据
             for removed in removed_scopes:
                 domain_status.pop(removed, None)
-                utils.conn_db("asset_domain").delete_many({"scope_id": str(scope_id), "domain": removed})
-                utils.conn_db("asset_ip").delete_many({"scope_id": str(scope_id), "ip": removed})
-                utils.conn_db("asset_site").delete_many({"scope_id": str(scope_id), "domain": removed})
-                utils.conn_db("asset_wih").delete_many({"scope_id": str(scope_id), "domain": removed})
-                # 级联物理清理周期监控任务，规避脱节盲派发 (Issue #48)
-                utils.conn_db("scheduler").delete_many({"scope_id": str(scope_id), "domain": removed})
 
             for d in domain_array:
                 if d not in domain_status:
@@ -663,10 +640,32 @@ class UpdateARLAssetScope(ARLResource):
 
         if update_fields:
             try:
+                # 先写后清原子顺序：先落库更新 asset_scope，确保存活栅栏立即拦截已剔除目标
                 utils.conn_db(table).update_one(query, {"$set": update_fields})
             except Exception as e:
                 logger.error(f"update asset_scope error, scope_id={scope_id}, detail={e}")
                 return utils.build_ret(ErrorMsg.Error, {"error": "数据库写入异常，请查看服务端日志"})
+
+            from app.services.asset_cascade_service import (
+                _sync_scope_rename_references,
+                bump_asset_cache_versions,
+                cascade_remove_scope_targets,
+            )
+
+            if name and old_name and name != old_name:
+                try:
+                    _sync_scope_rename_references(str(scope_id), old_name, name)
+                except Exception as rename_err:
+                    logger.warning(f"sync rename references failed for scope {scope_id}: {rename_err}")
+
+            if removed_scopes:
+                try:
+                    cascade_remove_scope_targets(str(scope_id), list(removed_scopes))
+                except Exception as cascade_err:
+                    logger.error(f"cascade_remove_scope_targets error, scope_id={scope_id}, detail={cascade_err}")
+                    return utils.build_ret(ErrorMsg.Error, {"error": "目标剔除级联清理异常，请查看服务端日志"})
+            else:
+                bump_asset_cache_versions()
 
         # 兼容返回数据
         scope_data["_id"] = str(scope_data.get("_id", scope_id))

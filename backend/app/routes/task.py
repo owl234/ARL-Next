@@ -393,6 +393,7 @@ def stop_task(task_id):
 # (附赠的一张表格) 印制删除任务的表格，询问是否连带删除扫出来的资产数据
 delete_task_fields = ns.model('DeleteTask',  {
     'del_task_data': fields.Boolean(required=False, default=False, description="是否删除任务数据"),
+    'del_synced_asset': fields.Boolean(required=False, default=False, description="是否同时清理已同步至资产组的独占资产（默认关闭）"),
     'task_id': fields.List(fields.String(required=True, description="任务ID"))
 })
 
@@ -408,68 +409,19 @@ class DeleteTask(ARLResource):
         """
         任务删除
         """
-        # 1. 明确只有结束状态的任务才能被删除
-        done_status = [TaskStatus.DONE, TaskStatus.STOP, TaskStatus.ERROR]
-
         args = self.parse_args(delete_task_fields)
-        task_id_list = args.pop('task_id')      # 拿到要删除的任务ID列表
-        del_task_data_flag = args.pop('del_task_data')  # 拿到用户的抉择：要不要把扫出来的资产数据一起删了？
+        task_id_list = args.pop('task_id') or []
+        del_task_data_flag = bool(args.pop('del_task_data', False))
+        del_synced_asset_flag = bool(args.pop('del_synced_asset', False))
 
-
-        # 2. 【第一层循环：纯校验】（Fail-Fast 机制）
-        # 在删任何东西之前，先把所有任务检查一遍，防止删到一半发现有个任务不能删。
-        for task_id in task_id_list:
-            task_data = utils.conn_db('task').find_one({'_id': ObjectId(task_id)})
-            if not task_data:
-                return utils.build_ret(ErrorMsg.NotFoundTask, {"task_id": task_id})
-
-            # 如果有个任务还在运行中，立刻打回，拒绝整个删除请求
-            if task_data["status"] not in done_status:
-                return utils.build_ret(ErrorMsg.TaskIsRunning, {"task_id": task_id})
-
-        # 3. 【第二层循环：真删除】
-        for task_id in task_id_list:
-            # 先把任务表 (task) 里的这条任务记录删掉
-            utils.conn_db('task').delete_many({'_id': ObjectId(task_id)})
-
-            # 这是一个硬编码的“关联表清单”，包含了所有可能存有扫描结果的表
-            table_list = ["cert", "domain", "fileleak","ip", "service",
-                          "site", "url", "vuln", "cip", "npoc_service", "wih", "nuclei_result", "stat_finger"]
-
-            # 如果用户勾选了“连带删除扫描数据”
-            if del_task_data_flag:
-                for name in table_list:
-                    # 🚨 保护性修改（核心）：由于资产表已做逻辑分区合并，
-                    # 任务删除只能清理“不属于任何资产组（即 scope_id 为空/不存在）”的资产，防止误删已同步到资产组的资产
-                    delete_query = {
-                        'task_id': task_id,
-                        '$or': [
-                            {'scope_id': {'$exists': False}},
-                            {'scope_id': ''},
-                            {'scope_id': None}
-                        ]
-                    }
-                    utils.conn_db(name).delete_many(delete_query)
-                    
-                # 【逻辑修正】：清理物理截图文件
-                # 由于部分站点可能已被同步至资产组（含后续无截图任务更新后仍保留旧截图路径的场景），
-                # 需同时检查 asset_site 是否按 task_id 或 screenshot 路径引用该目录，确认无引用后再删除
-                remaining_asset = utils.conn_db('asset_site').find_one({
-                    '$or': [
-                        {'task_id': task_id},
-                        {'screenshot': {'$regex': f'^/image/{re.escape(task_id)}/'}}
-                    ]
-                })
-                if not remaining_asset:
-                    import shutil
-                    from app.config import Config
-                    import os
-                    screenshot_path = os.path.join(Config.SCREENSHOT_DIR, task_id)
-                    if os.path.exists(screenshot_path):
-                        try:
-                            shutil.rmtree(screenshot_path, ignore_errors=True)
-                        except Exception:
-                            pass
+        from app.services.asset_cascade_service import cascade_delete_tasks
+        res = cascade_delete_tasks(
+            task_id_list,
+            del_task_data=del_task_data_flag,
+            del_synced_asset=del_synced_asset_flag,
+        )
+        if not res.get("ok"):
+            return utils.build_ret(res.get("error", ErrorMsg.Error), res.get("data", {}))
 
         return utils.build_ret(ErrorMsg.Success, {"task_id": task_id_list})
 

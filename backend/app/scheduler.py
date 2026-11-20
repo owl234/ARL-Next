@@ -290,6 +290,8 @@ def asset_monitor_scheduler():
             valid_scopes = set(scope_obj.get("scope_array", []))
             target_str = item.get("domain", "")
 
+            # 仅对域名/IP 目标级监控执行 scope_array 包含校验；
+            # 组级 site_update_monitor / wih_update_monitor 的 domain 为中文展示名，严禁误判为孤儿删除。
             if scope_type == AssetScopeType.IP and " " in target_str:
                 valid_targets = [t for t in target_str.split() if t in valid_scopes]
                 if not valid_targets:
@@ -297,7 +299,7 @@ def asset_monitor_scheduler():
                     conn('scheduler').delete_one({"_id": item["_id"]})
                     continue
                 item["domain"] = " ".join(valid_targets)
-            elif target_str:
+            elif scope_type in (AssetScopeType.DOMAIN, AssetScopeType.IP) and target_str:
                 if target_str not in valid_scopes:
                     logger.warning(f"Orphan scheduler detected: target '{target_str}' no longer in scope {scope_id_str}. Auto-deleting scheduler {scheduler_id_str}.")
                     conn('scheduler').delete_one({"_id": item["_id"]})

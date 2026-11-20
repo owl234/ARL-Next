@@ -291,14 +291,32 @@ class SyncAsset(object):
                 bulk_operations.append(ReplaceOne(query, data))
                 
         if bulk_operations:
+            if not self._is_scope_alive():
+                logger.warning("abort sync chunk: scope {} is no longer alive".format(self.scope_id))
+                return
             conn(dist_collection).bulk_write(bulk_operations, ordered=False)
+
+    def _is_scope_alive(self):
+        if not self.scope_id or not ObjectId.is_valid(str(self.scope_id)):
+            return False
+        try:
+            return conn("asset_scope").find_one({"_id": ObjectId(str(self.scope_id))}, {"_id": 1}) is not None
+        except Exception:
+            return False
 
     def run(self):
         logger.info("start sync {} -> {}".format(self.task_id, self.scope_id))
+        if not self._is_scope_alive():
+            logger.warning("abort sync {} -> {}: scope no longer exists".format(self.task_id, self.scope_id))
+            return self.new_asset_map, self.new_asset_counter, self.update_asset_map, self.update_asset_counter
+
         for category in self.category_list:
             if category not in self.available_category:
                 logger.warning("not found {} category in {}".format(category, self.available_category))
                 continue
+            if not self._is_scope_alive():
+                logger.warning("stop sync {} -> {} at category {}: scope deleted".format(self.task_id, self.scope_id, category))
+                return self.new_asset_map, self.new_asset_counter, self.update_asset_map, self.update_asset_counter
 
             self.sync_by_category(category)
 
@@ -309,9 +327,23 @@ class SyncAsset(object):
         except Exception as e:
             logger.error(f"SyncAsset enrich_and_heal_site_assets error: {e}", exc_info=True)
 
+        # 基于存活宿主表统一重算 asset_cip / asset_stat_finger / asset_service（修复 update_flag=False 漏合并与指纹漂移）
+        if self._is_scope_alive():
+            try:
+                from app.services.asset_cascade_service import (
+                    bump_asset_cache_versions,
+                    rebuild_scope_derived_collections,
+                )
+                rebuild_scope_derived_collections([self.scope_id])
+                bump_asset_cache_versions()
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.error(f"SyncAsset rebuild_scope_derived_collections error: {e}", exc_info=True)
+
         logger.info("end sync {} -> {}, result: {}, update: {}".format(self.task_id, self.scope_id, self.new_asset_counter, self.update_asset_counter))
 
-        if self.scope_id and self.task_id:
+        if self.scope_id and self.task_id and self._is_scope_alive():
             try:
                 task_info = utils.conn_db('task').find_one({"_id": ObjectId(self.task_id)})
                 if task_info:

@@ -169,10 +169,13 @@ class DeleteARLScheduler(ARLResource):
             if not item:
                 return utils.build_ret(ErrorMsg.JobNotFound, ret_data)
 
-        for scheduler_id in job_id_list:
-            app_scheduler.delete_scheduler(scheduler_id)
+        from app.services.asset_cascade_service import cascade_delete_schedulers
+        res = cascade_delete_schedulers(job_id_list, stop_only=False)
 
-        return utils.build_ret(ErrorMsg.Success, ret_data)
+        return utils.build_ret(ErrorMsg.Success, {
+            "scheduler_id": job_id_list,
+            "stopped_tasks": res.get("stopped_tasks", 0),
+        })
 
 
 recover_scheduler_fields = ns.model('recoverScheduler', {
@@ -262,9 +265,13 @@ class StopARLScheduler(ARLResource):
         if status != SchedulerStatus.RUNNING:
             return utils.build_ret(ErrorMsg.SchedulerStatusNotRunning, {"scheduler_id": scheduler_id})
 
-        app_scheduler.stop_scheduler(scheduler_id)
+        from app.services.asset_cascade_service import cascade_delete_schedulers
+        res = cascade_delete_schedulers([scheduler_id], stop_only=True)
 
-        return utils.build_ret(ErrorMsg.Success, {"scheduler_id": scheduler_id})
+        return utils.build_ret(ErrorMsg.Success, {
+            "scheduler_id": scheduler_id,
+            "stopped_tasks": res.get("stopped_tasks", 0),
+        })
 
 
 batch_stop_scheduler_fields = ns.model('batchStopScheduler', {
@@ -292,9 +299,13 @@ class BatchStopARLScheduler(ARLResource):
             if status != SchedulerStatus.RUNNING:
                 return utils.build_ret(ErrorMsg.SchedulerStatusNotRunning, {"scheduler_id": scheduler_id})
 
-            app_scheduler.stop_scheduler(scheduler_id)
+        from app.services.asset_cascade_service import cascade_delete_schedulers
+        res = cascade_delete_schedulers(job_id_list, stop_only=True)
 
-        return utils.build_ret(ErrorMsg.Success, {"scheduler_id": job_id_list})
+        return utils.build_ret(ErrorMsg.Success, {
+            "scheduler_id": job_id_list,
+            "stopped_tasks": res.get("stopped_tasks", 0),
+        })
 
 
 add_scheduler_site_fields = ns.model('addSchedulerSite', {

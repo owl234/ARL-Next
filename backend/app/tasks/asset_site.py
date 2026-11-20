@@ -65,7 +65,7 @@ class AssetSiteUpdateTask(CommonTask):
             self.save_task_site(monitor.site_change_info_list)
 
         self.update_status("domain site monitor")
-        domain2site_monitor = Domain2SiteMonitor(scope_id=self.scope_id)
+        domain2site_monitor = Domain2SiteMonitor(scope_id=self.scope_id, task_id=self.task_id)
         if domain2site_monitor.run():
             self.save_task_site(domain2site_monitor.site_info_list)
 
@@ -102,7 +102,19 @@ class AssetSiteUpdateTask(CommonTask):
         with TaskHeartbeat(self.task_id, interval=60):
             self.set_start_time()
             self.monitor()
+            self.insert_finger_stat()
             self.insert_task_stat()
+            try:
+                from app.services.asset_cascade_service import (
+                    bump_asset_cache_versions,
+                    is_scope_target_alive,
+                    rebuild_scope_derived_collections,
+                )
+                if is_scope_target_alive(self.scope_id):
+                    rebuild_scope_derived_collections([self.scope_id], targets=("stat_finger",))
+                bump_asset_cache_versions()
+            except Exception as e:
+                logger.warning(f"AssetSiteUpdateTask derived rebuild error: {e}")
             self.update_status(TaskStatus.DONE)
             self.set_end_time()
 

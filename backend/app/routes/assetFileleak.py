@@ -1,4 +1,3 @@
-from bson import ObjectId
 from flask_restx import fields, Namespace
 from app.utils import get_logger, auth
 from . import base_query_fields, ARLResource, get_arl_parser
@@ -58,7 +57,8 @@ class ARLAssetFileleakExport(HttpStatusResource):
 
 
 delete_fileleak_fields = ns.model('deleteAssetFileleak',  {
-    '_id': fields.List(fields.String(required=True, description="数据_id"))
+    '_id': fields.List(fields.String(required=True, description="数据_id")),
+    'scope_id': fields.String(required=False, description="可选资产组 ID")
 })
 
 
@@ -71,10 +71,8 @@ class DeleteARLAssetFileleak(ARLResource):
         删除资产组文件泄露信息
         """
         args = self.parse_args(delete_fileleak_fields)
-        id_list = args.pop('_id', "")
-
-        for _id in id_list:
-            query = {'_id': ObjectId(_id)}
-            utils.conn_db('asset_fileleak').delete_one(query)
-
-        return utils.build_ret(ErrorMsg.Success, {'_id': id_list})
+        from app.services.asset_cascade_service import handle_dimension_delete
+        return handle_dimension_delete(
+            "fileleak", True, args,
+            build_ret_fn=utils.build_ret, success_msg=ErrorMsg.Success, db_getter=utils.conn_db,
+        )

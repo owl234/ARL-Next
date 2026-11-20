@@ -16,19 +16,22 @@ def update_task_tag():
 
 
 def create_index():
+    import logging
     index_map = {
-        "cert": "task_id",
-        "domain": ["task_id", "domain"],
-        "fileleak": "task_id",
-        "ip": "task_id",
-        "npoc_service": "task_id",
-        "site": ["task_id", "status", "title", "hostname", "site", "http_server", "tag", "is_catch_all"],
-        "service": "task_id",
-        "url": "task_id",
+        "cert": ["task_id", "ip"],
+        "domain": ["task_id", "domain", "ips"],
+        "fileleak": ["task_id", "site", "url"],
+        "ip": ["task_id", "ip", "domain"],
+        "npoc_service": ["task_id", "host", "target"],
+        "site": ["task_id", "status", "title", "hostname", "site", "ip", "http_server", "tag", "is_catch_all"],
+        "service": ["task_id", "service_name", "service_info.ip"],
+        "url": ["task_id", "site", "url"],
         "task": ["status", "start_time"],
         "icp_task": ["status", "start_time", "end_time", "synced_scope_id"],
-        "vuln": ["task_id", "save_date"],
-        "nuclei_result": ["task_id", "vuln_severity", "template_source", "save_date"],
+        "vuln": ["task_id", "save_date", "target", "vuln_url"],
+        "nuclei_result": ["task_id", "vuln_severity", "template_source", "save_date", "target", "vuln_url"],
+        "cip": "cidr_ip",
+        "stat_finger": "name",
         "asset_ip": "scope_id",
         "asset_site": ["scope_id", "tag", "is_catch_all", "task_id", "screenshot"],
         "asset_domain": ["scope_id", "domain"],
@@ -36,7 +39,7 @@ def create_index():
         "github_monitor_result": ["github_scheduler_id", "hash_md5", "repo_full_name", "triage_status"],
         "github_hackers_history": "insert_time",
         "github_cve_history": "insert_time",
-        "wih": ["task_id", "record_type", "fnv_hash"],
+        "wih": ["task_id", "record_type", "fnv_hash", "site", "content"],
         "asset_cert": ["scope_id", "ip"],
         "asset_service": "scope_id",
         "asset_fileleak": "scope_id",
@@ -66,8 +69,19 @@ def create_index():
             except Exception as ie:
                 logging.getLogger().warning(f"Failed to create normal index {index_map[table]} on {table}: {ie}")
 
+    # task 显式关联资产组/监控计划稀疏索引（sparse=True 节省 1GB WiredTiger 缓存）
+    for sparse_field in ("scope_id", "sync_scope_id", "synced_scope_id", "options.scope_id", "options.related_scope_id", "options.scheduler_id"):
+        try:
+            conn_db("task").create_index(sparse_field, sparse=True, background=True)
+        except Exception as ie:
+            logging.getLogger().warning(f"Failed to create sparse index {sparse_field} on task: {ie}")
+
     # Scheduler 核心轮询复合索引
-    conn_db('scheduler').create_index([("status", 1), ("next_run_time", 1)], background=True)
+    try:
+        conn_db('scheduler').create_index([("status", 1), ("next_run_time", 1)], background=True)
+        conn_db('scheduler').create_index("scope_id", background=True)
+    except Exception as se:
+        logging.getLogger().warning(f"Failed to create scheduler indexes: {se}")
 
     # icp_asset 核心多维查询与排序复合索引（缓解 COLLSCAN 与 32MB 内存排序限制）
     # 逐个兜底：索引属增益型优化，任一构建异常都不得阻断后续增量迁移步骤
@@ -76,11 +90,15 @@ def create_index():
         try:
             conn_db('icp_asset').create_index(icp_keys, background=True)
         except Exception as ex:
-            import logging
             logging.getLogger().warning(f"Failed to create icp_asset index {icp_keys}: {ex}")
 
-    # 全链路资产画像 (subdomain_chain / MCP) 与资产组高频查询复合索引
+    # 全链路资产画像 (subdomain_chain / MCP) 与资产组高频查询/级联删除复合索引
+    # 注：asset_wih 已存在唯一索引 (scope_id, site, fnv_hash) 覆盖 (scope_id, site)，不重复建冗余索引；
+    #     cip / asset_cip 已由宿主表重算，不建 ip_list / domain_list 高内存多键数组索引。
     compound_indexes = {
+        "asset_domain": [
+            [("scope_id", 1), ("ips", 1)],
+        ],
         "asset_site": [
             [("scope_id", 1), ("hostname", 1)],
             [("scope_id", 1), ("site", 1)],
@@ -90,25 +108,37 @@ def create_index():
             [("scope_id", 1), ("ip", 1)],
             [("scope_id", 1), ("domain", 1)],
         ],
+        "asset_cert": [
+            [("scope_id", 1), ("ip", 1), ("cert.fingerprint.sha256", 1)],
+        ],
         "asset_service": [
             [("scope_id", 1), ("service_info.ip", 1)],
+            [("scope_id", 1), ("service_name", 1)],
         ],
         "asset_npoc_service": [
-            [("scope_id", 1), ("host", 1)],
+            [("scope_id", 1), ("host", 1), ("port", 1)],
             [("scope_id", 1), ("target", 1)],
         ],
         "asset_fileleak": [
             [("scope_id", 1), ("url", 1)],
+            [("scope_id", 1), ("site", 1)],
         ],
         "asset_url": [
             [("scope_id", 1), ("url", 1)],
+            [("scope_id", 1), ("site", 1)],
         ],
         "asset_vuln": [
-            [("scope_id", 1), ("target", 1)],
+            [("scope_id", 1), ("target", 1), ("vul_name", 1)],
         ],
         "asset_nuclei_result": [
-            [("scope_id", 1), ("target", 1)],
+            [("scope_id", 1), ("target", 1), ("template_id", 1)],
             [("scope_id", 1), ("vuln_url", 1)],
+        ],
+        "asset_stat_finger": [
+            [("scope_id", 1), ("name", 1)],
+        ],
+        "asset_wih": [
+            [("scope_id", 1), ("content", 1)],
         ],
         "asset_cip": [
             [("scope_id", 1), ("cidr_ip", 1)],
@@ -119,8 +149,22 @@ def create_index():
             try:
                 conn_db(col_name).create_index(idx_keys, background=True)
             except Exception as ex:
-                import logging
                 logging.getLogger().warning(f"Failed to create compound index {idx_keys} on {col_name}: {ex}")
+
+    # 回收已被 3 字段复合索引最左前缀覆盖的旧 2 字段冗余索引，释放 WiredTiger 缓存
+    superseded_indexes = [
+        ("asset_vuln", "scope_id_1_target_1", "scope_id_1_target_1_vul_name_1"),
+        ("asset_nuclei_result", "scope_id_1_target_1", "scope_id_1_target_1_template_id_1"),
+        ("asset_npoc_service", "scope_id_1_host_1", "scope_id_1_host_1_port_1"),
+    ]
+    for col_name, old_idx, new_idx in superseded_indexes:
+        try:
+            existing = conn_db(col_name).index_information()
+            if old_idx in existing and new_idx in existing:
+                conn_db(col_name).drop_index(old_idx)
+                logging.getLogger().info(f"Dropped superseded index {old_idx} on {col_name} (covered by {new_idx}).")
+        except Exception as ex:
+            logging.getLogger().warning(f"Failed to drop superseded index {old_idx} on {col_name}: {ex}")
 
     # 兜底：创建联合唯一索引，规避高并发下的重复写入冲突
     unique_indexes = {
@@ -1574,6 +1618,130 @@ def migrate_nuclei_result_template_source():
         log.error(f"migrate_nuclei_result_template_source error: {e}")
 
 
+def migrate_heal_cascade_and_derived_assets(run_in_thread=True):
+    """
+    一次性幂等存量库自愈迁移（带 system_config 原子领取哨兵，防多 Worker 启动并发重复执行）：
+      1. 清理 13 张 asset_* 与 scheduler 中 scope_id 已不存在于 asset_scope 的历史孤儿记录
+      2. 基于存活宿主表重算所有存量资产组的 asset_cip / asset_stat_finger / asset_service
+      3. 基于存活 ip 宿主表修复存量任务 cip 丢失的 domain_list
+      4. 递增跨进程缓存版本号并写入 completed 哨兵
+    """
+    import logging
+    import time
+
+    sentinel_id = "migration_cascade_heal_v1"
+    stale_timeout = 1800  # 30 分钟超时重入保护
+
+    def _run_heal():
+        log = logging.getLogger()
+        cfg_col = conn_db("system_config")
+        now = time.time()
+
+        # 初始化哨兵文档（幂等）
+        try:
+            cfg_col.update_one(
+                {"_id": sentinel_id},
+                {"$setOnInsert": {"status": "pending", "updated_at": 0}},
+                upsert=True,
+            )
+            claimed = cfg_col.find_one_and_update(
+                {
+                    "_id": sentinel_id,
+                    "$or": [
+                        {"status": {"$in": ["pending", "failed"]}},
+                        {"status": "running", "updated_at": {"$lt": now - stale_timeout}},
+                    ],
+                },
+                {"$set": {"status": "running", "updated_at": now}},
+            )
+        except Exception as claim_err:
+            log.warning(f"Failed to claim {sentinel_id}: {claim_err}")
+            return
+
+        if not claimed:
+            return
+
+        try:
+            from app.services.asset_cascade_service import (
+                ASSET_COLLECTIONS,
+                bump_asset_cache_versions,
+                rebuild_scope_derived_collections,
+                rebuild_task_derived_collections,
+            )
+
+            live_scope_ids = {str(d["_id"]) for d in conn_db("asset_scope").find({}, {"_id": 1})}
+
+            # 1. 清理历史孤儿 asset_* 与 scheduler 记录
+            orphan_cleaned = 0
+            for col_name in list(ASSET_COLLECTIONS) + ["scheduler"]:
+                try:
+                    col = conn_db(col_name)
+                    distinct_sids = [str(s) for s in col.distinct("scope_id") if s]
+                    orphan_sids = [s for s in distinct_sids if s not in live_scope_ids]
+                    for i in range(0, len(orphan_sids), 500):
+                        chunk = orphan_sids[i:i + 500]
+                        res = col.delete_many({"scope_id": {"$in": chunk}})
+                        orphan_cleaned += getattr(res, "deleted_count", 0)
+                except Exception as col_err:
+                    log.warning(f"Cascade heal orphan cleanup failed on {col_name}: {col_err}")
+
+            # 2. 基于存活宿主表重算所有存量资产组的三大派生表
+            if live_scope_ids:
+                rebuild_scope_derived_collections(list(live_scope_ids))
+
+            # 3. 修复存量任务 cip 丢失 domain_list 的记录（历史 gen_cip_map have_domain_flag Bug 残留）
+            try:
+                suspect_tids = set(
+                    str(tid)
+                    for tid in conn_db("cip").distinct("task_id", {"domain_count": 0})
+                    if tid
+                )
+                if suspect_tids:
+                    tids_needing_fix = []
+                    suspect_list = list(suspect_tids)
+                    for i in range(0, len(suspect_list), 500):
+                        chunk = suspect_list[i:i + 500]
+                        has_domain_tids = conn_db("ip").distinct(
+                            "task_id",
+                            {"task_id": {"$in": chunk}, "domain.0": {"$exists": True}},
+                        )
+                        tids_needing_fix.extend(str(t) for t in has_domain_tids if t)
+                    if tids_needing_fix:
+                        rebuild_task_derived_collections(tids_needing_fix, targets=("cip",))
+            except Exception as cip_err:
+                log.warning(f"Cascade heal task cip domain_list repair failed: {cip_err}")
+
+            bump_asset_cache_versions()
+            cfg_col.update_one(
+                {"_id": sentinel_id},
+                {
+                    "$set": {
+                        "status": "completed",
+                        "updated_at": time.time(),
+                        "orphan_cleaned": orphan_cleaned,
+                        "healed_scopes": len(live_scope_ids),
+                    }
+                },
+            )
+            log.info(
+                f"Completed {sentinel_id}: orphan_cleaned={orphan_cleaned}, healed_scopes={len(live_scope_ids)}"
+            )
+        except Exception as e:
+            log.error(f"{sentinel_id} failed: {e}", exc_info=True)
+            try:
+                cfg_col.update_one(
+                    {"_id": sentinel_id},
+                    {"$set": {"status": "failed", "updated_at": time.time(), "error": str(e)}},
+                )
+            except Exception:
+                pass
+
+    if run_in_thread:
+        threading.Thread(target=_run_heal, daemon=True).start()
+    else:
+        _run_heal()
+
+
 def arl_update():
     if is_run_flask_routes():
         return
@@ -1653,6 +1821,7 @@ def arl_update():
         _run_step("ensure_proxy_config_schema", ensure_proxy_config_schema)
         _run_step("migrate_nuclei_push_options", migrate_nuclei_push_options)
         _run_step("migrate_nuclei_result_template_source", migrate_nuclei_result_template_source)
+        _run_step("migrate_heal_cascade_and_derived_assets", migrate_heal_cascade_and_derived_assets)
         db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
     except Exception as e:
         import logging

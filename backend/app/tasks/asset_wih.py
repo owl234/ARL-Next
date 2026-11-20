@@ -69,7 +69,19 @@ class AssetWihUpdateTask(CommonTask):
 
     def insert_stat(self):
         self.insert_finger_stat()
+        self.insert_cip_stat()
         self.insert_task_stat()
+        try:
+            from app.services.asset_cascade_service import (
+                bump_asset_cache_versions,
+                is_scope_target_alive,
+                rebuild_scope_derived_collections,
+            )
+            if is_scope_target_alive(self.scope_id):
+                rebuild_scope_derived_collections([self.scope_id])
+            bump_asset_cache_versions()
+        except Exception as e:
+            logger.warning(f"AssetWihUpdateTask derived rebuild error: {e}")
 
     def wih_results_save(self):
         from pymongo import UpdateOne
@@ -96,7 +108,7 @@ class AssetWihUpdateTask(CommonTask):
         self.base_update_task.update_task_field("status", service_name)
         start_time = time.time()
 
-        self.wih_results = asset_wih_monitor(self.scope_id)
+        self.wih_results = asset_wih_monitor(self.scope_id, task_id=self.task_id)
 
         elapsed = time.time() - start_time
 

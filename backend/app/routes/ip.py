@@ -1,4 +1,3 @@
-from bson import ObjectId
 from flask_restx import fields, Namespace
 from app.utils import get_logger, auth
 from app import utils
@@ -95,7 +94,9 @@ class ARLIPExportIp(ARLResource):
 
 
 delete_ip_fields = ns.model('deleteIpFields',  {
-    '_id': fields.List(fields.String(required=True, description="IP _id"))
+    '_id': fields.List(fields.String(required=True, description="IP _id")),
+    'task_id': fields.String(required=False, description="可选任务 ID"),
+    'source_type': fields.String(required=False, description="可选删除作用域：task | global")
 })
 
 
@@ -105,12 +106,11 @@ class DeleteARLIP(ARLResource):
     @ns.expect(delete_ip_fields)
     def post(self):
         """
-        删除 IP
+        删除 IP（支持向下级联并向上解绑保留子域名）
         """
         args = self.parse_args(delete_ip_fields)
-        id_list = args.pop('_id', [])
-        for _id in id_list:
-            query = {'_id': ObjectId(_id)}
-            utils.conn_db('ip').delete_one(query)
-
-        return utils.build_ret(ErrorMsg.Success, {'_id': id_list})
+        from app.services.asset_cascade_service import handle_dimension_delete
+        return handle_dimension_delete(
+            "ip", False, args,
+            build_ret_fn=utils.build_ret, success_msg=ErrorMsg.Success, db_getter=utils.conn_db,
+        )

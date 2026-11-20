@@ -154,7 +154,8 @@ def add_site_to_scope(site, scope_id):
 
 
 delete_asset_site_fields = ns.model('deleteAssetSite',  {
-    '_id': fields.List(fields.String(required=True, description="站点 _id"))
+    '_id': fields.List(fields.String(required=True, description="站点 _id")),
+    'scope_id': fields.String(required=False, description="可选资产组 ID")
 })
 
 
@@ -164,15 +165,14 @@ class DeleteARLAssetSite(ARLResource):
     @ns.expect(delete_asset_site_fields)
     def post(self):
         """
-        删除资产组中的站点
+        删除资产组中的站点（仅收敛至本资产组与显式绑定任务）
         """
         args = self.parse_args(delete_asset_site_fields)
-        id_list = args.pop('_id', "")
-        for _id in id_list:
-            query = {'_id': ObjectId(_id)}
-            utils.conn_db('asset_site').delete_one(query)
-
-        return utils.build_ret(ErrorMsg.Success, {'_id': id_list})
+        from app.services.asset_cascade_service import handle_dimension_delete
+        return handle_dimension_delete(
+            "site", True, args,
+            build_ret_fn=utils.build_ret, success_msg=ErrorMsg.Success, db_getter=utils.conn_db,
+        )
 
 
 @ns.route('/save_result_set/')

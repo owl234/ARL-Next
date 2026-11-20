@@ -1,4 +1,3 @@
-from bson import ObjectId
 from flask_restx import fields, Namespace
 from app.utils import get_logger, auth
 from app import utils
@@ -60,7 +59,9 @@ class ARLUrlExport(HttpStatusResource):
 
 
 delete_result_fields = ns.model('deleteUrlResult', {
-    '_id': fields.List(fields.String, required=True, description="待删除的记录 ID")
+    '_id': fields.List(fields.String, required=True, description="待删除的记录 ID"),
+    'task_id': fields.String(required=False, description="可选任务 ID"),
+    'source_type': fields.String(required=False, description="可选删除作用域：task | global")
 })
 
 
@@ -71,12 +72,8 @@ class DeleteARLUrl(ARLResource):
     def post(self):
         """删除任务 URL 结果。"""
         args = self.parse_args(delete_result_fields)
-        id_list = args.get('_id') or []
-        # 先校验整批，避免无效 ID 导致前面的记录已被删除。
-        if not id_list or any(not ObjectId.is_valid(value) for value in id_list):
-            # build_ret 的报错消息会拼接非字符串字段，列表 ID 直接放进消息，data 中仅返回数量。
-            return utils.build_ret(
-                {"code": 400, "message": "请提供有效的记录 ID 列表"}, {'count': len(id_list)}
-            )
-        result = utils.conn_db('url').delete_many({'_id': {'$in': [ObjectId(value) for value in id_list]}})
-        return utils.build_ret(ErrorMsg.Success, {'_id': id_list, 'deleted_count': result.deleted_count})
+        from app.services.asset_cascade_service import handle_dimension_delete
+        return handle_dimension_delete(
+            "url", False, args,
+            build_ret_fn=utils.build_ret, success_msg=ErrorMsg.Success, db_getter=utils.conn_db,
+        )

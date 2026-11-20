@@ -1,4 +1,3 @@
-from bson import ObjectId
 from flask_restx import fields, Namespace
 from app.utils import get_logger, auth
 from app import utils
@@ -78,30 +77,23 @@ class ARLDomainExport(ARLResource):
 # ==========================================
 # 定义一个表单模型：告诉前端，删除操作你需要传一个名叫 '_id' 的列表过来，里面装满字符串
 delete_domain_fields = ns.model('deleteDomainFields',  {
-    '_id': fields.List(fields.String(required=True, description="域名 _id"))
+    '_id': fields.List(fields.String(required=True, description="域名 _id")),
+    'task_id': fields.String(required=False, description="可选任务 ID"),
+    'source_type': fields.String(required=False, description="可选删除作用域：task | global")
 })
 
 
 @ns.route('/delete/')
 class DeleteARLDomain(ARLResource):
     @auth
-    @ns.expect(delete_domain_fields)    # 绑定上面定义的表单模型
+    @ns.expect(delete_domain_fields)
     def post(self):
         """
-        删除 域名
+        删除域名（支持级联清理下级站点/L3 与孤儿 IP 回收）
         """
-        # 1. 解析前端传来的 JSON 请求体
         args = self.parse_args(delete_domain_fields)
-
-        # 2. 把要删除的 id 列表拿出来（如果前端没传，默认给个空列表 []）
-        id_list = args.pop('_id', [])
-
-        # 3. 挨个处理：遍历列表里的每一个 id 字符串
-        for _id in id_list:
-            # 【关键】：MongoDB 认的 ID 不是普通字符串，必须用 ObjectId() 包装一下
-            query = {'_id': ObjectId(_id)}
-            # 连上 'domain' 表，执行删除操作
-            utils.conn_db('domain').delete_one(query)
-
-        # 4. 全部删完，返回成功提示，并把删掉的 ID 告诉前端
-        return utils.build_ret(ErrorMsg.Success, {'_id': id_list})
+        from app.services.asset_cascade_service import handle_dimension_delete
+        return handle_dimension_delete(
+            "domain", False, args,
+            build_ret_fn=utils.build_ret, success_msg=ErrorMsg.Success, db_getter=utils.conn_db,
+        )

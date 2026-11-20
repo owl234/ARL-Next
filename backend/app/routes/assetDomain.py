@@ -170,7 +170,8 @@ class ARLAssetDomain(ARLResource):
 # 表单 3 与接口 C：删除资产组中的域名 (POST /delete/)
 # ==========================================
 delete_domain_fields = ns.model('deleteAssetDomain',  {
-    '_id': fields.List(fields.String(required=True, description="数据_id"))
+    '_id': fields.List(fields.String(required=True, description="数据_id")),
+    'scope_id': fields.String(required=False, description="可选资产组 ID")
 })
 
 
@@ -180,16 +181,14 @@ class DeleteARLAssetDomain(ARLResource):
     @ns.expect(delete_domain_fields)
     def post(self):
         """
-        删除资产组中的域名
+        删除资产组中的域名（含孤儿 IP 回收与显式绑定任务联动）
         """
         args = self.parse_args(delete_domain_fields)
-        id_list = args.pop('_id', "")
-        # 遍历前端传来的 ID 列表，挨个去数据库里物理删除
-        for _id in id_list:
-            query = {'_id': ObjectId(_id)}
-            utils.conn_db('asset_domain').delete_one(query)
-
-        return utils.build_ret(ErrorMsg.Success, {'_id': id_list})
+        from app.services.asset_cascade_service import handle_dimension_delete
+        return handle_dimension_delete(
+            "domain", True, args,
+            build_ret_fn=utils.build_ret, success_msg=ErrorMsg.Success, db_getter=utils.conn_db,
+        )
 
 
 # ==========================================

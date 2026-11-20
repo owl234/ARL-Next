@@ -6,60 +6,52 @@ import re
 
 def get_task_ids(domain):
     query = {"target": domain}
-    task_ids = []
-    for item in conn_db('task').find(query):
-        task_ids.append(str(item["_id"]))
-
-    return task_ids
+    return [str(item["_id"]) for item in conn_db('task').find(query, {"_id": 1})]
 
 
 def get_domain_by_id(task_id):
     query = {"task_id": task_id}
-    domains = []
-    for item in conn_db('domain').find(query):
-        domains.append(item["domain"])
-
-    return domains
+    return [item["domain"] for item in conn_db('domain').find(query, {"domain": 1, "_id": 0}) if item.get("domain")]
 
 
 def arl_domain(domain):
     from app.utils.domain import is_valid_domain
-    domains = []
-    for task_id in get_task_ids(domain):
-        for item in get_domain_by_id(task_id):
-            if not is_valid_domain(domain):
-                continue
+    if not domain or not is_valid_domain(domain):
+        return []
 
-            if item.endswith("." + domain):
-                domains.append(item)
+    suffix = "." + domain
+    domains = set()
 
-    for scope_id in get_scope_ids(domain):
-        for item in get_asset_domain_by_id(scope_id):
-            if not is_valid_domain(domain):
-                continue
+    task_ids = get_task_ids(domain)
+    if task_ids:
+        for i in range(0, len(task_ids), 1000):
+            chunk = task_ids[i:i + 1000]
+            for item in conn_db('domain').find({"task_id": {"$in": chunk}}, {"domain": 1, "_id": 0}):
+                dom = item.get("domain")
+                if dom and dom.endswith(suffix):
+                    domains.add(dom)
 
-            if item.endswith("." + domain):
-                domains.append(item)
+    scope_ids = get_scope_ids(domain)
+    if scope_ids:
+        for i in range(0, len(scope_ids), 1000):
+            chunk = scope_ids[i:i + 1000]
+            for item in conn_db('asset_domain').find({"scope_id": {"$in": chunk}}, {"domain": 1, "_id": 0}):
+                dom = item.get("domain")
+                if dom and dom.endswith(suffix):
+                    domains.add(dom)
 
-    return list(set(domains))
+    return list(domains)
 
 
 def get_asset_domain_by_id(scope_id):
     query = {"scope_id": scope_id}
-    domains = []
-    for item in conn_db('asset_domain').find(query):
-        domains.append(item["domain"])
-
-    return domains
+    return [item["domain"] for item in conn_db('asset_domain').find(query, {"domain": 1, "_id": 0}) if item.get("domain")]
 
 
 def get_monitor_domain_by_id(scope_id):
     query = {"scope_id": scope_id}
-    items = conn_db('scheduler').find(query)
-    domains = []
-    for item in items:
-        domains.append(item["domain"])
-    return domains
+    items = conn_db('scheduler').find(query, {"domain": 1, "_id": 0})
+    return [item["domain"] for item in items if "domain" in item]
 
 
 def scope_data_by_id(scope_id):
@@ -71,11 +63,7 @@ def scope_data_by_id(scope_id):
 
 def get_scope_ids(domain):
     query = {"scope_array": domain}
-    scope_ids = []
-    for item in conn_db('asset_scope').find(query):
-        scope_ids.append(str(item["_id"]))
-
-    return scope_ids
+    return [str(item["_id"]) for item in conn_db('asset_scope').find(query, {"_id": 1})]
 
 
 def task_statistic(task_id=None):
@@ -101,31 +89,36 @@ def gen_cip_map(task_id=None):
     if isinstance(task_id, str) and len(task_id) == 24:
         query["task_id"] = task_id
 
-    results = list(conn_db('ip').find(query, {"ip": 1, "domain": 1}))
+    results = conn_db('ip').find(query, {"ip": 1, "domain": 1, "_id": 0})
     cip_map = dict()
 
-    have_domain_flag = True
-
     for result in results:
-        if result.get("domain") is None:
-            have_domain_flag = False
+        ip_val = result.get("ip")
+        if not ip_val or ":" in str(ip_val):
+            continue
+        try:
+            cip = IP(str(ip_val) + "/24", make_net=True).strNormal(1)
+        except Exception:
+            continue
 
-        cip = result["ip"] + "/24"
-        cip = IP(cip, make_net=True).strNormal(1)
+        raw_domains = result.get("domain")
+        if isinstance(raw_domains, list):
+            curr_domains = {d for d in raw_domains if isinstance(d, str) and d}
+        elif isinstance(raw_domains, str) and raw_domains:
+            curr_domains = {raw_domains}
+        else:
+            curr_domains = set()
+
         count_map = cip_map.get(cip)
         if count_map is None:
-            domain_set = set()
-            if have_domain_flag:
-                domain_set = set(result["domain"])
             cip_map[cip] = {
-                "domain_set": domain_set,
-                "ip_set": {result["ip"]}
+                "domain_set": set(curr_domains),
+                "ip_set": {ip_val}
             }
         else:
-            if have_domain_flag:
-                count_map["domain_set"] |= set(result["domain"])
-
-            count_map["ip_set"] |= {result["ip"]}
+            if curr_domains:
+                count_map["domain_set"] |= curr_domains
+            count_map["ip_set"].add(ip_val)
 
     return cip_map
 
@@ -135,18 +128,32 @@ def gen_stat_finger_map(task_id=None):
     if isinstance(task_id, str) and len(task_id) == 24:
         query["task_id"] = task_id
 
-    results = list(conn_db('site').find(query, {"finger": 1}))
+    results = conn_db('site').find(query, {"finger": 1, "_id": 0})
     finger_map = dict()
     for result in results:
-        if not isinstance(result.get("finger"), list):
+        fingers = result.get("finger")
+        if not isinstance(fingers, list):
             continue
 
-        for finger in result["finger"]:
-            key = finger["name"].lower()
+        seen_in_site = set()
+        for finger in fingers:
+            if isinstance(finger, dict):
+                name = finger.get("name")
+            elif isinstance(finger, str):
+                name = finger
+            else:
+                name = None
+            if not name or not isinstance(name, str):
+                continue
+
+            key = name.lower()
+            if key in seen_in_site:
+                continue
+            seen_in_site.add(key)
 
             if key not in finger_map:
                 finger_map[key] = {
-                    "name": finger["name"],
+                    "name": name,
                     "cnt": 1
                 }
             else:

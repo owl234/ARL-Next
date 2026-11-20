@@ -205,6 +205,10 @@ class AssetSiteMonitor(object):
             bulk_updates.append(UpdateOne({"_id": old_site_info["_id"]}, update_op))
 
         if bulk_updates:
+            from app.services.asset_cascade_service import is_scope_target_alive
+            if not is_scope_target_alive(self.scope_id):
+                logger.warning("abort AssetSiteMonitor._process_site_batch: scope {} no longer exists".format(self.scope_id))
+                return
             try:
                 utils.conn_db("asset_site").bulk_write(bulk_updates, ordered=False)
             except Exception as e:
@@ -409,8 +413,9 @@ class AssetSiteMonitor(object):
 
 
 class Domain2SiteMonitor(object):
-    def __init__(self, scope_id):
+    def __init__(self, scope_id, task_id=None):
         self.scope_id = scope_id
+        self.task_id = task_id
         self.site_info_list = []
         self.html_report = ""
         self.dingding_markdown = ""
@@ -494,9 +499,20 @@ class Domain2SiteMonitor(object):
         return self.site_info_list
 
     def insert_asset_site(self):
+        from app.services.asset_cascade_service import is_scope_target_alive
+        if not is_scope_target_alive(self.scope_id):
+            logger.warning("abort Domain2SiteMonitor.insert_asset_site: scope {} no longer exists".format(self.scope_id))
+            return
+        inserted = 0
         for site_info in self.site_info_list:
+            curr_site = site_info.get("site")
+            if not is_scope_target_alive(self.scope_id, curr_site):
+                logger.warning("skip Domain2SiteMonitor insert {}: target removed from scope {}".format(curr_site, self.scope_id))
+                continue
             site_info = site_info.copy()
             site_info["scope_id"] = self.scope_id
+            if self.task_id:
+                site_info["task_id"] = self.task_id
             curr_date = utils.curr_date_obj()
             site_info["save_date"] = curr_date
             site_info["update_date"] = curr_date
@@ -510,7 +526,8 @@ class Domain2SiteMonitor(object):
                 tags.append("待测试")
             site_info["tag"] = tags
             utils.conn_db('asset_site').insert_one(site_info)
-        logger.info("save asset_site {} to {}".format(len(self.site_info_list), self.scope_id))
+            inserted += 1
+        logger.info("save asset_site {} to {}".format(inserted, self.scope_id))
 
     def build_report(self):
         from app.utils.push import dict2table, dict2dingding_mark

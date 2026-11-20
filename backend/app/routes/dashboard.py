@@ -12,12 +12,44 @@ ns = Namespace('dashboard', description="仪表盘接口")
 logger = get_logger()
 
 # 仪表盘短期内存缓存，降低高频并发统计与 RabbitMQ 连接开销
+_DASHBOARD_CACHE_VERSION_ID = "_dashboard_cache_version"
 _DASHBOARD_CACHE = {
-    "stats": {"data": None, "ts": 0},
-    "trend": {"data": None, "ts": 0},
-    "sysinfo": {"data": None, "ts": 0},
-    "widgets": {"data": None, "ts": 0},
+    "stats": {"data": None, "ts": 0, "ver": None},
+    "trend": {"data": None, "ts": 0, "ver": None},
+    "sysinfo": {"data": None, "ts": 0, "ver": None},
+    "widgets": {"data": None, "ts": 0, "ver": None},
 }
+
+
+def _read_dashboard_cache_version():
+    """读取仪表盘跨进程缓存版本号；读取异常返回 None 不阻断主流程。"""
+    try:
+        doc = conn('system_config').find_one({"_id": _DASHBOARD_CACHE_VERSION_ID}, {"version": 1})
+        if doc:
+            return doc.get("version")
+    except Exception:
+        pass
+    return None
+
+
+def _get_cached_dashboard_entry(key, ttl_seconds):
+    entry = _DASHBOARD_CACHE.get(key)
+    current_ver = _read_dashboard_cache_version()
+    now = time.time()
+    if entry and entry.get("data") is not None and (now - entry.get("ts", 0) < ttl_seconds):
+        if current_ver is None or entry.get("ver") == current_ver:
+            return entry["data"], current_ver
+    return None, current_ver
+
+
+def _set_cached_dashboard_entry(key, data, version):
+    _DASHBOARD_CACHE[key] = {"data": data, "ts": time.time(), "ver": version}
+
+
+def clear_local_dashboard_cache():
+    """清空当前进程内存缓存，配合跨进程版本号实现立即失效。"""
+    for key in _DASHBOARD_CACHE:
+        _DASHBOARD_CACHE[key] = {"data": None, "ts": 0, "ver": None}
 
 
 def _get_tz_offset_str():
@@ -33,9 +65,9 @@ class DashboardStats(ARLResource):
     @auth
     def get(self):
         """获取顶部统计卡片数据"""
-        now = time.time()
-        if _DASHBOARD_CACHE["stats"]["data"] and (now - _DASHBOARD_CACHE["stats"]["ts"] < 15):
-            return utils.build_ret(ErrorMsg.Success, _DASHBOARD_CACHE["stats"]["data"])
+        cached, cache_ver = _get_cached_dashboard_entry("stats", 15)
+        if cached is not None:
+            return utils.build_ret(ErrorMsg.Success, cached)
 
         # 1. 总站点数量 (O(1) 极速读取元数据)
         try:
@@ -90,7 +122,7 @@ class DashboardStats(ARLResource):
             },
             "github_monitors": github_monitors
         }
-        _DASHBOARD_CACHE["stats"] = {"data": data, "ts": time.time()}
+        _set_cached_dashboard_entry("stats", data, cache_ver)
         return utils.build_ret(ErrorMsg.Success, data)
 
 
@@ -99,9 +131,9 @@ class DashboardTrend(ARLResource):
     @auth
     def get(self):
         """获取最近7天风险趋势（单次聚合管道完成统计）"""
-        now = time.time()
-        if _DASHBOARD_CACHE["trend"]["data"] and (now - _DASHBOARD_CACHE["trend"]["ts"] < 60):
-            return utils.build_ret(ErrorMsg.Success, _DASHBOARD_CACHE["trend"]["data"])
+        cached, cache_ver = _get_cached_dashboard_entry("trend", 60)
+        if cached is not None:
+            return utils.build_ret(ErrorMsg.Success, cached)
 
         # 生成最近7天日期轴
         days = []
@@ -164,7 +196,7 @@ class DashboardTrend(ARLResource):
             "leaks": leaks,
             "cves": cves
         }
-        _DASHBOARD_CACHE["trend"] = {"data": data, "ts": time.time()}
+        _set_cached_dashboard_entry("trend", data, cache_ver)
         return utils.build_ret(ErrorMsg.Success, data)
 
 
@@ -201,9 +233,9 @@ class DashboardSysInfo(ARLResource):
     @auth
     def get(self):
         """获取系统信息 (CPU, 内存, 任务队列) - 内置 3s 微缓存削峰"""
-        now = time.time()
-        if _DASHBOARD_CACHE["sysinfo"]["data"] and (now - _DASHBOARD_CACHE["sysinfo"]["ts"] < 3):
-            return utils.build_ret(ErrorMsg.Success, _DASHBOARD_CACHE["sysinfo"]["data"])
+        cached, cache_ver = _get_cached_dashboard_entry("sysinfo", 3)
+        if cached is not None:
+            return utils.build_ret(ErrorMsg.Success, cached)
 
         # 1. CPU, Memory, Disk (非阻塞实时采样)
         cpu_percent = psutil.cpu_percent(interval=None)
@@ -327,7 +359,7 @@ class DashboardSysInfo(ARLResource):
             data["proxy"] = get_proxy_runtime_summary("osint")
         except Exception:
             data["proxy"] = None
-        _DASHBOARD_CACHE["sysinfo"] = {"data": data, "ts": time.time()}
+        _set_cached_dashboard_entry("sysinfo", data, cache_ver)
         return utils.build_ret(ErrorMsg.Success, data)
 
 
@@ -336,9 +368,9 @@ class DashboardWidgets(ARLResource):
     @auth
     def get(self):
         """获取仪表盘拓展组件数据 (Top5指纹组件, 实时活跃任务流)"""
-        now = time.time()
-        if _DASHBOARD_CACHE.get("widgets") and _DASHBOARD_CACHE["widgets"]["data"] and (now - _DASHBOARD_CACHE["widgets"]["ts"] < 15):
-            return utils.build_ret(ErrorMsg.Success, _DASHBOARD_CACHE["widgets"]["data"])
+        cached, cache_ver = _get_cached_dashboard_entry("widgets", 15)
+        if cached is not None:
+            return utils.build_ret(ErrorMsg.Success, cached)
 
         # 1. Top 5 Web 指纹/服务组件分布 (带聚合容错)
         top_fingerprints = []
@@ -427,7 +459,7 @@ class DashboardWidgets(ARLResource):
             "top_fingerprints": top_fingerprints,
             "active_tasks": active_tasks
         }
-        _DASHBOARD_CACHE["widgets"] = {"data": data, "ts": time.time()}
+        _set_cached_dashboard_entry("widgets", data, cache_ver)
         return utils.build_ret(ErrorMsg.Success, data)
 
 
