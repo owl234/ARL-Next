@@ -200,34 +200,38 @@ class IPTask(CommonTask):
             utils.safe_insert_asset_many('cert', ['task_id', 'ip', 'port'], all_certs)
 
     def save_service_info(self):
+        from app.services.service_fusion import build_service_endpoint_doc
         self.service_info_list = []
-        services_list = set()
+        seen_endpoints = set()
+        now_str = utils.curr_date()
         for _data in self.ip_info_list:
-            port_info_lsit = _data.get("port_info")
-            for _info in port_info_lsit:
-                if _info.get("service_name"):
-                    if _info.get("service_name") not in services_list:
-                        _result = {}
-                        _result["service_name"] = _info.get("service_name")
-                        _result["service_info"] = []
-                        _result["service_info"].append({'ip': _data.get("ip"),
-                                                        'port_id': _info.get("port_id"),
-                                                        'product': _info.get("product"),
-                                                        'version': _info.get("version")})
-                        _result["task_id"] = self.task_id
-                        self.service_info_list.append(_result)
-                        services_list.add(_info.get("service_name"))
-                    else:
-                        for service_info in self.service_info_list:
-                            if service_info.get("service_name") == _info.get("service_name"):
-                                service_info['service_info'].append({'ip': _data.get("ip"),
-                                                                    'port_id': _info.get("port_id"),
-                                                                    'product': _info.get("product"),
-                                                                    'version': _info.get("version")})
+            ip_val = _data.get("ip")
+            port_info_list = _data.get("port_info") or []
+            if not ip_val:
+                continue
+            for _info in port_info_list:
+                if _info.get("service_name") and _info.get("port_id") is not None:
+                    ep_doc = build_service_endpoint_doc(
+                        owner_field="task_id",
+                        owner_id=self.task_id,
+                        ip=ip_val,
+                        port_id=_info.get("port_id"),
+                        service_name=_info.get("service_name"),
+                        product=_info.get("product") or "",
+                        version=_info.get("version") or "",
+                        sources=["nmap"],
+                        save_date=now_str,
+                    )
+                    ep_key = (ep_doc["ip"], ep_doc["port_id"])
+                    if ep_key in seen_endpoints:
+                        continue
+                    seen_endpoints.add(ep_key)
+                    self.service_info_list.append(ep_doc)
         if self.service_info_list:
-            utils.safe_insert_asset_many('service', ['task_id', 'service_name'], self.service_info_list)
+            utils.safe_insert_asset_many('service', ['task_id', 'ip', 'port_id'], self.service_info_list)
 
     def npoc_service_detection(self):
+        from app.services.service_fusion import sync_npoc_items_to_service_and_ip
         targets = []
         for ip_info in self.ip_info_list:
             for port_info in ip_info["port_info"]:
@@ -244,6 +248,7 @@ class IPTask(CommonTask):
             item["save_date"] = utils.curr_date()
         if result:
             utils.safe_insert_asset_many('npoc_service', ['task_id', 'target'], result)
+            sync_npoc_items_to_service_and_ip(self.task_id, result)
 
     def brute_config(self):
         plugins = []

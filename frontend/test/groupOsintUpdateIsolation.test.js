@@ -576,7 +576,6 @@ test('GroupAssetsDetail: 切换分组时同步清零 OSINT 更新态并丢弃迟
     const fetchData = () => Promise.resolve();
     const fingerModalVisible = ref(false);
     const cipDetailModalVisible = ref(false);
-    const serviceDetailModalVisible = ref(false);
     const previewVisible = ref(false);
     const tagVisible = ref(false);
     const addSiteVisible = ref(false);

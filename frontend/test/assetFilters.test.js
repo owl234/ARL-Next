@@ -38,13 +38,16 @@ function pageFixture(name, tab = 'site') {
     activeTab: ref(tab), searchForm: ref(tab === 'site' ? { status: ['403', '200'], title: 'admin' } : { status_code: ['403', '200'], title: 'admin' }),
     pagination: { current: 2, pageSize: 20, total: 2 }, taskId: ref('task-a'), scope_id: ref('scope-a'), targetName: ref('fixture'),
     loading: ref(false), dataSource: ref([]), selectedRowKeys: ref([]), hasSelected: ref(false), asmCounts: {},
+    selectionTracker: { rememberRows() {}, syncSelection() {}, getLabels: () => [], clear() {} },
+    getAssetRowKey: r => r?._id || r?.id,
+    getAssetRecordDisplayLabel: () => '',
     tabCache: { updateMemoryCache() {}, saveCurrentTab() {}, resetTabState() {},
       getTabSearchForm: () => ({}), applyTabOperators() {}, getTabPage: () => 1, getMemoryCache: () => null },
     request: { async get(url, options) {
       calls.push({ url, ...plain(options) });
       if (url === '/policy/') return { code: 200, items: [] };
       if (url.includes('save_result_set')) return { code: 200, data: { result_set_id: 'result-a', result_total: 2 } };
-      return { code: 200, items: [], total: 2 };
+      return { code: 200, items: [{ _id: '1' }], total: 2 };
     } },
     message: Object.fromEntries(['loading', 'success', 'error', 'warning'].map(key => [key, value => notices.push({ key, value })])),
     Blob, console, window: { URL: { createObjectURL: () => 'fixture', revokeObjectURL() {} } },
@@ -177,49 +180,48 @@ for (const name of ['AssetSearch', 'TaskDetail', 'GroupAssetsDetail']) {
 }
 
 for (const name of ['AssetSearch', 'TaskDetail', 'GroupAssetsDetail']) {
-  test(`${name}: switching service engines uses effective tab and restores that engine's filters`, async () => {
+  test(`${name}: unified service tab supports endpoint filters, source filter and service export`, async () => {
     const fixture = pageFixture(name, 'service');
-    fixture.context.tabCache.getTabSearchForm = tab => tab === 'npoc_service'
-      ? { host: '192.0.2.1', port: 443, scheme: 'https', status: ['200'], service_name: 'ignored' }
-      : { service_name: 'http', 'service_info.ip': '192.0.2.2', host: 'ignored', status: ['403'] };
-    fixture.context.tabCache.getTabPage = () => 3;
-    fixture.context.serviceEngineType.value = 'npoc';
-    await fixture.invoke('onServiceEngineChange');
-    assert.equal(fixture.calls[0].url, fixture.context.tabConfig.npoc_service.url);
-    assert.equal(fixture.calls[0].params.host, '192.0.2.1');
-    assert.equal(fixture.calls[0].params.port, 443);
-    assert.equal(fixture.calls[0].params.page, 3);
-    assert.ok(!('service_name' in fixture.calls[0].params));
-    assert.ok(!('status__in' in fixture.calls[0].params));
+    fixture.context.searchForm.value = {
+      service_name: 'redis',
+      ip: '192.0.2.1',
+      port_id: '6379',
+      product: 'Redis',
+      version: '7.0',
+      sources: 'npoc',
+      unrelated: 'ignored'
+    };
+    fixture.context.pagination.current = 2;
+    await fixture.invoke('fetchData');
+    assert.equal(fixture.calls[0].url, fixture.context.tabConfig.service.url);
+    assert.equal(fixture.calls[0].params.service_name, 'redis');
+    assert.equal(fixture.calls[0].params.ip, '192.0.2.1');
+    assert.equal(fixture.calls[0].params.port_id, '6379');
+    assert.equal(fixture.calls[0].params.product, 'Redis');
+    assert.equal(fixture.calls[0].params.version, '7.0');
+    assert.equal(fixture.calls[0].params.sources, 'npoc');
+    assert.equal(fixture.calls[0].params.page, 2);
+    assert.ok(!('unrelated' in fixture.calls[0].params));
+
     await fixture.invoke('handleExport');
-    if (fixture.context.tabConfig.npoc_service.exportUrl) {
-      assert.equal(fixture.calls[1].url, fixture.context.tabConfig.npoc_service.exportUrl);
-      assert.equal(fixture.calls[1].params.host, '192.0.2.1');
-    } else {
-      assert.equal(fixture.calls.length, 1);
-    }
-    fixture.context.serviceEngineType.value = 'nmap';
-    await fixture.invoke('onServiceEngineChange');
-    const nmapCall = fixture.calls.at(-1);
-    assert.equal(nmapCall.url, fixture.context.tabConfig.service.url);
-    assert.equal(nmapCall.params.service_name, 'http');
-    assert.equal(nmapCall.params['service_info.ip'], '192.0.2.2');
-    assert.ok(!('host' in nmapCall.params));
+    assert.equal(fixture.calls[1].url, fixture.context.tabConfig.service.exportUrl);
+    assert.equal(fixture.calls[1].params.service_name, 'redis');
+    assert.equal(fixture.calls[1].params.sources, 'npoc');
     assert.equal(fixture.notices.filter(item => item.key === 'error').length, 0);
   });
 
-  test(`${name}: a response from the previous service engine cannot replace the current data`, async () => {
+  test(`${name}: a response from a previous tab cannot replace the current tab data`, async () => {
     const fixture = pageFixture(name, 'service');
     let finishOld;
     fixture.context.request.get = url => url === fixture.context.tabConfig.service.url
       ? new Promise(resolve => { finishOld = resolve; })
-      : Promise.resolve({ code: 200, total: 1, items: [{ id: 'current-engine' }] });
+      : Promise.resolve({ code: 200, total: 1, items: [{ id: 'current-tab' }] });
     const oldRequest = fixture.invoke('fetchData');
-    fixture.context.serviceEngineType.value = 'npoc';
+    fixture.context.activeTab.value = 'domain';
     await fixture.invoke('fetchData');
-    finishOld({ code: 200, total: 9, items: [{ id: 'old-engine' }] });
+    finishOld({ code: 200, total: 9, items: [{ id: 'old-tab' }] });
     await oldRequest;
-    assert.deepEqual(plain(fixture.context.dataSource.value), [{ id: 'current-engine' }]);
+    assert.deepEqual(plain(fixture.context.dataSource.value), [{ id: 'current-tab' }]);
     assert.equal(fixture.context.pagination.total, 1);
   });
 }

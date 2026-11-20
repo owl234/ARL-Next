@@ -34,6 +34,12 @@ export function getAssetRecordDisplayLabel(tabKey, record) {
     case 'stat_finger':
       return record.name || record._id || '';
     case 'service':
+      if (record.ip && record.port_id != null) {
+        return `${record.service_name ? `${record.service_name} · ` : ''}${record.ip}:${record.port_id}`;
+      }
+      if (record.host && record.port != null) {
+        return `${record.scheme || record.service_name ? `${record.scheme || record.service_name} · ` : ''}${record.host}:${record.port}`;
+      }
       return record.service_name
         ? `${record.service_name}${Array.isArray(record.service_info) && record.service_info.length ? ` (${record.service_info.length})` : ''}`
         : (record._id || '');

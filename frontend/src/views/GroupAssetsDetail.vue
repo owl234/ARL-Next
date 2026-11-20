@@ -109,22 +109,13 @@
             <template #tab>
               <span class="asm-tab-item">
                 <span>{{ t.label }}</span>
-                <span class="asm-tab-badge" :class="{ 'has-data': (t.key === 'service' ? ((asmCounts.service || 0) + (asmCounts.npoc_service || 0)) : (asmCounts[t.key] || 0)) > 0 }">
-                  {{ t.key === 'service' ? ((asmCounts.service || 0) + (asmCounts.npoc_service || 0)) : (asmCounts[t.key] || 0) }}
+                <span class="asm-tab-badge" :class="{ 'has-data': getAsmTabCount(t.key) > 0 }">
+                  {{ getAsmTabCount(t.key) }}
                 </span>
               </span>
             </template>
           </a-tab-pane>
         </a-tabs>
-
-        <!-- 系统服务识别引擎筛选控制条 -->
-        <div v-if="activeTab === 'service'" style="margin-top: 8px; margin-bottom: 4px; display: flex; align-items: center; gap: 10px; background: var(--arl-bg-light); padding: 8px 14px; border-radius: 6px; border: 1px solid var(--arl-border-color);">
-          <span class="asset-option-heading">{{ assetText('tasks.detectionEngine') }}</span>
-          <a-radio-group v-model:value="serviceEngineType" button-style="solid" size="small" @change="onServiceEngineChange">
-            <a-radio-button value="nmap">{{ assetText('assets.portServiceCount', { count: asmCounts.service || 0 }) }}</a-radio-button>
-            <a-radio-button value="npoc">{{ assetText('assets.pluginServiceCount', { count: asmCounts.npoc_service || 0 }) }}</a-radio-button>
-          </a-radio-group>
-        </div>
 
         <!-- 普通资产列表检索与操作工具栏 (上下分层：业务操作行 + 直接平铺紧凑检索卡片) -->
         <div class="asm-toolbar-container">
@@ -132,7 +123,7 @@
             <div class="toolbar-left">
               <span class="toolbar-title-text">{{ assetText('assets.categoryHeading', { category: tabConfig[effectiveTab]?.tabName || assetText('tasks.assets') }) }}</span>
               <span class="toolbar-meta-count">
-                {{ assetText('assets.recordCount', { count: effectiveTab === 'service' ? asmCounts.service : (effectiveTab === 'npoc_service' ? asmCounts.npoc_service : (asmCounts[activeTab] || 0)) }) }}
+                {{ assetText('assets.recordCount', { count: getAsmTabCount(activeTab) }) }}
               </span>
             </div>
 
@@ -594,36 +585,33 @@
           <span v-else>-</span>
         </template>
         <template v-else-if="column.key === 'ip_port'">
-          <div v-if="record.service_info && record.service_info.length">
-            <div v-for="(info, i) in record.service_info.slice(0, 3)" :key="i" style="line-height: 1.8; font-family: monospace;">
-              {{ info.ip }}:{{ info.port_id }}
-            </div>
-            <div v-if="record.service_info.length > 3" style="margin-top: 4px;">
-              <a-button
-                type="link"
-                size="small"
-                style="padding: 0; height: auto; font-size: 12px;"
-                @click="openServiceDetailModal(record)"
-              >
-                {{ assetText('tasks.viewAllTotal', { count: record.service_info.length }) }}
-              </a-button>
-            </div>
-          </div>
+          <template v-if="formatServiceEndpoint(record)">
+            <a
+              v-if="isWebServiceRecord(record)"
+              :href="getServiceEndpointUrl(record)"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="arl-mono"
+            >{{ formatServiceEndpoint(record) }}</a>
+            <span v-else class="arl-mono">{{ formatServiceEndpoint(record) }}</span>
+          </template>
           <span v-else>-</span>
         </template>
         <template v-else-if="column.key === 'product'">
-          <div v-if="record.service_info && record.service_info.length">
-            <div v-for="(info, i) in record.service_info.slice(0, 3)" :key="i" style="line-height: 1.8;">
-              {{ info.product || '-' }}
-            </div>
-            <div
-              v-if="record.service_info.length > 3"
-              style="margin-top: 4px; height: 22px; line-height: 22px; color: var(--arl-text-color); opacity: 0.45; font-size: 12px;"
-            >
-              ...
-            </div>
+          <span>{{ record.product || record.service_info?.[0]?.product || '-' }}</span>
+        </template>
+        <template v-else-if="column.key === 'version'">
+          <span>{{ record.version || record.service_info?.[0]?.version || '-' }}</span>
+        </template>
+        <template v-else-if="column.key === 'service_sources'">
+          <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+            <a-tag
+              v-for="src in getServiceSources(record)"
+              :key="src"
+              :color="src === 'npoc' ? 'purple' : 'blue'"
+              style="margin: 0;"
+            >{{ src === 'npoc' ? assetText('assets.pythonPluginServicesLabel') : 'Nmap' }}</a-tag>
           </div>
-          <span v-else>-</span>
         </template>
         <template v-else-if="column.key === 'template_id'">
           <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
@@ -703,9 +691,6 @@
 
     <!-- 综合C段详情弹窗 (提取为组件) -->
     <CidrDetailModal v-model:open="cipDetailModalVisible" :record="currentCidrRecord" />
-
-    <!-- 系统服务端点详情弹窗 (提取为组件) -->
-    <ServiceDetailModal v-model:open="serviceDetailModalVisible" :record="currentServiceRecord" />
 
     <!-- 图片预览组件 -->
     <a-modal v-model:open="previewVisible" :footer="null" width="85vw" centered @cancel="previewVisible = false" :bodyStyle="{ padding: '16px' }">
@@ -999,7 +984,6 @@ import dayjs from 'dayjs';
 import CidrDetailModal from '../components/CidrDetailModal.vue';
 import WihApiDetailsDrawer from '../components/WihApiDetailsDrawer.vue';
 import { isApiEndpointRecord } from '../utils/wihApi';
-import ServiceDetailModal from '../components/ServiceDetailModal.vue';
 import EnterpriseOsintPanel from '../components/EnterpriseOsintPanel.vue';
 import ChainDrawer from '../components/ChainDrawer.vue';
 import RawDataDrawer from '../components/RawDataDrawer.vue';
@@ -1539,30 +1523,50 @@ const handleOsintSynced = () => {
 
 const isScopeSwitching = ref(false);
 const activeTab = ref('site');
-const serviceEngineType = ref('nmap'); // 'nmap' | 'npoc'
-const effectiveTab = computed(() => {
-  if (activeTab.value === 'service' && serviceEngineType.value === 'npoc') {
-    return 'npoc_service';
-  }
-  return activeTab.value;
-});
+const effectiveTab = computed(() => activeTab.value);
 
-const onServiceEngineChange = () => {
-  const currentTab = effectiveTab.value;
-  clearSelection();
-  columns.value = tabConfig[currentTab]?.cols || [];
-  searchForm.value = tabCache.getTabSearchForm(currentTab);
-  tabCache.applyTabOperators(currentTab);
-  pagination.current = tabCache.getTabPage(currentTab) || 1;
-  const cached = tabCache.getMemoryCache(currentTab, pagination.pageSize);
-  if (cached) {
-    dataSource.value = cached.dataSource;
-    pagination.total = cached.total;
-    lastFetchedPage = pagination.current;
-    lastFetchedSize = pagination.pageSize;
-  } else {
-    fetchData();
+const getAsmTabCount = (key) => {
+  if (key === 'service') {
+    const svcCount = Number(asmCounts.service) || 0;
+    return svcCount > 0 ? svcCount : (Number(asmCounts.npoc_service) || 0);
   }
+  return Number(asmCounts[key]) || 0;
+};
+
+const formatServiceEndpoint = (record) => {
+  const ip = record?.ip || record?.host || record?.service_info?.[0]?.ip;
+  const port = record?.port_id ?? record?.port ?? record?.service_info?.[0]?.port_id;
+  if (!ip) return '';
+  return port != null && port !== '' ? `${ip}:${port}` : String(ip);
+};
+
+const isWebServiceRecord = (record) => {
+  const sName = String(record?.service_name || record?.scheme || '').toLowerCase();
+  if (sName.includes('http') || sName.includes('web')) return true;
+  const p = Number(record?.port_id ?? record?.port ?? record?.service_info?.[0]?.port_id);
+  return [80, 443, 8080, 8443, 8000, 8888].includes(p);
+};
+
+const getServiceEndpointUrl = (record) => {
+  const sName = String(record?.service_name || record?.scheme || '').toLowerCase();
+  const port = record?.port_id ?? record?.port ?? record?.service_info?.[0]?.port_id;
+  const p = Number(port) || 80;
+  const isHttps = sName.includes('https') || p === 443 || p === 8443;
+  const scheme = isHttps ? 'https' : 'http';
+  const ipStr = String(record?.ip || record?.host || record?.service_info?.[0]?.ip || '');
+  const host = ipStr.includes(':') && !ipStr.startsWith('[') ? `[${ipStr}]` : ipStr;
+  const portSuffix = port ? `:${port}` : '';
+  return `${scheme}://${host}${portSuffix}`;
+};
+
+const getServiceSources = (record) => {
+  if (Array.isArray(record?.sources) && record.sources.length) {
+    return record.sources;
+  }
+  if (record?.scheme && !record?.service_name) {
+    return ['npoc'];
+  }
+  return ['nmap'];
 };
 const loading = ref(false);
 const dataSource = ref([]);
@@ -1748,16 +1752,6 @@ const openCidrDetail = (record) => {
   cipDetailModalVisible.value = true;
 };
 
-// 系统服务端点详情弹窗
-const serviceDetailModalVisible = ref(false);
-const currentServiceRecord = ref(null);
-
-const openServiceDetailModal = (record) => {
-  currentServiceRecord.value = record;
-  serviceDetailModalVisible.value = true;
-};
-
-
 // 💡 针对分组详情定制的 Config (以站点为例，去掉了截图，加了更新时间)
 // 💡 完整版的 Config：涵盖站点、域名、IP、WIH
 // 💡 修复版 Config：使用 asset_ 前缀的专属接口，并修正日期字段
@@ -1886,19 +1880,33 @@ const tabConfig = reactive({
   },
   service: {
     url: '/asset_service/',
+    exportUrl: '/asset_service/export/',
     get tabName() { return assetText('tasks.services'); },
     searchFields: [
       { get label() { return assetText('tasks.services'); }, key: 'service_name', operator: '=' },
-      { label: 'IP', key: 'service_info.ip', operator: '=' },
-      { get label() { return assetText('tasks.port'); }, key: 'service_info.port_id', operator: '=' },
-      { get label() { return assetText('tasks.product'); }, key: 'service_info.product', operator: '=' },
+      { label: 'IP', key: 'ip', operator: '=' },
+      { get label() { return assetText('tasks.port'); }, key: 'port_id', operator: '=' },
+      { get label() { return assetText('tasks.product'); }, key: 'product', operator: '=' },
+      { get label() { return assetText('tasks.version'); }, key: 'version', operator: '=' },
+      {
+        get label() { return assetText('tasks.source'); },
+        key: 'sources',
+        operator: '=',
+        type: 'select',
+        options: [
+          { label: 'Nmap', value: 'nmap' },
+          { get label() { return assetText('assets.pythonPluginServicesLabel'); }, value: 'npoc' }
+        ]
+      },
       { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
-      { get title() { return assetText('tasks.services'); }, dataIndex: 'service_name', key: 'service_name', width: 150, align: 'center' },
-      { get title() { return assetText('tasks.ipPort'); }, key: 'ip_port', width: 300 },
-      { get title() { return assetText('tasks.product'); }, key: 'product', width: 250 },
+      { get title() { return assetText('tasks.services'); }, dataIndex: 'service_name', key: 'service_name', width: 140, align: 'center' },
+      { get title() { return assetText('tasks.ipPort'); }, key: 'ip_port', width: 220 },
+      { get title() { return assetText('tasks.product'); }, key: 'product', width: 220 },
+      { get title() { return assetText('tasks.version'); }, key: 'version', width: 140 },
+      { get title() { return assetText('tasks.source'); }, key: 'service_sources', width: 180 },
       { get title() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', width: 180 }
     ]
   },
@@ -2215,25 +2223,22 @@ const handleBatchDelete = () => {
 };
 
 watch(activeTab, (newVal, oldVal) => {
-  const oldEffective = (oldVal === 'service' && serviceEngineType.value === 'npoc') ? 'npoc_service' : oldVal;
-  const newEffective = (newVal === 'service' && serviceEngineType.value === 'npoc') ? 'npoc_service' : newVal;
-
-  if (oldEffective && tabConfig[oldEffective] && !isScopeSwitching.value) {
+  if (oldVal && tabConfig[oldVal] && !isScopeSwitching.value) {
     // 离开旧选项卡前，仅在非切组且有效交互时保存当前搜索表单、操作符和页码
-    tabCache.saveCurrentTab(oldEffective, searchForm.value, pagination.current);
+    tabCache.saveCurrentTab(oldVal, searchForm.value, pagination.current);
   }
 
-  if (tabConfig[newEffective]) {
-    columns.value = tabConfig[newEffective].cols;
+  if (tabConfig[newVal]) {
+    columns.value = tabConfig[newVal].cols;
     clearSelection();
 
     // 恢复新选项卡的搜索表单、操作符与页码
-    searchForm.value = tabCache.getTabSearchForm(newEffective);
-    tabCache.applyTabOperators(newEffective);
-    pagination.current = tabCache.getTabPage(newEffective) || 1;
+    searchForm.value = tabCache.getTabSearchForm(newVal);
+    tabCache.applyTabOperators(newVal);
+    pagination.current = tabCache.getTabPage(newVal) || 1;
 
     // 检查内存数据缓存：若已加载过且单页条数匹配则直接秒开渲染，不重复向后端发请求
-    const cached = tabCache.getMemoryCache(newEffective, pagination.pageSize);
+    const cached = tabCache.getMemoryCache(newVal, pagination.pageSize);
     if (cached) {
       dataSource.value = cached.dataSource;
       pagination.total = cached.total;
@@ -2277,7 +2282,6 @@ watch(scope_id, (newId) => {
 
     let restoredTab = tabCache.init();
     if (restoredTab === 'npoc_service') {
-      serviceEngineType.value = 'npoc';
       restoredTab = 'service';
     }
     if (restoredTab && tabConfig[restoredTab] && restoredTab !== activeTab.value) {
@@ -2669,7 +2673,6 @@ onDeactivated(() => {
   hasDeactivated = true;
   fingerModalVisible.value = false;
   cipDetailModalVisible.value = false;
-  serviceDetailModalVisible.value = false;
   previewVisible.value = false;
   tagVisible.value = false;
   addSiteVisible.value = false;

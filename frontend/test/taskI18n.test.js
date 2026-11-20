@@ -56,7 +56,7 @@ test('任务语言包均能渲染，所有参数保留原值，英文没有遗�
 test('任务组件的翻译引用及插值参数与语言包一致', () => {
   const files = ['views/TaskList.vue', 'views/TaskDetail.vue', 'views/PlanningTasks.vue',
     'components/EnterpriseTaskDetailPanel.vue', 'components/TycTaskModal.vue', 'components/SyncToScopeModal.vue',
-    'components/ServiceDetailModal.vue', 'components/CidrDetailModal.vue', 'components/AssetScopeSelect.vue', 'components/HttpStatusFilter.vue'];
+    'components/CidrDetailModal.vue', 'components/AssetScopeSelect.vue', 'components/HttpStatusFilter.vue'];
   for (const file of files) {
     const source = fs.readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
     // 分别解析模板表达式与脚本，检查调用时提供的具名参数。
@@ -95,7 +95,6 @@ test('已创建的任务表格、计划表格和企业结果列名随语言切�
   const cases = [
     ['views/TaskList.vue', 'enterpriseColumns'], ['views/TaskList.vue', 'columns'],
     ['views/PlanningTasks.vue', 'columns'], ['views/PlanningTasks.vue', 'monitorColumns'],
-    ['components/ServiceDetailModal.vue', 'columns'],
   ];
   for (const [file, name] of cases) {
     i18n.global.locale.value = 'zh-CN';

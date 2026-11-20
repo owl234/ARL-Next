@@ -64,12 +64,20 @@ class SyncAsset(object):
         return True
 
     def sync_by_category(self, category):
+        from app.services.service_fusion import expand_service_doc_to_endpoints
         dist_collection = 'asset_{}'.format(category)
         task_data_cursor = conn(category).find({"task_id": self.task_id})
         
         chunk_size = 500
         chunk = []
         for data in task_data_cursor:
+            if category == "service":
+                for ep in expand_service_doc_to_endpoints(data):
+                    chunk.append(ep)
+                    if len(chunk) >= chunk_size:
+                        self._process_sync_chunk(category, dist_collection, chunk)
+                        chunk = []
+                continue
             chunk.append(data)
             if len(chunk) >= chunk_size:
                 self._process_sync_chunk(category, dist_collection, chunk)
@@ -80,6 +88,7 @@ class SyncAsset(object):
 
     def _process_sync_chunk(self, category, dist_collection, chunk):
         from pymongo import InsertOne, ReplaceOne
+        from app.services.service_fusion import merge_endpoint_records
 
         queries = []
         for data in chunk:
@@ -93,8 +102,8 @@ class SyncAsset(object):
                 query = {"scope_id": self.scope_id, "ip": data.get("ip"), "cert.fingerprint.sha256": data.get("cert", {}).get("fingerprint", {}).get("sha256")}
                 data_content = f"{data.get('ip')}_{data.get('cert', {}).get('fingerprint', {}).get('sha256')}"
             elif category == "service":
-                query = {"scope_id": self.scope_id, "service_name": data.get("service_name")}
-                data_content = data.get("service_name")
+                query = {"scope_id": self.scope_id, "ip": data.get("ip"), "port_id": data.get("port_id")}
+                data_content = f"{data.get('ip')}:{data.get('port_id')}"
             elif category == "fileleak":
                 query = {"scope_id": self.scope_id, "url": data.get("url")}
                 data_content = data.get("url")
@@ -134,7 +143,7 @@ class SyncAsset(object):
                 elif category == "cert":
                     old_data_content = f"{old.get('ip')}_{old.get('cert', {}).get('fingerprint', {}).get('sha256')}"
                 elif category == "service":
-                    old_data_content = old.get("service_name")
+                    old_data_content = f"{old.get('ip')}:{old.get('port_id')}"
                 elif category == "fileleak":
                     old_data_content = old.get("url")
                 elif category == "url":
@@ -224,12 +233,12 @@ class SyncAsset(object):
                     data["domain_list"] = merged_domain_list
                     data["domain_count"] = len(merged_domain_list)
                 elif category == 'service':
-                    if data.get("service_info") and old.get("service_info"):
-                        existing_keys = {f"{item['ip']}:{item['port_id']}" for item in old["service_info"] if 'ip' in item and 'port_id' in item}
-                        for new_item in data["service_info"]:
-                            if f"{new_item.get('ip')}:{new_item.get('port_id')}" not in existing_keys:
-                                old["service_info"].append(new_item)
-                        data["service_info"] = old["service_info"]
+                    merged_ep = merge_endpoint_records(old, data)
+                    merged_ep.pop("_id", None)
+                    merged_ep["scope_id"] = self.scope_id
+                    merged_ep["save_date"] = data["save_date"]
+                    merged_ep["update_date"] = data["update_date"]
+                    data.update(merged_ep)
                 elif category == 'site':
                     old_tags = old.get("tag") or []
                     if isinstance(old_tags, str):

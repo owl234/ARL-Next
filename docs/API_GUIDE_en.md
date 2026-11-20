@@ -283,9 +283,16 @@ Example response:
 
 > [!IMPORTANT]
 > - Omitting `scope_id` returns **global unprefixed collection aggregates**, whereas providing `scope_id` returns **asset-group `asset_*` totals**; do not conflate the two scopes;
-> - `counts` returns totals for all **13 underlying asset collections**; the UI views (**Asset search**, **Asset group details**, **Task details**, and the asset relationship profile drawer) consistently present **12 asset dimensions** (including `nuclei_result`), unifying `service` (Port services / Nmap) and `npoc_service` (Python plugin services) under the single **Services** dimension (tab/chip badge sums both engines, with per-engine breakdown inside);
-> - Each dimension's counting rule matches its corresponding list endpoint — for example `cip` counts distinct C-blocks and `stat_finger` counts distinct fingerprint names, rather than raw document counts;
-> - A dimension whose count fails is returned as `null`. Clients should treat it as "unknown" and avoid rendering it as `0` (for the merged **Services** dimension, if either `service` or `npoc_service` is `null`, treat the combined badge as unknown as well).
+> - `counts` returns totals for all **13 underlying asset collections**; the UI views (**Asset search**, **Asset group details**, **Task details**, and the asset relationship profile drawer) consistently present **12 asset dimensions** (including `nuclei_result`), where `service` fuses Nmap port services and Python plugin services per `(ip, port_id)` endpoint on the backend (the `npoc_service` collection is retained for internal scan pipelines and backward compatibility). The **Services** badge matches `total` from `GET /api/service/` (deduplicated globally by `(ip, port_id)` across tasks) and `GET /api/asset_service/`;
+> - Each dimension's counting rule matches its corresponding list endpoint — for example global `service` counts distinct `(ip, port_id)` endpoints across tasks, `cip` counts distinct C-blocks, and `stat_finger` counts distinct fingerprint names, rather than raw document counts;
+> - A dimension whose count fails is returned as `null`. Clients should treat it as "unknown" and avoid rendering it as `0`.
+
+### Unified Per-Endpoint Service Query & Export Conventions
+
+`GET /api/service/` (global and per-task) and `GET /api/asset_service/` (per-asset-group) return unified per-endpoint `(ip, port_id)` records combining Nmap port service detection and Python sniffer plugin results:
+
+- **Fusion & Calibration**: When both Nmap and Python sniffer plugins detect the same `(ip, port_id)`, they merge into a single record. Python protocol handshakes take precedence over weak service labels such as `unknown` or `tcpwrapped`, while preserving Nmap `product` and `version` metadata and recording detection origins in `sources` (`["nmap"]`, `["npoc"]`, or `["nmap", "npoc"]`). Global queries (omitting `task_id`) deduplicate across tasks by `(ip, port_id)`.
+- **Filtering & Export**: Supports filtering by `service_name`, `ip`, `port_id`, `product`, `version`, and `sources` (`nmap` | `npoc`), with backward-compatible aliases (`service_info.*`, `host`, `port`, `scheme`). `GET /api/service/export/` and `GET /api/asset_service/export/` export deduplicated `scheme://ip:port` lists using the same query parameters.
 
 ### Asset Cascade Deletion & Derived Collection Recalculation
 

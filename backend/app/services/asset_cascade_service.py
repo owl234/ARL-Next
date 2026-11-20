@@ -606,12 +606,19 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
         for chunk in _chunked(ops):
             sf_col.bulk_write(chunk, ordered=False)
 
-    # 3. 重算 service / asset_service
+    # 3. 重算 service / asset_service（单端点模型：融合 ip.port_info 与 npoc_service）
     if "service" in target_set:
-        service_map = {}
-        seen_endpoints = {}
-        for doc in ip_docs:
-            ip_val = doc.get("ip")
+        from app.services.service_fusion import (
+            build_service_endpoint_doc,
+            expand_service_doc_to_endpoints,
+            merge_endpoint_records,
+            normalize_host,
+            normalize_port,
+        )
+
+        endpoint_map = {}
+        for doc in (ip_docs or []):
+            ip_val = normalize_host(doc.get("ip"))
             port_info_list = doc.get("port_info")
             if not ip_val or not isinstance(port_info_list, list):
                 continue
@@ -619,45 +626,80 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                 if not isinstance(p, dict):
                     continue
                 svc_name = p.get("service_name")
-                port_id = p.get("port_id")
+                port_id = normalize_port(p.get("port_id"))
                 if not svc_name or port_id is None:
                     continue
-                ep_key = (str(ip_val), str(port_id))
-                svc_seen = seen_endpoints.setdefault(svc_name, set())
-                if ep_key in svc_seen:
-                    continue
-                svc_seen.add(ep_key)
-                service_map.setdefault(svc_name, []).append({
-                    "ip": ip_val,
-                    "port_id": port_id,
-                    "product": p.get("product"),
-                    "version": p.get("version"),
-                })
+                ep_key = (ip_val, port_id)
+                ep_doc = build_service_endpoint_doc(
+                    owner_field=owner_field,
+                    owner_id=owner_id,
+                    ip=ip_val,
+                    port_id=port_id,
+                    service_name=svc_name,
+                    product=p.get("product") or "",
+                    version=p.get("version") or "",
+                    target=p.get("target") or "",
+                    sources=p.get("sources") or ["nmap"],
+                )
+                endpoint_map[ep_key] = merge_endpoint_records(endpoint_map.get(ep_key), ep_doc)
+
+        for npoc_doc in _db(f"{prefix}npoc_service").find({owner_field: owner_id}):
+            for npoc_ep in expand_service_doc_to_endpoints(npoc_doc, default_source="npoc"):
+                ep_key = (npoc_ep["ip"], npoc_ep["port_id"])
+                endpoint_map[ep_key] = merge_endpoint_records(
+                    endpoint_map.get(ep_key),
+                    npoc_ep,
+                    prefer_incoming_service=True,
+                )
 
         svc_col = _db(f"{prefix}service")
-        desired_svcs = set(service_map.keys())
-        existing_svcs = {
-            doc.get("service_name")
-            for doc in svc_col.find({owner_field: owner_id}, {"service_name": 1, "_id": 0})
-            if doc.get("service_name")
-        }
-        stale_svcs = list(existing_svcs - desired_svcs)
-        if stale_svcs:
-            for chunk in _chunked(stale_svcs):
-                svc_col.delete_many({owner_field: owner_id, "service_name": {"$in": chunk}})
+        stale_doc_ids = []
+        for ex_doc in svc_col.find({owner_field: owner_id}):
+            ex_ip = normalize_host(ex_doc.get("ip"))
+            ex_port = normalize_port(ex_doc.get("port_id"))
+            ex_infos = ex_doc.get("service_info")
+            is_legacy_grouped = not ex_ip or ex_port is None or (isinstance(ex_infos, list) and len(ex_infos) > 1)
+            if is_legacy_grouped:
+                stale_doc_ids.append(ex_doc["_id"])
+                continue
+            ep_key = (ex_ip, ex_port)
+            if ep_key not in endpoint_map:
+                stale_doc_ids.append(ex_doc["_id"])
+            else:
+                # 保留存量端点的 save_date 及已归并的 npoc 来源
+                cur = endpoint_map[ep_key]
+                if ex_doc.get("save_date") and not cur.get("save_date"):
+                    cur["save_date"] = ex_doc["save_date"]
+                if "npoc" in (ex_doc.get("sources") or []):
+                    endpoint_map[ep_key] = merge_endpoint_records(ex_doc, cur)
+
+        if stale_doc_ids:
+            for chunk in _chunked(stale_doc_ids):
+                svc_col.delete_many({"_id": {"$in": chunk}})
 
         ops = []
-        for svc_name, svc_infos in service_map.items():
-            set_doc = {
-                owner_field: owner_id,
-                "service_name": svc_name,
-                "service_info": svc_infos,
-            }
-            update_spec = {"$set": set_doc}
+        for (ip_val, port_id), ep_doc in endpoint_map.items():
+            set_doc = dict(ep_doc)
+            set_doc.pop("_id", None)
+            set_doc[owner_field] = owner_id
+            saved_ts = set_doc.pop("save_date", None)
             if is_asset:
                 set_doc["update_date"] = now
-                update_spec["$setOnInsert"] = {"save_date": now}
-            ops.append(UpdateOne({owner_field: owner_id, "service_name": svc_name}, update_spec, upsert=True))
+                update_spec = {
+                    "$set": set_doc,
+                    "$setOnInsert": {"save_date": saved_ts or now},
+                }
+            else:
+                if saved_ts:
+                    set_doc["save_date"] = saved_ts
+                update_spec = {"$set": set_doc}
+            ops.append(
+                UpdateOne(
+                    {owner_field: owner_id, "ip": ip_val, "port_id": port_id},
+                    update_spec,
+                    upsert=True,
+                )
+            )
         for chunk in _chunked(ops):
             svc_col.bulk_write(chunk, ordered=False)
 
@@ -1205,7 +1247,8 @@ def _cascade_delete_services_in_side(endpoint_tuples, empty_service_names, is_as
     """
     精确端点级服务联动：
     按 (service_name, ip, port_id) 端点对从 ip.port_info / asset_ip.port_info 中 $pull 剥离端口项，
-    仅对无明细的空 service 文档按 service_name 清理；不误伤同 service_name 下其他 IP 的服务。
+    同步删除 service / asset_service 单端点文档及 npoc_service / asset_npoc_service 对应记录；
+    不误伤同 service_name 下其他 IP 的服务。
     """
     prefix = "asset_" if is_asset else ""
     owner_field = None if global_mode else ("scope_id" if is_asset else "task_id")
@@ -1221,6 +1264,7 @@ def _cascade_delete_services_in_side(endpoint_tuples, empty_service_names, is_as
 
     ip_col = _db(f"{prefix}ip")
     svc_col = _db(f"{prefix}service")
+    npoc_col = _db(f"{prefix}npoc_service")
     for ip_val, pairs in ports_by_ip.items():
         # 构建精确端口匹配条件（兼容 port_id 为 int 或 str）
         port_vals = set()
@@ -1232,8 +1276,10 @@ def _cascade_delete_services_in_side(endpoint_tuples, empty_service_names, is_as
                 pass
             port_vals.add(str(pid))
 
-        base_q = {"ip": ip_val, "port_info.port_id": {"$in": list(port_vals)}}
-        svc_base_q = {"service_info.ip": ip_val}
+        port_vals_list = list(port_vals)
+        base_q = {"ip": ip_val, "port_info.port_id": {"$in": port_vals_list}}
+        svc_base_q = {"$or": [{"ip": ip_val, "port_id": {"$in": port_vals_list}}, {"service_info.ip": ip_val}]}
+        npoc_base_q = {"host": ip_val, "port": {"$in": port_vals_list}}
         if global_mode:
             for doc in ip_col.find(base_q, {track_field: 1, "_id": 0}):
                 if doc.get(track_field):
@@ -1241,8 +1287,13 @@ def _cascade_delete_services_in_side(endpoint_tuples, empty_service_names, is_as
             for doc in svc_col.find(svc_base_q, {track_field: 1, "_id": 0}):
                 if doc.get(track_field):
                     affected_owners.add(str(doc[track_field]))
+            for doc in npoc_col.find(npoc_base_q, {track_field: 1, "_id": 0}):
+                if doc.get(track_field):
+                    affected_owners.add(str(doc[track_field]))
+            npoc_col.delete_many(npoc_base_q)
+            svc_col.delete_many({"ip": ip_val, "port_id": {"$in": port_vals_list}})
             for svc_name, pid in pairs:
-                pid_cands = [pid]
+                pid_cands = [pid, str(pid)]
                 try:
                     pid_int = int(pid)
                     if pid_int not in pid_cands:
@@ -1250,26 +1301,30 @@ def _cascade_delete_services_in_side(endpoint_tuples, empty_service_names, is_as
                 except (ValueError, TypeError):
                     pass
                 pull_ip_elem = {"port_id": {"$in": pid_cands}}
-                if svc_name:
-                    pull_ip_elem["service_name"] = svc_name
                 ip_col.update_many({"ip": ip_val}, {"$pull": {"port_info": pull_ip_elem}})
 
-                svc_filter = {"service_info.ip": ip_val}
+                svc_filter = {"ip": {"$exists": False}, "service_info.ip": ip_val}
                 if svc_name:
                     svc_filter["service_name"] = svc_name
                 svc_col.update_many(svc_filter, {"$pull": {"service_info": {"ip": ip_val, "port_id": {"$in": pid_cands}}}})
         elif owner_ids:
             for chunk in _chunked(owner_ids):
                 q = {owner_field: {"$in": chunk}, "ip": ip_val}
-                for doc in ip_col.find({**q, "port_info.port_id": {"$in": list(port_vals)}}, {track_field: 1, "_id": 0}):
+                for doc in ip_col.find({**q, "port_info.port_id": {"$in": port_vals_list}}, {track_field: 1, "_id": 0}):
                     if doc.get(track_field):
                         affected_owners.add(str(doc[track_field]))
-                sq = {owner_field: {"$in": chunk}, "service_info.ip": ip_val}
+                sq = {owner_field: {"$in": chunk}, "$or": [{"ip": ip_val, "port_id": {"$in": port_vals_list}}, {"service_info.ip": ip_val}]}
                 for doc in svc_col.find(sq, {track_field: 1, "_id": 0}):
                     if doc.get(track_field):
                         affected_owners.add(str(doc[track_field]))
+                nq = {owner_field: {"$in": chunk}, "host": ip_val, "port": {"$in": port_vals_list}}
+                for doc in npoc_col.find(nq, {track_field: 1, "_id": 0}):
+                    if doc.get(track_field):
+                        affected_owners.add(str(doc[track_field]))
+                npoc_col.delete_many(nq)
+                svc_col.delete_many({owner_field: {"$in": chunk}, "ip": ip_val, "port_id": {"$in": port_vals_list}})
                 for svc_name, pid in pairs:
-                    pid_cands = [pid]
+                    pid_cands = [pid, str(pid)]
                     try:
                         pid_int = int(pid)
                         if pid_int not in pid_cands:
@@ -1277,17 +1332,15 @@ def _cascade_delete_services_in_side(endpoint_tuples, empty_service_names, is_as
                     except (ValueError, TypeError):
                         pass
                     pull_ip_elem = {"port_id": {"$in": pid_cands}}
-                    if svc_name:
-                        pull_ip_elem["service_name"] = svc_name
                     ip_col.update_many(q, {"$pull": {"port_info": pull_ip_elem}})
 
-                    svc_filter = {owner_field: {"$in": chunk}, "service_info.ip": ip_val}
+                    svc_filter = {owner_field: {"$in": chunk}, "ip": {"$exists": False}, "service_info.ip": ip_val}
                     if svc_name:
                         svc_filter["service_name"] = svc_name
                     svc_col.update_many(svc_filter, {"$pull": {"service_info": {"ip": ip_val, "port_id": {"$in": pid_cands}}}})
 
-    # 清理 service_info 已变空的服务文档
-    empty_q = {"$or": [{"service_info": {"$exists": False}}, {"service_info": {"$size": 0}}]}
+    # 清理旧版 service_info 已变空的服务文档
+    empty_q = {"ip": {"$exists": False}, "$or": [{"service_info": {"$exists": False}}, {"service_info": {"$size": 0}}]}
     if global_mode:
         svc_col.delete_many(empty_q)
     elif owner_ids:
@@ -1299,6 +1352,7 @@ def _cascade_delete_services_in_side(endpoint_tuples, empty_service_names, is_as
             f"{prefix}service",
             {
                 "service_name": {"$in": list(empty_service_names)},
+                "ip": {"$exists": False},
                 "$or": [{"service_info": {"$exists": False}}, {"service_info": {"$size": 0}}],
             },
             owner_field=owner_field,
@@ -2065,6 +2119,9 @@ def _cascade_delete_dimension_records_impl(category, ids_or_keys, source_type, s
         empty_service_names = set()
         for d in matched_docs:
             sname = d.get("service_name")
+            if d.get("ip") and d.get("port_id") is not None:
+                endpoint_tuples.append((sname, d["ip"], d["port_id"]))
+                continue
             sinfos = d.get("service_info") or []
             if isinstance(sinfos, list) and sinfos:
                 for info in sinfos:
@@ -2089,11 +2146,17 @@ def _cascade_delete_dimension_records_impl(category, ids_or_keys, source_type, s
             affected_tasks.update(t_aff)
 
         if affected_scopes:
-            sids_with_ip = [s for s in affected_scopes if _db("asset_ip").find_one({"scope_id": s}, {"_id": 1})]
+            sids_with_ip = [
+                s for s in affected_scopes
+                if _db("asset_ip").find_one({"scope_id": s}, {"_id": 1}) or _db("asset_npoc_service").find_one({"scope_id": s}, {"_id": 1})
+            ]
             if sids_with_ip:
                 rebuild_scope_derived_collections(sids_with_ip, targets=("service",))
         if affected_tasks:
-            tids_with_ip = [t for t in affected_tasks if _db("ip").find_one({"task_id": t}, {"_id": 1})]
+            tids_with_ip = [
+                t for t in affected_tasks
+                if _db("ip").find_one({"task_id": t}, {"_id": 1}) or _db("npoc_service").find_one({"task_id": t}, {"_id": 1})
+            ]
             if tids_with_ip:
                 rebuild_task_derived_collections(tids_with_ip, targets=("service",))
             recalculate_tasks_statistics(list(affected_tasks))

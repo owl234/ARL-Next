@@ -285,9 +285,16 @@ rules:
 
 > [!IMPORTANT]
 > - 省略 `scope_id` 返回的是**全局无前缀集合聚合口径**，传入 `scope_id` 返回的是**指定资产组 `asset_*` 集合口径**，二者统计范围不同，不可混用推导；
-> - `counts` 返回底层 **13 个资产集合**的计数；前端「资产搜索」「资产组详情」「任务详情」与全链路资产画像抽屉统一展示 **12 个资产维度**（含 `nuclei_result`），其中 `service`（端口服务 Nmap）与 `npoc_service`（Python 插件服务）合并归入「服务」维度（总徽标取二者之和，页签/卡片内再区分两个引擎）；
-> - 各维度计数口径与其对应列表接口保持一致，例如 `cip` 统计去重后的 C 段数、`stat_finger` 统计去重后的指纹名数量，而非底层集合文档数；
-> - 单个维度计数失败时该字段返回 `null`，客户端应视为「未知」并避免渲染为 `0`（合并展示的「服务」维度在 `service` 或 `npoc_service` 任一为 `null` 时同样视为未知）。
+> - `counts` 返回底层 **13 个资产集合**的计数；前端「资产搜索」「资产组详情」「任务详情」与全链路资产画像抽屉统一展示 **12 个资产维度**（含 `nuclei_result`），其中 `service` 已在后端按 `(ip, port_id)` 单端点融合 Nmap 端口服务与 Python 插件服务（`npoc_service` 集合保留用于内部扫描链路与向下兼容），「服务」页签徽标与 `GET /api/service/`（全局按 `(ip, port_id)` 跨任务去重）及 `GET /api/asset_service/` 的 `total` 严格一致；
+> - 各维度计数口径与其对应列表接口保持一致，例如全局 `service` 统计跨任务去重后的 `(ip, port_id)` 端点数、`cip` 统计去重后的 C 段数、`stat_finger` 统计去重后的指纹名数量，而非原始集合文档数；
+> - 单个维度计数失败时该字段返回 `null`，客户端应视为「未知」并避免渲染为 `0`。
+
+### 系统服务单端点融合查询与导出约定
+
+`GET /api/service/`（全局与任务级）与 `GET /api/asset_service/`（资产组级）统一返回按 `(ip, port_id)` 归并后的单端点服务记录（融合 Nmap 端口服务与 Python 插件握手识别结果）：
+
+- **融合与校准规则**：同一 `(ip, port_id)` 同时命中 Nmap 与 Python 插件时自动合并为单条记录，Python 协议握手结果优先校准 `unknown` / `tcpwrapped` 等弱服务名，保留 Nmap 探测到的 `product` 与 `version`，并通过 `sources` 数组标注识别来源（`["nmap"]`、`["npoc"]` 或 `["nmap", "npoc"]`）；全局查询（不传 `task_id`）按 `(ip, port_id)` 跨任务去重归并。
+- **筛选与导出**：支持按 `service_name`、`ip`、`port_id`、`product`、`version`、`sources`（`nmap` | `npoc`）筛选（向下兼容 `service_info.*`、`host`、`port`、`scheme` 参数）；`GET /api/service/export/` 与 `GET /api/asset_service/export/` 支持按相同筛选条件导出去重后的 `scheme://ip:port` 文本清单。
 
 ### 资产级联删除与派生重算约定
 

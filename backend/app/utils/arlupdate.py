@@ -24,7 +24,7 @@ def create_index():
         "ip": ["task_id", "ip", "domain"],
         "npoc_service": ["task_id", "host", "target"],
         "site": ["task_id", "status", "title", "hostname", "site", "ip", "http_server", "tag", "is_catch_all"],
-        "service": ["task_id", "service_name", "service_info.ip"],
+        "service": ["task_id", "service_name", "ip", "port_id", "sources", "service_info.ip"],
         "url": ["task_id", "site", "url"],
         "task": ["status", "start_time"],
         "icp_task": ["status", "start_time", "end_time", "synced_scope_id"],
@@ -41,7 +41,7 @@ def create_index():
         "github_cve_history": "insert_time",
         "wih": ["task_id", "record_type", "fnv_hash", "site", "content"],
         "asset_cert": ["scope_id", "ip"],
-        "asset_service": "scope_id",
+        "asset_service": ["scope_id", "service_name", "ip", "port_id", "sources"],
         "asset_fileleak": "scope_id",
         "asset_url": "scope_id",
         "asset_vuln": ["scope_id", "vul_name"],
@@ -112,8 +112,14 @@ def create_index():
             [("scope_id", 1), ("ip", 1), ("cert.fingerprint.sha256", 1)],
         ],
         "asset_service": [
+            [("scope_id", 1), ("ip", 1), ("port_id", 1)],
             [("scope_id", 1), ("service_info.ip", 1)],
             [("scope_id", 1), ("service_name", 1)],
+        ],
+        "service": [
+            [("task_id", 1), ("ip", 1), ("port_id", 1)],
+            [("task_id", 1), ("service_name", 1)],
+            [("ip", 1), ("port_id", 1)],
         ],
         "asset_npoc_service": [
             [("scope_id", 1), ("host", 1), ("port", 1)],
@@ -166,13 +172,21 @@ def create_index():
         except Exception as ex:
             logging.getLogger().warning(f"Failed to drop superseded index {old_idx} on {col_name}: {ex}")
 
+    # 在建立 (task_id, ip, port_id) / (scope_id, ip, port_id) 联合唯一索引前，
+    # 先移除旧版 (task_id, service_name) 唯一索引并将存量聚合 service / npoc_service 展开归并为单端点文档，避免 ip:null 误去重
+    try:
+        migrate_unified_service_assets()
+    except Exception as ex:
+        logging.getLogger().warning(f"Failed to run migrate_unified_service_assets before unique index creation: {ex}")
+
     # 兜底：创建联合唯一索引，规避高并发下的重复写入冲突
     unique_indexes = {
         "site": [("task_id", 1), ("site", 1)],
         "domain": [("task_id", 1), ("domain", 1)],
         "ip": [("task_id", 1), ("ip", 1)],
         "cert": [("task_id", 1), ("ip", 1), ("port", 1)],
-        "service": [("task_id", 1), ("service_name", 1)],
+        "service": [("task_id", 1), ("ip", 1), ("port_id", 1)],
+        "asset_service": [("scope_id", 1), ("ip", 1), ("port_id", 1)],
         "url": [("task_id", 1), ("url", 1)],
         "fileleak": [("task_id", 1), ("site", 1), ("url", 1)],
         "npoc_service": [("task_id", 1), ("target", 1)],
@@ -1742,6 +1756,141 @@ def migrate_heal_cascade_and_derived_assets(run_in_thread=True):
         _run_heal()
 
 
+def migrate_unified_service_assets():
+    """
+    🛡️【Nmap 端口服务与 Python 插件服务单端点融合平滑迁移】
+    1. 移除旧版 service 上按 (task_id, service_name) 的唯一索引（允许同任务下多个不同 IP:Port 共享同一 service_name）；
+    2. 将存量 service / asset_service 中含 service_info 嵌套数组的聚合文档展开为 (owner_id, ip, port_id) 单端点文档；
+    3. 将存量 npoc_service / asset_npoc_service 文档按 (owner_id, ip, port_id) 合流归并入 service / asset_service（校准 service_name 并保留双来源标签）；
+    4. 同步刷新受影响任务的 statistic.service_cnt。
+    """
+    import logging
+    import time
+    from bson import ObjectId
+    from pymongo import UpdateOne
+    from app.services.service_fusion import (
+        expand_service_doc_to_endpoints,
+        merge_endpoint_records,
+        normalize_host,
+        normalize_port,
+    )
+
+    log = logging.getLogger()
+
+    # 1. 移除旧版 (task_id, service_name) / (scope_id, service_name) 唯一索引（降级为普通索引）
+    for col_name, old_keys in (
+        ("service", [("task_id", 1), ("service_name", 1)]),
+        ("asset_service", [("scope_id", 1), ("service_name", 1)]),
+    ):
+        try:
+            idx_info = conn_db(col_name).index_information()
+            for idx_name, meta in idx_info.items():
+                if [(k, int(d)) for k, d in meta.get("key", [])] == old_keys and meta.get("unique", False):
+                    conn_db(col_name).drop_index(idx_name)
+                    log.info(f"Dropped legacy unique index {idx_name} on {col_name} for per-endpoint service schema.")
+        except Exception as idx_err:
+            log.warning(f"Failed to check/drop legacy unique index on {col_name}: {idx_err}")
+
+    cfg_col = conn_db("system_config")
+    sentinel_id = "migration_unified_service_v1"
+    sentinel = cfg_col.find_one({"_id": sentinel_id})
+    legacy_query = {
+        "$or": [
+            {"ip": {"$exists": False}},
+            {"ip": None},
+            {"ip": ""},
+            {"port_id": {"$exists": False}},
+            {"port_id": None},
+        ]
+    }
+
+    has_legacy_service = conn_db("service").find_one(legacy_query, {"_id": 1}) is not None
+    has_legacy_asset_service = conn_db("asset_service").find_one(legacy_query, {"_id": 1}) is not None
+    if sentinel and sentinel.get("status") == "completed" and not has_legacy_service and not has_legacy_asset_service:
+        return
+
+    affected_task_ids = set()
+
+    for svc_col_name, npoc_col_name, owner_field in (
+        ("service", "npoc_service", "task_id"),
+        ("asset_service", "asset_npoc_service", "scope_id"),
+    ):
+        svc_col = conn_db(svc_col_name)
+        npoc_col = conn_db(npoc_col_name)
+
+        owner_ids = set()
+        for d in svc_col.find({}, {owner_field: 1, "_id": 0}):
+            if d.get(owner_field):
+                owner_ids.add(str(d[owner_field]))
+        for d in npoc_col.find({}, {owner_field: 1, "_id": 0}):
+            if d.get(owner_field):
+                owner_ids.add(str(d[owner_field]))
+
+        for oid in owner_ids:
+            endpoint_map = {}
+            legacy_ids = []
+            for doc in svc_col.find({owner_field: oid}):
+                top_ip = normalize_host(doc.get("ip"))
+                top_port = normalize_port(doc.get("port_id"))
+                infos = doc.get("service_info")
+                if not top_ip or top_port is None or (isinstance(infos, list) and len(infos) > 1):
+                    legacy_ids.append(doc["_id"])
+                for ep in expand_service_doc_to_endpoints(doc, default_source="nmap"):
+                    key = (ep["ip"], ep["port_id"])
+                    endpoint_map[key] = merge_endpoint_records(endpoint_map.get(key), ep)
+
+            npoc_docs = list(npoc_col.find({owner_field: oid}))
+            for ndoc in npoc_docs:
+                for ep in expand_service_doc_to_endpoints(ndoc, default_source="npoc"):
+                    key = (ep["ip"], ep["port_id"])
+                    endpoint_map[key] = merge_endpoint_records(
+                        endpoint_map.get(key),
+                        ep,
+                        prefer_incoming_service=True,
+                    )
+
+            if not legacy_ids and not npoc_docs:
+                continue
+
+            docs_to_insert = []
+            for (ip_val, port_val), ep_doc in endpoint_map.items():
+                set_doc = dict(ep_doc)
+                set_doc.pop("_id", None)
+                set_doc[owner_field] = oid
+                docs_to_insert.append(set_doc)
+
+            svc_col.delete_many({owner_field: oid})
+            if docs_to_insert:
+                for i in range(0, len(docs_to_insert), 2000):
+                    svc_col.insert_many(docs_to_insert[i:i + 2000], ordered=False)
+
+            if owner_field == "task_id":
+                affected_task_ids.add(oid)
+
+    # 清理残余无有效端点的空旧文档
+    conn_db("service").delete_many(legacy_query)
+    conn_db("asset_service").delete_many(legacy_query)
+
+    # 刷新受影响任务的 statistic.service_cnt
+    task_col = conn_db("task")
+    for tid in affected_task_ids:
+        if ObjectId.is_valid(tid):
+            try:
+                cnt = conn_db("service").count_documents({"task_id": tid})
+                task_col.update_one(
+                    {"_id": ObjectId(tid), "statistic": {"$type": "object"}},
+                    {"$set": {"statistic.service_cnt": cnt}},
+                )
+            except Exception:
+                pass
+
+    cfg_col.update_one(
+        {"_id": sentinel_id},
+        {"$set": {"status": "completed", "updated_at": time.time(), "migrated_tasks": len(affected_task_ids)}},
+        upsert=True,
+    )
+
+
 def arl_update():
     if is_run_flask_routes():
         return
@@ -1821,6 +1970,7 @@ def arl_update():
         _run_step("ensure_proxy_config_schema", ensure_proxy_config_schema)
         _run_step("migrate_nuclei_push_options", migrate_nuclei_push_options)
         _run_step("migrate_nuclei_result_template_source", migrate_nuclei_result_template_source)
+        _run_step("migrate_unified_service_assets", migrate_unified_service_assets)
         _run_step("migrate_heal_cascade_and_derived_assets", migrate_heal_cascade_and_derived_assets)
         db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
     except Exception as e:

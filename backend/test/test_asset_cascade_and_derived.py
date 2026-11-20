@@ -632,10 +632,10 @@ class TestAssetCascadeAndDerived(unittest.TestCase):
         with patch.object(sync_mod, "conn", side_effect=self.conn):
             SyncAsset(t_str, scope_str, update_flag=False).run()
 
-        # Rebuilt asset_service must now include BOTH 192.0.2.1:80 and 192.0.2.2:8080
-        http_doc = self.conn("asset_service").find_one({"scope_id": scope_str, "service_name": "http"})
-        self.assertIsNotNone(http_doc)
-        endpoints = {(e["ip"], e["port_id"]) for e in http_doc["service_info"]}
+        # Rebuilt asset_service must now include BOTH 192.0.2.1:80 and 192.0.2.2:8080 as per-endpoint records
+        http_docs = list(self.conn("asset_service").find({"scope_id": scope_str, "service_name": "http"}))
+        self.assertEqual(len(http_docs), 2)
+        endpoints = {(d["ip"], d["port_id"]) for d in http_docs}
         self.assertEqual(endpoints, {("192.0.2.1", 80), ("192.0.2.2", 8080)})
 
         # Survival guard: if scope is deleted before SyncAsset.run(), nothing should be written
@@ -927,6 +927,105 @@ class TestAssetCascadeAndDerived(unittest.TestCase):
         with patch.object(arlupdate_mod, "conn_db", side_effect=self.conn):
             arlupdate_mod.migrate_heal_cascade_and_derived_assets(run_in_thread=False)
         self.assertEqual(self.conn("asset_domain").count_documents({"domain": "after-sentinel.example.com"}), 1)
+
+    def test_unified_service_fusion_dedup_calibration_and_migration(self):
+        import app.utils.arlupdate as arlupdate_mod
+        import app.routes.service as svc_route_mod
+        import app.routes.assetOverview as overview_mod
+        from app.services.service_fusion import sync_npoc_items_to_service_and_ip
+
+        t1 = str(ObjectId())
+        t2 = str(ObjectId())
+        scope_id = str(ObjectId())
+
+        # 1. Legacy grouped service doc in t1 + npoc_service doc on same (ip, port)
+        self.conn("ip").insert_one({
+            "task_id": t1,
+            "ip": "192.0.2.10",
+            "port_info": [
+                {"port_id": 6379, "service_name": "unknown", "product": "Redis key-value store", "version": "7.0.5"},
+                {"port_id": 22, "service_name": "ssh", "product": "OpenSSH", "version": "8.9"},
+            ],
+        })
+        self.conn("service").insert_many([
+            {
+                "task_id": t1,
+                "service_name": "unknown",
+                "service_info": [{"ip": "192.0.2.10", "port_id": 6379, "product": "Redis key-value store", "version": "7.0.5"}],
+            },
+            {
+                "task_id": t1,
+                "service_name": "ssh",
+                "service_info": [{"ip": "192.0.2.10", "port_id": 22, "product": "OpenSSH", "version": "8.9"}],
+            },
+        ])
+
+        # Real-time Python sniffer detection calibrates 192.0.2.10:6379 from 'unknown' to 'redis'
+        npoc_results = [
+            {"scheme": "redis", "host": "192.0.2.10", "port": "6379", "target": "redis://192.0.2.10:6379", "task_id": t1}
+        ]
+        self.conn("npoc_service").insert_many(npoc_results)
+        sync_npoc_items_to_service_and_ip(t1, npoc_results, db_getter=self.conn)
+
+        # Migrate remaining legacy grouped docs (like ssh:22) via migrate_unified_service_assets
+        with patch.object(arlupdate_mod, "conn_db", side_effect=self.conn):
+            arlupdate_mod.migrate_unified_service_assets()
+
+        t1_svcs = {d["port_id"]: d for d in self.conn("service").find({"task_id": t1})}
+        self.assertEqual(set(t1_svcs.keys()), {22, 6379})
+        self.assertEqual(t1_svcs[6379]["service_name"], "redis")
+        self.assertEqual(t1_svcs[6379]["product"], "Redis key-value store")
+        self.assertEqual(t1_svcs[6379]["version"], "7.0.5")
+        self.assertEqual(t1_svcs[6379]["sources"], ["nmap", "npoc"])
+        self.assertEqual(t1_svcs[22]["service_name"], "ssh")
+        self.assertEqual(t1_svcs[22]["sources"], ["nmap"])
+
+        # 2. Task t2 scans the same 192.0.2.10:6379 with only Nmap 'unknown'; global query must deduplicate to 2 endpoints
+        self.conn("service").insert_one({
+            "task_id": t2,
+            "ip": "192.0.2.10",
+            "port_id": 6379,
+            "service_name": "unknown",
+            "product": "",
+            "version": "",
+            "sources": ["nmap"],
+        })
+
+        svc_res = svc_route_mod.ServiceResource()
+        with patch.object(svc_route_mod, "conn", side_effect=self.conn), \
+             patch.object(overview_mod, "conn", side_effect=self.conn):
+            global_data = svc_res.build_data(args={"page": 1, "size": 10}, collection="service")
+            self.assertEqual(global_data["total"], 2)
+            self.assertEqual(overview_mod._count_collection("service", None), 2)
+            by_port = {item["port_id"]: item for item in global_data["items"]}
+            self.assertEqual(by_port[6379]["service_name"], "redis")
+            self.assertEqual(by_port[6379]["product"], "Redis key-value store")
+            self.assertEqual(by_port[6379]["sources"], ["nmap", "npoc"])
+
+            # Filter by source='npoc' in global mode
+            npoc_only = svc_res.build_data(args={"page": 1, "size": 10, "sources": "npoc"}, collection="service")
+            self.assertEqual(npoc_only["total"], 1)
+            self.assertEqual(npoc_only["items"][0]["port_id"], 6379)
+
+        # 3. Asset scope rebuild merges asset_ip + asset_npoc_service into asset_service
+        self.conn("asset_ip").insert_one({
+            "scope_id": scope_id,
+            "ip": "192.0.2.10",
+            "port_info": [{"port_id": 6379, "service_name": "unknown", "product": "Redis", "version": "7.0"}],
+        })
+        self.conn("asset_npoc_service").insert_one({
+            "scope_id": scope_id,
+            "host": "192.0.2.10",
+            "port": "6379",
+            "scheme": "redis",
+            "target": "redis://192.0.2.10:6379",
+        })
+        self.cascade_mod.rebuild_scope_derived_collections([scope_id], targets=("service",))
+        scoped_svcs = list(self.conn("asset_service").find({"scope_id": scope_id}))
+        self.assertEqual(len(scoped_svcs), 1)
+        self.assertEqual(scoped_svcs[0]["service_name"], "redis")
+        self.assertEqual(scoped_svcs[0]["product"], "Redis")
+        self.assertEqual(scoped_svcs[0]["sources"], ["nmap", "npoc"])
 
 
 if __name__ == "__main__":

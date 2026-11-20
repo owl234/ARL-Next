@@ -378,11 +378,16 @@ def sync_service_from_site(task_id, site_info_list):
                 product_str = ", ".join(finger_names) if finger_names else (site_info.get("http_server") or "")
                 version_str = ", ".join(finger_versions) if finger_versions else ""
 
-                # 1. 从除当前 service_name 外的其他服务分类（如 unknown, tcpwrapped）中剔除该 (ip, port)
+                from app.services.service_fusion import (
+                    build_service_endpoint_doc,
+                    merge_sources,
+                )
+
+                # 1. 兼容旧版按 service_name 聚合的文档：从无顶层 ip 字段的旧文档中剥离该 (ip, port)
                 utils.conn_db('service').update_many(
                     {
                         "task_id": task_id,
-                        "service_name": {"$ne": service_name}
+                        "ip": {"$exists": False},
                     },
                     {
                         "$pull": {
@@ -394,44 +399,30 @@ def sync_service_from_site(task_id, site_info_list):
                     }
                 )
 
-                # 2. 归入目标服务分类 (http 或 https)
-                new_service_entry = {
+                # 2. 按 (task_id, ip, port_id) 单端点模型幂等更新或插入
+                existing_ep = utils.conn_db('service').find_one({
+                    "task_id": task_id,
                     "ip": ip,
-                    "port_id": port,
-                    "product": product_str,
-                    "version": version_str
-                }
-
-                # 先移除目标分类中可能存在的旧记录以避免重复
-                utils.conn_db('service').update_many(
-                    {
-                        "task_id": task_id,
-                        "service_name": service_name
-                    },
-                    {
-                        "$pull": {
-                            "service_info": {
-                                "ip": ip,
-                                "port_id": {"$in": [port, str(port)]}
-                            }
-                        }
-                    }
+                    "port_id": {"$in": [port, str(port)]},
+                })
+                final_prod = product_str or (existing_ep.get("product") if existing_ep else "") or ""
+                final_ver = version_str or (existing_ep.get("version") if existing_ep else "") or ""
+                final_sources = merge_sources(existing_ep.get("sources") if existing_ep else ["nmap"], ["nmap"])
+                ep_doc = build_service_endpoint_doc(
+                    owner_field="task_id",
+                    owner_id=task_id,
+                    ip=ip,
+                    port_id=port,
+                    service_name=service_name,
+                    product=final_prod,
+                    version=final_ver,
+                    sources=final_sources,
+                    save_date=(existing_ep.get("save_date") if existing_ep else None) or utils.curr_date(),
                 )
-
-                # 推入更新后的服务信息，若不存在分类文档则自动创建
                 utils.conn_db('service').update_one(
-                    {
-                        "task_id": task_id,
-                        "service_name": service_name
-                    },
-                    {
-                        "$push": {"service_info": new_service_entry},
-                        "$setOnInsert": {
-                            "task_id": task_id,
-                            "service_name": service_name
-                        }
-                    },
-                    upsert=True
+                    {"task_id": task_id, "ip": ip, "port_id": port},
+                    {"$set": ep_doc},
+                    upsert=True,
                 )
 
                 # 3. 同步修正 db.ip 中对应端口的 service_name 与 product/version
@@ -1217,6 +1208,10 @@ class WebSiteFetch(object):
 
             try:
                 for svc_doc in utils.conn_db('npoc_service').find({"task_id": self.task_id}, {"target": 1}):
+                    svc_target = str(svc_doc.get("target") or "").strip()
+                    if svc_target:
+                        network_set.add(svc_target)
+                for svc_doc in utils.conn_db('service').find({"task_id": self.task_id, "sources": "npoc"}, {"target": 1}):
                     svc_target = str(svc_doc.get("target") or "").strip()
                     if svc_target:
                         network_set.add(svc_target)

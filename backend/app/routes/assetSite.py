@@ -460,14 +460,20 @@ class ARLAssetSubdomainChain(ARLResource):
                 return self.build_return_items(cert_cursor)
 
             def fetch_service():
-                if not resolved_ips:
-                    return []
-                service_query = {"scope_id": scope_id, "service_info.ip": {"$in": resolved_ips}}
+                service_or = [{"ip": clean_domain}]
+                if resolved_ips:
+                    service_or.append({"ip": {"$in": resolved_ips}})
+                    service_or.append({"service_info.ip": {"$in": resolved_ips}})
+                service_query = {"scope_id": scope_id, "$or": service_or}
                 service_cursor = utils.conn_db('asset_service').find(service_query).sort([("_id", -1)]).limit(100)
                 raw_service_items = self.build_return_items(service_cursor)
                 service_items = []
+                target_hosts = set(resolved_ips or []) | ({clean_domain} if clean_domain else set())
                 for s in raw_service_items:
-                    matching_infos = [info for info in s.get("service_info", []) if info.get("ip") in resolved_ips]
+                    if s.get("ip") in target_hosts and s.get("port_id") is not None:
+                        service_items.append(s)
+                        continue
+                    matching_infos = [info for info in s.get("service_info", []) if info.get("ip") in target_hosts]
                     if matching_infos:
                         s["service_info"] = matching_infos
                         service_items.append(s)

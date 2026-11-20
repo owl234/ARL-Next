@@ -86,6 +86,7 @@ class RiskCruising(CommonTask):
         self.targets = targets
 
     def npoc_service_detection(self):
+        from app.services.service_fusion import sync_npoc_items_to_service_and_ip
         logger.info("start npoc_service_detection {}".format(len(self.sniffer_target_set)))
         result = npoc.run_sniffer(self.sniffer_target_set)
         for item in result:
@@ -94,6 +95,7 @@ class RiskCruising(CommonTask):
             item["save_date"] = utils.curr_date()
         if result:
             utils.safe_insert_asset_many('npoc_service', ['task_id', 'target'], result)
+            sync_npoc_items_to_service_and_ip(self.task_id, result)
 
     def run_poc(self):
         """运行poc，获取进度"""

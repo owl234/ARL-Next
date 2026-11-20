@@ -276,7 +276,7 @@
             </div>
           </a-card>
 
-          <!-- 5. 系统服务（合并端口服务 Nmap 与 Python 插件服务） -->
+          <!-- 5. 系统服务（统一融合 Nmap 端口服务与 Python 插件服务，按单端点平铺） -->
           <a-card v-if="shouldShowSection(mergedServiceCount)" id="chain-sec-service" :bordered="false" class="drawer-chain-card">
             <template #title>
               <div class="drawer-card-title">
@@ -286,52 +286,40 @@
               </div>
             </template>
             <ArlEmpty v-if="mergedServiceCount === 0" compact :description="assetText('assets.noOpenNetworkServicesFound')" />
-            <div v-else class="drawer-service-sections">
-              <div v-if="shouldShowSection(nmapServiceCount)" class="drawer-service-subsection">
-                <div class="drawer-service-subtitle">
-                  <api-outlined style="color: #fa8c16;" />
-                  <span>{{ assetText('tasks.portServicesNmap') }}</span>
-                  <a-badge :count="nmapServiceCount" :show-zero="true" :number-style="getBadgeStyle(nmapServiceCount, '#fa8c16')" />
-                </div>
-                <ArlEmpty v-if="nmapServiceCount === 0" compact :description="assetText('assets.noPortServicesFound')" />
-                <div v-else class="drawer-services-grid">
-                  <div v-for="(srv, idx) in chainData.service" :key="idx" class="service-pill">
-                    <div class="service-name-tag">{{ srv.service_name || 'service' }}</div>
-                    <div v-for="(inf, i) in (srv.service_info || [])" :key="i" class="service-endpoint">
-                      <span class="font-mono">{{ inf.ip }}:{{ inf.port_id }}</span>
-                      <span v-if="inf.product" class="service-product">{{ inf.product }}</span>
-                    </div>
+            <a-table
+              v-else
+              :dataSource="unifiedServiceList"
+              :columns="serviceCols"
+              :pagination="tablePagination"
+              :scroll="{ x: 'max-content' }"
+              size="small"
+              :rowKey="(r, i) => `${r.ip}:${r.port_id}_${i}`"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'service_name'">
+                  <a-tag color="orange" style="margin: 0;">{{ record.service_name || 'unknown' }}</a-tag>
+                </template>
+                <template v-else-if="column.key === 'ip_port'">
+                  <span class="font-mono">{{ record.ip }}{{ record.port_id ? `:${record.port_id}` : '' }}</span>
+                </template>
+                <template v-else-if="column.key === 'product'">
+                  <span>{{ record.product || '-' }}</span>
+                </template>
+                <template v-else-if="column.key === 'version'">
+                  <span>{{ record.version || '-' }}</span>
+                </template>
+                <template v-else-if="column.key === 'sources'">
+                  <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                    <a-tag
+                      v-for="src in (record.sources || ['nmap'])"
+                      :key="src"
+                      :color="src === 'npoc' ? 'purple' : 'blue'"
+                      style="margin: 0;"
+                    >{{ src === 'npoc' ? assetText('assets.pythonPluginServicesLabel') : 'Nmap' }}</a-tag>
                   </div>
-                </div>
-              </div>
-
-              <div v-if="shouldShowSection(npocServiceCount)" class="drawer-service-subsection">
-                <div class="drawer-service-subtitle">
-                  <code-outlined style="color: #722ed1;" />
-                  <span>{{ assetText('assets.pythonPluginServicesLabel') }}</span>
-                  <a-badge :count="npocServiceCount" :show-zero="true" :number-style="getBadgeStyle(npocServiceCount, '#722ed1')" />
-                </div>
-                <ArlEmpty v-if="npocServiceCount === 0" compact :description="assetText('assets.noPythonPluginServicesFound')" />
-                <a-table
-                  v-else
-                  :dataSource="chainData.npoc_service"
-                  :columns="npocCols"
-                  :pagination="tablePagination"
-                  :scroll="{ x: 'max-content' }"
-                  size="small"
-                  :rowKey="(r, i) => r._id || i"
-                >
-                  <template #bodyCell="{ column, record }">
-                    <template v-if="column.key === 'scheme'">
-                      <a-tag color="purple">{{ record.scheme || '-' }}</a-tag>
-                    </template>
-                    <template v-else-if="column.key === 'target'">
-                      <span class="font-mono drawer-break-link">{{ record.target || '-' }}</span>
-                    </template>
-                  </template>
-                </a-table>
-              </div>
-            </div>
+                </template>
+              </template>
+            </a-table>
           </a-card>
 
           <!-- 6. 文件泄露 -->
@@ -745,9 +733,12 @@ const cipCols = [
   { get title() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', width: 160 }
 ];
 
-const npocCols = [
-  { get title() { return assetText('tasks.protocol'); }, dataIndex: 'scheme', key: 'scheme', width: 100, align: 'center' },
-  { get title() { return assetText('tasks.target'); }, dataIndex: 'target', key: 'target' }
+const serviceCols = [
+  { get title() { return assetText('tasks.services'); }, dataIndex: 'service_name', key: 'service_name', width: 120, align: 'center' },
+  { get title() { return assetText('tasks.ipPort'); }, key: 'ip_port', width: 180 },
+  { get title() { return assetText('tasks.product'); }, dataIndex: 'product', key: 'product', width: 180 },
+  { get title() { return assetText('tasks.version'); }, dataIndex: 'version', key: 'version', width: 120 },
+  { get title() { return assetText('tasks.source'); }, key: 'sources', width: 160 }
 ];
 
 const fileleakCols = [
@@ -796,9 +787,89 @@ const statFingerList = computed(() => {
     .sort((a, b) => b.cnt - a.cnt);
 });
 
+const unifiedServiceList = computed(() => {
+  const map = new Map();
+  const isWeakSvc = (name) => !name || ['unknown', 'tcpwrapped', 'service', 'tcp'].includes(String(name).trim().toLowerCase());
+  const addOrMerge = (ep, preferIncomingSvc = false) => {
+    const ip = String(ep.ip || '').trim();
+    const port = ep.port_id != null && ep.port_id !== '' ? String(ep.port_id).trim() : '';
+    if (!ip && !port) return;
+    const key = `${ip}:${port}`;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, {
+        ip,
+        port_id: port,
+        service_name: ep.service_name || 'unknown',
+        product: ep.product || '',
+        version: ep.version || '',
+        sources: Array.from(new Set(ep.sources || ['nmap']))
+      });
+      return;
+    }
+    if ((preferIncomingSvc && !isWeakSvc(ep.service_name)) || (isWeakSvc(existing.service_name) && !isWeakSvc(ep.service_name))) {
+      existing.service_name = ep.service_name;
+    }
+    if (!existing.product && ep.product) existing.product = ep.product;
+    if (!existing.version && ep.version) existing.version = ep.version;
+    const mergedSrc = new Set([...(existing.sources || []), ...(ep.sources || [])]);
+    existing.sources = ['nmap', 'npoc'].filter(s => mergedSrc.has(s));
+    if (!existing.sources.length) existing.sources = ['nmap'];
+  };
+
+  for (const s of (chainData.value?.service || [])) {
+    if (s.ip && s.port_id != null) {
+      addOrMerge({
+        ip: s.ip,
+        port_id: s.port_id,
+        service_name: s.service_name,
+        product: s.product || s.service_info?.[0]?.product || '',
+        version: s.version || s.service_info?.[0]?.version || '',
+        sources: Array.isArray(s.sources) && s.sources.length ? s.sources : ['nmap']
+      });
+    } else if (Array.isArray(s.service_info)) {
+      for (const inf of s.service_info) {
+        addOrMerge({
+          ip: inf.ip,
+          port_id: inf.port_id,
+          service_name: inf.service_name || s.service_name,
+          product: inf.product || '',
+          version: inf.version || '',
+          sources: Array.isArray(s.sources) && s.sources.length ? s.sources : ['nmap']
+        });
+      }
+    }
+  }
+
+  for (const n of (chainData.value?.npoc_service || [])) {
+    let host = n.host || '';
+    let port = n.port ?? '';
+    if ((!host || port === '') && n.target) {
+      const cleaned = String(n.target).replace(/^[a-zA-Z0-9+.-]+:\/\//, '');
+      const idx = cleaned.lastIndexOf(':');
+      if (idx !== -1) {
+        if (!host) host = cleaned.slice(0, idx);
+        if (port === '') port = cleaned.slice(idx + 1);
+      } else if (!host) {
+        host = cleaned;
+      }
+    }
+    addOrMerge({
+      ip: host,
+      port_id: port,
+      service_name: n.scheme || n.service_name || 'unknown',
+      product: n.product || '',
+      version: n.version || '',
+      sources: ['npoc']
+    }, true);
+  }
+
+  return Array.from(map.values());
+});
+
 const nmapServiceCount = computed(() => chainData.value?.service?.length || 0);
 const npocServiceCount = computed(() => chainData.value?.npoc_service?.length || 0);
-const mergedServiceCount = computed(() => nmapServiceCount.value + npocServiceCount.value);
+const mergedServiceCount = computed(() => unifiedServiceList.value.length);
 
 // 12 维统计指标与锚点导航列表（端口服务 Nmap 与 Python 插件服务归入「服务」维度）
 const metricChips = computed(() => {

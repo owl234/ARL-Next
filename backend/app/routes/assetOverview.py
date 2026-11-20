@@ -61,6 +61,20 @@ def _count_collection(name, scope_id=None):
         if name == "stat_finger":
             pipeline = [{"$group": {"_id": "$name"}}]
             return len(list(col.aggregate(pipeline)))
+        if name == "service":
+            pipeline = [
+                {
+                    "$group": {
+                        "_id": {
+                            "ip": {"$ifNull": ["$ip", "$_id"]},
+                            "port_id": {"$ifNull": ["$port_id", 0]},
+                        }
+                    }
+                },
+                {"$group": {"_id": None, "total": {"$sum": 1}}},
+            ]
+            agg_res = list(col.aggregate(pipeline))
+            return agg_res[0]["total"] if agg_res else 0
         return col.estimated_document_count()
     except Exception as e:
         logger.error(f"Failed to count collection {name} (scope_id={scope_id}): {e}")

@@ -21,22 +21,6 @@
         </a-tab-pane>
       </a-tabs>
 
-      <div v-if="activeTab === 'service'" style="margin-top: 8px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; background: var(--arl-bg-light); padding: 6px 12px; border-radius: 6px; border: 1px solid var(--arl-border-color);">
-        <span class="asset-engine-label">{{ assetText('tasks.detectionEngine') }}</span>
-        <a-radio-group v-model:value="serviceEngineType" button-style="solid" size="small" @change="onServiceEngineChange">
-          <a-radio-button value="nmap">
-            {{ overviewCounts.service !== undefined
-              ? assetText('assets.portServiceCount', { count: overviewCounts.service === null ? '-' : overviewCounts.service })
-              : assetText('tasks.portServicesNmap') }}
-          </a-radio-button>
-          <a-radio-button value="npoc">
-            {{ overviewCounts.npoc_service !== undefined
-              ? assetText('assets.pluginServiceCount', { count: overviewCounts.npoc_service === null ? '-' : overviewCounts.npoc_service })
-              : assetText('assets.pythonPluginServicesLabel') }}
-          </a-radio-button>
-        </a-radio-group>
-      </div>
-
       <!-- 资产列表检索与操作工具栏 (上下分层：业务操作行 + 紧凑折叠栅格卡片) -->
       <div class="asm-toolbar-container">
         <div class="toolbar-row">
@@ -423,20 +407,36 @@
         </template>
 
         <template v-else-if="column.key === 'ip_port'">
-          <div v-if="record.service_info && record.service_info.length">
-            <div v-for="(info, i) in record.service_info" :key="i" style="line-height: 1.8;">
-              {{ info.ip }}:{{ info.port_id }}
-            </div>
-          </div>
+          <template v-if="formatServiceEndpoint(record)">
+            <a
+              v-if="isWebServiceRecord(record)"
+              :href="getServiceEndpointUrl(record)"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="arl-mono"
+            >{{ formatServiceEndpoint(record) }}</a>
+            <span v-else class="arl-mono">{{ formatServiceEndpoint(record) }}</span>
+          </template>
           <span v-else>-</span>
         </template>
         <template v-else-if="column.key === 'product'">
-          <div v-if="record.service_info && record.service_info.length">
-            <div v-for="(info, i) in record.service_info" :key="i" style="line-height: 1.8;">
-              {{ info.product || '-' }}
-            </div>
+          <span>{{ record.product || record.service_info?.[0]?.product || '-' }}</span>
+        </template>
+        <template v-else-if="column.key === 'version'">
+          <span>{{ record.version || record.service_info?.[0]?.version || '-' }}</span>
+        </template>
+        <template v-else-if="column.key === 'service_sources'">
+          <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+            <a-tag
+              v-for="src in getServiceSources(record)"
+              :key="src"
+              :color="src === 'npoc' ? 'purple' : 'blue'"
+              style="margin: 0;"
+            >{{ src === 'npoc' ? assetText('assets.pythonPluginServicesLabel') : 'Nmap' }}</a-tag>
           </div>
-          <span v-else>-</span>
+        </template>
+        <template v-else-if="column.key === 'service_time'">
+          <span>{{ record.update_date || record.save_date || record.insert_time || '-' }}</span>
         </template>
 
         <template v-else-if="column.key === 'template_id'">
@@ -661,16 +661,46 @@ const tableScrollY = computed(() => {
 
 const route = useRoute();
 const isHydrating = ref(true);
-const serviceEngineType = ref(route.query.tab === 'npoc_service' ? 'npoc' : 'nmap');
 const activeTab = ref(route.query.tab === 'npoc_service' ? 'service' : (route.query.tab || 'site'));
-const effectiveTab = computed(() => {
-  if (activeTab.value === 'service' && serviceEngineType.value === 'npoc') {
-    return 'npoc_service';
-  }
-  return activeTab.value;
-});
+const effectiveTab = computed(() => activeTab.value);
 const loading = ref(false);
 const dataSource = ref([]);
+
+const formatServiceEndpoint = (record) => {
+  const ip = record?.ip || record?.host || record?.service_info?.[0]?.ip;
+  const port = record?.port_id ?? record?.port ?? record?.service_info?.[0]?.port_id;
+  if (!ip) return '';
+  return port != null && port !== '' ? `${ip}:${port}` : String(ip);
+};
+
+const isWebServiceRecord = (record) => {
+  const sName = String(record?.service_name || record?.scheme || '').toLowerCase();
+  if (sName.includes('http') || sName.includes('web')) return true;
+  const p = Number(record?.port_id ?? record?.port ?? record?.service_info?.[0]?.port_id);
+  return [80, 443, 8080, 8443, 8000, 8888].includes(p);
+};
+
+const getServiceEndpointUrl = (record) => {
+  const sName = String(record?.service_name || record?.scheme || '').toLowerCase();
+  const port = record?.port_id ?? record?.port ?? record?.service_info?.[0]?.port_id;
+  const p = Number(port) || 80;
+  const isHttps = sName.includes('https') || p === 443 || p === 8443;
+  const scheme = isHttps ? 'https' : 'http';
+  const ipStr = String(record?.ip || record?.host || record?.service_info?.[0]?.ip || '');
+  const host = ipStr.includes(':') && !ipStr.startsWith('[') ? `[${ipStr}]` : ipStr;
+  const portSuffix = port ? `:${port}` : '';
+  return `${scheme}://${host}${portSuffix}`;
+};
+
+const getServiceSources = (record) => {
+  if (Array.isArray(record?.sources) && record.sources.length) {
+    return record.sources;
+  }
+  if (record?.scheme && !record?.service_name) {
+    return ['npoc'];
+  }
+  return ['nmap'];
+};
 
 // 资产维度页签定义（key 需与后端 /asset_overview/count 的 counts 键保持一致）
 const assetTabList = [
@@ -688,17 +718,18 @@ const assetTabList = [
   { key: 'nuclei_result', label: 'nuclei' }
 ];
 
-// 各维度总量徽标：一次请求取回底层 13 个资产集合计数，供 12 个页签展示（服务页签合并 service + npoc_service）
+// 各维度总量徽标：一次请求取回资产集合计数，供 12 个页签展示（服务页签已融合 Nmap 与 Python 插件服务）
 // 取值为 null 表示该维度计数失败，徽标显示 "-" 而非 0
 const overviewCounts = ref({});
 
 const getOverviewTabCount = (key) => {
   if (key === 'service') {
-    const nmapCount = overviewCounts.value.service;
+    const svcCount = overviewCounts.value.service;
     const npocCount = overviewCounts.value.npoc_service;
-    if (nmapCount === undefined && npocCount === undefined) return undefined;
-    if (nmapCount === null || npocCount === null) return null;
-    return (Number(nmapCount) || 0) + (Number(npocCount) || 0);
+    if (svcCount === undefined && npocCount === undefined) return undefined;
+    if (svcCount === null || npocCount === null) return null;
+    const nSvc = Number(svcCount) || 0;
+    return nSvc > 0 ? nSvc : (Number(npocCount) || 0);
   }
   return overviewCounts.value[key];
 };
@@ -910,22 +941,37 @@ const tabConfig = reactive({
     ]
   },
 
-  // 💡 新增：服务 Tab 的 1:1 配置
+  // 💡 统一服务 Tab 配置（融合 Nmap 端口服务与 Python 插件服务，按单端点平铺）
   service: {
     url: '/service/',
     deleteUrl: '/service/delete/',
-    // 服务 Tab 不配置 exportUrl，保持无导出按钮的视图布局
+    exportUrl: '/service/export/',
+    get exportName() { return assetText('tasks.services'); },
     searchFields: [
       { get label() { return assetText('tasks.services'); }, key: 'service_name', operator: '=' },
-      { label: 'IP', key: 'service_info.ip', operator: '=' },
-      { get label() { return assetText('tasks.port'); }, key: 'service_info.port_id', operator: '=' },
-      { get label() { return assetText('tasks.product'); }, key: 'service_info.product', operator: '=' }
+      { label: 'IP', key: 'ip', operator: '=' },
+      { get label() { return assetText('tasks.port'); }, key: 'port_id', operator: '=' },
+      { get label() { return assetText('tasks.product'); }, key: 'product', operator: '=' },
+      { get label() { return assetText('tasks.version'); }, key: 'version', operator: '=' },
+      {
+        get label() { return assetText('tasks.source'); },
+        key: 'sources',
+        operator: '=',
+        type: 'select',
+        options: [
+          { label: 'Nmap', value: 'nmap' },
+          { get label() { return assetText('assets.pythonPluginServicesLabel'); }, value: 'npoc' }
+        ]
+      }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
-      { get title() { return assetText('tasks.services'); }, dataIndex: 'service_name', key: 'service_name', width: 150, align: 'center' },
-      { get title() { return assetText('tasks.ipPort'); }, key: 'ip_port', width: 300 },
-      { get title() { return assetText('tasks.product'); }, key: 'product', width: 250 }
+      { get title() { return assetText('tasks.services'); }, dataIndex: 'service_name', key: 'service_name', width: 140, align: 'center' },
+      { get title() { return assetText('tasks.ipPort'); }, key: 'ip_port', width: 220 },
+      { get title() { return assetText('tasks.product'); }, key: 'product', width: 220 },
+      { get title() { return assetText('tasks.version'); }, key: 'version', width: 140 },
+      { get title() { return assetText('tasks.source'); }, key: 'service_sources', width: 180 },
+      { get title() { return assetText('tasks.savedAt'); }, key: 'service_time', width: 170 }
     ]
   },
 
@@ -1241,29 +1287,6 @@ const handleBatchDelete = () => {
   });
 };
 
-// 切换服务识别引擎
-const onServiceEngineChange = () => {
-  const prevTabKey = effectiveTab.value === 'npoc_service' ? 'service' : 'npoc_service';
-  tabCache.saveCurrentTab(prevTabKey, searchForm.value, pagination.current);
-  clearSelection();
-
-  const currentTabKey = effectiveTab.value;
-  searchForm.value = tabCache.getTabSearchForm(currentTabKey);
-  tabCache.applyTabOperators(currentTabKey);
-  pagination.current = tabCache.getTabPage(currentTabKey);
-  columns.value = tabConfig[currentTabKey]?.cols || [];
-
-  const cached = tabCache.getMemoryCache(currentTabKey, pagination.pageSize);
-  if (cached) {
-    dataSource.value = cached.dataSource;
-    pagination.total = cached.total;
-    lastFetchedPage = pagination.current;
-    lastFetchedSize = pagination.pageSize;
-  } else {
-    fetchData();
-  }
-};
-
 // 🚨 核心逻辑调整：去掉 task_id 参数，纯净的全局搜索
 const fetchData = async () => {
   const currentTab = effectiveTab.value;
@@ -1376,9 +1399,8 @@ const handleTableChange = (page, pageSize) => {
 };
 
 watch(activeTab, (newVal, oldVal) => {
-  const prevEffective = (oldVal === 'service' && serviceEngineType.value === 'npoc') ? 'npoc_service' : oldVal;
-  if (prevEffective && tabConfig[prevEffective] && !isHydrating.value) {
-    tabCache.saveCurrentTab(prevEffective, searchForm.value, pagination.current);
+  if (oldVal && tabConfig[oldVal] && !isHydrating.value) {
+    tabCache.saveCurrentTab(oldVal, searchForm.value, pagination.current);
   }
   clearSelection();
 
@@ -1422,12 +1444,7 @@ onMounted(() => {
   const restoredTab = tabCache.init();
   let queryTab = route.query.tab;
   if (queryTab === 'npoc_service') {
-    serviceEngineType.value = 'npoc';
     queryTab = 'service';
-  } else if (queryTab === 'service') {
-    serviceEngineType.value = 'nmap';
-  } else if (!queryTab && restoredTab === 'npoc_service') {
-    serviceEngineType.value = 'npoc';
   }
 
   // 优先级：若 URL 带了 tab 参数则以 URL 为准，否则以 SessionStorage 恢复的为准

@@ -67,6 +67,8 @@ def _get_baseline_query(category, item, scope_id):
     elif category == "cert":
         return {"scope_id": scope_id, "ip": item.get("ip"), "cert.fingerprint.sha256": item.get("cert", {}).get("fingerprint", {}).get("sha256")}
     elif category == "service":
+        if item.get("ip") and item.get("port_id") is not None:
+            return {"scope_id": scope_id, "ip": item.get("ip"), "port_id": item.get("port_id")}
         return {"scope_id": scope_id, "service_name": item.get("service_name")}
     elif category == "fileleak":
         return {"scope_id": scope_id, "url": item.get("url")}

@@ -89,6 +89,7 @@ test('资产搜索、资产组详情、任务详情与全链路画像抽屉统�
   const chainData = ref({});
   const chain = loadComponent('components/ChainDrawer.vue', { chainData, ...iconStubs });
   chain.read('statFingerList');
+  chain.read('unifiedServiceList');
   chain.read('nmapServiceCount');
   chain.read('npocServiceCount');
   chain.read('mergedServiceCount');
@@ -97,7 +98,7 @@ test('资产搜索、资产组详情、任务详情与全链路画像抽屉统�
   assert.deepEqual(plain(chips.map(chip => chip.id)), EXPECTED_CHAIN_SECTION_IDS);
 });
 
-test('ChainDrawer 将 Nmap 与 Python 插件服务合并计入服务维度，且保留导出 JSON 原样结构', async () => {
+test('ChainDrawer 将 Nmap 与 Python 插件服务按端点去重融合为单一服务表，且保留导出 JSON 原样结构', async () => {
   const iconStubs = Object.fromEntries([
     'GlobalOutlined', 'LinkOutlined', 'CloudServerOutlined', 'SafetyCertificateOutlined',
     'ApiOutlined', 'FileSearchOutlined', 'DeploymentUnitOutlined', 'ClusterOutlined',
@@ -109,10 +110,13 @@ test('ChainDrawer 将 Nmap 与 Python 插件服务合并计入服务维度，且
     domain_records: [{ domain: 'app.example.test', ips: ['192.0.2.10'] }],
     ip: [],
     cert: [],
-    service: [{ service_name: 'http', service_info: [{ ip: '192.0.2.10', port_id: 80 }] }],
+    service: [
+      { ip: '192.0.2.10', port_id: 80, service_name: 'http', product: 'Nginx', version: '1.24', sources: ['nmap'] },
+      { ip: '192.0.2.10', port_id: 6379, service_name: 'unknown', product: 'Redis', version: '7.0', sources: ['nmap'] },
+    ],
     npoc_service: [
-      { _id: 'n1', scheme: 'redis', target: '192.0.2.10:6379' },
-      { _id: 'n2', scheme: 'ssh', target: '192.0.2.10:22' },
+      { _id: 'n1', scheme: 'redis', host: '192.0.2.10', port: '6379', target: 'redis://192.0.2.10:6379' },
+      { _id: 'n2', scheme: 'ssh', host: '192.0.2.10', port: '22', target: 'ssh://192.0.2.10:22' },
     ],
     fileleak: [],
     url: [],
@@ -137,17 +141,22 @@ test('ChainDrawer 将 Nmap 与 Python 插件服务合并计入服务维度，且
   });
 
   chain.read('statFingerList');
-  const nmapCount = chain.read('nmapServiceCount');
-  const npocCount = chain.read('npocServiceCount');
+  const unifiedList = chain.read('unifiedServiceList');
+  chain.read('nmapServiceCount');
+  chain.read('npocServiceCount');
   const mergedCount = chain.read('mergedServiceCount');
   const metricChips = chain.read('metricChips');
   const hitCategoryCount = chain.read('hitCategoryCount');
   const emptyCategoryCount = chain.read('emptyCategoryCount');
   const totalRecords = chain.read('totalRecords');
 
-  assert.equal(nmapCount.value, 1);
-  assert.equal(npocCount.value, 2);
+  // 192.0.2.10:6379 被 Nmap 与 Python 插件同时命中，自动按 (ip, port) 去重归并为 1 条并校准为 redis
   assert.equal(mergedCount.value, 3);
+  const redisEp = unifiedList.value.find(item => String(item.port_id) === '6379');
+  assert.equal(redisEp.service_name, 'redis');
+  assert.equal(redisEp.product, 'Redis');
+  assert.deepEqual(plain(redisEp.sources), ['nmap', 'npoc']);
+
   assert.equal(metricChips.value.length, 12);
   assert.equal(metricChips.value.find(c => c.id === 'chain-sec-service').count, 3);
   assert.equal(metricChips.value.find(c => c.id === 'chain-sec-nuclei').count, 1);
@@ -170,15 +179,14 @@ test('ChainDrawer 将 Nmap 与 Python 插件服务合并计入服务维度，且
   assert.deepEqual(exported.service, sampleData.service);
   assert.deepEqual(exported.npoc_service, sampleData.npoc_service);
 
-  // 模板不再存在独立 chain-sec-npoc 卡片，且在 chain-sec-service 内包含双引擎分区
+  // 模板不再存在独立 chain-sec-npoc 卡片，也不再拆分为双引擎子区块
   assert.doesNotMatch(chain.source, /id="chain-sec-npoc"/);
   assert.match(chain.source, /id="chain-sec-service"/);
-  assert.match(chain.source, /tasks\.portServicesNmap/);
-  assert.match(chain.source, /assets\.pythonPluginServicesLabel/);
+  assert.match(chain.source, /unifiedServiceList/);
 });
 
-test('AssetSearch 服务页签徽标累加 service + npoc_service，并处理 null 失败降级与引擎单选计数', () => {
-  const assetSearch = loadComponent('views/AssetSearch.vue');
+test('AssetSearch、GroupAssetsDetail 与 TaskDetail 服务页签统一为融合单表且移除二级引擎切换栏', () => {
+  const assetSearch = loadComponent('views/AssetSearch.vue', { route: { query: {} } });
   const overviewCounts = assetSearch.read('overviewCounts');
   const getOverviewTabCount = assetSearch.read('getOverviewTabCount');
 
@@ -186,28 +194,26 @@ test('AssetSearch 服务页签徽标累加 service + npoc_service，并处理 nu
   assert.equal(getOverviewTabCount('service'), undefined);
   assert.equal(getOverviewTabCount('nuclei_result'), undefined);
 
-  // 正常返回时 service 页签累加 Nmap + Python 插件服务
+  // 正常返回时 service 页签直接展示后端已融合去重的 service 计数
   overviewCounts.value = { site: 10, service: 12, npoc_service: 5, nuclei_result: 3 };
-  assert.equal(getOverviewTabCount('service'), 17);
+  assert.equal(getOverviewTabCount('service'), 12);
   assert.equal(getOverviewTabCount('site'), 10);
   assert.equal(getOverviewTabCount('nuclei_result'), 3);
 
-  // Nmap 为 0、Python 插件服务非 0 时不再误显为 0
+  // 兼容旧数据：若 service 为 0 而 npoc_service 非 0，回退展示 npoc_service
   overviewCounts.value = { service: 0, npoc_service: 4 };
   assert.equal(getOverviewTabCount('service'), 4);
 
-  // 任一服务引擎计数失败返回 null 时，整体服务徽标降级为 null（UI 展示 "-"）
+  // 任一服务计数失败返回 null 时，整体服务徽标降级为 null（UI 展示 "-"）
   overviewCounts.value = { service: 12, npoc_service: null };
   assert.equal(getOverviewTabCount('service'), null);
   overviewCounts.value = { service: null, npoc_service: 5 };
   assert.equal(getOverviewTabCount('service'), null);
 
-  // 兼容未返回 npoc_service 的响应
-  overviewCounts.value = { service: 8 };
-  assert.equal(getOverviewTabCount('service'), 8);
-
-  // 模板接入合并计数函数，且单选按钮展示 Nmap 与 Python 插件各自计数
-  assert.match(assetSearch.source, /getOverviewTabCount\(t\.key\)/);
-  assert.match(assetSearch.source, /assets\.portServiceCount/);
-  assert.match(assetSearch.source, /assets\.pluginServiceCount/);
+  // 三个主视图均已移除 serviceEngineType 二级切换单选栏
+  const groupDetailSource = fs.readFileSync(new URL('../src/views/GroupAssetsDetail.vue', import.meta.url), 'utf8');
+  const taskDetailSource = fs.readFileSync(new URL('../src/views/TaskDetail.vue', import.meta.url), 'utf8');
+  assert.doesNotMatch(assetSearch.source, /serviceEngineType/);
+  assert.doesNotMatch(groupDetailSource, /serviceEngineType/);
+  assert.doesNotMatch(taskDetailSource, /serviceEngineType/);
 });

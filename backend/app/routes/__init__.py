@@ -20,7 +20,7 @@ base_query_fields = {
 # 只能用等号进行mongo查询的字段
 EQUAL_FIELDS = [
     "task_id", "task_tag", "ip_type", "scope_id", "group_id", "type", "query_type",
-    "status", "schedule_status", "schedule_type", "source", "template_source",
+    "status", "schedule_status", "schedule_type", "source", "sources", "template_source",
     "plg_type", "plugin_type", "vuln_severity", "port_scan_type",
     "record_type", "sync_status"
 ]
@@ -526,6 +526,8 @@ class ARLResource(Resource):
             "asset_fileleak": "url",
             "cip": "cidr_ip",
             "wih": "content",
+            "service": "target",
+            "asset_service": "target",
             "npoc_service": "target",
             "asset_npoc_service": "target",
         }
@@ -589,6 +591,21 @@ class ARLResource(Resource):
                 if not item.get(filed_name):
                     continue
                 items_set.add(format_wih_export(item, filed_name))
+
+        elif _type in ("service", "asset_service"):
+            projection = {"ip": 1, "port_id": 1, "service_name": 1, "target": 1, "service_info": 1, "_id": 0}
+            cursor = conn(_type).find(query, projection)
+            for item in cursor:
+                if item.get("target"):
+                    items_set.add(str(item["target"]))
+                elif item.get("ip") and item.get("port_id") is not None:
+                    svc = item.get("service_name") or "tcp"
+                    items_set.add(f"{svc}://{item['ip']}:{item['port_id']}")
+                elif isinstance(item.get("service_info"), list):
+                    svc = item.get("service_name") or "tcp"
+                    for info in item["service_info"]:
+                        if isinstance(info, dict) and info.get("ip") and info.get("port_id") is not None:
+                            items_set.add(f"{svc}://{info['ip']}:{info['port_id']}")
 
         # 2. 简单类型：无业务上下文，直接使用数据库级别的 distinct 去重
         else:

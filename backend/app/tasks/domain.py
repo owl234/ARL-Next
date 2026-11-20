@@ -841,33 +841,33 @@ class DomainTask(CommonTask):
             utils.safe_insert_asset('ip', ['task_id', 'ip'], ip_info)
 
     def save_service_info(self):
+        from app.services.service_fusion import build_service_endpoint_doc
         self.service_info_list = []
-        services_list = set()
+        seen_endpoints = set()
+        now_str = utils.curr_date()
         for _data in self.ip_info_list:
             port_info_list = _data.port_info_list
             for _info in port_info_list:
-                if _info.service_name:
-                    if _info.service_name not in services_list:
-                        _result = {}
-                        _result["service_name"] = _info.service_name
-                        _result["service_info"] = []
-                        _result["service_info"].append({'ip': _data.ip,
-                                                        'port_id': _info.port_id,
-                                                        'product': _info.product,
-                                                        'version': _info.version})
-                        _result["task_id"] = self.task_id
-                        self.service_info_list.append(_result)
-                        services_list.add(_info.service_name)
-                    else:
-                        for service_info in self.service_info_list:
-                            if service_info.get("service_name") == _info.service_name:
-                                service_info['service_info'].append({'ip': _data.ip,
-                                                                     'port_id': _info.port_id,
-                                                                     'product': _info.product,
-                                                                     'version': _info.version})
+                if _info.service_name and _info.port_id is not None:
+                    ep_doc = build_service_endpoint_doc(
+                        owner_field="task_id",
+                        owner_id=self.task_id,
+                        ip=_data.ip,
+                        port_id=_info.port_id,
+                        service_name=_info.service_name,
+                        product=_info.product or "",
+                        version=_info.version or "",
+                        sources=["nmap"],
+                        save_date=now_str,
+                    )
+                    ep_key = (ep_doc["ip"], ep_doc["port_id"])
+                    if ep_key in seen_endpoints:
+                        continue
+                    seen_endpoints.add(ep_key)
+                    self.service_info_list.append(ep_doc)
         if self.service_info_list:
             for srv_item in self.service_info_list:
-                utils.safe_insert_asset('service', ['task_id', 'service_name'], srv_item)
+                utils.safe_insert_asset('service', ['task_id', 'ip', 'port_id'], srv_item)
 
     def ssl_cert(self):
         if self.options.get("port_scan"):
@@ -1096,6 +1096,7 @@ class DomainTask(CommonTask):
         self.web_site_fetch = web_site_fetch
 
     def npoc_service_detection(self):
+        from app.services.service_fusion import sync_npoc_items_to_service_and_ip
         targets = []
         for ip_info in self.ip_info_list:
             for port_info in ip_info.port_info_list:
@@ -1111,6 +1112,8 @@ class DomainTask(CommonTask):
             item["task_id"] = self.task_id
             item["save_date"] = utils.curr_date()
             utils.safe_insert_asset('npoc_service', ['task_id', 'target'], item)
+        if result:
+            sync_npoc_items_to_service_and_ip(self.task_id, result)
 
     def start_poc_run(self):
         """poc run"""
