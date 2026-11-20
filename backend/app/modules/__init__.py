@@ -218,6 +218,7 @@ class CollectSource:
     更在权重判断、置信度分析时起关键作用（比如爆破发现的置信度可能高于某个老旧第三方API）。
     """
     DOMAIN_BRUTE = "domain_brute" # 子域名爆破获取
+    TARGET = "target"             # 任务输入目标本身（未开启域名爆破时仅做 DNS 解析入库）
     BAIDU = "baidu"               # 百度搜索爬取
     ALTDNS = "alt_dns"            # 组合变种词爆破
     ARL = "arl"                   # 系统内部历史数据碰撞

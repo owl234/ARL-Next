@@ -968,10 +968,11 @@ class DomainTask(CommonTask):
             with self.safe_phase("domain_brute", self.base_update_task, critical=not has_fallback_discovery):
                 self.domain_brute()
         else:
+            # 未开启域名爆破时仅解析任务目标本身，来源须标记为 target，避免误标为 domain_brute
             domain_info = self.build_single_domain_info(self.base_domain)
             if domain_info:
                 self.domain_info_list.append(domain_info)
-                self.save_domain_info_list([domain_info])
+                self.save_domain_info_list([domain_info], source=CollectSource.TARGET)
 
         if "{fuzz}" in self.base_domain:
             return

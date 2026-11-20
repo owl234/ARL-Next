@@ -398,6 +398,36 @@ def run_task(options):
         _restore_sigterm_handler(prev_sigterm)
 
 
+# 附属参数 -> 父开关映射：父开关关闭时，附属参数（字典、端口策略等）不会被扫描阶段读取，
+# 因此不应出现在启动日志中，避免被误读为对应阶段已执行。
+TASK_OPTION_PARENT_SWITCH = {
+    "domain_brute_type": "domain_brute",
+    "alt_dns_dict": "alt_dns",
+    "port_scan_type": "port_scan",
+    "port_custom": "port_scan",
+    "host_timeout_type": "port_scan",
+    "host_discovery_mode": "port_scan",
+    "exclude_ports": "port_scan",
+    "file_leak_dict": "file_leak",
+}
+
+
+def build_task_options_summary(task_options):
+    """生成任务启动日志的配置摘要：仅列出已开启的开关及其生效中的附属参数。"""
+    if not isinstance(task_options, dict):
+        return []
+    summary = []
+    for key, value in task_options.items():
+        parent = TASK_OPTION_PARENT_SWITCH.get(key)
+        if parent and task_options.get(parent) is not True:
+            continue
+        if value is True:
+            summary.append(f"已开启 {key}")
+        elif isinstance(value, str) and value:
+            summary.append(f"{key}: {value}")
+    return summary
+
+
 def _run_task_with_managed_signal(options):
     action = options.get("celery_action")
     data = options.get("data")
@@ -426,17 +456,10 @@ def _run_task_with_managed_signal(options):
     logger.info("name:{}, target:{}, task_id:{}".format(
         data.get("name"), data.get("target"), data.get("task_id")))
 
-    task_options = data.get("options", {})
-    if task_options:
-        active_opts = []
-        for k, v in task_options.items():
-            if v is True:
-                active_opts.append(f"已开启 {k}")
-            elif isinstance(v, str) and v:
-                active_opts.append(f"{k}: {v}")
-        if active_opts:
-            logger.info(f"任务配置: {', '.join(active_opts)}")
-            
+    active_opts = build_task_options_summary(data.get("options", {}))
+    if active_opts:
+        logger.info(f"任务配置: {', '.join(active_opts)}")
+
     task_id = data.get("task_id")
     if task_id:
         try:

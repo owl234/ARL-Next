@@ -1988,16 +1988,17 @@ const getDetailedOptions = (options) => {
     }
   }
 
-  if (options.domain_brute_type) {
+  // 附属参数仅在父开关开启时展示，避免把未执行阶段的字典误读为已生效（与后端 TASK_OPTION_PARENT_SWITCH 一致）
+  if (options.domain_brute === true && options.domain_brute_type) {
     const typeMap = { test: taskText('tasks.test'), big: taskText('tasks.largeWordlist') };
     detailed.push(taskText('tasks.subdomainWordlistName', { name: typeMap[options.domain_brute_type] || options.domain_brute_type }));
   }
-  if (options.port_scan_type && options.port_scan_type !== 'null' && options.port_scan_type !== null) {
+  if (options.port_scan === true && options.port_scan_type && options.port_scan_type !== 'null') {
     // 'test' 为历史端口类型别名，后端实际映射到 port_top100.txt
     const typeMap = { test: 'TOP100', top100: 'TOP100', top1000: 'TOP1000', all: taskText('tasks.allPorts') };
     detailed.push(taskText('tasks.portScanPolicyName', { name: typeMap[options.port_scan_type] || options.port_scan_type.toUpperCase() }));
   }
-  if (options.host_discovery_mode && options.host_discovery_mode !== 'auto') {
+  if (options.port_scan === true && options.host_discovery_mode && options.host_discovery_mode !== 'auto') {
     const modeLabel = options.host_discovery_mode === 'skip'
       ? taskText('tasks.hostDiscoverySkipShort')
       : options.host_discovery_mode === 'probe'
@@ -2005,10 +2006,10 @@ const getDetailedOptions = (options) => {
         : options.host_discovery_mode;
     detailed.push(taskText('tasks.hostDiscoveryOptionTag', { mode: modeLabel }));
   }
-  if (options.alt_dns_dict) {
+  if (options.alt_dns === true && options.alt_dns_dict) {
     detailed.push(taskText('tasks.generatedSubdomainWordlistName', { name: options.alt_dns_dict }));
   }
-  if (options.file_leak_dict) {
+  if (options.file_leak === true && options.file_leak_dict) {
     detailed.push(taskText('tasks.fileDiscoveryWordlistName', { name: options.file_leak_dict }));
   }
 
