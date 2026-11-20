@@ -389,10 +389,16 @@ import { formatTaskStatus } from '../constants/taskStatus';
 
 defineOptions({ name: 'PlanningTasks' });
 
-import { ref, reactive, onMounted, onDeactivated, computed, watch, createVNode } from 'vue';
+import { ref, reactive, onMounted, onActivated, onDeactivated, computed, watch, createVNode } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useSticky } from '../utils/useSticky';
 import request from '../utils/request';
+import {
+  assetMutationVersion,
+  notifyAssetMutated,
+  createSelectionLabelTracker,
+  buildSelectionConfirmContent
+} from '../utils/useTabStateCache';
 import { message, Modal } from 'ant-design-vue';
 import { SearchOutlined, ExclamationCircleOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, PauseCircleOutlined, PlayCircleOutlined, SendOutlined, ReloadOutlined, ClockCircleOutlined, RadarChartOutlined } from '@ant-design/icons-vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
@@ -665,8 +671,26 @@ const monitorSearchForm = ref({});
 const monitorPagination = reactive({ current: 1, pageSize: globalPageSize.value, total: 0 });
 
 const monitorSelectedRowKeys = ref([]);
+const monitorSelectionTracker = createSelectionLabelTracker();
 const hasMonitorSelected = computed(() => monitorSelectedRowKeys.value.length > 0);
-const onMonitorSelectChange = (keys) => { monitorSelectedRowKeys.value = keys; };
+let lastObservedMutationVersion = assetMutationVersion.value;
+
+const getMonitorRowKey = (row) => row?._id;
+const getMonitorRowLabel = (row) => {
+  if (!row) return '';
+  const name = row.name || row._id || '';
+  return row.domain && row.domain !== name ? `${name} (${row.domain})` : name;
+};
+
+const onMonitorSelectChange = (keys, selectedRows) => {
+  monitorSelectedRowKeys.value = keys;
+  monitorSelectionTracker.syncSelection(keys, selectedRows, monitorDataSource.value, getMonitorRowKey, getMonitorRowLabel);
+};
+
+const clearMonitorSelection = () => {
+  monitorSelectedRowKeys.value = [];
+  monitorSelectionTracker.clear();
+};
 
 const monitorColumns = [
   { get title() { return taskText('tasks.no'); }, key: 'index', width: 80, align: 'center' },
@@ -704,9 +728,18 @@ const fetchMonitorData = async () => {
     }
     const res = await request.get('/scheduler/', { params });
     if (res.code === 200) {
-      monitorDataSource.value = res.items || [];
-      monitorPagination.total = res.total || 0;
-      monitorSelectedRowKeys.value = [];
+      const items = res.items || [];
+      const total = res.total || 0;
+      if (items.length === 0 && total > 0 && monitorPagination.current > 1) {
+        const maxPage = Math.max(1, Math.ceil(total / (monitorPagination.pageSize || 10)));
+        if (monitorPagination.current > maxPage) {
+          monitorPagination.current = maxPage;
+          return await fetchMonitorData();
+        }
+      }
+      monitorDataSource.value = items;
+      monitorPagination.total = total;
+      monitorSelectionTracker.rememberRows(items, getMonitorRowKey, getMonitorRowLabel);
     }
   } catch (error) {
     message.error(taskText('tasks.failedToLoadAssetMonitors'));
@@ -718,10 +751,11 @@ const fetchMonitorData = async () => {
 const resetMonitorSearch = () => {
   monitorSearchForm.value = {};
   monitorPagination.current = 1;
+  clearMonitorSelection();
   onMonitorSearch();
 };
 
-const onMonitorSearch = () => { monitorPagination.current = 1; fetchMonitorData(); };
+const onMonitorSearch = () => { monitorPagination.current = 1; clearMonitorSelection(); fetchMonitorData(); };
 const handleMonitorTableChange = (page, pageSize) => { monitorPagination.current = page; monitorPagination.pageSize = pageSize; fetchMonitorData(); };
 
 const monitorApiMap = {
@@ -745,6 +779,14 @@ const executeMonitorAction = async (actionType, ids) => {
     const res = await request.post(url, payload);
     if (res.code === 200) {
       message.success(taskText('tasks.operationCompleted'));
+      if (actionType === 'delete') {
+        const idSet = new Set(ids);
+        if (monitorSelectedRowKeys.value.some(k => idSet.has(k))) {
+          onMonitorSelectChange(monitorSelectedRowKeys.value.filter(k => !idSet.has(k)), []);
+        }
+      }
+      notifyAssetMutated();
+      lastObservedMutationVersion = assetMutationVersion.value;
       fetchMonitorData();
     } else {
       message.error(taskText('tasks.operationFailed') + res.message);
@@ -755,16 +797,28 @@ const executeMonitorAction = async (actionType, ids) => {
 };
 
 const handleMonitorSingleAction = (actionType, record) => {
-  const actionName = actionType === 'delete' ? taskText('tasks.delete') : actionType === 'stop' ? taskText('tasks.pause') : actionType === 'resume' ? taskText('tasks.resume') : taskText('tasks.run');
-  if (actionType === 'delete' || actionType === 'run') {
+  if (actionType === 'delete' || actionType === 'stop' || actionType === 'run') {
+    const isDelete = actionType === 'delete';
+    const isStop = actionType === 'stop';
+    const title = isDelete
+      ? taskText('tasks.deleteMonitoringTask')
+      : isStop
+        ? taskText('tasks.pauseMonitoringTaskTitle')
+        : taskText('tasks.runMonitoringTask');
+    const content = isDelete
+      ? taskText('tasks.deleteMonitoringTaskStopsRunningDesc', { name: record.name })
+      : isStop
+        ? taskText('tasks.pauseMonitoringTaskConfirmDesc', { name: record.name })
+        : taskText('tasks.runMonitoringTaskNameNowItWillBe', { name: record.name });
     Modal.confirm({
-      title: actionType === 'delete' ? taskText('tasks.deleteMonitoringTask') : taskText('tasks.runMonitoringTask'),
-      icon: createVNode(ExclamationCircleOutlined, actionType === 'delete' ? { style: 'color: #ff4d4f;' } : undefined),
-      content: actionType === 'delete'
-        ? taskText('tasks.deleteMonitoringTaskNameItsSchedulingConfigurationWill', { name: record.name })
-        : taskText('tasks.runMonitoringTaskNameNowItWillBe', { name: record.name }),
-      okText: actionType === 'delete' ? taskText('tasks.confirmDeletion') : taskText('tasks.confirm'),
-      okButtonProps: actionType === 'delete' ? { danger: true } : undefined,
+      title,
+      icon: createVNode(
+        ExclamationCircleOutlined,
+        isDelete ? { style: 'color: #ff4d4f;' } : isStop ? { style: 'color: #faad14;' } : undefined
+      ),
+      content,
+      okText: isDelete ? taskText('tasks.confirmDeletion') : taskText('tasks.confirm'),
+      okButtonProps: (isDelete || isStop) ? { danger: true } : undefined,
       cancelText: taskText('tasks.cancel'),
       onOk: () => executeMonitorAction(actionType, [record._id])
     });
@@ -784,25 +838,43 @@ const handleMonitorBatchAction = (action) => {
   const current = actionMap[action];
   if (!current) return;
 
+  const selectedKeys = monitorSelectedRowKeys.value.filter(k => k != null && k !== '');
+  if (!selectedKeys.length) return;
+  const selectedLabels = monitorSelectionTracker.getLabels(selectedKeys);
+  const isDestructive = action === 'delete' || action === 'stop';
+
   Modal.confirm({
     title: taskText('tasks.confirmAction', { action: current.title }),
     icon: createVNode(ExclamationCircleOutlined),
-    content: taskText('tasks.applyActionToTheSelectedTasksCount', { count: monitorSelectedRowKeys.value.length, action: current.text }),
+    width: 560,
+    content: buildSelectionConfirmContent({
+      alertType: isDestructive ? 'warning' : '',
+      alertMessage: isDestructive ? current.title : '',
+      alertDescription: isDestructive ? taskText('tasks.monitorBatchStopDeleteWarning') : '',
+      summary: taskText('tasks.applyActionToTheSelectedTasksCount', { count: selectedKeys.length, action: current.text }),
+      listHeading: taskText('tasks.selectedMonitoringPlansListHeading'),
+      items: selectedLabels,
+      expandText: (total) => taskText('assets.expandAllCount', { count: total }),
+      collapseText: taskText('assets.collapseList'),
+    }),
     okText: taskText('tasks.confirm'),
     okType: current.type,
     cancelText: taskText('tasks.cancel'),
     onOk: async () => {
       try {
         const res = await request.post(current.url, {
-          scheduler_id: monitorSelectedRowKeys.value
+          scheduler_id: selectedKeys
         });
 
         if (res.code === 200) {
           message.success(taskText('tasks.batchOperationCompletedAction', { action: current.text }));
-          if (action === 'delete' && monitorDataSource.value.length === monitorSelectedRowKeys.value.length && monitorPagination.current > 1) {
+          const visibleDeletedCount = monitorDataSource.value.filter(item => selectedKeys.includes(item._id)).length;
+          clearMonitorSelection();
+          notifyAssetMutated();
+          lastObservedMutationVersion = assetMutationVersion.value;
+          if (action === 'delete' && visibleDeletedCount >= monitorDataSource.value.length && monitorPagination.current > 1) {
             monitorPagination.current -= 1;
           }
-          monitorSelectedRowKeys.value = [];
           fetchMonitorData();
         } else {
           message.error(taskText('tasks.actionFailed', { action: current.text }) + res.message);
@@ -833,6 +905,22 @@ onMounted(() => {
     fetchPlanData();
   }
   fetchPolicyList();
+});
+
+onActivated(() => {
+  const mutated = assetMutationVersion.value !== lastObservedMutationVersion;
+  if (mutated) {
+    lastObservedMutationVersion = assetMutationVersion.value;
+    clearMonitorSelection();
+    if (activeTab.value === 'monitor') {
+      fetchMonitorData();
+    } else {
+      fetchPlanData();
+      if (monitorDataSource.value.length > 0) {
+        fetchMonitorData();
+      }
+    }
+  }
 });
 
 onDeactivated(() => {

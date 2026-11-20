@@ -302,7 +302,7 @@
     <div v-show="currentView === 'asm'">
     <a-table
       :sticky="pagination.pageSize >= 100 ? false : asmStickyConfig"
-      :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange }"
+      :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange, preserveSelectedRowKeys: true }"
       :loading="loading"
       :dataSource="dataSource"
       :columns="columns"
@@ -311,7 +311,7 @@
       :virtual="pagination.pageSize >= 100"
       size="small"
       class="modern-clean-table"
-      :rowKey="(record) => record._id || record.id"
+      :rowKey="getAssetRowKey"
     >
       <template #bodyCell="{ column, record, index }">
 
@@ -741,7 +741,7 @@
             <template #icon><bug-outlined /></template>
             {{ assetText('assets.riskScanCount', { count: selectedRowKeys.length }) }}
           </a-button>
-          <a-button size="small" @click="selectedRowKeys = []">{{ assetText('tasks.clearSelection') }}</a-button>
+          <a-button size="small" @click="clearSelection">{{ assetText('tasks.clearSelection') }}</a-button>
         </div>
       </div>
     </transition>
@@ -1029,7 +1029,15 @@ import {
 } from '@ant-design/icons-vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import { formatTaskStatus, formatTaskStatusColor } from '../constants/taskStatus';
-import { createTabStateCache } from '../utils/useTabStateCache';
+import {
+  createTabStateCache,
+  assetMutationVersion,
+  deletedScopeIdSet,
+  notifyAssetMutated,
+  createSelectionLabelTracker,
+  getAssetRecordDisplayLabel,
+  buildSelectionConfirmContent
+} from '../utils/useTabStateCache';
 
 const { t: assetText, locale: assetLocale } = useI18n({ useScope: 'global' });
 
@@ -1232,22 +1240,19 @@ const fetchBoundTaskDetail = async (taskId) => {
 const fetchAsmCounts = async () => {
   const reqScopeId = scope_id.value;
   if (!reqScopeId) return;
-  const keys = Object.keys(tabConfig);
-  await Promise.allSettled(
-    keys.map(async (key) => {
-      const config = tabConfig[key];
-      if (!config || !config.url) return;
-      try {
-        const res = await request.get(config.url, {
-          params: { page: 1, size: 1, scope_id: reqScopeId }
-        });
-        if (scope_id.value !== reqScopeId) return;
-        if (res && res.code === 200) {
-          asmCounts[key] = res.total || 0;
+  try {
+    const res = await request.get('/asset_overview/count', {
+      params: { scope_id: reqScopeId }
+    });
+    if (scope_id.value !== reqScopeId) return;
+    if (res && res.code === 200 && res.counts) {
+      Object.keys(asmCounts).forEach((key) => {
+        if (res.counts[key] !== undefined && res.counts[key] !== null) {
+          asmCounts[key] = res.counts[key];
         }
-      } catch (e) {}
-    })
-  );
+      });
+    }
+  } catch (e) {}
 };
 
 const bindModalVisible = ref(false);
@@ -1372,6 +1377,9 @@ const fetchScopeMeta = async () => {
         osintTotalCount.value = 0;
       }
       fetchAsmCounts();
+    } else if (res && res.code === 200 && (!res.items || res.items.length === 0)) {
+      message.warning(assetText('assets.assetGroupDeletedRedirectNotice'));
+      router.replace('/group');
     }
   } catch (err) {
     console.error('获取资产组企业元信息失败', err);
@@ -1541,7 +1549,7 @@ const effectiveTab = computed(() => {
 
 const onServiceEngineChange = () => {
   const currentTab = effectiveTab.value;
-  selectedRowKeys.value = [];
+  clearSelection();
   columns.value = tabConfig[currentTab]?.cols || [];
   searchForm.value = tabCache.getTabSearchForm(currentTab);
   tabCache.applyTabOperators(currentTab);
@@ -1587,8 +1595,24 @@ watch(globalPageSize, (newSize) => {
 });
 
 const selectedRowKeys = ref([]);
+const selectionTracker = createSelectionLabelTracker();
+const getAssetRowKey = (record) => record?._id || record?.id || record?.name || record?.cidr_ip;
 const hasSelected = computed(() => selectedRowKeys.value.length > 0);
-const onSelectChange = (keys) => { selectedRowKeys.value = keys; };
+const onSelectChange = (keys, selectedRows) => {
+  selectedRowKeys.value = keys;
+  selectionTracker.syncSelection(
+    keys,
+    selectedRows,
+    dataSource.value,
+    getAssetRowKey,
+    (row) => getAssetRecordDisplayLabel(effectiveTab.value, row)
+  );
+};
+const clearSelection = () => {
+  selectedRowKeys.value = [];
+  selectionTracker.clear();
+};
+let lastObservedMutationVersion = assetMutationVersion.value;
 
 // 标签管理逻辑
 const tagVisible = ref(false);
@@ -2048,10 +2072,26 @@ const fetchData = async () => {
     if (effectiveTab.value !== currentReqTab) return;
 
     if (res.code === 200) {
-      dataSource.value = res.items || [];
-      pagination.total = res.total || 0;
-      asmCounts[effectiveTab.value] = res.total || 0;
-      selectedRowKeys.value = [];
+      const items = res.items || [];
+      const total = res.total || 0;
+      // 跨 Tab 级联删除后若历史页码越界显示空页，自动回退至最大有效页并重拉
+      if (items.length === 0 && total > 0 && pagination.current > 1) {
+        const clampedPage = Math.max(1, Math.ceil(total / pagination.pageSize));
+        if (clampedPage !== pagination.current) {
+          pagination.current = clampedPage;
+          lastFetchedPage = clampedPage;
+          tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, clampedPage);
+          return fetchData();
+        }
+      }
+      dataSource.value = items;
+      pagination.total = total;
+      asmCounts[effectiveTab.value] = total;
+      selectionTracker.rememberRows(
+        items,
+        getAssetRowKey,
+        (row) => getAssetRecordDisplayLabel(effectiveTab.value, row)
+      );
       lastFetchedPage = pagination.current;
       lastFetchedSize = pagination.pageSize;
       // 更新当前 Tab 内存数据缓存并持久化轻量搜索状态
@@ -2105,41 +2145,67 @@ const handleTableChange = (page, pageSize) => {
   fetchData();
 };
 
-// ================= 批量删除功能 (兼容所有 Tab) =================
+// ================= 批量删除功能 (兼容所有 Tab，支持跨页对象清单与统一级联) =================
 const handleBatchDelete = () => {
+  const validKeys = selectedRowKeys.value.filter(k => k != null && k !== '');
+  if (validKeys.length === 0) return;
+  if (validKeys.length > 500) {
+    message.warning(assetText('assets.maxBatchDeleteLimitNotice'));
+    return;
+  }
+
+  const targetLabels = selectionTracker.getLabels(validKeys);
+
   Modal.confirm({
     title: assetText('tasks.deleteSelectedRecords'),
-    icon: createVNode(ExclamationCircleOutlined),
-    content: assetText('assets.permanentlyDeleteTheSelectedAssetsCountFromThis', { count: selectedRowKeys.value.length }),
+    icon: createVNode(ExclamationCircleOutlined, { style: 'color: #ff4d4f;' }),
+    width: 540,
+    content: buildSelectionConfirmContent({
+      alertType: 'warning',
+      alertMessage: assetText('assets.scopedCascadeDeleteHint'),
+      summary: assetText('assets.permanentlyDeleteTheSelectedAssetsCountFromThis', { count: validKeys.length }),
+      listHeading: assetText('assets.selectedRecordsWillBeDeleted'),
+      items: targetLabels,
+      previewLimit: 20,
+      expandText: (total) => assetText('assets.expandAllCount', { count: total }),
+      collapseText: assetText('assets.collapseList'),
+    }),
     okText: assetText('tasks.confirm'),
     okType: 'danger',
     cancelText: assetText('assets.cancel'),
     onOk: async () => {
       try {
-        const config = tabConfig[effectiveTab.value];
+        const currentTabKey = effectiveTab.value;
+        const config = tabConfig[currentTabKey];
         if (!config || !config.url) return;
 
-        // 🚨 优先读取专用配置，否则动态拼接删除 API 路径：例如 /asset_domain/ -> /asset_domain/delete/
         const deleteUrl = config.deleteUrl || `${config.url}delete/`;
+        const payload = {
+          _id: validKeys,
+          scope_id: scope_id.value,
+        };
+        if (currentTabKey === 'stat_finger') {
+          payload.name = validKeys;
+        }
 
-        // 🚨 严格按照抓包 Payload：键名为 _id
-        const res = await request.post(deleteUrl, {
-          _id: selectedRowKeys.value
-        });
+        const res = await request.post(deleteUrl, payload);
 
         if (res.code === 200) {
-          message.success(assetText('tasks.assetsDeletedCount', { count: selectedRowKeys.value.length }));
+          const deletedCount = validKeys.length;
+          message.success(assetText('tasks.assetsDeletedCount', { count: deletedCount }));
 
-          // 如果删光了当前页的数据且不在第一页，自动回退一页
-          if (dataSource.value.length === selectedRowKeys.value.length && pagination.current > 1) {
+          if (dataSource.value.length <= deletedCount && pagination.current > 1) {
             pagination.current -= 1;
           }
 
-          selectedRowKeys.value = []; // 清空选中状态
-          tabCache.invalidateMemoryCache(effectiveTab.value);
-          fetchData(); // 删除后自动刷新表格数据
+          clearSelection();
+          tabCache.invalidateAllMemoryCaches();
+          notifyAssetMutated();
+          lastObservedMutationVersion = assetMutationVersion.value;
+          fetchAsmCounts();
+          fetchData();
         } else {
-          message.error(assetText('tasks.deletionFailed') + res.message);
+          message.error(assetText('tasks.deletionFailed') + (res.message || assetText('tasks.unknownError')));
         }
       } catch (error) {
         message.error(assetText('assets.requestFailedAssetGroupWasNotDeleted'));
@@ -2159,7 +2225,7 @@ watch(activeTab, (newVal, oldVal) => {
 
   if (tabConfig[newEffective]) {
     columns.value = tabConfig[newEffective].cols;
-    selectedRowKeys.value = [];
+    clearSelection();
 
     // 恢复新选项卡的搜索表单、操作符与页码
     searchForm.value = tabCache.getTabSearchForm(newEffective);
@@ -2574,13 +2640,27 @@ const submitAddDomain = async () => {
 
 onActivated(() => {
   isPageActive.value = true;
-  if (hasDeactivated && scope_id.value && scope_id.value === lastObservedScopeId) {
+  if (scope_id.value && deletedScopeIdSet.has(String(scope_id.value))) {
+    message.warning(assetText('assets.assetGroupDeletedRedirectNotice'));
+    router.replace('/group');
+    return;
+  }
+  const mutated = assetMutationVersion.value !== lastObservedMutationVersion;
+  if (mutated) {
+    lastObservedMutationVersion = assetMutationVersion.value;
+    tabCache.invalidateAllMemoryCaches();
+    clearSelection();
+  }
+  if ((hasDeactivated || mutated) && scope_id.value && scope_id.value === lastObservedScopeId) {
     hasDeactivated = false;
     justSyncedOnActivated = true;
     queueMicrotask(() => {
       justSyncedOnActivated = false;
     });
     fetchScopeMeta();
+    if (mutated) {
+      fetchData();
+    }
   }
 });
 

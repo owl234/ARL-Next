@@ -1,5 +1,197 @@
-import { ref, reactive } from 'vue';
+import { ref, reactive, defineComponent, h } from 'vue';
+import { Alert } from 'ant-design-vue';
 import dayjs from 'dayjs';
+
+/**
+ * 全局资产/任务/监控变更版本号（供所有 <keep-alive> 视图感知跨页面数据变更并即时失效回源）
+ */
+export const assetMutationVersion = ref(0);
+export const deletedScopeIdSet = reactive(new Set());
+
+export function notifyAssetMutated(meta = {}) {
+  if (Array.isArray(meta?.deletedScopeIds)) {
+    meta.deletedScopeIds.forEach((sid) => {
+      if (sid) deletedScopeIdSet.add(String(sid));
+    });
+  }
+  assetMutationVersion.value += 1;
+}
+
+/**
+ * 提取各资产维度记录的人类可读对象名称（用于跨页批量操作确认清单展示）
+ */
+export function getAssetRecordDisplayLabel(tabKey, record) {
+  if (!record || typeof record !== 'object') return String(record || '');
+  switch (tabKey) {
+    case 'site':
+      return record.site || record.url || record.hostname || record._id || '';
+    case 'domain':
+      return record.domain || record._id || '';
+    case 'ip':
+      return record.ip || record._id || '';
+    case 'cip':
+      return record.cidr_ip || record._id || '';
+    case 'stat_finger':
+      return record.name || record._id || '';
+    case 'service':
+      return record.service_name
+        ? `${record.service_name}${Array.isArray(record.service_info) && record.service_info.length ? ` (${record.service_info.length})` : ''}`
+        : (record._id || '');
+    case 'npoc_service':
+      return record.target || (record.host && record.port ? `${record.host}:${record.port}` : (record.host || record._id || ''));
+    case 'cert':
+      return record.ip ? `${record.ip}${record.port ? `:${record.port}` : ''}` : (record._id || '');
+    case 'fileleak':
+    case 'url':
+      return record.url || record.site || record._id || '';
+    case 'vuln':
+      return [record.vul_name || record.plugin_name, record.target || record.vuln_url].filter(Boolean).join(' · ') || record._id || '';
+    case 'nuclei_result':
+      return [record.template_id, record.target || record.vuln_url].filter(Boolean).join(' · ') || record._id || '';
+    case 'wih':
+      return [record.record_type, record.content].filter(Boolean).join(': ') || record.site || record._id || '';
+    default:
+      return record.name || record.site || record.domain || record.ip || record.url || record._id || '';
+  }
+}
+
+/**
+ * 跨页多选对象名称映射追踪器（配合 preserveSelectedRowKeys: true，切页后仍完整保留已勾选对象真实名称）
+ */
+export function createSelectionLabelTracker() {
+  const labelMap = new Map();
+
+  const rememberRows = (rows, getKey, getLabel) => {
+    if (!Array.isArray(rows)) return;
+    for (const row of rows) {
+      const k = getKey(row);
+      if (k != null && k !== '') {
+        labelMap.set(String(k), getLabel(row) || String(k));
+      }
+    }
+  };
+
+  const syncSelection = (selectedKeys, selectedRows, allVisibleRows, getKey, getLabel) => {
+    rememberRows(allVisibleRows, getKey, getLabel);
+    rememberRows(selectedRows, getKey, getLabel);
+    const keepSet = new Set((selectedKeys || []).filter(k => k != null).map(k => String(k)));
+    for (const key of Array.from(labelMap.keys())) {
+      if (!keepSet.has(key)) {
+        labelMap.delete(key);
+      }
+    }
+  };
+
+  const getLabels = (selectedKeys) => {
+    return (selectedKeys || [])
+      .filter(k => k != null && k !== '')
+      .map(k => labelMap.get(String(k)) || String(k));
+  };
+
+  const clear = () => {
+    labelMap.clear();
+  };
+
+  return {
+    rememberRows,
+    syncSelection,
+    getLabels,
+    clear,
+  };
+}
+
+/**
+ * 构造带可折叠对象清单（默认前 20 条 + 一键展开全部）和分级警示条的确认弹窗内容 VNode
+ */
+const CollapsibleSelectionList = defineComponent({
+  name: 'CollapsibleSelectionList',
+  props: {
+    summary: { type: String, default: '' },
+    listHeading: { type: String, default: '' },
+    items: { type: Array, default: () => [] },
+    previewLimit: { type: Number, default: 20 },
+    alertType: { type: String, default: '' },
+    alertMessage: { type: String, default: '' },
+    alertDescription: { type: String, default: '' },
+    expandText: { type: Function, default: (total) => `展开全部 (${total})` },
+    collapseText: { type: String, default: '收起清单' },
+  },
+  setup(props) {
+    const expanded = ref(false);
+    return () => {
+      const allItems = Array.isArray(props.items) ? props.items : [];
+      const hasOverflow = allItems.length > props.previewLimit;
+      const visibleItems = expanded.value || !hasOverflow ? allItems : allItems.slice(0, props.previewLimit);
+
+      const children = [];
+      if (props.alertType && (props.alertMessage || props.alertDescription)) {
+        children.push(
+          h(Alert, {
+            type: props.alertType,
+            showIcon: true,
+            message: props.alertMessage,
+            description: props.alertDescription || undefined,
+            style: 'margin-bottom: 12px;',
+          })
+        );
+      }
+      if (props.summary) {
+        children.push(
+          h('div', { style: 'margin-bottom: 10px; color: var(--arl-text-color); line-height: 1.5;' }, props.summary)
+        );
+      }
+      if (allItems.length > 0) {
+        children.push(
+          h(
+            'div',
+            {
+              style:
+                'background: var(--arl-bg-light); border: 1px solid var(--arl-border-color); border-radius: 6px; padding: 8px 10px; font-size: 12px; color: var(--arl-text-color);',
+            },
+            [
+              props.listHeading
+                ? h('div', { style: 'font-weight: 500; margin-bottom: 6px; opacity: 0.9;' }, props.listHeading)
+                : null,
+              h(
+                'div',
+                {
+                  style:
+                    'max-height: 180px; overflow-y: auto; line-height: 1.65; word-break: break-all; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;',
+                },
+                visibleItems.map((label, idx) => h('div', { key: `${idx}-${label}` }, `${idx + 1}. ${label}`))
+              ),
+              hasOverflow
+                ? h(
+                    'div',
+                    { style: 'margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--arl-border-color);' },
+                    [
+                      h(
+                        'a',
+                        {
+                          href: 'javascript:void(0)',
+                          style: 'font-size: 12px;',
+                          onClick: (e) => {
+                            e.preventDefault();
+                            expanded.value = !expanded.value;
+                          },
+                        },
+                        expanded.value ? props.collapseText : props.expandText(allItems.length)
+                      ),
+                    ]
+                  )
+                : null,
+            ]
+          )
+        );
+      }
+      return h('div', { style: 'margin-top: 8px;' }, children);
+    };
+  },
+});
+
+export function buildSelectionConfirmContent(options) {
+  return h(CollapsibleSelectionList, options);
+}
 
 /**
  * 序列化 searchForm 对象

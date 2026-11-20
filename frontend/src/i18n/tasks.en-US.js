@@ -806,5 +806,13 @@ export default {
   "nucleiScanScopeLabel": "Nuclei template scope",
   "nucleiScopeBoth": "Community + Custom (Default)",
   "nucleiScopeCustomOnly": "Custom templates only",
-  "nucleiScopeCommunityOnly": "Community templates only"
+  "nucleiScopeCommunityOnly": "Community templates only",
+  "alsoDeleteExclusiveSyncedAssets": "Also remove exclusive assets synced to the asset group (high risk, off by default)",
+  "alsoDeleteExclusiveSyncedAssetsHint": "Asset group ledgers are preserved by default; only when both options are checked will exclusive records produced solely by the deleted tasks be removed from the bound asset group.",
+  "taskDeleteCascadeHint": "If this task is explicitly bound to an asset group, deletion also removes matching records from that asset group and its bound tasks; standalone tasks only affect their own data.",
+  "pauseMonitoringTaskTitle": "Confirm Pause Monitoring Plan",
+  "pauseMonitoringTaskConfirmDesc": "Pause monitoring plan \"{name}\"? Any in-progress or queued monitoring tasks spawned by this plan will be stopped, while completed history and asset group ledgers are preserved.",
+  "deleteMonitoringTaskStopsRunningDesc": "Delete monitoring plan \"{name}\"? Its schedule will be permanently removed and any in-progress or queued spawned tasks will be stopped, while completed history and ingested assets are preserved.",
+  "monitorBatchStopDeleteWarning": "This action also stops any in-progress or queued tasks spawned by the selected monitoring plans; completed history and ingested assets are preserved.",
+  "selectedMonitoringPlansListHeading": "Monitoring plans affected:"
 };

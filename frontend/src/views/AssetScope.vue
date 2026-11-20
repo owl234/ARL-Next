@@ -361,7 +361,7 @@
             <div v-if="hasSelected" class="selection-indicator">
               <InfoCircleOutlined style="color: var(--arl-theme-color);" />
               <span>{{ assetText('assets.selected') }} <strong>{{ selectedRowKeys.length }}</strong> {{ assetText('assets.items') }}</span>
-              <a-button type="link" size="small" @click="selectedRowKeys = []" class="asset-inline-action">{{ assetText('tasks.clearSelection') }}</a-button>
+              <a-button type="link" size="small" @click="clearSelection" class="asset-inline-action">{{ assetText('tasks.clearSelection') }}</a-button>
             </div>
           </div>
 
@@ -1637,6 +1637,12 @@ const actionBarRef = ref(null);
 const { stickyConfig } = useSticky(actionBarRef);
 
 import request from '../utils/request';
+import {
+  assetMutationVersion,
+  notifyAssetMutated,
+  createSelectionLabelTracker,
+  buildSelectionConfirmContent
+} from '../utils/useTabStateCache';
 import { message, Modal, notification, Button } from 'ant-design-vue';
 import { h } from 'vue';
 import SyncToScopeModal from '../components/SyncToScopeModal.vue';
@@ -1701,8 +1707,25 @@ watch(globalPageSize, (newSize) => {
 });
 
 const selectedRowKeys = ref([]);
+const scopeSelectionTracker = createSelectionLabelTracker();
 const hasSelected = computed(() => selectedRowKeys.value.length > 0);
-const onSelectChange = (keys) => { selectedRowKeys.value = keys; };
+let lastObservedMutationVersion = assetMutationVersion.value;
+
+const onSelectChange = (keys, selectedRows) => {
+  selectedRowKeys.value = keys;
+  scopeSelectionTracker.syncSelection(
+    keys,
+    selectedRows,
+    dataSource.value,
+    (row) => row?._id,
+    (row) => row?.name || row?._id || ''
+  );
+};
+
+const clearSelection = () => {
+  selectedRowKeys.value = [];
+  scopeSelectionTracker.clear();
+};
 
 // 表格列定义
 const columns = computed(() => {
@@ -1841,9 +1864,11 @@ const fetchData = async (silent = false) => {
     if (res.code === 200) {
       dataSource.value = processScopeItems(res.items || []);
       pagination.total = res.total || 0;
-      if (!silent) {
-        selectedRowKeys.value = [];
-      }
+      scopeSelectionTracker.rememberRows(
+        dataSource.value,
+        (row) => row?._id,
+        (row) => row?.name || row?._id || ''
+      );
       checkAndSchedulePoll();
     }
   } catch (error) {
@@ -1862,7 +1887,7 @@ const fetchData = async (silent = false) => {
   }
 };
 
-const onSearch = () => { pagination.current = 1; fetchData(); };
+const onSearch = () => { pagination.current = 1; clearSelection(); fetchData(); };
 const resetSearch = () => {
   searchForm.value = {};
   onSearch();
@@ -2009,7 +2034,7 @@ const handleGroupSwitch = (info) => {
       title: assetText('assets.switchOrganizationGroup'),
       content: assetText('assets.youHaveSelectedCountAssetGroupsSwitchingViews', { count: selectedRowKeys.value.length }),
       onOk: () => {
-        selectedRowKeys.value = [];
+        clearSelection();
         activeGroupId.value = newKey;
       }
     });
@@ -2019,7 +2044,7 @@ const handleGroupSwitch = (info) => {
 };
 
 watch(activeGroupId, (newVal) => {
-  selectedRowKeys.value = [];
+  clearSelection();
   searchForm.value.group_id = newVal === 'all' ? undefined : newVal;
   pagination.current = 1;
   fetchData();
@@ -2260,7 +2285,7 @@ const submitBatchMove = async () => {
     if (res.code === 200) {
       message.success(assetText('assets.selectedGroupsMoved'));
       batchMoveModalVisible.value = false;
-      selectedRowKeys.value = [];
+      clearSelection();
       fetchData();
       fetchGroups();
     } else {
@@ -2347,7 +2372,12 @@ onMounted(() => {
 });
 
 onActivated(() => {
-  if (route.path === '/group') {
+  const mutated = assetMutationVersion.value !== lastObservedMutationVersion;
+  if (mutated) {
+    lastObservedMutationVersion = assetMutationVersion.value;
+    clearSelection();
+  }
+  if (route.path === '/group' || mutated) {
     fetchGroups();
     fetchData(true);
   }
@@ -3190,6 +3220,8 @@ const submitEditGroupUpdate = async (scopeList) => {
     if (res.code === 200) {
       message.success(assetText('assets.assetGroupUpdated'));
       editGroupModalVisible.value = false;
+      notifyAssetMutated();
+      lastObservedMutationVersion = assetMutationVersion.value;
       fetchData();
     } else {
       message.error(assetText('assets.updateFailed') + (res.message || assetText('tasks.unknownError')));
@@ -3229,6 +3261,8 @@ const handleRemoveSingleScope = (record, scopeItem) => {
         });
         if (res.code === 200) {
           message.success(assetText('assets.scopeTargetRemovedTarget', { target: scopeItem }));
+          notifyAssetMutated();
+          lastObservedMutationVersion = assetMutationVersion.value;
           fetchData(true);
         } else {
           message.error(assetText('assets.removalFailed') + (res.message || res.data?.error || assetText('tasks.unknownError')));
@@ -3245,10 +3279,14 @@ const handleSingleDelete = (record) => {
   Modal.confirm({
     title: assetText('assets.permanentlyDeleteAssetGroup'),
     icon: createVNode(ExclamationCircleOutlined, { style: 'color: #ff4d4f;' }),
-    content: createVNode('div', null, [
-      createVNode('p', { style: 'color: #ff4d4f; margin-bottom: 8px;' }, assetText('assets.permanentlyDeleteAssetGroupName', { name: record.name })),
-      createVNode('p', { style: 'font-size: 12px; color: #8c8c8c; margin-bottom: 0;' }, assetText('assets.warningAllDiscoveredSubdomainsIpsWebsitesWihAssets'))
-    ]),
+    width: 540,
+    content: buildSelectionConfirmContent({
+      alertType: 'warning',
+      alertMessage: assetText('assets.permanentlyDeleteAssetGroupName', { name: record.name }),
+      alertDescription: assetText('assets.scopeDeleteAlsoCleansBoundTasksHint'),
+      summary: assetText('assets.warningAllDiscoveredSubdomainsIpsWebsitesWihAssets'),
+      items: [],
+    }),
     okText: assetText('assets.deletePermanently'),
     okType: 'danger',
     cancelText: assetText('assets.cancel'),
@@ -3260,6 +3298,11 @@ const handleSingleDelete = (record) => {
 
         if (res.code === 200) {
           message.success(assetText('assets.assetGroupDeleted'));
+          if (selectedRowKeys.value.includes(record._id)) {
+            onSelectChange(selectedRowKeys.value.filter(k => k !== record._id), []);
+          }
+          notifyAssetMutated({ deletedScopeIds: [record._id] });
+          lastObservedMutationVersion = assetMutationVersion.value;
           if (dataSource.value.length === 1 && pagination.current > 1) {
             pagination.current -= 1;
           }
@@ -3276,23 +3319,41 @@ const handleSingleDelete = (record) => {
 
 // ================= 批量删除逻辑 =================
 const handleBatchDelete = () => {
+  const selectedKeys = selectedRowKeys.value.filter(key => key != null && key !== '');
+  if (!selectedKeys.length) return;
+
+  const selectedLabels = scopeSelectionTracker.getLabels(selectedKeys);
+
   Modal.confirm({
     title: assetText('assets.deleteSelectedAssetGroups'),
     icon: createVNode(ExclamationCircleOutlined, { style: 'color: #ff4d4f;' }),
-    content: assetText('assets.permanentlyDeleteSelectedAssetGroupsCountAndAll', { count: selectedRowKeys.value.length }),
+    width: 560,
+    content: buildSelectionConfirmContent({
+      alertType: 'warning',
+      alertMessage: assetText('assets.deleteSelectedAssetGroups'),
+      alertDescription: assetText('assets.scopeDeleteAlsoCleansBoundTasksHint'),
+      summary: assetText('assets.permanentlyDeleteSelectedAssetGroupsCountAndAll', { count: selectedKeys.length }),
+      listHeading: assetText('assets.selectedAssetGroupsWillBeDeleted'),
+      items: selectedLabels,
+      expandText: (total) => assetText('assets.expandAllCount', { count: total }),
+      collapseText: assetText('assets.collapseList'),
+    }),
     okText: assetText('assets.deletePermanently'),
     okType: 'danger',
     cancelText: assetText('assets.cancel'),
     onOk: async () => {
       try {
         const res = await request.post('/asset_scope/delete/', {
-          scope_id: selectedRowKeys.value
+          scope_id: selectedKeys
         });
 
         if (res.code === 200) {
           message.success(assetText('assets.selectedAssetGroupsDeleted'));
-          selectedRowKeys.value = [];
-          if (dataSource.value.length === selectedRowKeys.value.length && pagination.current > 1) {
+          const visibleDeletedCount = dataSource.value.filter(item => selectedKeys.includes(item._id)).length;
+          clearSelection();
+          notifyAssetMutated({ deletedScopeIds: selectedKeys });
+          lastObservedMutationVersion = assetMutationVersion.value;
+          if (visibleDeletedCount >= dataSource.value.length && pagination.current > 1) {
             pagination.current -= 1;
           }
           fetchData();

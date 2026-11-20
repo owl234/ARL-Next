@@ -48,6 +48,21 @@
           </div>
 
           <div class="toolbar-right">
+            <a-button
+              v-if="tabConfig[effectiveTab]?.deleteUrl"
+              danger
+              size="small"
+              :disabled="!hasSelected"
+              @click="handleBatchDelete"
+            >
+              <template #icon><delete-outlined /></template>
+              {{ hasSelected ? assetText('assets.batchDeleteCount', { count: selectedRowKeys.length }) : assetText('tasks.deleteSelected') }}
+            </a-button>
+
+            <a-button v-if="hasSelected" size="small" @click="clearSelection">
+              {{ assetText('tasks.clearSelection') }}
+            </a-button>
+
             <a-button v-if="tabConfig[effectiveTab]?.exportName" size="small" @click="handleExport">
               <template #icon><download-outlined /></template>
               {{ assetText('tasks.exportAssetType', { type: tabConfig[effectiveTab].exportName }) }}
@@ -215,7 +230,8 @@
         :scroll="pagination.pageSize >= 100 ? { y: tableScrollY, x: 'max-content' } : { x: 'max-content' }"
         :virtual="pagination.pageSize >= 100"
         size="small"
-        :rowKey="(record) => record._id || record.id"
+        :rowKey="getAssetRowKey"
+        :row-selection="tabConfig[effectiveTab]?.deleteUrl ? { selectedRowKeys: selectedRowKeys, onChange: onSelectChange, preserveSelectedRowKeys: true } : null"
     >
             <template #bodyCell="{ column, record, index }">
         <template v-if="column.key === 'index'">
@@ -577,7 +593,7 @@
 import { useI18n } from 'vue-i18n';
 defineOptions({ name: 'AssetSearch' });
 
-import { ref, onMounted, onActivated, onDeactivated, reactive, watch, onUnmounted, computed, nextTick } from 'vue';
+import { ref, onMounted, onActivated, onDeactivated, reactive, watch, onUnmounted, computed, nextTick, createVNode } from 'vue';
 import { useSticky } from '../utils/useSticky';
 const actionBarRef = ref(null);
 const { stickyConfig, actionBarHeight } = useSticky(actionBarRef);
@@ -587,7 +603,7 @@ import { isCustomNucleiResult, isHttpUrl, formatRiskPolicyLabel } from '../utils
 import AuthenticatedImage from '../components/AuthenticatedImage.vue';
 import HttpStatusFilter from '../components/HttpStatusFilter.vue';
 import { buildAssetFilterParams, formatAssetFilterOperator } from '../utils/assetFilters';
-import { message } from 'ant-design-vue';
+import { message, Modal } from 'ant-design-vue';
 import {
   SearchOutlined,
   UndoOutlined,
@@ -595,13 +611,22 @@ import {
   ThunderboltOutlined,
   FilterOutlined,
   DownOutlined,
-  UpOutlined
+  UpOutlined,
+  DeleteOutlined,
+  ExclamationCircleOutlined
 } from '@ant-design/icons-vue';
 import CidrDetailModal from '../components/CidrDetailModal.vue';
 import WihApiDetailsDrawer from '../components/WihApiDetailsDrawer.vue';
 import { isApiEndpointRecord } from '../utils/wihApi';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
-import { createTabStateCache } from '../utils/useTabStateCache';
+import {
+  createTabStateCache,
+  assetMutationVersion,
+  notifyAssetMutated,
+  createSelectionLabelTracker,
+  getAssetRecordDisplayLabel,
+  buildSelectionConfirmContent
+} from '../utils/useTabStateCache';
 import { formatGeo } from '../utils/formatGeo';
 
 const { t: assetText, locale: assetLocale } = useI18n({ useScope: 'global' });
@@ -775,6 +800,7 @@ const handlePreview = (url) => { previewImage.value = url; previewVisible.value 
 const tabConfig = reactive({
   site: {
     url: '/site/',
+    deleteUrl: '/site/delete/',
     exportUrl: '/site/export/',
     get exportName() { return assetText('tasks.websites'); },
     searchFields: [
@@ -808,6 +834,7 @@ const tabConfig = reactive({
   // 💡 新增：子域名 Tab 的 1:1 配置
   domain: {
     url: '/domain/',
+    deleteUrl: '/domain/delete/',
     exportUrl: '/domain/export/',
     get exportName() { return assetText('tasks.subdomains'); },
     searchFields: [
@@ -866,6 +893,7 @@ const tabConfig = reactive({
   // 💡 重新构建：1:1 对齐截图的 SSL证书 配置
   cert: {
     url: '/cert/',
+    deleteUrl: '/cert/delete/',
     exportUrl: '/cert/export/',
     get exportName() { return assetText('assets.sslCertificates'); },
     searchFields: [
@@ -885,6 +913,7 @@ const tabConfig = reactive({
   // 💡 新增：服务 Tab 的 1:1 配置
   service: {
     url: '/service/',
+    deleteUrl: '/service/delete/',
     // 服务 Tab 不配置 exportUrl，保持无导出按钮的视图布局
     searchFields: [
       { get label() { return assetText('tasks.services'); }, key: 'service_name', operator: '=' },
@@ -903,6 +932,7 @@ const tabConfig = reactive({
   // 💡 新增：文件泄露 Tab 的 1:1 配置
   fileleak: {
     url: '/fileleak/',
+    deleteUrl: '/fileleak/delete/',
     // 🚨 同样不配置 exportUrl，隐身导出按钮
     searchFields: [
       { label: 'URL', key: 'url', operator: '=' },
@@ -922,6 +952,7 @@ const tabConfig = reactive({
   // 💡 新增：URL信息 Tab 的 1:1 配置
   url: {
     url: '/url/',
+    deleteUrl: '/url/delete/',
     exportUrl: '/url/export/', // 恢复导出接口
     get exportName() { return assetText('tasks.urls'); },     // 自动生成 URL 导出按钮
     searchFields: [
@@ -963,6 +994,7 @@ const tabConfig = reactive({
   // 💡 新增：风险 Tab 的 1:1 配置
   vuln: {
     url: '/vuln/',
+    deleteUrl: '/vuln/delete/',
     // 🚨 截图显示无导出按钮，所以不配置 exportUrl
     searchFields: [
       { get label() { return assetText('tasks.vulnerabilityName'); }, key: 'vul_name', operator: '=' },
@@ -984,6 +1016,7 @@ const tabConfig = reactive({
   // 💡 新增：Python 插件服务 Tab 的 1:1 配置
   npoc_service: {
     url: '/npoc_service/',
+    deleteUrl: '/npoc_service/delete/',
     // 🚨 截图显示无导出按钮，不配置 exportUrl
     searchFields: [
       { get label() { return assetText('tasks.protocol'); }, key: 'scheme', operator: '=' },
@@ -1004,6 +1037,7 @@ const tabConfig = reactive({
   // 💡 新增：C段 Tab 的 1:1 配置
   cip: {
     url: '/cip/',
+    deleteUrl: '/cip/delete/',
     exportUrl: '/cip/export/', // 恢复导出接口
     get exportName() { return assetText('tasks.cClassNetworks'); },         // 自动生成 C 段导出按钮
     searchFields: [
@@ -1066,7 +1100,7 @@ const tabConfig = reactive({
   // 💡 新增：指纹统计 Tab 的 1:1 配置
   stat_finger: {
     url: '/stat_finger/',
-    deleteUrl: '/site/delete/', // 视后端情况，如果报错可改为 '/site/delete/'
+    deleteUrl: '/stat_finger/delete/',
     // 🚨 截图显示无导出按钮
     searchFields: [
       {
@@ -1089,6 +1123,7 @@ const tabConfig = reactive({
 // 💡 修复：WIH (Web Info Hunter) Tab 配置
   wih: {
     url: '/wih/',
+    deleteUrl: '/wih/delete/',
     exportUrl: '/wih/export/',
     exportName: 'WIH',
     searchFields: [
@@ -1121,10 +1156,96 @@ const tabCache = createTabStateCache({
 
 const columns = ref(tabConfig[effectiveTab.value]?.cols || tabConfig.site.cols);
 
+const getAssetRowKey = (record) => record?._id || record?.id || record?.name || record?.cidr_ip;
+const selectedRowKeys = ref([]);
+const selectionTracker = createSelectionLabelTracker();
+const hasSelected = computed(() => selectedRowKeys.value.length > 0);
+let lastObservedMutationVersion = assetMutationVersion.value;
+
+const onSelectChange = (keys, selectedRows) => {
+  selectedRowKeys.value = keys;
+  const tabKey = effectiveTab.value;
+  selectionTracker.syncSelection(
+    keys,
+    selectedRows,
+    dataSource.value,
+    getAssetRowKey,
+    (row) => getAssetRecordDisplayLabel(tabKey, row)
+  );
+};
+
+const clearSelection = () => {
+  selectedRowKeys.value = [];
+  selectionTracker.clear();
+};
+
+const handleBatchDelete = () => {
+  const currentTab = effectiveTab.value;
+  const config = tabConfig[currentTab];
+  if (!config || !config.deleteUrl) {
+    message.warning(assetText('tasks.thisAssetCategoryDoesNotSupportDeletion'));
+    return;
+  }
+
+  const validKeys = selectedRowKeys.value.filter(key => key != null && key !== '');
+  if (!validKeys.length) {
+    message.warning(assetText('tasks.pleaseSelectAtLeastOneRecord'));
+    return;
+  }
+  if (validKeys.length > 500) {
+    message.warning(assetText('assets.maxBatchDeleteLimitNotice'));
+    return;
+  }
+
+  const selectedLabels = selectionTracker.getLabels(validKeys);
+
+  Modal.confirm({
+    title: assetText('tasks.confirmDeletion'),
+    icon: createVNode(ExclamationCircleOutlined),
+    width: 560,
+    content: buildSelectionConfirmContent({
+      alertType: 'error',
+      alertMessage: assetText('assets.globalCascadeDeleteWarningTitle'),
+      alertDescription: assetText('assets.globalCascadeDeleteWarningDesc'),
+      summary: assetText('tasks.confirmDeleteSelectedRecords', { count: validKeys.length }),
+      listHeading: assetText('assets.selectedRecordsWillBeDeleted'),
+      items: selectedLabels,
+      expandText: (total) => assetText('assets.expandAllCount', { count: total }),
+      collapseText: assetText('assets.collapseList'),
+    }),
+    okText: assetText('tasks.confirmDeletion'),
+    okType: 'danger',
+    cancelText: assetText('assets.cancel'),
+    async onOk() {
+      try {
+        const payload = { _id: validKeys, source_type: 'global' };
+        if (currentTab === 'stat_finger') {
+          payload.name = validKeys;
+        }
+        const res = await request.post(config.deleteUrl, payload);
+        if (res.code === 200) {
+          message.success(assetText('tasks.deletedSuccessfully'));
+          clearSelection();
+          tabCache.invalidateAllMemoryCaches();
+          notifyAssetMutated();
+          lastObservedMutationVersion = assetMutationVersion.value;
+          fetchOverviewCounts();
+          fetchData();
+        } else {
+          message.error(res.message || assetText('tasks.deleteFailed'));
+        }
+      } catch (e) {
+        message.error(assetText('tasks.deleteFailed'));
+      }
+    }
+  });
+};
+
 // 切换服务识别引擎
 const onServiceEngineChange = () => {
   const prevTabKey = effectiveTab.value === 'npoc_service' ? 'service' : 'npoc_service';
   tabCache.saveCurrentTab(prevTabKey, searchForm.value, pagination.current);
+  clearSelection();
 
   const currentTabKey = effectiveTab.value;
   searchForm.value = tabCache.getTabSearchForm(currentTabKey);
@@ -1159,10 +1280,22 @@ const fetchData = async () => {
     if (effectiveTab.value !== currentReqTab) return;
 
     if (res.code === 200) {
-      dataSource.value = res.items || [];
-      pagination.total = res.total || 0;
+      const items = res.items || [];
+      const total = res.total || 0;
+      if (items.length === 0 && total > 0 && pagination.current > 1) {
+        const maxPage = Math.max(1, Math.ceil(total / (pagination.pageSize || 10)));
+        if (pagination.current > maxPage) {
+          pagination.current = maxPage;
+          lastFetchedPage = maxPage;
+          tabCache.saveCurrentTab(currentTab, searchForm.value, maxPage);
+          return await fetchData();
+        }
+      }
+      dataSource.value = items;
+      pagination.total = total;
       lastFetchedPage = pagination.current;
       lastFetchedSize = pagination.pageSize;
+      selectionTracker.rememberRows(items, getAssetRowKey, (row) => getAssetRecordDisplayLabel(currentTab, row));
       tabCache.updateMemoryCache(currentTab, dataSource.value, pagination.total, pagination.pageSize);
       tabCache.saveCurrentTab(currentTab, searchForm.value, pagination.current);
     }
@@ -1247,6 +1380,7 @@ watch(activeTab, (newVal, oldVal) => {
   if (prevEffective && tabConfig[prevEffective] && !isHydrating.value) {
     tabCache.saveCurrentTab(prevEffective, searchForm.value, pagination.current);
   }
+  clearSelection();
 
   const currentTab = effectiveTab.value;
   if (tabConfig[currentTab]) {
@@ -1342,8 +1476,17 @@ onMounted(() => {
 });
 
 onActivated(() => {
-  // 页面被 keep-alive 复用时刷新徽标，避免数量停留在离开前的旧值
-  fetchOverviewCounts();
+  const mutated = assetMutationVersion.value !== lastObservedMutationVersion;
+  if (mutated) {
+    lastObservedMutationVersion = assetMutationVersion.value;
+    tabCache.invalidateAllMemoryCaches();
+    clearSelection();
+    fetchOverviewCounts();
+    fetchData();
+  } else {
+    // 页面被 keep-alive 复用时刷新徽标，避免数量停留在离开前的旧值
+    fetchOverviewCounts();
+  }
 });
 
 onUnmounted(() => {
@@ -1361,7 +1504,7 @@ const targetCount = ref(0);
 const currentResultSetId = ref('');
 
 const openRiskModal = async () => {
-  targetCount.value = pagination.total;
+  targetCount.value = hasSelected.value ? selectedRowKeys.value.length : pagination.total;
   if (targetCount.value === 0) return message.warning(assetText('tasks.noAssetTargetsAreAvailableForScanning'));
 
   riskForm.policy_id = undefined;
@@ -1371,7 +1514,9 @@ const openRiskModal = async () => {
 
   try {
     const policyPromise = request.get('/policy/', { params: { size: 1000 } });
-    const setParams = buildAssetFilterParams(searchForm.value, tabConfig[effectiveTab.value].searchFields);
+    const setParams = hasSelected.value
+      ? { _id: selectedRowKeys.value.join(',') }
+      : buildAssetFilterParams(searchForm.value, tabConfig[effectiveTab.value].searchFields);
     const resultSetPromise = request.get('/site/save_result_set/', { params: setParams });
     const [policyRes, resultSetRes] = await Promise.all([policyPromise, resultSetPromise]);
 
@@ -1381,7 +1526,12 @@ const openRiskModal = async () => {
         label: formatRiskPolicyLabel(item, assetText)
       }));
     }
-    if (resultSetRes.code === 200) currentResultSetId.value = resultSetRes.data.result_set_id;
+    if (resultSetRes.code === 200) {
+      currentResultSetId.value = resultSetRes.data.result_set_id;
+      if (resultSetRes.data.result_total !== undefined) {
+        targetCount.value = resultSetRes.data.result_total;
+      }
+    }
 
     message.success({ content: assetText('assets.ready'), key: 'risk_prepare', duration: 2 });
     riskVisible.value = true;
@@ -1403,6 +1553,7 @@ const submitRiskTask = async () => {
     if (res.code === 200) {
       message.success(assetText('tasks.riskScanningTaskCreated'));
       riskVisible.value = false;
+      clearSelection();
     } else message.error(assetText('tasks.failedToCreateTaskLabel') + res.message);
   } catch (error) { message.error(assetText('assets.failedToCreateTask')); }
   finally { riskSubmitLoading.value = false; }

@@ -644,6 +644,7 @@ defineOptions({
 
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { assetMutationVersion } from '@/utils/useTabStateCache';
 import { formatProxyEgressLabel, formatProxyLevelClass, formatProxyPulse } from '@/constants/proxyStatus';
 import { 
   DatabaseOutlined, 
@@ -1409,6 +1410,7 @@ const fetchAllData = async (isInitial = false) => {
 
 let sysInfoTimer = null;
 let isFirstMounted = true;
+let lastObservedMutationVersion = assetMutationVersion.value;
 const isPageActive = ref(false);
 
 const startPolling = () => {
@@ -1458,7 +1460,11 @@ onMounted(async () => {
 onActivated(() => {
   isPageActive.value = true;
   isDarkMode.value = localStorage.getItem('darkMode') === 'true';
-  if (!isFirstMounted) {
+  const mutated = assetMutationVersion.value !== lastObservedMutationVersion;
+  if (mutated) {
+    lastObservedMutationVersion = assetMutationVersion.value;
+  }
+  if (!isFirstMounted || mutated) {
     fetchAllData(false);
     startPolling();
   }

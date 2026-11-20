@@ -535,7 +535,7 @@
             {{ taskText('tasks.deleteSelected') }}
           </a-button>
 
-          <a-button size="small" type="link" @click="selectedRowKeys = []">{{ taskText('tasks.clearSelection') }}</a-button>
+          <a-button size="small" type="link" @click="clearSelection">{{ taskText('tasks.clearSelection') }}</a-button>
         </template>
       </div>
     </div>
@@ -1184,8 +1184,14 @@ import { useI18n } from 'vue-i18n';
 
 defineOptions({ name: 'TaskList' });
 
-import { ref, reactive, onMounted, computed, createVNode, watch, onActivated, onDeactivated, onUnmounted } from 'vue';
+import { ref, reactive, onMounted, computed, createVNode, defineComponent, h, watch, onActivated, onDeactivated, onUnmounted } from 'vue';
 import { useSticky } from '../utils/useSticky';
+import {
+  assetMutationVersion,
+  notifyAssetMutated,
+  createSelectionLabelTracker,
+  buildSelectionConfirmContent
+} from '../utils/useTabStateCache';
 import { Modal, message, Checkbox } from 'ant-design-vue';
 import { useRouter, useRoute } from 'vue-router';
 import {
@@ -2044,10 +2050,60 @@ const resetAdvancedFilters = () => {
 
 // 表格多选逻辑
 const selectedRowKeys = ref([]);
+const taskSelectionTracker = createSelectionLabelTracker();
 const hasSelected = computed(() => selectedRowKeys.value.length > 0);
-const onSelectChange = (keys) => {
-  selectedRowKeys.value = keys;
+let lastObservedMutationVersion = assetMutationVersion.value;
+
+const getTaskRowKey = (row) => row?._id || row?.task_id;
+const getTaskRowLabel = (row) => {
+  if (!row) return '';
+  const name = row.name || row._id || row.task_id || '';
+  return row.target && row.target !== name ? `${name} (${row.target})` : name;
 };
+
+const onSelectChange = (keys, selectedRows) => {
+  selectedRowKeys.value = keys;
+  taskSelectionTracker.syncSelection(keys, selectedRows, taskList.value, getTaskRowKey, getTaskRowLabel);
+};
+
+const clearSelection = () => {
+  selectedRowKeys.value = [];
+  taskSelectionTracker.clear();
+};
+
+const TaskDeleteOptionsBox = defineComponent({
+  name: 'TaskDeleteOptionsBox',
+  props: {
+    deleteDataRef: { type: Object, required: true },
+    deleteSyncedAssetRef: { type: Object, required: true },
+    deleteDataLabel: { type: String, required: true },
+  },
+  setup(props) {
+    return () => h('div', { style: 'margin-top: 12px; display: flex; flex-direction: column; gap: 8px;' }, [
+      h(Checkbox, {
+        checked: props.deleteDataRef.value,
+        'onUpdate:checked': (val) => {
+          props.deleteDataRef.value = val;
+          if (!val) {
+            props.deleteSyncedAssetRef.value = false;
+          }
+        },
+      }, () => props.deleteDataLabel),
+      h('div', { style: 'padding-left: 24px;' }, [
+        h(Checkbox, {
+          checked: props.deleteSyncedAssetRef.value,
+          disabled: !props.deleteDataRef.value,
+          'onUpdate:checked': (val) => {
+            props.deleteSyncedAssetRef.value = val;
+          },
+        }, () => taskText('tasks.alsoDeleteExclusiveSyncedAssets')),
+        h('div', {
+          style: 'font-size: 12px; color: var(--arl-text-secondary); margin-top: 4px; padding-left: 24px; line-height: 1.5;'
+        }, taskText('tasks.alsoDeleteExclusiveSyncedAssetsHint')),
+      ]),
+    ]);
+  }
+});
 
 // 获取任务列表数据
 const fetchTasks = async (page = 1, size = 10, silent = false, includeStatistics = true) => {
@@ -2084,6 +2140,7 @@ const fetchTasks = async (page = 1, size = 10, silent = false, includeStatistics
       pagination.total = res.total || 0;
       pagination.current = page;
       pagination.pageSize = size;
+      taskSelectionTracker.rememberRows(taskList.value, getTaskRowKey, getTaskRowLabel);
       lastRefreshTime.value = new Date();
     }
   } catch (error) {
@@ -2118,37 +2175,31 @@ const handleBatchDelete = () => {
     return;
   }
 
-  const validKeys = selectedRowKeys.value.filter(key => key != null);
+  const validKeys = selectedRowKeys.value.filter(key => key != null && key !== '');
   if (validKeys.length === 0) return;
 
   // 默认不勾选：级联删除资产数据不可恢复，须由用户显式确认
-  let isDeleteData = false;
-
-  // 跨页选择时勾选项可能不在当前可见页，列出名称便于用户复核范围
-  const selectedNames = taskList.value
-    .filter(item => validKeys.includes(item._id || item.task_id))
-    .map(item => item.name)
-    .filter(Boolean);
-  const visibleCount = taskList.value.filter(item => validKeys.includes(item._id || item.task_id)).length;
+  const isDeleteData = ref(false);
+  const isDeleteSyncedAsset = ref(false);
+  const selectedLabels = taskSelectionTracker.getLabels(validKeys);
 
   Modal.confirm({
     title: taskText('tasks.deleteSelectedTasks'),
     icon: createVNode(ExclamationCircleOutlined),
-    content: createVNode('div', { style: 'margin-top: 8px;' }, [
-      createVNode('div', { style: 'margin-bottom: 14px; color: var(--arl-text-color);' }, taskText('tasks.deleteTheSelectedTasksCount', { count: validKeys.length })),
-      selectedNames.length > 0 ? createVNode('div', {
-        style: 'max-height: 120px; overflow-y: auto; background: var(--arl-bg-light); padding: 6px 8px; border-radius: 4px; margin-bottom: 14px; font-size: 12px; color: var(--arl-text-color); opacity: 0.85; line-height: 1.6;'
-      }, [
-        createVNode('div', { style: 'font-weight: 500; margin-bottom: 4px;' }, taskText('tasks.theFollowingTasksWillBeDeleted', {  })),
-        createVNode('div', null, `· ${selectedNames.join('\n· ')}`),
-        visibleCount < validKeys.length
-          ? createVNode('div', { style: 'margin-top: 4px; color: #faad14;' }, taskText('tasks.includesCountSelectionsRetainedFromOtherPages', { count: validKeys.length - visibleCount }))
-          : null
-      ]) : null,
-      createVNode(Checkbox, {
-        defaultChecked: isDeleteData,
-        onChange: (e) => { isDeleteData = e.target.checked; }
-      }, () => taskText('tasks.alsoPermanentlyDeleteAllAssetsOwnedByThese'))
+    width: 560,
+    content: h('div', null, [
+      buildSelectionConfirmContent({
+        summary: taskText('tasks.deleteTheSelectedTasksCount', { count: validKeys.length }),
+        listHeading: taskText('tasks.theFollowingTasksWillBeDeleted'),
+        items: selectedLabels,
+        expandText: (total) => taskText('assets.expandAllCount', { count: total }),
+        collapseText: taskText('assets.collapseList'),
+      }),
+      h(TaskDeleteOptionsBox, {
+        deleteDataRef: isDeleteData,
+        deleteSyncedAssetRef: isDeleteSyncedAsset,
+        deleteDataLabel: taskText('tasks.alsoPermanentlyDeleteAllAssetsOwnedByThese'),
+      }),
     ]),
     okText: taskText('tasks.confirmDeletion'),
     cancelText: taskText('tasks.cancel'),
@@ -2156,13 +2207,16 @@ const handleBatchDelete = () => {
     onOk: async () => {
       try {
         const res = await request.post('/task/delete/', {
-          del_task_data: isDeleteData,
+          del_task_data: isDeleteData.value,
+          del_synced_asset: isDeleteData.value && isDeleteSyncedAsset.value,
           task_id: validKeys
         });
 
         if (res.code === 200) {
           message.success(taskText('tasks.tasksDeletedCount', { count: validKeys.length }));
-          selectedRowKeys.value = [];
+          clearSelection();
+          notifyAssetMutated();
+          lastObservedMutationVersion = assetMutationVersion.value;
           fetchTasks(1, pagination.pageSize);
         } else {
           message.error(taskText('tasks.deletionFailed') + (res.message || taskText('tasks.unknownError')));
@@ -2203,7 +2257,7 @@ const handleBatchStop = () => {
         const res = await request.post('/task/batch_stop/', { task_id: validKeys });
         if (res.code === 200) {
           message.success(taskText('tasks.stopRequestSentLabel'));
-          selectedRowKeys.value = [];
+          clearSelection();
           fetchTasks(pagination.current, pagination.pageSize);
         } else {
           message.error(taskText('tasks.failedToStopTask') + (res.message || taskText('tasks.unknownError')));
@@ -2306,17 +2360,21 @@ const stopSingleTask = async (record) => {
 };
 
 const deleteSingleTask = (record) => {
-  let isDeleteData = true;
+  const isDeleteData = ref(true);
+  const isDeleteSyncedAsset = ref(false);
+  const targetTaskId = record._id || record.task_id;
 
   Modal.confirm({
     title: taskText('tasks.deleteTask'),
     icon: createVNode(ExclamationCircleOutlined),
-    content: createVNode('div', { style: 'margin-top: 8px;' }, [
-      createVNode('div', { style: 'margin-bottom: 14px; color: var(--arl-text-color);' }, taskText('tasks.deleteTaskName', { name: record.name || record._id })),
-      createVNode(Checkbox, {
-        defaultChecked: isDeleteData,
-        onChange: (e) => { isDeleteData = e.target.checked; }
-      }, () => taskText('tasks.alsoPermanentlyDeleteAllAssetsAssociatedWithThis'))
+    width: 540,
+    content: h('div', { style: 'margin-top: 8px;' }, [
+      h('div', { style: 'margin-bottom: 12px; color: var(--arl-text-color);' }, taskText('tasks.deleteTaskName', { name: record.name || record._id })),
+      h(TaskDeleteOptionsBox, {
+        deleteDataRef: isDeleteData,
+        deleteSyncedAssetRef: isDeleteSyncedAsset,
+        deleteDataLabel: taskText('tasks.alsoPermanentlyDeleteAllAssetsAssociatedWithThis'),
+      }),
     ]),
     okText: taskText('tasks.confirmDeletion'),
     cancelText: taskText('tasks.cancel'),
@@ -2324,12 +2382,18 @@ const deleteSingleTask = (record) => {
     onOk: async () => {
       try {
         const res = await request.post('/task/delete/', {
-          task_id: [record._id || record.task_id],
-          del_task_data: isDeleteData
+          task_id: [targetTaskId],
+          del_task_data: isDeleteData.value,
+          del_synced_asset: isDeleteData.value && isDeleteSyncedAsset.value
         });
 
         if (res.code === 200) {
           message.success(taskText('tasks.taskDeleted'));
+          if (selectedRowKeys.value.includes(targetTaskId)) {
+            onSelectChange(selectedRowKeys.value.filter(k => k !== targetTaskId), []);
+          }
+          notifyAssetMutated();
+          lastObservedMutationVersion = assetMutationVersion.value;
           fetchTasks(pagination.current, pagination.pageSize);
         } else {
           message.error(taskText('tasks.deletionFailed') + (res.message || taskText('tasks.unknownError')));
@@ -2809,14 +2873,19 @@ onMounted(async () => {
 let firstActivation = true;
 onActivated(() => {
   // KeepAlive 首次激活时 onMounted 已启动加载，消除并发双重触发
+  const mutated = assetMutationVersion.value !== lastObservedMutationVersion;
+  if (mutated) {
+    lastObservedMutationVersion = assetMutationVersion.value;
+    clearSelection();
+  }
   if (firstActivation) {
     firstActivation = false;
-    return;
+    if (!mutated) return;
   }
   if (activeMainTab.value === 'enterprise') {
     fetchEnterpriseTasks(enterprisePagination.current, enterprisePagination.pageSize, true);
   } else {
-    fetchTasks(pagination.current, pagination.pageSize, true);
+    fetchTasks(pagination.current, pagination.pageSize, !mutated, true);
   }
   startSmartPolling();
 });

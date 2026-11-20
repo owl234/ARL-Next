@@ -527,5 +527,16 @@ export default {
   "waitingInBackgroundQueueToStart": "：更新任务已进入调度队列，等待执行",
   "lastBackgroundUpdateFailedTitle": "上次后台主体资产更新失败（已保留历史快照）",
   "existingUpdateTaskResumed": "当前资产组已有更新任务正在执行，已接管进度跟踪",
-  "organizationAssetDiscoveryCompleted": "关联主体测绘任务已完成，已刷新最新资产数据"
+  "organizationAssetDiscoveryCompleted": "关联主体测绘任务已完成，已刷新最新资产数据",
+  "globalCascadeDeleteWarningTitle": "高危操作：全局跨资产组、跨任务级联删除",
+  "globalCascadeDeleteWarningDesc": "此入口删除将穿透全库所有资产组台账与扫描任务记录，并按资产层级自动级联清理下级关联数据（如删域名连带清理站点/URL/孤儿IP），操作不可撤销。",
+  "scopedCascadeDeleteHint": "本次删除仅作用于当前资产组及其显式绑定任务，并按层级级联清理下级关联资产，不影响其他存活资产组与独立扫描任务。",
+  "selectedRecordsWillBeDeleted": "待删除对象清单：",
+  "selectedAssetGroupsWillBeDeleted": "待删除资产组清单：",
+  "scopeDeleteAlsoCleansBoundTasksHint": "将同步删除所选资产组下的全维度资产、持续监控计划及显式绑定任务，并解绑企业测绘关联（保留企业测绘原始数据），独立扫描任务不受影响。",
+  "expandAllCount": "展开全部（共 {count} 项）",
+  "collapseList": "收起清单",
+  "assetGroupDeletedRedirectNotice": "当前查看的资产组已被删除，已自动返回资产组列表",
+  "batchDeleteCount": "批量删除 ({count})",
+  "maxBatchDeleteLimitNotice": "单次批量删除最多支持 500 条记录，请缩减勾选数量后重试"
 };

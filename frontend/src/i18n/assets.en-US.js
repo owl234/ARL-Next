@@ -527,5 +527,16 @@ export default {
   "waitingInBackgroundQueueToStart": ": the update task has entered the scheduling queue and is waiting to run",
   "lastBackgroundUpdateFailedTitle": "Previous background organization update failed (existing snapshot preserved)",
   "existingUpdateTaskResumed": "An update task is already running for this asset group; progress tracking has resumed",
-  "organizationAssetDiscoveryCompleted": "Linked organization discovery completed; asset data has been refreshed"
+  "organizationAssetDiscoveryCompleted": "Linked organization discovery completed; asset data has been refreshed",
+  "globalCascadeDeleteWarningTitle": "High-Risk Action: Global Cross-Group & Cross-Task Cascade Delete",
+  "globalCascadeDeleteWarningDesc": "Deleting from global search cascades across all asset groups and scan tasks in the database and removes dependent child records (e.g., deleting a domain removes its websites, URLs, and orphan IPs). This action cannot be undone.",
+  "scopedCascadeDeleteHint": "Deletion is scoped to this asset group and its explicitly bound tasks, cascading to child records without affecting other active asset groups or standalone scan tasks.",
+  "selectedRecordsWillBeDeleted": "Items to be deleted:",
+  "selectedAssetGroupsWillBeDeleted": "Asset groups to be deleted:",
+  "scopeDeleteAlsoCleansBoundTasksHint": "All assets, continuous monitors, and explicitly bound tasks under the selected asset groups will be removed; enterprise discovery links will be unbound while preserving raw discovery records. Standalone scan tasks remain unaffected.",
+  "expandAllCount": "Expand all ({count} items)",
+  "collapseList": "Collapse list",
+  "assetGroupDeletedRedirectNotice": "This asset group has been deleted; redirected back to the asset group list",
+  "batchDeleteCount": "Batch Delete ({count})",
+  "maxBatchDeleteLimitNotice": "A maximum of 500 records can be deleted per batch. Please reduce your selection and try again."
 };
