@@ -18,20 +18,20 @@ def update_task_tag():
 def create_index():
     import logging
     index_map = {
-        "cert": ["task_id", "ip"],
-        "domain": ["task_id", "domain", "ips"],
-        "fileleak": ["task_id", "site", "url"],
-        "ip": ["task_id", "ip", "domain"],
-        "npoc_service": ["task_id", "host", "target"],
-        "site": ["task_id", "status", "title", "hostname", "site", "ip", "http_server", "tag", "is_catch_all"],
-        "service": ["task_id", "service_name", "ip", "port_id", "sources", "service_info.ip"],
-        "url": ["task_id", "site", "url"],
+        "cert": ["task_id", "ip", "save_date"],
+        "domain": ["task_id", "domain", "ips", "save_date"],
+        "fileleak": ["task_id", "site", "url", "save_date"],
+        "ip": ["task_id", "ip", "domain", "save_date"],
+        "npoc_service": ["task_id", "host", "target", "save_date"],
+        "site": ["task_id", "status", "title", "hostname", "site", "ip", "http_server", "tag", "is_catch_all", "save_date"],
+        "service": ["task_id", "service_name", "ip", "port_id", "sources", "service_info.ip", "save_date"],
+        "url": ["task_id", "site", "url", "save_date"],
         "task": ["status", "start_time"],
         "icp_task": ["status", "start_time", "end_time", "synced_scope_id"],
         "vuln": ["task_id", "save_date", "target", "vuln_url"],
         "nuclei_result": ["task_id", "vuln_severity", "template_source", "save_date", "target", "vuln_url"],
-        "cip": "cidr_ip",
-        "stat_finger": "name",
+        "cip": ["cidr_ip", "save_date"],
+        "stat_finger": ["name", "save_date"],
         "asset_ip": "scope_id",
         "asset_site": ["scope_id", "tag", "is_catch_all", "task_id", "screenshot"],
         "asset_domain": ["scope_id", "domain"],
@@ -39,7 +39,7 @@ def create_index():
         "github_monitor_result": ["github_scheduler_id", "hash_md5", "repo_full_name", "triage_status"],
         "github_hackers_history": "insert_time",
         "github_cve_history": "insert_time",
-        "wih": ["task_id", "record_type", "fnv_hash", "site", "content"],
+        "wih": ["task_id", "record_type", "fnv_hash", "site", "content", "save_date"],
         "asset_cert": ["scope_id", "ip"],
         "asset_service": ["scope_id", "service_name", "ip", "port_id", "sources"],
         "asset_fileleak": "scope_id",
@@ -98,23 +98,28 @@ def create_index():
     compound_indexes = {
         "asset_domain": [
             [("scope_id", 1), ("ips", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_site": [
             [("scope_id", 1), ("hostname", 1)],
             [("scope_id", 1), ("site", 1)],
             [("scope_id", 1), ("ip", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_ip": [
             [("scope_id", 1), ("ip", 1)],
             [("scope_id", 1), ("domain", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_cert": [
             [("scope_id", 1), ("ip", 1), ("cert.fingerprint.sha256", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_service": [
             [("scope_id", 1), ("ip", 1), ("port_id", 1)],
             [("scope_id", 1), ("service_info.ip", 1)],
             [("scope_id", 1), ("service_name", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "service": [
             [("task_id", 1), ("ip", 1), ("port_id", 1)],
@@ -124,30 +129,38 @@ def create_index():
         "asset_npoc_service": [
             [("scope_id", 1), ("host", 1), ("port", 1)],
             [("scope_id", 1), ("target", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_fileleak": [
             [("scope_id", 1), ("url", 1)],
             [("scope_id", 1), ("site", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_url": [
             [("scope_id", 1), ("url", 1)],
             [("scope_id", 1), ("site", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_vuln": [
             [("scope_id", 1), ("target", 1), ("vul_name", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_nuclei_result": [
             [("scope_id", 1), ("target", 1), ("template_id", 1)],
             [("scope_id", 1), ("vuln_url", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_stat_finger": [
             [("scope_id", 1), ("name", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_wih": [
             [("scope_id", 1), ("content", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_cip": [
             [("scope_id", 1), ("cidr_ip", 1)],
+            [("scope_id", 1), ("save_date", -1)],
         ],
     }
     for col_name, idx_list in compound_indexes.items():
@@ -1891,6 +1904,189 @@ def migrate_unified_service_assets():
     )
 
 
+def migrate_asset_discovery_timestamps(run_async=False, batch_size=500, pause_seconds=0.02):
+    """
+    幂等补齐并归一化 26 张资产集合（13 张任务表 + 13 张资产组表）的发现时间 save_date 与更新时间 update_date：
+    1. 将存量字符串格式时间转换为本地时区 BSON datetime（精确到秒）；
+    2. 为缺失 save_date 的历史文档使用 MongoDB _id 内嵌创建时间（换算本地时区）自动回填；
+    3. 为资产组集合缺失 update_date 的历史文档对齐至 save_date。
+    使用 system_config 哨兵（migration_asset_discovery_timestamps）防止重复全表扫描与多容器并发重入；
+    服务启动阶段以 run_async=True 在后台守护线程分批低负载执行，避免阻塞 Web 启动。
+    """
+    import datetime
+    import logging
+    import time
+    from pymongo import UpdateOne
+    from app.utils.time import curr_date_obj, to_datetime_obj
+
+    logger = logging.getLogger()
+    sentinel_id = "migration_asset_discovery_timestamps"
+    cfg_col = conn_db("system_config")
+
+    existing = cfg_col.find_one({"_id": sentinel_id})
+    if existing and existing.get("status") == "completed":
+        return 0
+
+    now_ts = time.time()
+    # 原子抢占迁移执行权：仅当未完成且无活跃执行线程（10分钟心跳）时允许启动
+    cfg_col.update_one(
+        {"_id": sentinel_id},
+        {"$setOnInsert": {"status": "pending", "updated_at": 0, "migrated_count": 0}},
+        upsert=True,
+    )
+    claim = cfg_col.update_one(
+        {
+            "_id": sentinel_id,
+            "$or": [
+                {"status": {"$in": ["pending", "error", "idle"]}},
+                {"status": "running", "updated_at": {"$lt": now_ts - 600}},
+            ],
+        },
+        {"$set": {"status": "running", "started_at": now_ts, "updated_at": now_ts}},
+    )
+    if claim.modified_count == 0:
+        return 0
+
+    task_collections = (
+        "site", "domain", "ip", "cert", "service", "fileleak", "url",
+        "cip", "stat_finger", "wih", "vuln", "nuclei_result", "npoc_service",
+    )
+    asset_collections = tuple(f"asset_{name}" for name in task_collections)
+
+    def _execute():
+        if run_async:
+            # 避开 gunicorn --preload fork 窗口，确保主进程完成 worker 派生后再启动批量迁移
+            time.sleep(3)
+        now_dt = curr_date_obj()
+        total_updated = 0
+        had_error = False
+        last_error = ""
+
+        def _migrate_collection(col_name, is_asset):
+            col = conn_db(col_name)
+            need_conditions = [
+                {"save_date": {"$exists": False}},
+                {"save_date": None},
+                {"save_date": ""},
+                {"save_date": {"$type": "string"}},
+            ]
+            if is_asset:
+                need_conditions.extend([
+                    {"update_date": {"$exists": False}},
+                    {"update_date": None},
+                    {"update_date": ""},
+                    {"update_date": {"$type": "string"}},
+                ])
+            else:
+                need_conditions.append({"update_date": {"$type": "string"}})
+
+            query = {"$or": need_conditions}
+            cursor = col.find(query, {"_id": 1, "save_date": 1, "update_date": 1}).batch_size(batch_size)
+            ops = []
+            updated = 0
+
+            for doc in cursor:
+                raw_save = doc.get("save_date")
+                raw_upd = doc.get("update_date")
+                oid_dt = to_datetime_obj(None, fallback_oid=doc.get("_id"))
+                parsed_save = to_datetime_obj(raw_save)
+                parsed_upd = to_datetime_obj(raw_upd)
+
+                set_fields = {}
+                if is_asset:
+                    if parsed_save is not None:
+                        target_save = parsed_save
+                    elif parsed_upd is not None and oid_dt is not None:
+                        target_save = min(parsed_upd, oid_dt)
+                    else:
+                        target_save = parsed_upd or oid_dt or now_dt
+                    target_upd = parsed_upd or target_save
+
+                    if not isinstance(raw_save, datetime.datetime) or raw_save != target_save:
+                        set_fields["save_date"] = target_save
+                    if not isinstance(raw_upd, datetime.datetime) or raw_upd != target_upd:
+                        set_fields["update_date"] = target_upd
+                else:
+                    target_save = parsed_save or parsed_upd or oid_dt or now_dt
+                    if not isinstance(raw_save, datetime.datetime) or raw_save != target_save:
+                        set_fields["save_date"] = target_save
+                    if isinstance(raw_upd, str) and parsed_upd is not None:
+                        set_fields["update_date"] = parsed_upd
+
+                if set_fields:
+                    ops.append(UpdateOne({"_id": doc["_id"]}, {"$set": set_fields}))
+                    if len(ops) >= batch_size:
+                        col.bulk_write(ops, ordered=False)
+                        updated += len(ops)
+                        ops.clear()
+                        cfg_col.update_one(
+                            {"_id": sentinel_id},
+                            {"$set": {
+                                "updated_at": time.time(),
+                                "current_collection": col_name,
+                                "migrated_count": total_updated + updated,
+                            }},
+                        )
+                        if run_async and pause_seconds > 0:
+                            time.sleep(pause_seconds)
+
+            if ops:
+                col.bulk_write(ops, ordered=False)
+                updated += len(ops)
+            return updated
+
+        try:
+            for col_name in task_collections:
+                try:
+                    total_updated += _migrate_collection(col_name, is_asset=False)
+                except Exception as col_ex:
+                    had_error = True
+                    last_error = f"{col_name}: {col_ex}"
+                    logger.error(f"migrate_asset_discovery_timestamps failed on {col_name}: {col_ex}", exc_info=True)
+            for col_name in asset_collections:
+                try:
+                    total_updated += _migrate_collection(col_name, is_asset=True)
+                except Exception as col_ex:
+                    had_error = True
+                    last_error = f"{col_name}: {col_ex}"
+                    logger.error(f"migrate_asset_discovery_timestamps failed on {col_name}: {col_ex}", exc_info=True)
+
+            if had_error:
+                cfg_col.update_one(
+                    {"_id": sentinel_id},
+                    {"$set": {
+                        "status": "error",
+                        "updated_at": time.time(),
+                        "migrated_count": total_updated,
+                        "error": last_error,
+                    }},
+                )
+            else:
+                cfg_col.update_one(
+                    {"_id": sentinel_id},
+                    {"$set": {
+                        "status": "completed",
+                        "updated_at": time.time(),
+                        "completed_at": time.time(),
+                        "migrated_count": total_updated,
+                        "current_collection": "",
+                    }},
+                )
+                logger.info(f"migrate_asset_discovery_timestamps: completed ({total_updated} documents normalized/backfilled).")
+        except Exception as ex:
+            logger.error(f"migrate_asset_discovery_timestamps fatal error: {ex}", exc_info=True)
+            cfg_col.update_one(
+                {"_id": sentinel_id},
+                {"$set": {"status": "error", "updated_at": time.time(), "error": str(ex)}},
+            )
+        return total_updated
+
+    if run_async:
+        threading.Thread(target=_execute, name="migrate-discovery-timestamps", daemon=True).start()
+        return 0
+    return _execute()
+
+
 def arl_update():
     if is_run_flask_routes():
         return
@@ -1972,6 +2168,7 @@ def arl_update():
         _run_step("migrate_nuclei_result_template_source", migrate_nuclei_result_template_source)
         _run_step("migrate_unified_service_assets", migrate_unified_service_assets)
         _run_step("migrate_heal_cascade_and_derived_assets", migrate_heal_cascade_and_derived_assets)
+        _run_step("migrate_asset_discovery_timestamps", lambda: migrate_asset_discovery_timestamps(run_async=True))
         db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
     except Exception as e:
         import logging

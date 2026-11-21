@@ -31,6 +31,8 @@ base_search_fields = {
     'service_info.port_id': fields.String(description="端口号(兼容字段)"),
     'service_info.version': fields.String(description="系统服务版本(兼容字段)"),
     'service_info.product': fields.String(description="产品(兼容字段)"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
     "task_id": fields.String(description="任务ID"),
 }
 
@@ -90,8 +92,9 @@ class ServiceResource(ARLResource):
 
         # 全局「资产搜索」模式（无 task_id 且查询无前缀 service 表）：按 (ip, port_id) 跨任务去重归并
         if collection == 'service' and "task_id" not in query:
+            post_save_date_filter = query.pop("save_date", None)
             pipeline = [
-                {"$match": query},
+                {"$match": dict(query)},
                 {"$sort": {"_id": -1}},
                 {
                     "$group": {
@@ -108,12 +111,20 @@ class ServiceResource(ARLResource):
                         "targets": {"$push": "$target"},
                         "sources_all": {"$push": "$sources"},
                         "service_info": {"$first": "$service_info"},
-                        "save_date": {"$max": "$save_date"},
-                        "update_date": {"$max": "$update_date"},
+                        "save_date": {"$min": "$save_date"},
+                        "latest_save_date": {"$max": "$save_date"},
+                        "raw_update_date": {"$max": "$update_date"},
                         "task_id": {"$first": "$task_id"},
                     }
                 },
+                {
+                    "$addFields": {
+                        "update_date": {"$ifNull": ["$raw_update_date", "$latest_save_date"]},
+                    }
+                },
             ]
+            if post_save_date_filter is not None:
+                pipeline.append({"$match": {"save_date": post_save_date_filter}})
 
             if not has_custom_order:
                 pipeline.append({"$sort": {"doc_id": -1}})
@@ -122,6 +133,8 @@ class ServiceResource(ARLResource):
                 for field, direction in orderby_list:
                     sort_key = "doc_id" if field == "_id" else field
                     sort_dict[sort_key] = direction
+                if "doc_id" not in sort_dict:
+                    sort_dict["doc_id"] = -1
                 pipeline.append({"$sort": sort_dict})
 
             pipeline.append({"$skip": size * (page - 1)})
@@ -132,6 +145,13 @@ class ServiceResource(ARLResource):
             for grp in raw_grouped:
                 ip_val = grp.get("ip")
                 port_val = grp.get("port_id")
+                raw_upd = utils.to_datetime_obj(grp.get("raw_update_date"))
+                latest_save = utils.to_datetime_obj(grp.get("latest_save_date"))
+                if raw_upd is not None and latest_save is not None:
+                    resolved_update_date = max(raw_upd, latest_save)
+                else:
+                    resolved_update_date = raw_upd or latest_save or grp.get("update_date") or grp.get("save_date")
+
                 if not ip_val or port_val is None:
                     # 兼容未迁移的旧版嵌套记录
                     fallback_doc = {
@@ -140,6 +160,7 @@ class ServiceResource(ARLResource):
                         "service_name": (grp.get("service_names") or [""])[0],
                         "service_info": grp.get("service_info") or [],
                         "save_date": grp.get("save_date"),
+                        "update_date": resolved_update_date,
                     }
                     merged_items.append(fallback_doc)
                     continue
@@ -163,7 +184,7 @@ class ServiceResource(ARLResource):
                     target=best_target,
                     sources=merged_src,
                     save_date=grp.get("save_date"),
-                    update_date=grp.get("update_date") or grp.get("save_date"),
+                    update_date=resolved_update_date,
                     extra_fields={"_id": grp.get("doc_id")},
                 )
                 merged_items.append(ep_doc)
@@ -175,14 +196,20 @@ class ServiceResource(ARLResource):
                         "_id": {
                             "ip": {"$ifNull": ["$ip", "$_id"]},
                             "port_id": {"$ifNull": ["$port_id", 0]},
-                        }
+                        },
+                        "save_date": {"$min": "$save_date"},
                     }
                 },
-                {"$group": {"_id": None, "total": {"$sum": 1}}},
             ]
+            if post_save_date_filter is not None:
+                count_pipeline.append({"$match": {"save_date": post_save_date_filter}})
+            count_pipeline.append({"$group": {"_id": None, "total": {"$sum": 1}}})
             agg_cnt = list(conn(collection).aggregate(count_pipeline))
             count = agg_cnt[0]["total"] if agg_cnt else 0
             items = self.build_return_items(merged_items)
+            resp_query = dict(query)
+            if post_save_date_filter is not None:
+                resp_query["save_date"] = post_save_date_filter
         else:
             if collection and collection.startswith("asset_") and "task_id" in query:
                 task_id = query["task_id"]
@@ -197,12 +224,13 @@ class ServiceResource(ARLResource):
             else:
                 count = conn(collection).count_documents(query)
             items = self.build_return_items(result)
+            resp_query = dict(query)
 
         special_keys = ["_id", "save_date", "update_date", "create_time"]
-        for key in query:
+        for key in resp_query:
             if key in special_keys:
-                query[key] = str(query[key])
-            raw_value = query[key]
+                resp_query[key] = str(resp_query[key])
+            raw_value = resp_query[key]
             if isinstance(raw_value, dict) and "$not" in raw_value:
                 if isinstance(raw_value["$not"], type(re.compile(""))):
                     raw_value["$not"] = raw_value["$not"].pattern
@@ -212,7 +240,7 @@ class ServiceResource(ARLResource):
             "size": size,
             "total": count,
             "items": items,
-            "query": query,
+            "query": resp_query,
             "code": 200,
         }
 

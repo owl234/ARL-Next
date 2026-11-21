@@ -33,6 +33,32 @@ class ARLResource(Resource):
         "vul_category": "plg_type"
     }
 
+    @staticmethod
+    def _parse_date_boundary(raw_value, is_end=False):
+        """解析时间范围过滤参数，支持 YYYY-MM-DD HH:MM:SS 与 YYYY-MM-DD。"""
+        if isinstance(raw_value, datetime):
+            return raw_value.replace(microsecond=0)
+        raw = str(raw_value or "").strip()
+        if not raw:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
+            try:
+                return datetime.strptime(raw, fmt).replace(microsecond=0)
+            except ValueError:
+                continue
+        try:
+            dt = datetime.strptime(raw, "%Y-%m-%d")
+            return dt.replace(hour=23, minute=59, second=59) if is_end else dt.replace(hour=0, minute=0, second=0)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _format_datetime_value(value):
+        if isinstance(value, datetime):
+            dt = value.astimezone().replace(tzinfo=None) if value.tzinfo is not None else value
+            return dt.replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+        return str(value)
+
     def get_parser(self, model, location='json'):
         """
         根据传入的模型（model）自动生成一个请求参数解析器（pareser）。
@@ -131,7 +157,7 @@ class ARLResource(Resource):
                 raw_value.update({"$lte": args[key]})
                 query_args[actual_key] = raw_value
 
-            # __dgt 代表 datetime greater than (时间大于)
+            # __dgt 代表 datetime greater than or equal (时间大于等于)
             elif key.endswith("__dgt"):
                 real_key = key.split('__dgt')[0]
                 actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
@@ -141,16 +167,13 @@ class ARLResource(Resource):
                 if real_key in ["start_time", "end_time"]:
                     raw_value.update({"$gte": args[key]})
                 else:
-                    try:
-                        raw_value.update({
-                            "$gt": datetime.strptime(args[key],
-                                                     "%Y-%m-%d %H:%M:%S")
-                        })
-                    except (ValueError, TypeError):
+                    parsed_dt = self._parse_date_boundary(args[key], is_end=False)
+                    if parsed_dt is None:
                         continue
+                    raw_value.update({"$gte": parsed_dt})
                 query_args[actual_key] = raw_value
 
-            # __dlt 代表 datetime less than (时间小于)
+            # __dlt 代表 datetime less than or equal (时间小于等于)
             elif key.endswith("__dlt"):
                 real_key = key.split('__dlt')[0]
                 actual_key = getattr(self, "query_field_map", {}).get(real_key, real_key)
@@ -160,13 +183,10 @@ class ARLResource(Resource):
                 if real_key in ["start_time", "end_time"]:
                     raw_value.update({"$lte": args[key]})
                 else:
-                    try:
-                        raw_value.update({
-                            "$lt": datetime.strptime(args[key],
-                                                     "%Y-%m-%d %H:%M:%S")
-                        })
-                    except (ValueError, TypeError):
+                    parsed_dt = self._parse_date_boundary(args[key], is_end=True)
+                    if parsed_dt is None:
                         continue
+                    raw_value.update({"$lte": parsed_dt})
                 query_args[actual_key] = raw_value
 
             # __ngt 代表 numeric greater than (数字大于)
@@ -309,9 +329,9 @@ class ARLResource(Resource):
                 item["vul_category"] = item["plg_type"]
             # 第二层循环：遍历这一条数据里的每一个字段名（比如 name, _id, status）
             for key in item:
-                # 核心操作：把它的值强制转换成普通字符串 (string)
-                if key in special_keys:
-                    item[key] = str(item[key])
+                # 核心操作：把它的值强制转换成标准字符串 (string)
+                if key in special_keys and item[key] is not None:
+                    item[key] = self._format_datetime_value(item[key])
 
             # 把这行处理干净的数据，放进我们准备好的合格列表里
             items.append(item)
@@ -492,6 +512,10 @@ class ARLResource(Resource):
                 item["scope_id"] = str(doc["scope_id"])
             if "cert" in doc and isinstance(doc["cert"], dict):
                 item["cert"] = doc["cert"]
+            if doc.get("save_date") is not None:
+                item["save_date"] = self._format_datetime_value(doc["save_date"])
+            if doc.get("update_date") is not None:
+                item["update_date"] = self._format_datetime_value(doc["update_date"])
             items.append(item)
 
         json_content = json.dumps(items, ensure_ascii=False, default=str)

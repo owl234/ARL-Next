@@ -322,6 +322,18 @@ The site, URL, and file leak lists in Global Asset Search, Task Details, and Ass
 > - Example: `GET /api/site/?task_id=<task_id>&status__in=200,403` selects sites from that task with status 200 or 403. The same parameters apply to `/api/site/export/` and `/api/site/save_result_set/`. For asset group queries, replace the parameter with `scope_id` and query `/api/asset_site/`.
 > - Current support is restricted to status code field enumeration and field-level AND combinations; arbitrary boolean expressions or cross-field OR logic are not supported.
 
+### Discovery & Update Time Filtering and Sorting Across 12 Asset Dimensions
+
+All task collections (`site`, `domain`, `ip`, `cert`, `service`, `fileleak`, `url`, `cip`, `stat_finger`, `wih`, `vuln`, `nuclei_result`, plus legacy `npoc_service`) and their asset-group counterparts (`asset_*`) persist `save_date` (first discovered timestamp, plus `update_date` on `asset_*`) as server-local BSON `datetime` values and serialize them as `YYYY-MM-DD HH:MM:SS` strings in responses:
+
+- **Inclusive Date-Range Filtering**:
+  - All 12 task and asset-group endpoints accept `save_date__dgt` (`>=`) and `save_date__dlt` (`<=`);
+  - All 12 asset-group endpoints (`/api/asset_*/`) additionally accept `update_date__dgt` (`>=`) and `update_date__dlt` (`<=`);
+  - Values accept `YYYY-MM-DD HH:MM:SS` or date-only `YYYY-MM-DD` (expanded to `00:00:00` for lower bounds and `23:59:59` for upper bounds).
+- **Server-Side Sorting**: All list endpoints accept `order=-save_date` (newest discovered first) and `order=+save_date` (oldest discovered first). Omitting `order` preserves each dimension's default ordering (`-_id` for standard lists, IP+domain count descending for `cip`/`asset_cip`, hit count descending for `stat_finger`/`asset_stat_finger`).
+- **Cross-Task Aggregation Semantics**: Global deduplicated endpoints (`GET /api/service/`, `GET /api/cip/`, and `GET /api/stat_finger/` without `task_id`) compute `save_date` via `$min` (first discovered) and `update_date` via `$max` (last seen). Date-range filters on `save_date` are applied post-aggregation so listed rows and `total` counts remain strictly consistent.
+- **Asset-Group Sync & Exports**: When task assets are synced to an asset group for the first time, `asset_*` inherits the task record's original `save_date` and initializes `update_date` to match; `update_date` advances only on subsequent re-scans or monitor refreshes. Plain-text `.txt` target exports remain unchanged, while certificate JSON exports (`/api/cert/export/`, `/api/asset_cert/export/`) include `save_date` and `update_date`.
+
 ---
 
 ## 5. Error Code Conventions & Client Branching

@@ -85,14 +85,16 @@ class AssetWihUpdateTask(CommonTask):
 
     def wih_results_save(self):
         from pymongo import UpdateOne
+        now_dt = utils.curr_date_obj()
         bulk_operations = []
         for record in self.wih_results:
             item = record.dump_json()
             item["task_id"] = self.task_id
+            save_dt = utils.to_datetime_obj(item.pop("save_date", None)) or now_dt
             
             # 使用 UpdateOne 构建 Upsert 操作
             query = {"task_id": self.task_id, "site": item["site"], "fnv_hash": item["fnv_hash"]}
-            bulk_operations.append(UpdateOne(query, {"$set": item}, upsert=True))
+            bulk_operations.append(UpdateOne(query, {"$set": item, "$setOnInsert": {"save_date": save_dt}}, upsert=True))
             
             # 分批写入防止内存爆炸
             if len(bulk_operations) >= 1000:

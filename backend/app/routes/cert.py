@@ -20,6 +20,8 @@ base_search_fields = {
     'cert.fingerprint.sha1': fields.String(description="SHA-1"),
     'cert.fingerprint.md5': fields.String(description="MD5"),
     'cert.extensions.subjectAltName': fields.String(description="备用名称"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
     'task_id': fields.String(description="任务 ID"),
 }
 

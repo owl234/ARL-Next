@@ -14,8 +14,10 @@ base_search_fields = {
     'cidr_ip': fields.String(required=False, description="C段"),
     "ip_count": fields.Integer(description="IP 个数"),
     "domain_count": fields.Integer(description="解析到该 C 段域名个数"),
-    "update_date__dgt": fields.String(description="更新时间大于"),
-    "update_date__dlt": fields.String(description="更新时间小于"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
+    "update_date__dgt": fields.String(description="更新时间大于等于"),
+    "update_date__dlt": fields.String(description="更新时间小于等于"),
     "insert_time__dgt": fields.String(description="插入时间大于"),
     "insert_time__dlt": fields.String(description="插入时间小于"),
     "scope_id": fields.String(description="资产范围ID")
@@ -36,16 +38,25 @@ class ARLAssetCip(ARLResource):
         """
         # args 需要转为普通的 dict，以便 get_default_field 中可以使用 pop()
         args_dict = dict(self.parser.parse_args())
+        has_custom_order = bool(args_dict.get("order"))
         
         # 1. 提取基础参数 (会把 page, size, order pop 出来)
         default_field = self.get_default_field(args_dict)
         page = default_field.get("page", 1)
         size = default_field.get("size", 10)
+        orderby_list = default_field.get("order", [("_id", -1)])
         
         # 2. 翻译查询条件
         query = self.build_db_query(args_dict)
 
-        # 3. 聚合查询，强制按 (ip_count + domain_count) 降序
+        # 3. 聚合查询，默认按 (ip_count + domain_count) 降序，支持显式 order 排序
+        if has_custom_order:
+            sort_dict = {field: direction for field, direction in orderby_list}
+            if "_id" not in sort_dict:
+                sort_dict["_id"] = -1
+        else:
+            sort_dict = {"total_cnt": -1, "_id": -1}
+
         pipeline = [
             {"$match": query},
             {"$addFields": {
@@ -56,7 +67,7 @@ class ARLAssetCip(ARLResource):
                     ]
                 }
             }},
-            {"$sort": {"total_cnt": -1, "_id": -1}},
+            {"$sort": sort_dict},
             {"$skip": size * (page - 1)},
             {"$limit": size}
         ]

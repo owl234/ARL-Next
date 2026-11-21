@@ -676,6 +676,7 @@ class IPExecutor(IPTask):
                 asset_ip_info["domain"] = []
                 asset_ip_info["save_date"] = curr_date_obj
                 asset_ip_info["update_date"] = curr_date_obj
+                ip_info["save_date"] = curr_date_obj
                 utils.conn_db('asset_ip').insert_one(asset_ip_info)
                 utils.conn_db('ip').insert_one(ip_info)
                 new_ip_info_list.append(ip_info)
@@ -702,6 +703,7 @@ class IPExecutor(IPTask):
                 # 存入数据库记录，只记录新发现的端口
                 ip_info_copy = ip_info.copy()
                 ip_info_copy["port_info"] = new_port_info_list
+                ip_info_copy["save_date"] = update_info["update_date"]
                 utils.conn_db('ip').insert_one(ip_info_copy)
 
             # 无论是否发现新端口，无论是一次性扫描还是周期任务，

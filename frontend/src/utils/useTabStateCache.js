@@ -376,10 +376,14 @@ export function createTabStateCache({
     const saved = loadSessionTabState(currentKey);
     if (saved && saved.tabs) {
       for (const tabKey of Object.keys(saved.tabs)) {
+        const savedSort = saved.tabs[tabKey].sort;
         tabStateMap[tabKey] = {
           searchForm: saved.tabs[tabKey].searchForm || {},
           operators: saved.tabs[tabKey].operators || {},
-          page: saved.tabs[tabKey].page || 1
+          page: saved.tabs[tabKey].page || 1,
+          sort: savedSort && typeof savedSort === 'object'
+            ? { field: savedSort.field || '', order: savedSort.order || null }
+            : { field: '', order: null }
         };
       }
       if (saved.activeTab && tabConfig[saved.activeTab]) {
@@ -390,12 +394,12 @@ export function createTabStateCache({
   };
 
   /**
-   * 保存特定 Tab 的轻量搜索与分页状态
+   * 保存特定 Tab 的轻量搜索、分页与排序状态
    */
-  const saveCurrentTab = (tabKey, currentSearchForm, page) => {
+  const saveCurrentTab = (tabKey, currentSearchForm, page, sort) => {
     if (!tabKey) return;
     if (!tabStateMap[tabKey]) {
-      tabStateMap[tabKey] = { searchForm: {}, operators: {}, page: 1 };
+      tabStateMap[tabKey] = { searchForm: {}, operators: {}, page: 1, sort: { field: '', order: null } };
     }
     tabStateMap[tabKey].searchForm = serializeSearchForm(currentSearchForm);
     if (tabConfig[tabKey]?.searchFields) {
@@ -403,6 +407,11 @@ export function createTabStateCache({
     }
     if (typeof page === 'number' && page > 0) {
       tabStateMap[tabKey].page = page;
+    }
+    if (sort !== undefined) {
+      tabStateMap[tabKey].sort = sort && typeof sort === 'object'
+        ? { field: sort.field || '', order: sort.order || null }
+        : { field: '', order: null };
     }
 
     // 立即持久化轻量状态至 SessionStorage
@@ -421,7 +430,8 @@ export function createTabStateCache({
       tabsData[tabKey] = {
         searchForm: tabStateMap[tabKey].searchForm || {},
         operators: tabStateMap[tabKey].operators || {},
-        page: tabStateMap[tabKey].page || 1
+        page: tabStateMap[tabKey].page || 1,
+        sort: tabStateMap[tabKey].sort || { field: '', order: null }
       };
     }
 
@@ -455,6 +465,16 @@ export function createTabStateCache({
    */
   const getTabPage = (tabKey) => {
     return tabStateMap[tabKey]?.page || 1;
+  };
+
+  /**
+   * 获取指定 Tab 记忆的排序状态
+   */
+  const getTabSort = (tabKey) => {
+    const s = tabStateMap[tabKey]?.sort;
+    return s && typeof s === 'object'
+      ? { field: s.field || '', order: s.order || null }
+      : { field: '', order: null };
   };
 
   /**
@@ -524,10 +544,11 @@ export function createTabStateCache({
   const resetTabState = (tabKey) => {
     if (!tabKey) return;
     if (!tabStateMap[tabKey]) {
-      tabStateMap[tabKey] = { searchForm: {}, operators: {}, page: 1 };
+      tabStateMap[tabKey] = { searchForm: {}, operators: {}, page: 1, sort: { field: '', order: null } };
     }
     tabStateMap[tabKey].searchForm = {};
     tabStateMap[tabKey].page = 1;
+    tabStateMap[tabKey].sort = { field: '', order: null };
 
     // 复位操作符为初始默认值
     if (defaultOperators[tabKey] && tabConfig[tabKey]?.searchFields) {
@@ -549,6 +570,7 @@ export function createTabStateCache({
     getTabSearchForm,
     applyTabOperators,
     getTabPage,
+    getTabSort,
     updateMemoryCache,
     getMemoryCache,
     invalidateMemoryCache,

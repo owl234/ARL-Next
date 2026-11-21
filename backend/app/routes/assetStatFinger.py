@@ -12,8 +12,10 @@ base_search_fields = {
     'name': fields.String(required=False, description="指纹名称"),
     'name__eq': fields.String(required=False, description="指纹名称精确匹配"),
     "cnt": fields.Integer(description="数目"),
-    "update_date__dgt": fields.String(description="更新时间大于"),
-    "update_date__dlt": fields.String(description="更新时间小于"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
+    "update_date__dgt": fields.String(description="更新时间大于等于"),
+    "update_date__dlt": fields.String(description="更新时间小于等于"),
     "insert_time__dgt": fields.String(description="插入时间大于"),
     "insert_time__dlt": fields.String(description="插入时间小于"),
     "scope_id": fields.String(description="资产范围ID")
@@ -32,26 +34,79 @@ class ARLAssetStatFinger(ARLResource):
         """
         资产组指纹统计信息查询
         """
-        args = self.parser.parse_args()
-        query = self.build_db_query(args)
+        args_dict = dict(self.parser.parse_args())
+        has_custom_order = bool(args_dict.get("order"))
+        default_field = self.get_default_field(args_dict)
+        page = default_field.get("page", 1)
+        size = default_field.get("size", 10)
+        orderby_list = default_field.get("order", [("_id", -1)])
+
+        query = self.build_db_query(args_dict)
+        post_save_date_filter = query.pop("save_date", None)
+        post_update_date_filter = query.pop("update_date", None)
+
+        if has_custom_order:
+            sort_dict = {field: direction for field, direction in orderby_list}
+            if "cnt" not in sort_dict:
+                sort_dict["cnt"] = -1
+        else:
+            sort_dict = {"cnt": -1, "_id": 1}
+
+        post_match = {}
+        if post_save_date_filter is not None:
+            post_match["save_date"] = post_save_date_filter
+        if post_update_date_filter is not None:
+            post_match["update_date"] = post_update_date_filter
 
         pipeline = [
             {"$match": query},
-            {"$group": {"_id": "$name", "cnt": {"$sum": "$cnt"}}},
-            {"$project": {"_id": "$_id", "name": "$_id", "cnt": 1}},
-            {"$sort": {"cnt": -1}},
-            {"$skip": (args.page - 1) * args.size},
-            {"$limit": args.size}
+            {"$group": {
+                "_id": "$name",
+                "cnt": {"$sum": "$cnt"},
+                "save_date": {"$min": "$save_date"},
+                "latest_save_date": {"$max": "$save_date"},
+                "raw_update_date": {"$max": "$update_date"},
+            }},
+            {"$addFields": {
+                "update_date": {"$ifNull": ["$raw_update_date", "$latest_save_date"]},
+            }},
         ]
-        items = list(utils.conn_db('asset_stat_finger').aggregate(pipeline))
+        if post_match:
+            pipeline.append({"$match": post_match})
+        pipeline.extend([
+            {"$project": {
+                "_id": "$_id",
+                "name": "$_id",
+                "cnt": 1,
+                "save_date": 1,
+                "update_date": 1,
+            }},
+            {"$sort": sort_dict},
+            {"$skip": (page - 1) * size},
+            {"$limit": size}
+        ])
+        raw_items = list(utils.conn_db('asset_stat_finger').aggregate(pipeline))
+        items = self.build_return_items(raw_items)
 
         count_pipeline = [
             {"$match": query},
-            {"$group": {"_id": "$name"}}
+            {"$group": {
+                "_id": "$name",
+                "save_date": {"$min": "$save_date"},
+                "latest_save_date": {"$max": "$save_date"},
+                "raw_update_date": {"$max": "$update_date"},
+            }},
+            {"$addFields": {
+                "update_date": {"$ifNull": ["$raw_update_date", "$latest_save_date"]},
+            }},
         ]
+        if post_match:
+            count_pipeline.append({"$match": post_match})
         total = len(list(utils.conn_db('asset_stat_finger').aggregate(count_pipeline)))
 
         return {
+            "page": page,
+            "size": size,
             "total": total,
             "items": items,
             "code": 200

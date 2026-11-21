@@ -16,6 +16,8 @@ base_search_fields = {
     'status_code': fields.Integer(description="状态码"),
     'status_code__in': HttpStatusCodes(description="状态码多选，逗号分隔，例如 200,301,403"),
     'title': fields.String(description="标题"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
     "task_id": fields.String(description="任务ID")
 }
 

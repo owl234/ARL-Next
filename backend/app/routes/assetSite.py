@@ -30,8 +30,10 @@ base_search_fields = {
     'favicon.hash': fields.Integer(description="favicon hash"),
     'task_id': fields.String(description="任务 ID"),
     'scope_id': fields.String(description="范围 ID"),
-    "update_date__dgt": fields.String(description="更新时间大于"),
-    "update_date__dlt": fields.String(description="更新时间小于"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
+    "update_date__dgt": fields.String(description="更新时间大于等于"),
+    "update_date__dlt": fields.String(description="更新时间小于等于"),
     'tag': fields.String(description="标签列表")
 }
 

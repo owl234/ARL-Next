@@ -181,9 +181,9 @@ def build_service_endpoint_doc(
     if owner_field and owner_id is not None:
         doc[owner_field] = str(owner_id)
     if save_date is not None:
-        doc["save_date"] = save_date
+        doc["save_date"] = utils.to_datetime_obj(save_date) or save_date
     if update_date is not None:
-        doc["update_date"] = update_date
+        doc["update_date"] = utils.to_datetime_obj(update_date) or update_date
     if isinstance(extra_fields, dict):
         for k, v in extra_fields.items():
             if k not in doc and v is not None:
@@ -336,8 +336,19 @@ def merge_endpoint_records(existing_ep: dict, incoming_ep: dict, prefer_incoming
     )
     merged_target = build_service_target(merged_svc, ip_val, port_val, existing_target=raw_target)
 
-    save_date = existing_ep.get("save_date") or incoming_ep.get("save_date")
-    update_date = incoming_ep.get("update_date") or existing_ep.get("update_date") or save_date
+    ex_save = utils.to_datetime_obj(existing_ep.get("save_date"))
+    in_save = utils.to_datetime_obj(incoming_ep.get("save_date"))
+    if ex_save is not None and in_save is not None:
+        save_date = min(ex_save, in_save)
+    else:
+        save_date = ex_save or in_save or existing_ep.get("save_date") or incoming_ep.get("save_date")
+
+    ex_upd = utils.to_datetime_obj(existing_ep.get("update_date"))
+    in_upd = utils.to_datetime_obj(incoming_ep.get("update_date"))
+    if ex_upd is not None and in_upd is not None:
+        update_date = max(ex_upd, in_upd)
+    else:
+        update_date = in_upd or ex_upd or incoming_ep.get("update_date") or existing_ep.get("update_date") or save_date
 
     extra = {}
     for k in ("change_status", "update_diff", "_id"):
@@ -385,7 +396,7 @@ def sync_npoc_items_to_service_and_ip(task_id, npoc_items, db_getter=None):
     tid = str(task_id)
     svc_col = _get_db("service", db_getter)
     ip_col = _get_db("ip", db_getter)
-    now_str = utils.curr_date()
+    now_dt = utils.curr_date_obj()
 
     for item in npoc_items:
         for incoming in expand_service_doc_to_endpoints({**item, "task_id": tid}, default_source="npoc"):
@@ -426,7 +437,7 @@ def sync_npoc_items_to_service_and_ip(task_id, npoc_items, db_getter=None):
                     product=legacy_prod,
                     version=legacy_ver,
                     sources=legacy_sources or ["nmap"],
-                    save_date=now_str,
+                    save_date=now_dt,
                 )
 
             # 同时若 db.ip 中有该端口的 product/version 而 service 尚未记录，从 db.ip 补齐
@@ -454,18 +465,17 @@ def sync_npoc_items_to_service_and_ip(task_id, npoc_items, db_getter=None):
                                 product=ip_prod,
                                 version=ip_ver,
                                 sources=ip_sources,
-                                save_date=now_str,
+                                save_date=now_dt,
                             )
                         break
 
             merged = merge_endpoint_records(existing, incoming, prefer_incoming_service=True)
             merged.pop("_id", None)
-            if not merged.get("save_date"):
-                merged["save_date"] = item.get("save_date") or now_str
+            saved_dt = utils.to_datetime_obj(merged.pop("save_date", None)) or utils.to_datetime_obj(item.get("save_date")) or now_dt
 
             svc_col.update_one(
                 {"task_id": tid, "ip": ip_val, "port_id": port_val},
-                {"$set": merged},
+                {"$set": merged, "$setOnInsert": {"save_date": saved_dt}},
                 upsert=True,
             )
 

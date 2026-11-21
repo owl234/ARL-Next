@@ -476,16 +476,31 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
     # 若需重算 cip 或 service，仅读取一次 ip 宿主表减少 I/O
     ip_docs = None
     if "cip" in target_set or "service" in target_set:
-        proj = {"ip": 1, "_id": 0}
+        proj = {"ip": 1, "save_date": 1, "update_date": 1, "_id": 0}
         if "cip" in target_set:
             proj["domain"] = 1
         if "service" in target_set:
             proj["port_info"] = 1
         ip_docs = list(_db(f"{prefix}ip").find({owner_field: owner_id}, proj))
 
+    def _pick_min_dt(a, b):
+        da = utils.to_datetime_obj(a)
+        db = utils.to_datetime_obj(b)
+        if da and db:
+            return min(da, db)
+        return da or db
+
+    def _pick_max_dt(a, b):
+        da = utils.to_datetime_obj(a)
+        db = utils.to_datetime_obj(b)
+        if da and db:
+            return max(da, db)
+        return da or db
+
     # 1. 重算 cip / asset_cip
     if "cip" in target_set:
         ip_domains_map = {}
+        ip_time_map = {}
         for doc in ip_docs:
             ip_val = doc.get("ip")
             if not ip_val or ":" in str(ip_val):
@@ -497,6 +512,9 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                 dom_set.update(d for d in raw_doms if isinstance(d, str) and d)
             elif isinstance(raw_doms, str) and raw_doms:
                 dom_set.add(raw_doms)
+            ts_entry = ip_time_map.setdefault(ip_str, {"save": None, "upd": None})
+            ts_entry["save"] = _pick_min_dt(ts_entry["save"], doc.get("save_date"))
+            ts_entry["upd"] = _pick_max_dt(ts_entry["upd"], doc.get("update_date") or doc.get("save_date"))
 
         if ip_domains_map:
             for d_doc in _db(f"{prefix}domain").find(
@@ -517,18 +535,21 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                 cidr = IP(f"{ip_str}/24", make_net=True).strNormal(1)
             except Exception:
                 continue
-            entry = cip_map.setdefault(cidr, {"ip_set": set(), "domain_set": set()})
+            entry = cip_map.setdefault(cidr, {"ip_set": set(), "domain_set": set(), "save": None, "upd": None})
             entry["ip_set"].add(ip_str)
             entry["domain_set"].update(dom_set)
+            ip_ts = ip_time_map.get(ip_str) or {}
+            entry["save"] = _pick_min_dt(entry["save"], ip_ts.get("save"))
+            entry["upd"] = _pick_max_dt(entry["upd"], ip_ts.get("upd"))
 
         cip_col = _db(f"{prefix}cip")
         desired_cidrs = set(cip_map.keys())
-        existing_cidrs = {
-            doc.get("cidr_ip")
-            for doc in cip_col.find({owner_field: owner_id}, {"cidr_ip": 1, "_id": 0})
+        existing_cip_map = {
+            doc.get("cidr_ip"): doc
+            for doc in cip_col.find({owner_field: owner_id}, {"cidr_ip": 1, "save_date": 1, "update_date": 1, "_id": 0})
             if doc.get("cidr_ip")
         }
-        stale_cidrs = list(existing_cidrs - desired_cidrs)
+        stale_cidrs = list(set(existing_cip_map.keys()) - desired_cidrs)
         if stale_cidrs:
             for chunk in _chunked(stale_cidrs):
                 cip_col.delete_many({owner_field: owner_id, "cidr_ip": {"$in": chunk}})
@@ -537,6 +558,9 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
         for cidr, info in cip_map.items():
             ip_list = sorted(info["ip_set"])
             domain_list = sorted(info["domain_set"])
+            ex_doc = existing_cip_map.get(cidr) or {}
+            min_save = _pick_min_dt(ex_doc.get("save_date"), info["save"]) or now
+            max_upd = _pick_max_dt(ex_doc.get("update_date"), info["upd"]) or min_save
             set_doc = {
                 owner_field: owner_id,
                 "cidr_ip": cidr,
@@ -545,10 +569,9 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                 "domain_list": domain_list,
                 "domain_count": len(domain_list),
             }
-            update_spec = {"$set": set_doc}
+            update_spec = {"$set": set_doc, "$setOnInsert": {"save_date": min_save}}
             if is_asset:
-                set_doc["update_date"] = now
-                update_spec["$setOnInsert"] = {"save_date": now}
+                set_doc["update_date"] = max_upd
             ops.append(UpdateOne({owner_field: owner_id, "cidr_ip": cidr}, update_spec, upsert=True))
         for chunk in _chunked(ops):
             cip_col.bulk_write(chunk, ordered=False)
@@ -556,10 +579,12 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
     # 2. 重算 stat_finger / asset_stat_finger
     if "stat_finger" in target_set:
         finger_map = {}
-        for s_doc in _db(f"{prefix}site").find({owner_field: owner_id}, {"finger": 1, "_id": 0}):
+        for s_doc in _db(f"{prefix}site").find({owner_field: owner_id}, {"finger": 1, "save_date": 1, "update_date": 1, "_id": 0}):
             fingers = s_doc.get("finger")
             if not isinstance(fingers, list):
                 continue
+            s_save = s_doc.get("save_date")
+            s_upd = s_doc.get("update_date") or s_save
             seen_in_site = set()
             for item in fingers:
                 if isinstance(item, dict):
@@ -575,33 +600,37 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                     continue
                 seen_in_site.add(key)
                 if key not in finger_map:
-                    finger_map[key] = {"name": fname, "cnt": 1}
+                    finger_map[key] = {"name": fname, "cnt": 1, "save": utils.to_datetime_obj(s_save), "upd": utils.to_datetime_obj(s_upd)}
                 else:
                     finger_map[key]["cnt"] += 1
+                    finger_map[key]["save"] = _pick_min_dt(finger_map[key]["save"], s_save)
+                    finger_map[key]["upd"] = _pick_max_dt(finger_map[key]["upd"], s_upd)
 
         sf_col = _db(f"{prefix}stat_finger")
-        desired_names = {v["name"]: v["cnt"] for v in finger_map.values()}
-        existing_names = {
-            doc.get("name")
-            for doc in sf_col.find({owner_field: owner_id}, {"name": 1, "_id": 0})
+        desired_info = {v["name"]: v for v in finger_map.values()}
+        existing_sf_map = {
+            doc.get("name"): doc
+            for doc in sf_col.find({owner_field: owner_id}, {"name": 1, "save_date": 1, "update_date": 1, "_id": 0})
             if doc.get("name")
         }
-        stale_names = list(existing_names - set(desired_names.keys()))
+        stale_names = list(set(existing_sf_map.keys()) - set(desired_info.keys()))
         if stale_names:
             for chunk in _chunked(stale_names):
                 sf_col.delete_many({owner_field: owner_id, "name": {"$in": chunk}})
 
         ops = []
-        for fname, cnt in desired_names.items():
+        for fname, info in desired_info.items():
+            ex_doc = existing_sf_map.get(fname) or {}
+            min_save = _pick_min_dt(ex_doc.get("save_date"), info["save"]) or now
+            max_upd = _pick_max_dt(ex_doc.get("update_date"), info["upd"]) or min_save
             set_doc = {
                 owner_field: owner_id,
                 "name": fname,
-                "cnt": cnt,
+                "cnt": info["cnt"],
             }
-            update_spec = {"$set": set_doc}
+            update_spec = {"$set": set_doc, "$setOnInsert": {"save_date": min_save}}
             if is_asset:
-                set_doc["update_date"] = now
-                update_spec["$setOnInsert"] = {"save_date": now}
+                set_doc["update_date"] = max_upd
             ops.append(UpdateOne({owner_field: owner_id, "name": fname}, update_spec, upsert=True))
         for chunk in _chunked(ops):
             sf_col.bulk_write(chunk, ordered=False)
@@ -622,6 +651,8 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
             port_info_list = doc.get("port_info")
             if not ip_val or not isinstance(port_info_list, list):
                 continue
+            doc_save = utils.to_datetime_obj(doc.get("save_date"))
+            doc_upd = utils.to_datetime_obj(doc.get("update_date")) or doc_save
             for p in port_info_list:
                 if not isinstance(p, dict):
                     continue
@@ -640,6 +671,8 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                     version=p.get("version") or "",
                     target=p.get("target") or "",
                     sources=p.get("sources") or ["nmap"],
+                    save_date=doc_save,
+                    update_date=doc_upd,
                 )
                 endpoint_map[ep_key] = merge_endpoint_records(endpoint_map.get(ep_key), ep_doc)
 
@@ -666,10 +699,10 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
             if ep_key not in endpoint_map:
                 stale_doc_ids.append(ex_doc["_id"])
             else:
-                # 保留存量端点的 save_date 及已归并的 npoc 来源
+                # 保留存量端点的最早 save_date、最新 update_date 及已归并的 npoc 来源
                 cur = endpoint_map[ep_key]
-                if ex_doc.get("save_date") and not cur.get("save_date"):
-                    cur["save_date"] = ex_doc["save_date"]
+                cur["save_date"] = _pick_min_dt(ex_doc.get("save_date"), cur.get("save_date"))
+                cur["update_date"] = _pick_max_dt(ex_doc.get("update_date"), cur.get("update_date"))
                 if "npoc" in (ex_doc.get("sources") or []):
                     endpoint_map[ep_key] = merge_endpoint_records(ex_doc, cur)
 
@@ -682,17 +715,19 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
             set_doc = dict(ep_doc)
             set_doc.pop("_id", None)
             set_doc[owner_field] = owner_id
-            saved_ts = set_doc.pop("save_date", None)
+            saved_ts = utils.to_datetime_obj(set_doc.pop("save_date", None)) or now
+            upd_ts = utils.to_datetime_obj(set_doc.pop("update_date", None)) or saved_ts
             if is_asset:
-                set_doc["update_date"] = now
+                set_doc["update_date"] = upd_ts
                 update_spec = {
                     "$set": set_doc,
-                    "$setOnInsert": {"save_date": saved_ts or now},
+                    "$setOnInsert": {"save_date": saved_ts},
                 }
             else:
-                if saved_ts:
-                    set_doc["save_date"] = saved_ts
-                update_spec = {"$set": set_doc}
+                update_spec = {
+                    "$set": set_doc,
+                    "$setOnInsert": {"save_date": saved_ts},
+                }
             ops.append(
                 UpdateOne(
                     {owner_field: owner_id, "ip": ip_val, "port_id": port_id},

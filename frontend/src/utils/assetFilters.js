@@ -25,8 +25,8 @@ export function buildAssetFilterParams(form, searchFields = []) {
       params[`${field.key}__in`] = codes.sort().join(',');
     } else if (field.type === 'dateRange' && Array.isArray(value)) {
       if (value.length !== 2 || !value[0] || !value[1]) continue;
-      params[`${field.key}__dgt`] = value[0].format('YYYY-MM-DD HH:mm:ss');
-      params[`${field.key}__dlt`] = value[1].format('YYYY-MM-DD HH:mm:ss');
+      params[`${field.key}__dgt`] = value[0].startOf('day').format('YYYY-MM-DD HH:mm:ss');
+      params[`${field.key}__dlt`] = value[1].endOf('day').format('YYYY-MM-DD HH:mm:ss');
     } else {
       const suffix = field.hasOperatorSelect ? {
         '大于': '__gt', '小于': '__lt', '不等于': '__neq',
@@ -51,4 +51,24 @@ const OPERATOR_LABEL_KEYS = {
 // 运算符仍使用历史缓存和请求参数所需的原值，仅翻译展示名称。
 export function formatAssetFilterOperator(operator) {
   return OPERATOR_LABEL_KEYS[operator] ? taskText(OPERATOR_LABEL_KEYS[operator]) : operator;
+}
+
+// 统一将 Ant Design Vue 表头排序态转换为后端 ARLResource 的 order 查询参数。
+export function buildAssetSortOrder(sortState) {
+  const field = sortState?.field;
+  const order = sortState?.order;
+  if (!field || (order !== 'ascend' && order !== 'descend')) {
+    return '';
+  }
+  return order === 'descend' ? `-${field}` : `+${field}`;
+}
+
+export function extractTableSortState(sorter, fallbackField = 'save_date') {
+  const active = Array.isArray(sorter) ? sorter[0] : sorter;
+  const order = active?.order === 'ascend' || active?.order === 'descend' ? active.order : null;
+  if (!order) {
+    return { field: '', order: null };
+  }
+  const field = active?.columnKey || active?.field || fallbackField;
+  return { field: String(field), order };
 }

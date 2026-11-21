@@ -324,6 +324,18 @@ rules:
 > - 示例：`GET /api/site/?task_id=<task_id>&status__in=200,403` 查询该任务中状态码为 200 或 403 的站点。相同参数亦完全适用于 `/api/site/export/` 导出及 `/api/site/save_result_set/` 结果集保存接口；按资产组检索时只需将查询参数替换为 `scope_id` 并访问 `/api/asset_site/`。
 > - 当前接口实现仅支持针对状态码字段的枚举匹配与字段间 AND 组合，暂不支持自由输入布尔表达式或跨任意字段的 OR 逻辑。
 
+### 12 维资产发现时间、更新时间筛选与排序
+
+任务集合（`site`、`domain`、`ip`、`cert`、`service`、`fileleak`、`url`、`cip`、`stat_finger`、`wih`、`vuln`、`nuclei_result` 及兼容表 `npoc_service`）与对应资产组集合（`asset_*`）统一将发现时间 `save_date`（以及资产组表的更新时间 `update_date`）以服务器本地时区 BSON `datetime` 持久化，并在响应中序列化为 `YYYY-MM-DD HH:MM:SS` 字符串：
+
+- **时间范围筛选（闭区间）**：
+  - 全部 12 维任务接口与资产组接口均支持 `save_date__dgt`（发现时间 ≥）与 `save_date__dlt`（发现时间 ≤）；
+  - 全部 12 维资产组接口（`/api/asset_*/`）同时支持 `update_date__dgt`（更新时间 ≥）与 `update_date__dlt`（更新时间 ≤）；
+  - 参数格式支持 `YYYY-MM-DD HH:MM:SS` 或 `YYYY-MM-DD`（仅传日期时，下界自动按 `00:00:00` 解析，上界按 `23:59:59` 解析）。
+- **服务端排序**：全部列表接口均支持 `order=-save_date`（按发现时间倒序）与 `order=+save_date`（按发现时间正序）；不传 `order` 时保持各维度默认排序（普通维度按 `_id` 倒序，`cip`/`asset_cip` 按 IP+域名数降序，`stat_finger`/`asset_stat_finger` 按命中数降序）。
+- **跨任务聚合口径**：全局资产搜索中按端点/网段/指纹跨任务归并的 `GET /api/service/`、`GET /api/cip/` 与 `GET /api/stat_finger/`，严格以最早记录（`$min`）作为 `save_date`（首次发现时间），以最近观测（`$max`）作为 `update_date`（最近出现时间），且 `save_date__dgt`/`save_date__dlt` 过滤作用于归并后的首次发现时间，确保列表与总数口径一致。
+- **同步入组与导出**：任务资产首次同步至资产组时，`asset_*` 沿用任务记录的原始 `save_date`，并将 `update_date` 对齐该值，仅在后续复扫或监控刷新时推进 `update_date`。文本清单导出（`.txt`）保持原单目标格式不变，证书 JSON 导出（`/api/cert/export/`、`/api/asset_cert/export/`）同步包含 `save_date` 与 `update_date` 字段。
+
 ---
 
 ## 5. 错误码约定与客户端分支建议

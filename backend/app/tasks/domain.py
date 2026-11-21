@@ -844,7 +844,7 @@ class DomainTask(CommonTask):
         from app.services.service_fusion import build_service_endpoint_doc
         self.service_info_list = []
         seen_endpoints = set()
-        now_str = utils.curr_date()
+        now_dt = utils.curr_date_obj()
         for _data in self.ip_info_list:
             port_info_list = _data.port_info_list
             for _info in port_info_list:
@@ -858,7 +858,7 @@ class DomainTask(CommonTask):
                         product=_info.product or "",
                         version=_info.version or "",
                         sources=["nmap"],
-                        save_date=now_str,
+                        save_date=now_dt,
                     )
                     ep_key = (ep_doc["ip"], ep_doc["port_id"])
                     if ep_key in seen_endpoints:
@@ -1111,7 +1111,7 @@ class DomainTask(CommonTask):
         for item in result:
             self.npoc_service_target_set.add(item["target"])
             item["task_id"] = self.task_id
-            item["save_date"] = utils.curr_date()
+            item["save_date"] = utils.curr_date_obj()
             utils.safe_insert_asset('npoc_service', ['task_id', 'target'], item)
         if result:
             sync_npoc_items_to_service_and_ip(self.task_id, result)
@@ -1148,7 +1148,7 @@ class DomainTask(CommonTask):
         result = run_risk_cruising(targets=targets, plugins=plugins)
         for item in result:
             item["task_id"] = self.task_id
-            item["save_date"] = utils.curr_date()
+            item["save_date"] = utils.curr_date_obj()
             if "plg_name" in item:
                 item["plugin_name"] = item.get("plg_name")
             if "target" in item:
@@ -1175,7 +1175,7 @@ class DomainTask(CommonTask):
                                                             result["body_length"])
             save_item["verify_obj"] = result
             save_item["task_id"] = self.task_id
-            save_item["save_date"] = utils.curr_date()
+            save_item["save_date"] = utils.curr_date_obj()
             save_item["plugin_name"] = save_item["plg_name"]
             save_item["vuln_url"] = save_item["target"]
             utils.safe_insert_asset('vuln', ['task_id', 'vuln_url', 'plugin_name'], save_item)

@@ -417,11 +417,12 @@ def sync_service_from_site(task_id, site_info_list):
                     product=final_prod,
                     version=final_ver,
                     sources=final_sources,
-                    save_date=(existing_ep.get("save_date") if existing_ep else None) or utils.curr_date(),
+                    save_date=utils.to_datetime_obj(existing_ep.get("save_date") if existing_ep else None) or utils.curr_date_obj(),
                 )
+                saved_dt = ep_doc.pop("save_date", None) or utils.curr_date_obj()
                 utils.conn_db('service').update_one(
                     {"task_id": task_id, "ip": ip, "port_id": port},
-                    {"$set": ep_doc},
+                    {"$set": ep_doc, "$setOnInsert": {"save_date": saved_dt}},
                     upsert=True,
                 )
 
@@ -608,11 +609,16 @@ class WebSiteFetch(object):
         logger.info("save_site_info site:{}, {}".format(len(self.site_info_list), self.__str__()))
         if self.site_info_list:
             from pymongo import UpdateOne
+            now_dt = utils.curr_date_obj()
             operations = []
             for info in self.site_info_list:
+                save_dt = utils.to_datetime_obj(info.get("save_date")) or now_dt
+                info["save_date"] = save_dt
+                set_doc = dict(info)
+                set_doc.pop("save_date", None)
                 operations.append(UpdateOne(
                     {'task_id': info['task_id'], 'site': info['site']},
-                    {'$set': info},
+                    {'$set': set_doc, '$setOnInsert': {'save_date': save_dt}},
                     upsert=True
                 ))
             if operations:
@@ -1168,9 +1174,10 @@ class WebSiteFetch(object):
 
         result = run_risk_cruising(plugins=plugins, targets=poc_targets)
         if result:
+            now_dt = utils.curr_date_obj()
             for item in result:
                 item["task_id"] = self.task_id
-                item["save_date"] = utils.curr_date()
+                item["save_date"] = now_dt
                 if "plg_name" in item:
                     item["plugin_name"] = item.get("plg_name")
                 if "target" in item:
@@ -1243,9 +1250,10 @@ class WebSiteFetch(object):
         else:
             scan_results = nuclei_scan(list(self.poc_sites), options=self.options)
         if scan_results:
+            now_dt = utils.curr_date_obj()
             for item in scan_results:
                 item["task_id"] = self.task_id
-                item["save_date"] = utils.curr_date()
+                item["save_date"] = now_dt
             utils.safe_insert_asset_many('nuclei_result', ['task_id', 'template_id', 'host'], scan_results)
 
         logger.info("end nuclei_scan， result:{}".format(len(scan_results)))

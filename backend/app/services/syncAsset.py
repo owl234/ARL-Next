@@ -1,4 +1,5 @@
 import copy
+import datetime
 import re
 from bson import ObjectId
 from app.utils import conn_db as conn
@@ -7,6 +8,29 @@ logger = utils.get_logger()
 
 
 class SyncAsset(object):
+    @staticmethod
+    def _coerce_datetime(value, fallback_oid=None):
+        import datetime as _dt
+        fn = getattr(utils, "to_datetime_obj", None)
+        if callable(fn):
+            return fn(value, fallback_oid=fallback_oid)
+        if isinstance(value, _dt.datetime):
+            dt = value.astimezone().replace(tzinfo=None) if value.tzinfo is not None else value
+            return dt.replace(microsecond=0)
+        if isinstance(value, str) and value.strip():
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d"):
+                try:
+                    return _dt.datetime.strptime(value.strip(), fmt).replace(microsecond=0)
+                except ValueError:
+                    continue
+        if fallback_oid is not None:
+            try:
+                oid = fallback_oid if isinstance(fallback_oid, ObjectId) else ObjectId(str(fallback_oid))
+                return oid.generation_time.astimezone().replace(tzinfo=None).replace(microsecond=0)
+            except Exception:
+                pass
+        return None
+
     def __init__(self, task_id, scope_id, update_flag=False,  category=None, task_name=""):
         self.available_category = [
             "site", "domain", "ip", "wih",
@@ -72,7 +96,10 @@ class SyncAsset(object):
         chunk = []
         for data in task_data_cursor:
             if category == "service":
+                orig_save_dt = self._coerce_datetime(data.get("save_date"), fallback_oid=data.get("_id"))
                 for ep in expand_service_doc_to_endpoints(data):
+                    if orig_save_dt is not None and not ep.get("save_date"):
+                        ep["save_date"] = orig_save_dt
                     chunk.append(ep)
                     if len(chunk) >= chunk_size:
                         self._process_sync_chunk(category, dist_collection, chunk)
@@ -126,12 +153,13 @@ class SyncAsset(object):
                 query = {"scope_id": self.scope_id, "name": data.get("name")}
                 data_content = data.get("name")
 
-            if "_id" in data:
-                del data["_id"]
+            orig_oid = data.pop("_id", None)
+            origin_save_date = self._coerce_datetime(data.get("save_date"), fallback_oid=orig_oid)
             data["scope_id"] = self.scope_id
             
             data["_tmp_query"] = query
             data["_tmp_data_content"] = data_content
+            data["_tmp_origin_save_date"] = origin_save_date
             queries.append(query)
             
         existing_items = {}
@@ -165,12 +193,14 @@ class SyncAsset(object):
         for data in chunk:
             query = data.pop("_tmp_query")
             data_content = data.pop("_tmp_data_content")
+            origin_save_date = data.pop("_tmp_origin_save_date", None)
             
             old = existing_items.get(data_content)
             
             if old is None:
-                data["save_date"] = utils.curr_date_obj()
-                data["update_date"] = data["save_date"]
+                first_seen = origin_save_date or utils.curr_date_obj()
+                data["save_date"] = first_seen
+                data["update_date"] = first_seen
                 if category == 'site':
                     raw_tags = data.get("tag") or []
                     if isinstance(raw_tags, str):
@@ -196,7 +226,19 @@ class SyncAsset(object):
 
             if old and self.update_flag:
                 curr_date = utils.curr_date_obj()
-                data["save_date"] = old.get("save_date", curr_date)
+                raw_old_save = old.get("save_date")
+                parsed_old_save = self._coerce_datetime(raw_old_save)
+                if parsed_old_save is not None:
+                    data["save_date"] = min(parsed_old_save, origin_save_date) if origin_save_date is not None else parsed_old_save
+                elif raw_old_save is not None and raw_old_save != "":
+                    # 兼容非标准历史值或单测占位值，不强行抹除原有 save_date
+                    data["save_date"] = raw_old_save
+                else:
+                    fallback_old = self._coerce_datetime(None, fallback_oid=old.get("_id"))
+                    if fallback_old and origin_save_date:
+                        data["save_date"] = min(fallback_old, origin_save_date)
+                    else:
+                        data["save_date"] = fallback_old or origin_save_date or curr_date
                 data["update_date"] = curr_date
 
                 # [第一性原理：资产溯源防降级保护]
