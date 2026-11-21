@@ -190,7 +190,13 @@ test('PlanningTasks 与 PocList 胶囊切换可联动更新视图状态与路由
       useSticky: () => ({ stickyConfig: computed(() => false) }),
       useGlobalPageSize: () => ref(10),
       onMounted: () => {},
+      onActivated: () => {},
       onDeactivated: () => {},
+      onUnmounted: () => {},
+      createSelectionLabelTracker: () => ({ rememberRows() {}, syncSelection() {}, getLabels: keys => keys, clear() {} }),
+      buildSelectionConfirmContent: opts => opts,
+      assetMutationVersion: ref(0),
+      notifyAssetMutated: () => {},
       request: { get: async () => ({ code: 200, items: [], total: 0 }), post: async () => ({ code: 200 }) },
       message: { success() {}, error() {}, warning() {} },
       Modal: { confirm() {} },
@@ -204,19 +210,21 @@ test('PlanningTasks 与 PocList 胶囊切换可联动更新视图状态与路由
       SyncOutlined: {}, DownloadOutlined: {}, PlusOutlined: {}, UploadOutlined: {},
       DeleteOutlined: {}, UndoOutlined: {}, PauseCircleOutlined: {}, PlayCircleOutlined: {},
       SendOutlined: {}, ReloadOutlined: {}, ClockCircleOutlined: {}, RadarChartOutlined: {},
+      AppstoreOutlined: {}, CheckCircleOutlined: {}, CloseCircleOutlined: {},
+      GlobalOutlined: {}, ClusterOutlined: {},
       ...extra,
     });
     return vm.runInContext(`${body}\n;({ ${exposeList.join(', ')} });`, ctx);
   };
 
-  const plan = loadView('views/PlanningTasks.vue', ['activeTab', 'onTabChange', 'refreshActiveTab'], {
-    fetchMonitorData: () => {},
-    fetchPlanData: () => {},
-  });
-  assert.equal(plan.activeTab.value, 'planning');
-  plan.onTabChange('monitor');
-  assert.equal(plan.activeTab.value, 'monitor');
+  const plan = loadView('views/PlanningTasks.vue', ['activeCategory', 'onCategoryChange', 'fetchAllSchedules']);
+  assert.equal(plan.activeCategory.value, 'all');
+  plan.onCategoryChange('monitor');
+  assert.equal(plan.activeCategory.value, 'monitor');
   assert.deepEqual(replaced.at(-1), { query: { tab: 'monitor' } });
+  plan.onCategoryChange('all');
+  assert.equal(plan.activeCategory.value, 'all');
+  assert.deepEqual(replaced.at(-1), { query: {} });
 
   const poc = loadView('views/PocList.vue', ['mainTab', 'hasVisitedNuclei', 'switchMainTab']);
   assert.equal(poc.mainTab.value, 'arl');

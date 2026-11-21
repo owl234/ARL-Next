@@ -82,6 +82,7 @@ function component(get) {
     taskText: (...args) => i18n.global.t(...args),
     request, taskListClient: createTaskListClient(request), applyTaskStatistics,
     taskRequestVersion: 0, enterpriseRequestVersion: 0, taskStatisticsReady: false, enterpriseStatisticsReady: false,
+    assetMutationVersion: { value: 0 }, lastObservedMutationVersion: 0, clearSelection() {},
     taskMetricCounts: {}, enterpriseMetricCounts: {}, enterpriseRunningCount: { value: 0 },
     activeMainTab: { value: 'enterprise' }, reconSearchForm: {}, searchForm: {},
     taskList: { value: [] }, enterpriseTaskList: { value: [] }, enterpriseTaskCache: new Map(),

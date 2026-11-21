@@ -49,23 +49,49 @@ class ResultFixture(unittest.TestCase):
         self.utils = types.SimpleNamespace(
             get_logger=lambda: LOG, random_choices=lambda *args: str(next(count)),
             conn_db=self.db.__getitem__, curr_date=lambda: '2026-10-15 12:00:00',
-            curr_date_obj=lambda: datetime(2026, 10, 15, 12))
+            curr_date_obj=lambda: datetime(2026, 10, 15, 12),
+            to_datetime_obj=lambda val, fallback_oid=None: val if isinstance(val, datetime) else datetime(2026, 10, 15, 12))
         env = dict(Config=types.SimpleNamespace(TMP_PATH=str(self.directory)), utils=self.utils)
         tree = ast.parse(SCANNER.read_text())
         execute([n for n in tree.body if not (
             isinstance(n, ast.ImportFrom) and n.module in ('app', 'app.config'))], env)
         self.scanner = env['NucleiScan']([])
 
+        app_pkg = types.ModuleType('app')
+        app_pkg.__path__ = []
+        app_pkg.utils = self.utils
+        services_pkg = types.ModuleType('app.services')
+        services_pkg.__path__ = []
+        app_pkg.services = services_pkg
         monitor = types.ModuleType('app.utils.monitor_diff')
         monitor.__dict__.update(conn_db=self.db.__getitem__, _get_task_scope_id=lambda _: None)
         load_nodes('app/utils/monitor_diff.py', ['_get_baseline_query', '_compute_update_diff', 'tag_monitor_diff'], monitor.__dict__)
-        modules = patch.dict(sys.modules, {'app.utils.monitor_diff': monitor})
+        modules = patch.dict(sys.modules, {
+            'app': app_pkg,
+            'app.utils': self.utils,
+            'app.services': services_pkg,
+            'app.utils.monitor_diff': monitor,
+        })
         modules.start()
         self.addCleanup(modules.stop)
+        import importlib.util
+        sf_spec = importlib.util.spec_from_file_location('app.services.service_fusion', ROOT / 'app/services/service_fusion.py')
+        sf_mod = importlib.util.module_from_spec(sf_spec)
+        sf_spec.loader.exec_module(sf_mod)
+        sys.modules['app.services.service_fusion'] = sf_mod
+        services_pkg.service_fusion = sf_mod
+
         self.baseline_query = monitor._get_baseline_query
-        persistence = dict(UpdateOne=UpdateOne, conn_db=self.db.__getitem__)
+        persistence = dict(
+            UpdateOne=UpdateOne,
+            conn_db=self.db.__getitem__,
+            curr_date_obj=self.utils.curr_date_obj,
+            to_datetime_obj=self.utils.to_datetime_obj,
+        )
         load_nodes('app/utils/__init__.py', ['safe_insert_asset_many'], persistence)
         self.utils.safe_insert_asset_many = persistence['safe_insert_asset_many']
+        self.scope_a = str(self.db.asset_scope.insert_one({'name': 'scope-a'}).inserted_id)
+        self.scope_b = str(self.db.asset_scope.insert_one({'name': 'scope-b'}).inserted_id)
 
         # 使用生产定义的唯一索引，不另写测试专用去重规则。
         tree = ast.parse((ROOT / 'app/utils/arlupdate.py').read_text())
@@ -94,8 +120,9 @@ class ResultFixture(unittest.TestCase):
         self.common_env['nuclei_scan'] = lambda *args, **kwargs: self.parse(records)
         self.common_env['save_scan_results'](types.SimpleNamespace(task_id=task, poc_sites={'fixture'}, options={}))
 
-    def sync(self, task='task-a', scope='scope-a', update=True):
-        sync = self.sync_class(task, scope, update_flag=update, category=['nuclei_result'])
+    def sync(self, task='task-a', scope=None, update=True):
+        scope_id = scope or self.scope_a
+        sync = self.sync_class(task, scope_id, update_flag=update, category=['nuclei_result'])
         sync.sync_by_category('nuclei_result')
 
 
@@ -162,10 +189,10 @@ class PersistenceTests(ResultFixture):
         for task in ('task-a', 'task-b'):
             self.scan_and_save(records, task)
             self.sync(task)
-        self.sync(scope='scope-b')
+        self.sync(scope=self.scope_b)
         self.assertEqual(self.db.nuclei_result.count_documents({}), 4)
-        self.assertEqual(self.db.asset_nuclei_result.count_documents({'scope_id': 'scope-a'}), 2)
-        self.assertEqual(self.db.asset_nuclei_result.count_documents({'scope_id': 'scope-b'}), 2)
+        self.assertEqual(self.db.asset_nuclei_result.count_documents({'scope_id': self.scope_a}), 2)
+        self.assertEqual(self.db.asset_nuclei_result.count_documents({'scope_id': self.scope_b}), 2)
 
     def test_legacy_full_url_matches_new_result_without_archive_duplicates(self):
         legacy = raw_result()
@@ -181,7 +208,7 @@ class PersistenceTests(ResultFixture):
         self.assertEqual(self.db.asset_nuclei_result.find_one()['_id'], existing['_id'])
 
     def test_ambiguous_legacy_record_is_retained_without_guessing_its_port(self):
-        legacy = {'scope_id': 'scope-a', 'host': '127.0.0.1', 'target': '127.0.0.1', 'template_id': 'fixture-template'}
+        legacy = {'scope_id': self.scope_a, 'host': '127.0.0.1', 'target': '127.0.0.1', 'template_id': 'fixture-template'}
         old_id = self.db.asset_nuclei_result.insert_one(copy.deepcopy(legacy)).inserted_id
         self.scan_and_save([raw_result('http://127.0.0.1:8080'), raw_result('http://127.0.0.1:8443')])
         self.sync()
@@ -190,7 +217,7 @@ class PersistenceTests(ResultFixture):
 
     def test_monitor_baselines_distinguish_the_same_template_on_different_ports(self):
         parsed = self.parse([raw_result('http://127.0.0.1:8080'), raw_result('http://127.0.0.1:8443')])
-        queries = [self.baseline_query('nuclei_result', item, 'scope-a') for item in parsed]
+        queries = [self.baseline_query('nuclei_result', item, self.scope_a) for item in parsed]
         self.assertNotEqual(queries[0], queries[1])
 
 

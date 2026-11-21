@@ -3,7 +3,7 @@
 ARL-Next Zero-Dependency MCP Server (JSON-RPC 2.0 over Stdio)
 - 标准库实现：纯 Python 3 标准库（sys, json, urllib, ssl, concurrent.futures），无需 pip 安装额外依赖
 - 轻量冷启动：跨平台（Mac/Linux/Windows）即插即用，低资源开销
-- 能力与 SSE 对齐：支持资产画像、企业生态、全库检索、任务状态及受控调度共 6 项标准工具，并与后端权限策略及审计落盘保持一致
+- 能力与 SSE 对齐：支持资产画像、企业生态、资产条件检索、任务状态及受控调度共 6 项标准工具，并与后端权限策略及审计落盘保持一致
 - 双阶引擎保障：优先调用后端原生 `/api/mcp/*` 聚合接口；画像工具在远端未就绪时可自动降级到标准 REST 聚合，保障高可用
 - 广泛客户端兼容：支持 Antigravity, Claude Code, OpenAI Codex, Cursor, Windsurf 等标准客户端
 """

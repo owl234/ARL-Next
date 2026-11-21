@@ -1256,13 +1256,13 @@ const handleBatchDelete = () => {
   const currentTab = effectiveTab.value;
   const config = tabConfig[currentTab];
   if (!config || !config.deleteUrl) {
-    message.warning(assetText('tasks.thisAssetCategoryDoesNotSupportDeletion'));
+    message.warning(assetText('tasks.thisAssetTypeDoesNotSupportBatchDeletion'));
     return;
   }
 
   const validKeys = selectedRowKeys.value.filter(key => key != null && key !== '');
   if (!validKeys.length) {
-    message.warning(assetText('tasks.pleaseSelectAtLeastOneRecord'));
+    message.warning(assetText('tasks.noDeletableAssetRecordsFoundRefreshThePage'));
     return;
   }
   if (validKeys.length > 500) {
@@ -1280,7 +1280,7 @@ const handleBatchDelete = () => {
       alertType: 'error',
       alertMessage: assetText('assets.globalCascadeDeleteWarningTitle'),
       alertDescription: assetText('assets.globalCascadeDeleteWarningDesc'),
-      summary: assetText('tasks.confirmDeleteSelectedRecords', { count: validKeys.length }),
+      summary: assetText('tasks.deleteTheSelectedRecordsCountFromType', { count: validKeys.length, type: currentTabLabel.value }),
       listHeading: assetText('assets.selectedRecordsWillBeDeleted'),
       items: selectedLabels,
       expandText: (total) => assetText('assets.expandAllCount', { count: total }),
@@ -1305,10 +1305,10 @@ const handleBatchDelete = () => {
           fetchOverviewCounts();
           fetchData();
         } else {
-          message.error(res.message || assetText('tasks.deleteFailed'));
+          message.error(res.message || assetText('tasks.deletionFailedLabel'));
         }
       } catch (e) {
-        message.error(assetText('tasks.deleteFailed'));
+        message.error(assetText('tasks.deletionFailedLabel'));
       }
     }
   });
@@ -1575,8 +1575,10 @@ const targetCount = ref(0);
 const currentResultSetId = ref('');
 
 const openRiskModal = async () => {
-  targetCount.value = hasSelected.value ? selectedRowKeys.value.length : pagination.total;
+  const selectedIds = hasSelected.value ? selectedRowKeys.value.filter(k => k != null && k !== '') : [];
+  targetCount.value = selectedIds.length > 0 ? selectedIds.length : pagination.total;
   if (targetCount.value === 0) return message.warning(assetText('tasks.noAssetTargetsAreAvailableForScanning'));
+  if (selectedIds.length > 500) return message.warning(assetText('assets.maxBatchDeleteLimitNotice'));
 
   riskForm.policy_id = undefined;
   riskForm.name = '';
@@ -1585,10 +1587,11 @@ const openRiskModal = async () => {
 
   try {
     const policyPromise = request.get('/policy/', { params: { size: 1000 } });
-    const setParams = hasSelected.value
-      ? { _id: selectedRowKeys.value.join(',') }
-      : buildAssetFilterParams(searchForm.value, tabConfig[effectiveTab.value].searchFields);
-    const resultSetPromise = request.get('/site/save_result_set/', { params: setParams });
+    const resultSetPromise = selectedIds.length > 0
+      ? request.post('/site/save_result_set/', { _id: selectedIds })
+      : request.get('/site/save_result_set/', {
+          params: buildAssetFilterParams(searchForm.value, tabConfig[effectiveTab.value].searchFields)
+        });
     const [policyRes, resultSetRes] = await Promise.all([policyPromise, resultSetPromise]);
 
     if (policyRes.code === 200) {
@@ -1597,11 +1600,13 @@ const openRiskModal = async () => {
         label: formatRiskPolicyLabel(item, assetText)
       }));
     }
-    if (resultSetRes.code === 200) {
-      currentResultSetId.value = resultSetRes.data.result_set_id;
-      if (resultSetRes.data.result_total !== undefined) {
-        targetCount.value = resultSetRes.data.result_total;
-      }
+    if (resultSetRes.code !== 200 || !resultSetRes.data?.result_set_id) {
+      message.error({ content: resultSetRes.message || assetText('assets.failedToPrepareData'), key: 'risk_prepare', duration: 2 });
+      return;
+    }
+    currentResultSetId.value = resultSetRes.data.result_set_id;
+    if (resultSetRes.data.result_total !== undefined) {
+      targetCount.value = resultSetRes.data.result_total;
     }
 
     message.success({ content: assetText('assets.ready'), key: 'risk_prepare', duration: 2 });

@@ -59,7 +59,7 @@ class CIPResource(ARLResource):
                 },
                 {
                     "$addFields": {
-                        "update_date": {"$ifNull": ["$raw_update_date", "$latest_save_date"]},
+                        "update_date": {"$max": ["$raw_update_date", "$latest_save_date"]},
                         "ip_list": {
                             "$reduce": {
                                 "input": "$ip_list_all",
@@ -118,7 +118,7 @@ class CIPResource(ARLResource):
         pipeline.append({"$skip": size * (page - 1)})
         pipeline.append({"$limit": size})
 
-        result = list(conn(collection).aggregate(pipeline))
+        result = list(self._aggregate(conn(collection), pipeline))
 
         if is_global:
             if post_save_date_filter is not None:
@@ -128,7 +128,7 @@ class CIPResource(ARLResource):
                     {"$match": {"save_date": post_save_date_filter}},
                     {"$group": {"_id": None, "total": {"$sum": 1}}},
                 ]
-                agg_cnt = list(conn(collection).aggregate(count_pipeline))
+                agg_cnt = list(self._aggregate(conn(collection), count_pipeline))
                 count = agg_cnt[0]["total"] if agg_cnt else 0
             else:
                 # 全局搜索：实际总数为去重后的C段数
@@ -163,6 +163,27 @@ class CIPResource(ARLResource):
             "code": 200
         }
         return data
+
+    def send_export_file(self, args, _type):
+        """
+        全局 cip 导出在携带 save_date 筛选时与列表口径保持一致（按跨任务 $min(save_date) 聚合后过滤）。
+        """
+        if _type == "cip":
+            query = self._build_export_query(args, _type)
+            if "task_id" not in query and "save_date" in query:
+                post_save_date_filter = query.pop("save_date")
+                pipeline = [
+                    {"$match": dict(query)},
+                    {"$group": {"_id": "$cidr_ip", "save_date": {"$min": "$save_date"}}},
+                    {"$match": {"save_date": post_save_date_filter}},
+                ]
+                items_set = {
+                    doc["_id"]
+                    for doc in self._aggregate(conn(_type), pipeline)
+                    if doc.get("_id")
+                }
+                return self.send_file(items_set, _type)
+        return super().send_export_file(args, _type)
 
 
 @ns.route('/')

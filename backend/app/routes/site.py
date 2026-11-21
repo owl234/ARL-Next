@@ -67,39 +67,78 @@ class ARLSiteExport(HttpStatusResource):
         return response
 
 
+save_result_set_fields = ns.model('SaveSiteResultSetFields', {
+    '_id': fields.List(fields.String(required=True, description="选中的站点 _id 列表")),
+    'task_id': fields.String(required=False, description="可选任务 ID 作用域约束"),
+})
+
+
 @ns.route('/save_result_set/')
 class ARLSaveResultSet(HttpStatusResource):
     parser = get_arl_parser(site_search_fields, location='args')
+    MAX_SELECTED_IDS = 500
 
-    @auth
-    @ns.expect(parser)
-    def get(self):
-        """
-        保存站点结果集
-        """
-        args = self.parser.parse_args()
-        query = self.build_db_query(args)
-        items = utils.conn_db('site').distinct("site", query)
-
-        items = list(set([utils.url.cut_filename(x) for x in items]))
-
-        if len(items) == 0:
+    @staticmethod
+    def _persist_site_result_set(items):
+        cleaned = list(set([utils.url.cut_filename(x) for x in items if x]))
+        if len(cleaned) == 0:
             return utils.build_ret(ErrorMsg.QueryResultIsEmpty, {})
 
         data = {
-            "items": items,
+            "items": cleaned,
             "type": "site",
-            "total": len(items)
+            "total": len(cleaned)
         }
         result = utils.conn_db('result_set').insert_one(data)
 
         ret_data = {
             "result_set_id": str(result.inserted_id),
-            "result_total": len(items),
+            "result_total": len(cleaned),
             "type": "site",
         }
-
         return utils.build_ret(ErrorMsg.Success, ret_data)
+
+    @auth
+    @ns.expect(parser)
+    def get(self):
+        """
+        按筛选条件保存站点结果集
+        """
+        args = self.parser.parse_args()
+        query = self.build_db_query(args)
+        items = utils.conn_db('site').distinct("site", query)
+        return self._persist_site_result_set(items)
+
+    @auth
+    @ns.expect(save_result_set_fields)
+    def post(self):
+        """
+        按勾选站点 _id 列表保存结果集（严格校验 ObjectId，避免空条件退化为全库查询）
+        """
+        args = self.parse_args(save_result_set_fields)
+        raw_ids = args.get('_id')
+        task_id = (args.get('task_id') or '').strip()
+
+        if not isinstance(raw_ids, list) or len(raw_ids) == 0:
+            return utils.build_ret({"code": 400, "message": "请提供有效的站点 _id 列表"}, {"count": 0})
+        if len(raw_ids) > self.MAX_SELECTED_IDS:
+            return utils.build_ret(
+                {"code": 400, "message": f"单次最多选择 {self.MAX_SELECTED_IDS} 条站点记录"},
+                {"count": len(raw_ids)},
+            )
+
+        obj_ids = []
+        for raw_id in raw_ids:
+            if not isinstance(raw_id, str) or not ObjectId.is_valid(raw_id.strip()):
+                return utils.build_ret({"code": 400, "message": "请提供有效的站点 _id 列表"}, {"count": len(raw_ids)})
+            obj_ids.append(ObjectId(raw_id.strip()))
+
+        query = {"_id": {"$in": obj_ids}}
+        if task_id:
+            query["task_id"] = task_id
+
+        items = utils.conn_db('site').distinct("site", query)
+        return self._persist_site_result_set(items)
 
 
 add_site_tag_fields = ns.model('AddSiteTagFields',  {

@@ -462,7 +462,13 @@ def recalculate_tasks_statistics(task_ids):
     return stats_by_tid
 
 
-def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", "stat_finger", "service")):
+def _rebuild_derived_for_owner(
+    owner_field,
+    owner_id,
+    is_asset,
+    targets=("cip", "stat_finger", "service"),
+    preserve_existing_npoc=True,
+):
     """
     基于存活宿主表全量重算单个作用域（资产组或任务）的三大派生集合：
       - cip / asset_cip：双向归并 ip + domain 生成 /24 C 段统计
@@ -661,6 +667,9 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                 if not svc_name or port_id is None:
                     continue
                 ep_key = (ip_val, port_id)
+                raw_port_sources = p.get("sources") or ["nmap"]
+                if not preserve_existing_npoc:
+                    raw_port_sources = [s for s in raw_port_sources if s != "npoc"] or ["nmap"]
                 ep_doc = build_service_endpoint_doc(
                     owner_field=owner_field,
                     owner_id=owner_id,
@@ -670,7 +679,7 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                     product=p.get("product") or "",
                     version=p.get("version") or "",
                     target=p.get("target") or "",
-                    sources=p.get("sources") or ["nmap"],
+                    sources=raw_port_sources,
                     save_date=doc_save,
                     update_date=doc_upd,
                 )
@@ -699,11 +708,11 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
             if ep_key not in endpoint_map:
                 stale_doc_ids.append(ex_doc["_id"])
             else:
-                # 保留存量端点的最早 save_date、最新 update_date 及已归并的 npoc 来源
+                # 保留存量端点的最早 save_date、最新 update_date 及已归并的 npoc 来源（npoc_service 显式删除重算时除外）
                 cur = endpoint_map[ep_key]
                 cur["save_date"] = _pick_min_dt(ex_doc.get("save_date"), cur.get("save_date"))
                 cur["update_date"] = _pick_max_dt(ex_doc.get("update_date"), cur.get("update_date"))
-                if "npoc" in (ex_doc.get("sources") or []):
+                if preserve_existing_npoc and "npoc" in (ex_doc.get("sources") or []):
                     endpoint_map[ep_key] = merge_endpoint_records(ex_doc, cur)
 
         if stale_doc_ids:
@@ -739,22 +748,26 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
             svc_col.bulk_write(chunk, ordered=False)
 
 
-def rebuild_scope_derived_collections(scope_ids, targets=("cip", "stat_finger", "service")):
+def rebuild_scope_derived_collections(scope_ids, targets=("cip", "stat_finger", "service"), preserve_existing_npoc=True):
     """基于存活宿主表重算指定资产组的 asset_cip / asset_stat_finger / asset_service。"""
     unique_sids = list(dict.fromkeys(str(s) for s in (scope_ids or []) if s))
     for sid in unique_sids:
         try:
-            _rebuild_derived_for_owner("scope_id", sid, is_asset=True, targets=targets)
+            _rebuild_derived_for_owner(
+                "scope_id", sid, is_asset=True, targets=targets, preserve_existing_npoc=preserve_existing_npoc
+            )
         except Exception as e:
             logger.error(f"rebuild_scope_derived_collections failed for scope {sid}: {e}")
 
 
-def rebuild_task_derived_collections(task_ids, targets=("cip", "stat_finger", "service")):
+def rebuild_task_derived_collections(task_ids, targets=("cip", "stat_finger", "service"), preserve_existing_npoc=True):
     """基于存活宿主表重算指定任务的 cip / stat_finger / service。"""
     unique_tids = list(dict.fromkeys(str(t) for t in (task_ids or []) if t))
     for tid in unique_tids:
         try:
-            _rebuild_derived_for_owner("task_id", tid, is_asset=False, targets=targets)
+            _rebuild_derived_for_owner(
+                "task_id", tid, is_asset=False, targets=targets, preserve_existing_npoc=preserve_existing_npoc
+            )
         except Exception as e:
             logger.error(f"rebuild_task_derived_collections failed for task {tid}: {e}")
 
@@ -1400,7 +1413,7 @@ def _cascade_delete_services_in_side(endpoint_tuples, empty_service_names, is_as
 
 
 def _cascade_delete_stat_fingers_in_side(finger_names, is_asset, owner_ids=None, global_mode=False):
-    """从 site.finger / asset_site.finger 剥离目标指纹（兼容 dict 与 str 双格式，保留宿主站点）并删除 stat_finger。"""
+    """从 site.finger / asset_site.finger 剥离目标指纹（兼容 dict 与 str 双格式及大小写不敏感匹配，保留宿主站点）并删除 stat_finger。"""
     names = list(dict.fromkeys(str(n).strip() for n in (finger_names or []) if n and isinstance(n, str)))
     if not names:
         return set()
@@ -1410,10 +1423,14 @@ def _cascade_delete_stat_fingers_in_side(finger_names, is_asset, owner_ids=None,
     track_field = "scope_id" if is_asset else "task_id"
     affected_owners = set()
 
-    # 1. 删除 stat_finger / asset_stat_finger 中精确匹配项
+    # 聚合统计按 name.lower() 大小写不敏感归并，删除时同样使用全词大小写不敏感匹配，避免异大小写指纹删后复活
+    ci_pattern = "^(?:" + "|".join(re.escape(n) for n in names) + ")$"
+    ci_regex = {"$regex": ci_pattern, "$options": "i"}
+
+    # 1. 删除 stat_finger / asset_stat_finger 中大小写不敏感匹配项
     _, sf_owners, _ = _delete_with_owner_tracking(
         f"{prefix}stat_finger",
-        {"name": {"$in": names}},
+        {"$or": [{"name": {"$in": names}}, {"name": ci_regex}]},
         owner_field=owner_field,
         owner_ids=owner_ids,
         track_field=track_field,
@@ -1424,15 +1441,23 @@ def _cascade_delete_stat_fingers_in_side(finger_names, is_asset, owner_ids=None,
     site_col = _db(f"{prefix}site")
     match_site_or = [
         {"finger.name": {"$in": names}},
+        {"finger.name": ci_regex},
         {"finger": {"$in": names}},
+        {"finger": ci_regex},
     ]
     if global_mode:
         q = {"$or": match_site_or}
         for doc in site_col.find(q, {track_field: 1, "_id": 0}):
             if doc.get(track_field):
                 affected_owners.add(str(doc[track_field]))
-        site_col.update_many({"finger.name": {"$in": names}}, {"$pull": {"finger": {"name": {"$in": names}}}})
-        site_col.update_many({"finger": {"$in": names}}, {"$pull": {"finger": {"$in": names}}})
+        site_col.update_many(
+            {"$or": [{"finger.name": {"$in": names}}, {"finger.name": ci_regex}]},
+            {"$pull": {"finger": {"name": ci_regex}}},
+        )
+        site_col.update_many(
+            {"$or": [{"finger": {"$in": names}}, {"finger": ci_regex}]},
+            {"$pull": {"finger": ci_regex}},
+        )
     elif owner_ids:
         for chunk in _chunked(owner_ids):
             q = {"$and": [{owner_field: {"$in": chunk}}, {"$or": match_site_or}]}
@@ -1440,12 +1465,12 @@ def _cascade_delete_stat_fingers_in_side(finger_names, is_asset, owner_ids=None,
                 if doc.get(track_field):
                     affected_owners.add(str(doc[track_field]))
             site_col.update_many(
-                {owner_field: {"$in": chunk}, "finger.name": {"$in": names}},
-                {"$pull": {"finger": {"name": {"$in": names}}}},
+                {owner_field: {"$in": chunk}, "$or": [{"finger.name": {"$in": names}}, {"finger.name": ci_regex}]},
+                {"$pull": {"finger": {"name": ci_regex}}},
             )
             site_col.update_many(
-                {owner_field: {"$in": chunk}, "finger": {"$in": names}},
-                {"$pull": {"finger": {"$in": names}}},
+                {owner_field: {"$in": chunk}, "$or": [{"finger": {"$in": names}}, {"finger": ci_regex}]},
+                {"$pull": {"finger": ci_regex}},
             )
 
     return affected_owners
@@ -2073,14 +2098,26 @@ def _cascade_delete_dimension_records_impl(category, ids_or_keys, source_type, s
                     q_ip = {} if global_mode else {"scope_id": {"$in": scope_id_list}}
                     for doc in _db("asset_ip").find(q_ip, {"ip": 1, "_id": 0}):
                         ip_v = doc.get("ip")
-                        if ip_v and any(ipaddress.ip_address(ip_v) in net for net in cidr_nets if ":" not in ip_v):
-                            target_ips.add(ip_v)
+                        if not ip_v or not isinstance(ip_v, str) or ":" in ip_v:
+                            continue
+                        try:
+                            ip_obj = ipaddress.ip_address(ip_v.strip())
+                        except ValueError:
+                            continue
+                        if any(ip_obj in net for net in cidr_nets):
+                            target_ips.add(ip_v.strip())
                 if global_mode or task_id_list:
                     q_ip = {} if global_mode else {"task_id": {"$in": task_id_list}}
                     for doc in _db("ip").find(q_ip, {"ip": 1, "_id": 0}):
                         ip_v = doc.get("ip")
-                        if ip_v and any(ipaddress.ip_address(ip_v) in net for net in cidr_nets if ":" not in ip_v):
-                            target_ips.add(ip_v)
+                        if not ip_v or not isinstance(ip_v, str) or ":" in ip_v:
+                            continue
+                        try:
+                            ip_obj = ipaddress.ip_address(ip_v.strip())
+                        except ValueError:
+                            continue
+                        if any(ip_obj in net for net in cidr_nets):
+                            target_ips.add(ip_v.strip())
 
             # 直接删除显式选中的 cip / asset_cip 文档（覆盖无关联 ip 文档的孤立 C 段）
             if obj_ids:
@@ -2255,6 +2292,16 @@ def _cascade_delete_dimension_records_impl(category, ids_or_keys, source_type, s
                     track_field="task_id",
                 )
                 affected_tasks.update(t_aff)
+
+        if category == "npoc_service":
+            if affected_scopes:
+                rebuild_scope_derived_collections(
+                    list(affected_scopes), targets=("service",), preserve_existing_npoc=False
+                )
+            if affected_tasks:
+                rebuild_task_derived_collections(
+                    list(affected_tasks), targets=("service",), preserve_existing_npoc=False
+                )
 
         if affected_tasks:
             recalculate_tasks_statistics(list(affected_tasks))

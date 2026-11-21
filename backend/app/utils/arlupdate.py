@@ -116,13 +116,11 @@ def create_index():
             [("scope_id", 1), ("save_date", -1)],
         ],
         "asset_service": [
-            [("scope_id", 1), ("ip", 1), ("port_id", 1)],
             [("scope_id", 1), ("service_info.ip", 1)],
             [("scope_id", 1), ("service_name", 1)],
             [("scope_id", 1), ("save_date", -1)],
         ],
         "service": [
-            [("task_id", 1), ("ip", 1), ("port_id", 1)],
             [("task_id", 1), ("service_name", 1)],
             [("ip", 1), ("port_id", 1)],
         ],
@@ -187,10 +185,12 @@ def create_index():
 
     # 在建立 (task_id, ip, port_id) / (scope_id, ip, port_id) 联合唯一索引前，
     # 先移除旧版 (task_id, service_name) 唯一索引并将存量聚合 service / npoc_service 展开归并为单端点文档，避免 ip:null 误去重
+    unified_service_ready = False
     try:
-        migrate_unified_service_assets()
+        unified_service_ready = bool(migrate_unified_service_assets())
     except Exception as ex:
-        logging.getLogger().warning(f"Failed to run migrate_unified_service_assets before unique index creation: {ex}")
+        logging.getLogger().error(f"Failed to run migrate_unified_service_assets before unique index creation: {ex}", exc_info=True)
+        unified_service_ready = False
 
     # 兜底：创建联合唯一索引，规避高并发下的重复写入冲突
     unique_indexes = {
@@ -198,8 +198,6 @@ def create_index():
         "domain": [("task_id", 1), ("domain", 1)],
         "ip": [("task_id", 1), ("ip", 1)],
         "cert": [("task_id", 1), ("ip", 1), ("port", 1)],
-        "service": [("task_id", 1), ("ip", 1), ("port_id", 1)],
-        "asset_service": [("scope_id", 1), ("ip", 1), ("port_id", 1)],
         "url": [("task_id", 1), ("url", 1)],
         "fileleak": [("task_id", 1), ("site", 1), ("url", 1)],
         "npoc_service": [("task_id", 1), ("target", 1)],
@@ -218,6 +216,13 @@ def create_index():
         "github_triage": [("hash_md5", 1)],
         "github_ignored_repo": [("repo_full_name", 1)],
     }
+    if unified_service_ready:
+        unique_indexes["service"] = [("task_id", 1), ("ip", 1), ("port_id", 1)]
+        unique_indexes["asset_service"] = [("scope_id", 1), ("ip", 1), ("port_id", 1)]
+    else:
+        logging.getLogger().error(
+            "Skipping unique index creation for service/asset_service because migrate_unified_service_assets did not complete; preserving legacy documents."
+        )
 
     def _deduplicate_and_create_unique(col, keys, drop_idx=None):
         import logging
@@ -1774,8 +1779,8 @@ def migrate_unified_service_assets():
     🛡️【Nmap 端口服务与 Python 插件服务单端点融合平滑迁移】
     1. 移除旧版 service 上按 (task_id, service_name) 的唯一索引（允许同任务下多个不同 IP:Port 共享同一 service_name）；
     2. 将存量 service / asset_service 中含 service_info 嵌套数组的聚合文档展开为 (owner_id, ip, port_id) 单端点文档；
-    3. 将存量 npoc_service / asset_npoc_service 文档按 (owner_id, ip, port_id) 合流归并入 service / asset_service（校准 service_name 并保留双来源标签）；
-    4. 同步刷新受影响任务的 statistic.service_cnt。
+    3. 将存量 npoc_service / asset_npoc_service 文档按 (owner_id, ip, port_id) 合流归并入 service / asset_service（校准 service_name 并保留双来源标签与原始发现时间）；
+    4. 采用两阶段安全写入（先 upsert 单端点文档，再仅删除旧版嵌套文档），规避中断丢数，并同步刷新受影响任务的 statistic.service_cnt。
     """
     import logging
     import time
@@ -1787,6 +1792,7 @@ def migrate_unified_service_assets():
         normalize_host,
         normalize_port,
     )
+    from app.utils.time import curr_date_obj, to_datetime_obj
 
     log = logging.getLogger()
 
@@ -1820,88 +1826,142 @@ def migrate_unified_service_assets():
     has_legacy_service = conn_db("service").find_one(legacy_query, {"_id": 1}) is not None
     has_legacy_asset_service = conn_db("asset_service").find_one(legacy_query, {"_id": 1}) is not None
     if sentinel and sentinel.get("status") == "completed" and not has_legacy_service and not has_legacy_asset_service:
-        return
+        return True
 
-    affected_task_ids = set()
-
-    for svc_col_name, npoc_col_name, owner_field in (
-        ("service", "npoc_service", "task_id"),
-        ("asset_service", "asset_npoc_service", "scope_id"),
-    ):
-        svc_col = conn_db(svc_col_name)
-        npoc_col = conn_db(npoc_col_name)
-
-        owner_ids = set()
-        for d in svc_col.find({}, {owner_field: 1, "_id": 0}):
-            if d.get(owner_field):
-                owner_ids.add(str(d[owner_field]))
-        for d in npoc_col.find({}, {owner_field: 1, "_id": 0}):
-            if d.get(owner_field):
-                owner_ids.add(str(d[owner_field]))
-
-        for oid in owner_ids:
-            endpoint_map = {}
-            legacy_ids = []
-            for doc in svc_col.find({owner_field: oid}):
-                top_ip = normalize_host(doc.get("ip"))
-                top_port = normalize_port(doc.get("port_id"))
-                infos = doc.get("service_info")
-                if not top_ip or top_port is None or (isinstance(infos, list) and len(infos) > 1):
-                    legacy_ids.append(doc["_id"])
-                for ep in expand_service_doc_to_endpoints(doc, default_source="nmap"):
-                    key = (ep["ip"], ep["port_id"])
-                    endpoint_map[key] = merge_endpoint_records(endpoint_map.get(key), ep)
-
-            npoc_docs = list(npoc_col.find({owner_field: oid}))
-            for ndoc in npoc_docs:
-                for ep in expand_service_doc_to_endpoints(ndoc, default_source="npoc"):
-                    key = (ep["ip"], ep["port_id"])
-                    endpoint_map[key] = merge_endpoint_records(
-                        endpoint_map.get(key),
-                        ep,
-                        prefer_incoming_service=True,
-                    )
-
-            if not legacy_ids and not npoc_docs:
-                continue
-
-            docs_to_insert = []
-            for (ip_val, port_val), ep_doc in endpoint_map.items():
-                set_doc = dict(ep_doc)
-                set_doc.pop("_id", None)
-                set_doc[owner_field] = oid
-                docs_to_insert.append(set_doc)
-
-            svc_col.delete_many({owner_field: oid})
-            if docs_to_insert:
-                for i in range(0, len(docs_to_insert), 2000):
-                    svc_col.insert_many(docs_to_insert[i:i + 2000], ordered=False)
-
-            if owner_field == "task_id":
-                affected_task_ids.add(oid)
-
-    # 清理残余无有效端点的空旧文档
-    conn_db("service").delete_many(legacy_query)
-    conn_db("asset_service").delete_many(legacy_query)
-
-    # 刷新受影响任务的 statistic.service_cnt
-    task_col = conn_db("task")
-    for tid in affected_task_ids:
-        if ObjectId.is_valid(tid):
-            try:
-                cnt = conn_db("service").count_documents({"task_id": tid})
-                task_col.update_one(
-                    {"_id": ObjectId(tid), "statistic": {"$type": "object"}},
-                    {"$set": {"statistic.service_cnt": cnt}},
-                )
-            except Exception:
-                pass
-
+    now_ts = time.time()
     cfg_col.update_one(
         {"_id": sentinel_id},
-        {"$set": {"status": "completed", "updated_at": time.time(), "migrated_tasks": len(affected_task_ids)}},
+        {"$setOnInsert": {"status": "pending", "updated_at": 0}},
         upsert=True,
     )
+    claim_query = {
+        "_id": sentinel_id,
+        "$or": [
+            {"status": {"$in": ["pending", "failed", "error"]}},
+            {"status": "running", "updated_at": {"$lt": now_ts - 600}},
+        ],
+    }
+    if has_legacy_service or has_legacy_asset_service:
+        claim_query["$or"].append({"status": "completed"})
+
+    claim = cfg_col.update_one(
+        claim_query,
+        {"$set": {"status": "running", "updated_at": now_ts}},
+    )
+    if getattr(claim, "modified_count", 1) == 0:
+        # 另一个进程正在执行迁移时保守返回 False，避免本进程抢建唯一索引误去重未展开旧数据
+        return False
+
+    affected_task_ids = set()
+    now_dt = curr_date_obj()
+
+    try:
+        for svc_col_name, npoc_col_name, owner_field in (
+            ("service", "npoc_service", "task_id"),
+            ("asset_service", "asset_npoc_service", "scope_id"),
+        ):
+            svc_col = conn_db(svc_col_name)
+            npoc_col = conn_db(npoc_col_name)
+            is_asset_col = owner_field == "scope_id"
+
+            owner_ids = set()
+            for d in svc_col.find({}, {owner_field: 1, "_id": 0}):
+                if d.get(owner_field):
+                    owner_ids.add(str(d[owner_field]))
+            for d in npoc_col.find({}, {owner_field: 1, "_id": 0}):
+                if d.get(owner_field):
+                    owner_ids.add(str(d[owner_field]))
+
+            for oid in owner_ids:
+                endpoint_map = {}
+                legacy_ids = []
+                for doc in svc_col.find({owner_field: oid}):
+                    top_ip = normalize_host(doc.get("ip"))
+                    top_port = normalize_port(doc.get("port_id"))
+                    infos = doc.get("service_info")
+                    if not top_ip or top_port is None or (isinstance(infos, list) and len(infos) > 1):
+                        legacy_ids.append(doc["_id"])
+                    for ep in expand_service_doc_to_endpoints(doc, default_source="nmap"):
+                        key = (ep["ip"], ep["port_id"])
+                        endpoint_map[key] = merge_endpoint_records(endpoint_map.get(key), ep)
+
+                npoc_docs = list(npoc_col.find({owner_field: oid}))
+                for ndoc in npoc_docs:
+                    for ep in expand_service_doc_to_endpoints(ndoc, default_source="npoc"):
+                        key = (ep["ip"], ep["port_id"])
+                        endpoint_map[key] = merge_endpoint_records(
+                            endpoint_map.get(key),
+                            ep,
+                            prefer_incoming_service=True,
+                        )
+
+                if not legacy_ids and not npoc_docs:
+                    continue
+
+                # 阶段一：两阶段安全写入——先幂等 upsert 所有合并后的单端点文档，保留最早 save_date
+                bulk_ops = []
+                for (ip_val, port_val), ep_doc in endpoint_map.items():
+                    set_doc = dict(ep_doc)
+                    set_doc.pop("_id", None)
+                    set_doc[owner_field] = oid
+                    saved_dt = to_datetime_obj(set_doc.get("save_date")) or now_dt
+                    set_doc["save_date"] = saved_dt
+                    if is_asset_col:
+                        upd_dt = to_datetime_obj(set_doc.get("update_date")) or saved_dt
+                        set_doc["update_date"] = upd_dt
+                    bulk_ops.append(
+                        UpdateOne(
+                            {owner_field: oid, "ip": ip_val, "port_id": port_val},
+                            {"$set": set_doc},
+                            upsert=True,
+                        )
+                    )
+
+                for i in range(0, len(bulk_ops), 1000):
+                    svc_col.bulk_write(bulk_ops[i:i + 1000], ordered=False)
+
+                # 阶段二：新单端点文档确认落盘后，再清理被展开的旧嵌套聚合文档
+                if legacy_ids:
+                    for i in range(0, len(legacy_ids), 1000):
+                        svc_col.delete_many({"_id": {"$in": legacy_ids[i:i + 1000]}})
+
+                if owner_field == "task_id":
+                    affected_task_ids.add(oid)
+
+        # 清理残余无有效端点的空旧文档
+        conn_db("service").delete_many(legacy_query)
+        conn_db("asset_service").delete_many(legacy_query)
+
+        # 刷新受影响任务的 statistic.service_cnt
+        task_col = conn_db("task")
+        for tid in affected_task_ids:
+            if ObjectId.is_valid(tid):
+                try:
+                    cnt = conn_db("service").count_documents({"task_id": tid})
+                    task_col.update_one(
+                        {"_id": ObjectId(tid), "statistic": {"$type": "object"}},
+                        {"$set": {"statistic.service_cnt": cnt}},
+                    )
+                except Exception:
+                    pass
+
+        cfg_col.update_one(
+            {"_id": sentinel_id},
+            {"$set": {"status": "completed", "updated_at": time.time(), "migrated_tasks": len(affected_task_ids)}},
+            upsert=True,
+        )
+        return True
+    except Exception as ex:
+        log.error(f"migrate_unified_service_assets failed: {ex}", exc_info=True)
+        try:
+            cfg_col.update_one(
+                {"_id": sentinel_id},
+                {"$set": {"status": "failed", "updated_at": time.time(), "error": str(ex)}},
+                upsert=True,
+            )
+        except Exception:
+            pass
+        return False
 
 
 def migrate_asset_discovery_timestamps(run_async=False, batch_size=500, pause_seconds=0.02):
@@ -2087,6 +2147,28 @@ def migrate_asset_discovery_timestamps(run_async=False, batch_size=500, pause_se
     return _execute()
 
 
+def start_deferred_asset_migrations():
+    """
+    以单一后台守护线程串行编排派生表自愈与 26 集合发现时间归一化迁移：
+    先避开 gunicorn --preload fork 窗口，再顺序执行自愈重建与时间戳归一化，规避双后台线程并发读写同一集合的竞态。
+    """
+    def _runner():
+        import logging
+        import time
+        log = logging.getLogger()
+        time.sleep(3)
+        for name, fn in (
+            ("migrate_heal_cascade_and_derived_assets", lambda: migrate_heal_cascade_and_derived_assets(run_in_thread=False)),
+            ("migrate_asset_discovery_timestamps", lambda: migrate_asset_discovery_timestamps(run_async=False)),
+        ):
+            try:
+                fn()
+            except Exception as ex:
+                log.error(f"Deferred startup migration '{name}' failed: {ex}", exc_info=True)
+
+    threading.Thread(target=_runner, name="arl-deferred-migrations", daemon=True).start()
+
+
 def arl_update():
     if is_run_flask_routes():
         return
@@ -2166,9 +2248,7 @@ def arl_update():
         _run_step("ensure_proxy_config_schema", ensure_proxy_config_schema)
         _run_step("migrate_nuclei_push_options", migrate_nuclei_push_options)
         _run_step("migrate_nuclei_result_template_source", migrate_nuclei_result_template_source)
-        _run_step("migrate_unified_service_assets", migrate_unified_service_assets)
-        _run_step("migrate_heal_cascade_and_derived_assets", migrate_heal_cascade_and_derived_assets)
-        _run_step("migrate_asset_discovery_timestamps", lambda: migrate_asset_discovery_timestamps(run_async=True))
+        _run_step("start_deferred_asset_migrations", start_deferred_asset_migrations)
         db.update_one({"_id": "init_lock"}, {"$set": {"status": "idle", "last_completed_at": time.time()}})
     except Exception as e:
         import logging

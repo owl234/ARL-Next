@@ -6,6 +6,7 @@ from app.modules import ErrorMsg
 from app import utils
 from app.services.service_fusion import (
     build_service_endpoint_doc,
+    build_service_target,
     choose_service_name,
     format_service_endpoint_for_return,
     merge_sources,
@@ -119,7 +120,7 @@ class ServiceResource(ARLResource):
                 },
                 {
                     "$addFields": {
-                        "update_date": {"$ifNull": ["$raw_update_date", "$latest_save_date"]},
+                        "update_date": {"$max": ["$raw_update_date", "$latest_save_date"]},
                     }
                 },
             ]
@@ -140,7 +141,7 @@ class ServiceResource(ARLResource):
             pipeline.append({"$skip": size * (page - 1)})
             pipeline.append({"$limit": size})
 
-            raw_grouped = list(conn(collection).aggregate(pipeline))
+            raw_grouped = list(self._aggregate(conn(collection), pipeline))
             merged_items = []
             for grp in raw_grouped:
                 ip_val = grp.get("ip")
@@ -204,7 +205,7 @@ class ServiceResource(ARLResource):
             if post_save_date_filter is not None:
                 count_pipeline.append({"$match": {"save_date": post_save_date_filter}})
             count_pipeline.append({"$group": {"_id": None, "total": {"$sum": 1}}})
-            agg_cnt = list(conn(collection).aggregate(count_pipeline))
+            agg_cnt = list(self._aggregate(conn(collection), count_pipeline))
             count = agg_cnt[0]["total"] if agg_cnt else 0
             items = self.build_return_items(merged_items)
             resp_query = dict(query)
@@ -243,6 +244,53 @@ class ServiceResource(ARLResource):
             "query": resp_query,
             "code": 200,
         }
+
+    def send_export_file(self, args, _type):
+        """
+        全局 service 导出在携带 save_date 筛选时与列表口径保持一致（按跨任务 $min(save_date) 聚合后过滤）。
+        """
+        if _type == "service":
+            query = self._build_export_query(args, _type)
+            if "task_id" not in query and "save_date" in query:
+                post_save_date_filter = query.pop("save_date")
+                pipeline = [
+                    {"$match": dict(query)},
+                    {"$sort": {"_id": -1}},
+                    {
+                        "$group": {
+                            "_id": {
+                                "ip": {"$ifNull": ["$ip", "$_id"]},
+                                "port_id": {"$ifNull": ["$port_id", 0]},
+                            },
+                            "ip": {"$first": "$ip"},
+                            "port_id": {"$first": "$port_id"},
+                            "service_names": {"$push": "$service_name"},
+                            "targets": {"$push": "$target"},
+                            "service_info": {"$first": "$service_info"},
+                            "save_date": {"$min": "$save_date"},
+                        }
+                    },
+                    {"$match": {"save_date": post_save_date_filter}},
+                ]
+                items_set = set()
+                for grp in self._aggregate(conn(_type), pipeline):
+                    ip_val = grp.get("ip")
+                    port_val = grp.get("port_id")
+                    best_target = next((str(t).strip() for t in (grp.get("targets") or []) if t and str(t).strip()), "")
+                    if best_target:
+                        items_set.add(best_target)
+                    elif ip_val and port_val is not None:
+                        best_svc = ""
+                        for sn in (grp.get("service_names") or []):
+                            best_svc = choose_service_name(best_svc, sn, prefer_new=False)
+                        items_set.add(build_service_target(best_svc, ip_val, port_val))
+                    elif isinstance(grp.get("service_info"), list):
+                        svc = (grp.get("service_names") or ["tcp"])[0] or "tcp"
+                        for info in grp["service_info"]:
+                            if isinstance(info, dict) and info.get("ip") and info.get("port_id") is not None:
+                                items_set.add(f"{svc}://{info['ip']}:{info['port_id']}")
+                return self.send_file(items_set, _type)
+        return super().send_export_file(args, _type)
 
 
 @ns.route('/')

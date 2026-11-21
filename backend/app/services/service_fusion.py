@@ -202,7 +202,11 @@ def expand_service_doc_to_endpoints(doc: dict, default_source: str = "nmap") -> 
     owner_field = "scope_id" if "scope_id" in doc else ("task_id" if "task_id" in doc else None)
     owner_id = doc.get(owner_field) if owner_field else None
     save_date = doc.get("save_date")
+    if save_date is None or save_date == "":
+        save_date = utils.to_datetime_obj(None, fallback_oid=doc.get("_id"))
     update_date = doc.get("update_date")
+    if owner_field == "scope_id" and (update_date is None or update_date == "") and save_date is not None:
+        update_date = save_date
     extra = {}
     if "change_status" in doc:
         extra["change_status"] = doc["change_status"]

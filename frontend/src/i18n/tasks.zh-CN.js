@@ -810,8 +810,8 @@ export default {
   "alsoDeleteExclusiveSyncedAssets": "同时清理已同步至资产组的独占资产（高风险，默认关闭）",
   "alsoDeleteExclusiveSyncedAssetsHint": "默认保留资产组台账；仅当勾选此项且勾选删除任务数据时，才删除资产组中仅由被删任务独占产出的记录并重算派生统计。",
   "taskDeleteCascadeHint": "若该任务已显式绑定资产组，删除记录将同步清理所属资产组及关联任务中的对应项；独立任务仅清理本任务数据。",
-  "pauseMonitoringTaskTitle": "暂停持续监控计划确认",
-  "pauseMonitoringTaskConfirmDesc": "确认暂停监控计划「{name}」吗？若存在该计划派生且进行中或排队中的监控任务，将同步终止并标记为已停止，历史已完成任务与资产组台账保持保留。",
+  "pauseMonitoringTaskTitle": "停止持续监控计划确认",
+  "pauseMonitoringTaskConfirmDesc": "确认停止监控计划「{name}」吗？若存在该计划派生且进行中或排队中的监控任务，将同步终止并标记为已停止，历史已完成任务与资产组台账保持保留。",
   "deleteMonitoringTaskStopsRunningDesc": "确认删除监控计划「{name}」吗？该计划及其调度配置将被永久移除，进行中或排队中的派生监控任务将同步终止，历史已完成任务与已入库资产保持保留。",
   "monitorBatchStopDeleteWarning": "操作将同步终止所选监控计划下所有进行中或排队中的派生任务，历史已完成任务与已入库资产保持保留。",
   "selectedMonitoringPlansListHeading": "本次受影响的监控计划清单：",
@@ -850,5 +850,7 @@ export default {
   "selectedSchedulesListHeading": "本次受影响的调度任务清单：",
   "runScheduledTaskNowTitle": "立即下发计划任务",
   "runScheduledTaskNowConfirmDesc": "确认将计划任务「{name}」派发进入调度队列吗？",
-  "activeScheduled": "进行中 / 已计划"
+  "activeScheduled": "进行中 / 已计划",
+  "noEligibleSchedulesForAction": "所选 {count} 项均不满足「{action}」状态条件，已取消操作",
+  "batchActionSkippedNotice": "（已自动跳过 {skipped} 项不满足状态条件的任务）"
 };

@@ -1476,7 +1476,7 @@ const tabConfig = reactive({
 // 任务视图查询任务结果集合；全局查看与同页其他页签一致，使用资产组集合。
 const resolveAssetEndpoint = (config) => (taskId.value ? config?.url : config?.globalUrl || config?.url);
 
-// 任务集合中的记录可按 ID 删除；指纹统计为聚合结果，全局视图为资产组集合。
+// 仅任务详情上下文（存在 taskId）允许按维度发起批量删除；全局查看回退资产组集合只读展示。
 const canDeleteAssets = computed(() => !!taskId.value && !!tabConfig[effectiveTab.value]?.deleteUrl);
 const canSelectAssets = computed(() => canDeleteAssets.value);
 const getAssetRowKey = (record) => record?._id || record?.id || record?.name || record?.cidr_ip;
@@ -1984,6 +1984,12 @@ const openRiskModal = async () => {
     return;
   }
 
+  const selectedIds = hasSelected.value ? selectedRowKeys.value.filter(k => k != null && k !== '') : [];
+  if (selectedIds.length > 500) {
+    message.warning(taskText('assets.maxBatchDeleteLimitNotice'));
+    return;
+  }
+
   riskForm.policy_id = undefined;
   riskForm.name = '';
   currentResultSetId.value = '';
@@ -1993,14 +1999,17 @@ const openRiskModal = async () => {
   try {
     const policyPromise = request.get('/policy/', { params: { size: 1000 } });
 
-    const setParams = {};
-    if (hasSelected.value) {
-      setParams._id = selectedRowKeys.value.join(',');
+    let resultSetPromise;
+    if (selectedIds.length > 0) {
+      const payload = { _id: selectedIds };
+      if (taskId.value) payload.task_id = taskId.value;
+      resultSetPromise = request.post('/site/save_result_set/', payload);
     } else {
+      const setParams = {};
       if (taskId.value) setParams.task_id = taskId.value;
       Object.assign(setParams, buildAssetFilterParams(searchForm.value, tabConfig[effectiveTab.value].searchFields));
+      resultSetPromise = request.get('/site/save_result_set/', { params: setParams });
     }
-    const resultSetPromise = request.get('/site/save_result_set/', { params: setParams });
 
     const [policyRes, resultSetRes] = await Promise.all([policyPromise, resultSetPromise]);
 
@@ -2011,11 +2020,14 @@ const openRiskModal = async () => {
       }));
     }
 
-    if (resultSetRes.code === 200) {
-      currentResultSetId.value = resultSetRes.data.result_set_id;
-      if (resultSetRes.data.result_total !== undefined) {
-        targetCount.value = resultSetRes.data.result_total;
-      }
+    if (resultSetRes.code !== 200 || !resultSetRes.data?.result_set_id) {
+      message.error({ content: resultSetRes.message || taskText('tasks.failedToPrepareDataCheckTheConsole'), key: 'risk_prepare', duration: 2 });
+      return;
+    }
+
+    currentResultSetId.value = resultSetRes.data.result_set_id;
+    if (resultSetRes.data.result_total !== undefined) {
+      targetCount.value = resultSetRes.data.result_total;
     }
 
     message.success({ content: taskText('tasks.dataIsReady'), key: 'risk_prepare', duration: 2 });

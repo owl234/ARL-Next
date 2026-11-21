@@ -23,7 +23,7 @@
 
 ---
 
-## ⚡ 10 秒极速接入（按你的客户端选择）
+## ⚡ 快速接入（按你的客户端选择）
 
 > [!TIP]
 > **💡 最省心的做法**：登录 ARL-Next Web 控制台，进入左侧菜单 **「MCP 中心」**（或点击顶部导航栏右上角 **「MCP」**），可按需签发最小权限的 MCP 专用密钥（支持 `asset:read` 只读情报与 `task:dispatch` 任务调度分级授权）、配置单工具开关与速率配额、查看调用审计日志，并一键复制或导出预生成配置。若手动配置，请直接对号入座复制下方卡片：
@@ -48,8 +48,8 @@
     }
   }
   ```
-  *(注：若客户端不支持自定义 Headers，可直接使用 `"url": "https://arl.example.com:5173/mcp/sse?token=<Token>"`)*
-- **备选配置：私网 IP / 自签证书环境 (Stdio 桥接)** *(自动加载自签证书，规避 Node.js TLS 拦截)*：
+  *(注：若客户端不支持自定义 Headers，仅建议使用最小权限的 MCP 专用密钥配合 `"url": "https://arl.example.com:5173/mcp/sse?token=<MCP_Key>"`，优先仍推荐使用请求头避免凭据进入网关日志)*
+- **备选配置：私网 IP / 自签证书环境 (Stdio 桥接)** *(复制服务端 `certs/arl.crt` 到本地并配置 `ARL_CA_BUNDLE`，在保留证书链校验的同时规避 Node.js TLS 拦截)*：
   ```json
   {
     "mcpServers": {
@@ -57,8 +57,9 @@
         "command": "python3",
         "args": ["/绝对路径/ARL-Next/mcp-server/server.py"],
         "env": {
-          "ARL_HOST": "https://192.168.1.100:5173",
-          "ARL_TOKEN": "<从 ARL 控制台复制的 Token>"
+          "ARL_HOST": "https://192.0.2.100:5173",
+          "ARL_TOKEN": "<从 ARL 控制台复制的 Token>",
+          "ARL_CA_BUNDLE": "/绝对路径/arl.crt"
         }
       }
     }
@@ -93,8 +94,9 @@
         "command": "python3",
         "args": ["/绝对路径/ARL-Next/mcp-server/server.py"],
         "env": {
-          "ARL_HOST": "https://192.168.1.100:5173",
-          "ARL_TOKEN": "<从 ARL 控制台复制的 Token>"
+          "ARL_HOST": "https://192.0.2.100:5173",
+          "ARL_TOKEN": "<从 ARL 控制台复制的 Token>",
+          "ARL_CA_BUNDLE": "/绝对路径/arl.crt"
         }
       }
     }
@@ -111,7 +113,7 @@
 claude mcp add -s user arl-next \
   python3 "$(pwd)/mcp-server/server.py" \
   --env ARL_HOST="https://arl.example.com:5173" \
-  --env ARL_TOKEN="<从 ARL 控制台或 ARL_auth.md 获取的 Token>"
+  --env ARL_TOKEN="<从 ARL 控制台「MCP 中心」获取的 Token>"
 ```
 
 ---
@@ -134,11 +136,11 @@ ARL-Next MCP 注册了 6 项核心标准化工具，默认开启只读情报查�
 | 工具名称 | 核心职责 | 默认权限 | 典型应用场景 |
 | :--- | :--- | :--- | :--- |
 | `get_asset_profile` | 五维资产画像下钻 | **只读（开放）** | 查询指定域名、IP 或 URL 的端口服务、Web 指纹、证书、历史漏洞及敏感泄露 |
-| `get_enterprise_profile` | 企业全景生态画像 | **只读（开放）** | 查询企业组织架构、ICP 备案域名、移动 APP、小程序、公众号、微博及投资控股关系 |
-| `search_assets` | 全库条件检索 | **只读（开放）** | 按关键字匹配站点、域名、IP 或漏洞资产 |
-| `get_task_status` | 任务状态跟踪 | **只读（开放）** | 查询指定 24 位任务 ID 的实时进度百分比与统计结果 |
+| `get_enterprise_profile` | 企业全景生态画像 | **只读（开放）** | 查询企业组织架构、ICP 备案域名、移动 APP、小程序、快应用、公众号、微博及投资控股关系 |
+| `search_assets` | 条件资产检索 | **只读（开放）** | 按关键字在指定单类集合（`site`/`domain`/`ip`/`vuln`）中检索匹配资产（受 `max_search_limit` 截断上限约束） |
+| `get_task_status` | 任务状态跟踪 | **只读（开放）** | 查询指定 24 位任务 ID 的执行状态、起止时间与资产统计摘要 |
 | `create_scan_task` | 下发扫描任务 | **受控（需授权开启）** | 驱动 ARL 创建常规资产扫描或风险巡航任务 |
-| `stop_scan_task` | 终止扫描任务 | **受控（需授权开启）** | 终止正在排队或执行中的特定任务 |
+| `stop_scan_task` | 终止扫描任务 | **受控（需授权开启）** | 终止排队中或进行中的特定任务 |
 
 ### 2. 典型 Agent 交互指令示例
 
@@ -165,7 +167,7 @@ ARL-Next MCP 注册了 6 项核心标准化工具，默认开启只读情报查�
 - **🔴 症状**：Cursor / Claude Desktop 无法连接，错误日志提示证书不受信任。
 - **🔍 根因**：客户端运行于 Electron / Node.js 体系，默认严格拦截未受系统信任机构签名的自签名证书或局域网 IP。
 - **⚡ 解决（推荐）**：
-  1. **首选方案**：改用各客户端卡片中的 **「本地 Stdio 桥接」** 模式。导出的 Python 脚本已内置针对自签证书与私网 IP 的安全兼容校验，零证书拦截报错。
+  1. **首选方案**：改用各客户端卡片中的 **「本地 Stdio 桥接」** 模式。同机回环部署时脚本可自动发现本地 `certs/arl.crt`；远程 IP 自签部署需将服务端证书复制到客户端并配置 `ARL_CA_BUNDLE`（保留证书链校验，自动跳过缺失 IP SAN 的主机名匹配）。
   2. **若坚持远程 SSE 直连**：需将服务端的 CA 证书（`certs/arl.crt`）导入客户端操作系统的受信任根证书库（macOS 钥匙串设置为“始终信任” / Windows 受信任的根证书颁发机构），使系统网络栈天然信任。（注：请勿在 `mcp.json` 中配置 `NODE_TLS_REJECT_UNAUTHORIZED`，SSE 模式下不会被识别）。
 
 ### Q2: 接口调用返回 `401 Unauthorized` 或 `Invalid or expired token`
@@ -188,7 +190,7 @@ ARL-Next MCP 注册了 6 项核心标准化工具，默认开启只读情报查�
 ## <span id="architecture"></span><details><summary><b>⚙️ 深入了解：底层架构设计哲学与证书细节（点击展开）</b></summary>
 
 ### 1. 独立异步微服务解耦长连接
-ARL-Next 主 Web API 采用 Gunicorn 多进程线程池模型（16 线程），若直接承载持久化 SSE 长连接，几个 Agent 连接即可耗尽 Web 线程池导致控制台瘫痪。为此，ARL-Next 设计了独立的 `arl-mcp` 异步微服务容器（基于 Python 3.13 原生 `asyncio`），内存占用仅约 60MB，与主业务线程池物理隔离，支持毫秒级握手与高并发事件流分发。
+ARL-Next 主 Web API 采用 Gunicorn 多进程线程池模型（16 线程），若直接承载持久化 SSE 长连接，几个 Agent 连接即可耗尽 Web 线程池导致控制台响应受阻。为此，ARL-Next 设计了独立的 `arl-mcp` 异步微服务容器（基于 Python 3.13 原生 `asyncio`），内存占用仅约 60MB，与主业务线程池物理隔离，支持低延迟握手与高并发事件流分发。
 
 ### 2. 紧凑数据递归剪枝（Context-Efficient）
 为规避 Agent 上下文 Token 的无效消耗，MCP 服务端与客户端内置递归剪枝算法：
@@ -200,7 +202,7 @@ ARL-Next 主 Web API 采用 Gunicorn 多进程线程池模型（16 线程），�
 
 | 部署形态 | `ARL_HOST` 取值 | 证书校验逻辑 |
 | :--- | :--- | :--- |
-| **客户端与服务端同机** | `https://127.0.0.1:5173` | **无需配置**。脚本检测到 `certs/arl.crt`（或 `ARL_auth.md` 记录的路径）即自动信任 |
+| **客户端与服务端同机** | `https://127.0.0.1:5173` | **无需配置**。脚本检测到本地 `certs/arl.crt` 即自动信任 |
 | **已配置受信任公共证书** | `https://arl.example.com` | **无需配置**。完整校验证书链与主机名 |
 | **远程自签部署（经 IP 访问）** | `https://<服务器IP>:5173` | 将服务端证书复制到客户端后设置 `ARL_CA_BUNDLE=/绝对路径/arl.crt` |
 

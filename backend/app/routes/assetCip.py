@@ -72,7 +72,7 @@ class ARLAssetCip(ARLResource):
             {"$limit": size}
         ]
         
-        result = list(utils.conn_db('asset_cip').aggregate(pipeline))
+        result = list(self._aggregate(utils.conn_db('asset_cip'), pipeline))
         
         # 4. 计算总数
         if not query:

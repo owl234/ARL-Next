@@ -60,7 +60,7 @@ class ARLStatFingerprint(ARLResource):
                 "raw_update_date": {"$max": "$update_date"},
             }},
             {"$addFields": {
-                "update_date": {"$ifNull": ["$raw_update_date", "$latest_save_date"]},
+                "update_date": {"$max": ["$raw_update_date", "$latest_save_date"]},
             }},
         ]
         if post_save_date_filter is not None:
@@ -79,7 +79,7 @@ class ARLStatFingerprint(ARLResource):
             {"$skip": (page - 1) * size},
             {"$limit": size}
         ])
-        raw_items = list(utils.conn_db('stat_finger').aggregate(pipeline))
+        raw_items = list(self._aggregate(utils.conn_db('stat_finger'), pipeline))
         items = self.build_return_items(raw_items)
 
         # 计算去重后的指纹总数（与 post-group 时间筛选严格一致）
@@ -89,7 +89,7 @@ class ARLStatFingerprint(ARLResource):
         ]
         if post_save_date_filter is not None:
             count_pipeline.append({"$match": {"save_date": post_save_date_filter}})
-        total = len(list(utils.conn_db('stat_finger').aggregate(count_pipeline)))
+        total = len(list(self._aggregate(utils.conn_db('stat_finger'), count_pipeline)))
 
         return {
             "page": page,

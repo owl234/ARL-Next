@@ -89,14 +89,27 @@ def _match_simple_query(doc, query):
             continue
         actual = doc.get(k)
         if isinstance(v, dict):
-            if "$regex" in v:
-                if not isinstance(actual, str) or not re.search(v["$regex"], actual):
+            for op, operand in v.items():
+                if op == "$regex":
+                    if not isinstance(actual, str) or not re.search(operand, actual):
+                        return False
+                elif op == "$in":
+                    if actual not in operand:
+                        return False
+                elif op == "$gte":
+                    if actual is None or actual < operand:
+                        return False
+                elif op == "$gt":
+                    if actual is None or actual <= operand:
+                        return False
+                elif op == "$lte":
+                    if actual is None or actual > operand:
+                        return False
+                elif op == "$lt":
+                    if actual is None or actual >= operand:
+                        return False
+                else:
                     return False
-            elif "$in" in v:
-                if actual not in v["$in"]:
-                    return False
-            else:
-                return False
         elif actual != v:
             return False
     return True
@@ -196,9 +209,11 @@ class TestWebSiteFetchSiteCapture(unittest.TestCase):
 
 class TestSyncAssetScreenshotPreservation(unittest.TestCase):
     def test_sync_preserves_existing_screenshot_when_new_scan_has_empty_screenshot(self):
+        scope_oid = ObjectId()
+        scope_id = str(scope_oid)
         old_doc = {
             "_id": ObjectId(),
-            "scope_id": "scope1",
+            "scope_id": scope_id,
             "site": "https://app.example.com",
             "task_id": "old_task_111",
             "title": "Portal",
@@ -218,9 +233,17 @@ class TestSyncAssetScreenshotPreservation(unittest.TestCase):
             "screenshot": "",
         }
         asset_site_col = _FakeCollection(docs=[old_doc])
-        syncer = SyncAsset(task_id="new_task_222", scope_id="scope1", update_flag=True)
+        asset_scope_col = _FakeCollection(docs=[{"_id": scope_oid, "name": "scope1"}])
+        syncer = SyncAsset(task_id="new_task_222", scope_id=scope_id, update_flag=True)
 
-        with patch("app.services.syncAsset.conn", side_effect=lambda name: asset_site_col if name == "asset_site" else _FakeCollection()):
+        def _fake_conn(name):
+            if name == "asset_site":
+                return asset_site_col
+            if name == "asset_scope":
+                return asset_scope_col
+            return _FakeCollection()
+
+        with patch("app.services.syncAsset.conn", side_effect=_fake_conn):
             syncer._process_sync_chunk("site", "asset_site", [new_doc])
 
         self.assertEqual(len(asset_site_col.bulk_ops), 1)
@@ -229,9 +252,11 @@ class TestSyncAssetScreenshotPreservation(unittest.TestCase):
         self.assertEqual(replaced["task_id"], "new_task_222")
 
     def test_sync_overwrites_screenshot_when_new_scan_captures_fresh_screenshot(self):
+        scope_oid = ObjectId()
+        scope_id = str(scope_oid)
         old_doc = {
             "_id": ObjectId(),
-            "scope_id": "scope1",
+            "scope_id": scope_id,
             "site": "https://app.example.com",
             "task_id": "old_task_111",
             "title": "Portal",
@@ -251,9 +276,17 @@ class TestSyncAssetScreenshotPreservation(unittest.TestCase):
             "screenshot": "/image/new_task_222/https_app.example.com.jpg",
         }
         asset_site_col = _FakeCollection(docs=[old_doc])
-        syncer = SyncAsset(task_id="new_task_222", scope_id="scope1", update_flag=True)
+        asset_scope_col = _FakeCollection(docs=[{"_id": scope_oid, "name": "scope1"}])
+        syncer = SyncAsset(task_id="new_task_222", scope_id=scope_id, update_flag=True)
 
-        with patch("app.services.syncAsset.conn", side_effect=lambda name: asset_site_col if name == "asset_site" else _FakeCollection()):
+        def _fake_conn(name):
+            if name == "asset_site":
+                return asset_site_col
+            if name == "asset_scope":
+                return asset_scope_col
+            return _FakeCollection()
+
+        with patch("app.services.syncAsset.conn", side_effect=_fake_conn):
             syncer._process_sync_chunk("site", "asset_site", [new_doc])
 
         replaced = asset_site_col.bulk_ops[0]._doc

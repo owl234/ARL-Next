@@ -68,7 +68,7 @@ class ARLAssetStatFinger(ARLResource):
                 "raw_update_date": {"$max": "$update_date"},
             }},
             {"$addFields": {
-                "update_date": {"$ifNull": ["$raw_update_date", "$latest_save_date"]},
+                "update_date": {"$max": ["$raw_update_date", "$latest_save_date"]},
             }},
         ]
         if post_match:
@@ -85,7 +85,7 @@ class ARLAssetStatFinger(ARLResource):
             {"$skip": (page - 1) * size},
             {"$limit": size}
         ])
-        raw_items = list(utils.conn_db('asset_stat_finger').aggregate(pipeline))
+        raw_items = list(self._aggregate(utils.conn_db('asset_stat_finger'), pipeline))
         items = self.build_return_items(raw_items)
 
         count_pipeline = [
@@ -97,12 +97,12 @@ class ARLAssetStatFinger(ARLResource):
                 "raw_update_date": {"$max": "$update_date"},
             }},
             {"$addFields": {
-                "update_date": {"$ifNull": ["$raw_update_date", "$latest_save_date"]},
+                "update_date": {"$max": ["$raw_update_date", "$latest_save_date"]},
             }},
         ]
         if post_match:
             count_pipeline.append({"$match": post_match})
-        total = len(list(utils.conn_db('asset_stat_finger').aggregate(count_pipeline)))
+        total = len(list(self._aggregate(utils.conn_db('asset_stat_finger'), count_pipeline)))
 
         return {
             "page": page,

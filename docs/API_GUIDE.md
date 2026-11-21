@@ -35,7 +35,7 @@
   ```http
   Token: <your-token>
   ```
-- **URL 中不接受账号凭据**：`?token=` 已停用，避免完整账号凭据进入网关和代理日志。受保护接口的认证拦截返回 HTTP 401 与 JSON `code: 401`；其他存量业务错误仍应检查 JSON `code`。
+- **URL 中不接受账号凭据**：所有 `/api/*` REST 接口已停用 `?token=`，避免完整账号凭据进入网关和代理日志（`/mcp/sse` 仅建议配合专用受限 MCP Key 且优先使用请求头）。受保护接口的认证拦截返回 HTTP 401 与 JSON `code: 401`；其他存量业务错误仍应检查 JSON `code`。
 - **会话与迁移**：登录/刷新生成密码学随机令牌，有效期 24 小时；旧会话迁移时仅补一次 24 小时到期时间，重复启动不会续期。旧 MD5 密码在成功登录时升级为 scrypt，升级不重置已有密码。新建/重置账号不再使用固定初始密码；新密码长度为 12–1024 个字符。长期集成可配置独立的全权限 `API_KEY`，并在 MCP 客户端通过 `ARL_TOKEN` 使用；该 Key 仍需按管理制度轮换。
 - **登录限速**：后端使用 MongoDB 原子计数，单账号每 5 分钟最多 10 次尝试，成功后清除账号计数；每个后端连接地址每分钟最多 60 次。生产网关另按实际客户端 IP 限制为每分钟 5 次、突发 5 次。超限返回 HTTP 429；后端同时提供 `Retry-After`。代理层限速不依赖客户端提供的转发头。
 - **截图与文件**：截图需要同样的 Header 鉴权，前端获取 Blob 后显示并回收 URL。Nuclei 导出使用 Header 下载。大文件备份先通过已认证的 `POST /api/backup/download_ticket` 提交 `{"filename":"arl_backup_....tar.gz"}`，然后以 `GET /api/backup/download/<filename>?ticket=<ticket>` 下载。票据有效期 60 秒、仅限该文件、原子消费一次；账号登出、刷新令牌或 API Key 轮换后失效。票据不能访问其他 API；下载中断后重新申请票据。
@@ -84,7 +84,7 @@
 | **原位补全缺失详情** | `POST /api/icp/backfill_details/<task_id>` | URL 路径参数：`task_id`；可选 JSON：`{"query_types": ["app", "mapp", "kapp"]}` | 仅允许终态任务；取消单批 100 条截断上限，原位补全 `serviceName` 为空的条目（对 `dataId=0` 或已轮换失效记录按备案号重刷最新 `dataId`），并执行跨源同名合并与统计校准，不新建任务 |
 | **删除任务** | `POST /api/task/delete/` | JSON：`{"task_id": ["<task_id>"], "del_task_data": false, "del_synced_asset": false}` | ⚠️ **前置条件约束**：仅允许删除处于 `done`、`stop` 或 `error` 结束态的任务；进行中任务将返回错误码 `104`。`del_synced_asset` 默认为 `false`（保留资产组台账），仅在同时指定 `del_task_data: true` 时生效，清理仅由被删任务独占同步至资产组的记录并重算派生统计 |
 | **重启任务** | `POST /api/task/restart/` | JSON：`{"task_id": ["<task_id>"]}` | 仅允许重启已结束的任务 |
-| **立即执行计划任务** | `POST /api/task_schedule/run/` | JSON：`{"_id": ["<schedule_id>"]}` | 立即触发所选扫描计划任务派发进入调度队列，并递增 `run_number`、刷新 `last_run_date`（周期计划处于 `scheduled` 时同步重算 `next_run_date`） |
+| **立即执行计划任务** | `POST /api/task_schedule/run/` | JSON：`{"_id": ["<schedule_id>"]}` | 立即将所选扫描计划任务派发进入调度队列（不限当前计划状态），派发成功后原子递增 `run_number` 并刷新 `last_run_date`（周期计划处于 `scheduled` 时同步重算 `next_run_date`）；空列表或非法 ID 返回业务错误 |
 
 ### 新建任务关联资产组
 
@@ -141,9 +141,9 @@
 
 ### 任务生命周期与删除最佳实践
 
-若需通过自动化脚本删除正在执行中的任务，必须严格执行两阶段操作：
+若需通过自动化脚本删除进行中的任务，必须严格执行两阶段操作：
 1. 先调用 `GET /api/task/stop/<task_id>` 将任务终止至 `stop` 状态；
-2. 校验任务状态确认进入终态后，再调用 `POST /api/task/delete/` 提交删除。直接对运行态任务请求删除将被服务端拒绝并返回 `{"code": 104, "message": "任务运行中"}`。
+2. 校验任务状态确认进入终态后，再调用 `POST /api/task/delete/` 提交删除。直接对进行中或排队中任务请求删除将被服务端拒绝并返回 `{"code": 104, "message": "任务运行中"}`。
 
 ### 统计指标参数 (`include_statistics=1`)
 
@@ -285,7 +285,7 @@ rules:
 
 > [!IMPORTANT]
 > - 省略 `scope_id` 返回的是**全局无前缀集合聚合口径**，传入 `scope_id` 返回的是**指定资产组 `asset_*` 集合口径**，二者统计范围不同，不可混用推导；
-> - `counts` 返回底层 **13 个资产集合**的计数；前端「资产搜索」「资产组详情」「任务详情」与全链路资产画像抽屉统一展示 **12 个资产维度**（含 `nuclei_result`），其中 `service` 已在后端按 `(ip, port_id)` 单端点融合 Nmap 端口服务与 Python 插件服务（`npoc_service` 集合保留用于内部扫描链路与向下兼容），「服务」页签徽标与 `GET /api/service/`（全局按 `(ip, port_id)` 跨任务去重）及 `GET /api/asset_service/` 的 `total` 严格一致；
+> - `counts` 返回底层 **13 个资产集合**的计数；前端「资产搜索」「资产组详情」「任务详情」与资产关联画像抽屉统一展示 **12 个资产维度**（含 `nuclei_result`），其中 `service` 已在后端按 `(ip, port_id)` 单端点融合 Nmap 端口服务与 Python 插件服务（`npoc_service` 集合保留用于内部扫描链路与向下兼容），「服务」页签徽标与 `GET /api/service/`（全局按 `(ip, port_id)` 跨任务去重）及 `GET /api/asset_service/` 的 `total` 严格一致；
 > - 各维度计数口径与其对应列表接口保持一致，例如全局 `service` 统计跨任务去重后的 `(ip, port_id)` 端点数、`cip` 统计去重后的 C 段数、`stat_finger` 统计去重后的指纹名数量，而非原始集合文档数；
 > - 单个维度计数失败时该字段返回 `null`，客户端应视为「未知」并避免渲染为 `0`。
 
@@ -300,7 +300,7 @@ rules:
 
 平台 26 个维度删除接口（13 个无前缀 `/api/<dim>/delete/`，含 `POST /api/stat_finger/delete/`；13 个前缀 `/api/asset_<dim>/delete/`）共用统一的层级级联、作用域隔离与派生集合重算规则：
 
-- **批量上限与参数校验**：单次删除请求最多接受 **500** 项待删标识（`_id` / `name` / CIDR），空列表、非法 ID 或超过上限统一返回错误码 `400`。`GET /api/stat_finger/` 与 `GET /api/asset_stat_finger/` 的返回项均包含 `"_id"` 字段（与指纹 `name` 等值），删除时支持传入 `_id` 或 `name`；`POST /api/cip/delete/` 与 `POST /api/asset_cip/delete/` 同时接受 24 位 ObjectId 与 CIDR 字符串。
+- **批量上限与参数校验**：单次删除请求最多接受 **500** 项待删标识（`_id` / `name` / CIDR），空列表、非法 ID 或超过上限统一返回业务错误码 `code: 400`。`GET /api/stat_finger/` 与 `GET /api/asset_stat_finger/` 的返回项均包含 `"_id"` 字段（与指纹 `name` 等值），删除时支持传入 `_id` 或 `name`；`POST /api/cip/delete/` 与 `POST /api/asset_cip/delete/` 同时接受 24 位 ObjectId 与 CIDR 字符串。
 - **作用域隔离（`source_type`）**：
   - **资产组视图（`/api/asset_<dim>/delete/`）**：支持传入 `scope_id`，仅清理该资产组 `asset_*` 台账及显式绑定至该组的任务（`scope_id`、`sync_scope_id`、`synced_scope_id`、`options.scope_id`、`options.related_scope_id`、`options.scheduler_id`）内的对应记录，不影响其他存活资产组或未绑定该组的独立扫描任务。
   - **任务与全局视图（`/api/<dim>/delete/`）**：支持可选字段 `task_id` 与 `source_type`（可选 `"task"` 或 `"global"`，缺省为 `"task"`）。`source_type: "task"` 时仅作用于对应任务（若任务已显式绑定资产组，则同步清理所属资产组及关联绑定任务）；仅当显式传入 `source_type: "global"` 时，才执行跨资产组、跨任务的全局级联清理。
@@ -309,7 +309,7 @@ rules:
   - 删除完成后自动从存活主表重算受影响范围的派生集合（`cip` / `asset_cip`、`stat_finger` / `asset_stat_finger`、`service` / `asset_service`），校准受影响任务的 `statistic` 计数，并失效跨进程仪表盘与监控缓存。
 - **资产组与持续监控联动**：
   - 删除资产组（`POST /api/asset_scope/delete/`）或移除范围目标（`GET /api/asset_scope/delete/`、`POST /api/asset_scope/update/`）同步清理该组 13 个 `asset_*` 集合、关联监控计划及显式绑定任务；若资产组存在进行中的企业测绘更新任务（`updating_icp_task_id`），将先尝试终止并解除 `icp_task` 的 `synced_scope_id`/`synced_scope_name` 绑定（保留 `icp_task` 与 `icp_asset` 原始记录）。资产组改名时同步刷新默认命名的 `scheduler.name`、`icp_task.synced_scope_name` 及绑定任务中的资产组名称字段。
-  - 暂停或删除持续监控计划（`POST /api/scheduler/stop/`、`POST /api/scheduler/stop/batch`、`POST /api/scheduler/delete/`）会同步终止该计划派生的进行中与排队中监控任务（暂停时将 `next_run_date` 置为 `"-"`）并刷新 `asset_scope.domain_status`，历史已完成任务与已入库资产保持保留；`GET /api/scheduler/` 返回列表项时自动关联 `asset_scope` 补齐可读的 `scope_name` 字段。
+  - 停止或删除持续监控计划（`POST /api/scheduler/stop/`、`POST /api/scheduler/stop/batch`、`POST /api/scheduler/delete/`）会同步终止该计划派生的进行中与排队中监控任务（停止时将 `next_run_date` 置为 `"-"`）并刷新 `asset_scope.domain_status`，历史已完成任务与已入库资产保持保留；`GET /api/scheduler/` 返回列表项时自动关联 `asset_scope` 补齐可读的 `scope_name` 字段。
 
 ### 资产列表 HTTP 状态码多选筛选
 
@@ -321,7 +321,8 @@ rules:
 - **向下兼容性**：原有单值标量参数（`status=200`、`status_code=200`）保持兼容；若同时传入单值与多选参数，系统将自动取二者的交集。任务自身运行状态的过滤不受影响，保持原格式。
 
 > [!NOTE]
-> - 示例：`GET /api/site/?task_id=<task_id>&status__in=200,403` 查询该任务中状态码为 200 或 403 的站点。相同参数亦完全适用于 `/api/site/export/` 导出及 `/api/site/save_result_set/` 结果集保存接口；按资产组检索时只需将查询参数替换为 `scope_id` 并访问 `/api/asset_site/`。
+> - 示例：`GET /api/site/?task_id=<task_id>&status__in=200,403` 查询该任务中状态码为 200 或 403 的站点。相同参数亦完全适用于 `/api/site/export/` 导出及 `GET /api/site/save_result_set/` 按筛选条件保存结果集；按资产组检索时只需将查询参数替换为 `scope_id` 并访问 `/api/asset_site/`。
+> - **按勾选记录保存站点结果集**：支持 `POST /api/site/save_result_set/`（JSON：`{"_id": ["<site_id>"], "task_id": "<可选任务 ID>"}`）与 `POST /api/asset_site/save_result_set/`（JSON：`{"_id": ["<asset_site_id>"], "scope_id": "<可选资产组 ID>"}`），单次最多 500 条，严格校验 24 位 ObjectId 非空与合法性（非法或空列表返回业务错误码 `code: 400`，避免空条件退化为全集合查询）。
 > - 当前接口实现仅支持针对状态码字段的枚举匹配与字段间 AND 组合，暂不支持自由输入布尔表达式或跨任意字段的 OR 逻辑。
 
 ### 12 维资产发现时间、更新时间筛选与排序
@@ -412,7 +413,7 @@ ARL-Next 集成了 Model Context Protocol (MCP 2024-11-05 规范)，支持 AI �
 
 > [!NOTE]
 > - 生产反向代理已针对 `/mcp/sse` 配置专用流式转发（禁用缓冲、长连接保活 24 小时）；
-> - 经 IP 访问自签证书部署时，客户端若因 TLS 校验阻断直连，推荐使用本地 Stdio 脚本接入（已内置证书自适应），或将服务端 CA 证书导入系统信任库。
+> - 经 IP 访问自签证书部署时，客户端若因 TLS 校验阻断直连，推荐使用本地 Stdio 脚本接入（客户端与服务端同机回环时可自动加载 `certs/arl.crt`；远程 IP 部署需将服务端证书复制到客户端并配置 `ARL_CA_BUNDLE`，在保留证书链校验的同时自动适配缺失 IP SAN 的主机名校验），或将服务端 CA 证书导入操作系统信任库。
 
 - MCP Scope、有效期和工具开关拒绝非法输入；局部策略更新保留未提交的开关。搜索条件按文字匹配，列表分页限制为 1–100 条。
 - MCP 请求体最大 16 MiB；每个会话最多 16 个在途请求、服务最多 64 个。请求在发出 202 前进入处理队列，断连后已接收的执行仍计入容量，无法投递的回复有超时清理。
@@ -532,11 +533,11 @@ Worker 不可达、控制指令没有完整确认或停止超时，均中止恢�
   - `create` / `update` / `import` 强制校验顶层 YAML 映射、`id`（仅限 `a-zA-Z0-9_.-`）、`info.name`、`info.author`（字符串或非空字符串列表）、`info.severity` 白名单（`info` / `low` / `medium` / `high` / `critical` / `unknown`）及至少一个非空协议/工作流块（`http`、`requests`、`dns`、`tcp`、`network`、`ssl`、`websocket`、`whois`、`code`、`javascript`、`headless`、`file`、`workflows`）。
   - 当运行环境检测到 `nuclei` 二进制时，额外执行 `nuclei -duc -no-color -validate` 深度语义校验（缺失二进制时自动降级为静态校验）；`create` / `update` 校验失败或 `template_id` 重复均返回 `code: 999` 与明确提示，`import` 校验失败条目被拒收并汇总至 `fail_details`。
 - **在线单目标即时调试（`POST /api/nuclei/template/test/`）规范**：
-  - **目标协议自适应与防注入**：拒绝空白符、换行/控制字符及以 `-` 开头的目标输入；对 `http` / `headless` 自动补齐 `http://`（`websocket` 保留 `ws(s)://` / `http(s)://`），对 `dns` / `tcp` / `network` / `ssl` / `whois` 自动剥离多余的 `http(s)://` 前缀与路径段。
+  - **受限协议拦截与目标协议自适应**：在线调试禁止执行包含 `code`、`headless`、`file`、`workflows` 等受限协议的模板；拒绝空白符、换行/控制字符及以 `-` 开头的目标输入；对 `http` 自动补齐 `http://`（`websocket` 保留 `ws(s)://` / `http(s)://`），对 `dns` / `tcp` / `network` / `ssl` / `whois` 自动剥离多余的 `http(s)://` 前缀与路径段。
   - **代理与输出清洗**：复用全局 `scan` 域代理策略（`apply_to_nuclei`）并在日志与回显中对代理凭据脱敏；移除终端 ANSI 颜色转义序列并优先基于 `-jle` 解析结构化命中（旧版引擎自动回退无 ANSI 文本行判定）。
   - **响应字段**：成功（`code: 200`）时 `data` 包含 `matched`、`matched_count`、`findings`（每项含 `template_id`、`name`、`severity`、`matched_at`、`curl_command`、`extracted_results`）、`target`、`output`、`returncode`、`cost_seconds`；当 `nuclei` 退出码非 0 时返回 `code: 999`，`message` 给出核心错误摘要，`data.output` 与 `data.returncode` 仍保留完整诊断日志。
 - **ASM 任务通道隔离与按协议分流**：
   - `nuclei_config`（可用于 `POST /api/task/`、`POST /api/policy/add/`、`POST /api/policy/edit/`）支持字段：`include_community`（布尔值，默认 `true`；设为 `false` 可仅运行自建模板）、`severity`（社区通道等级过滤，默认 `["low","medium","high","critical"]`）、`exclude_blacklist`（布尔值，默认 `true`，仅作用于社区通道）、`custom_template_mode`（`all_enabled` / `selected` / `tags` / `none`）、`selected_custom_templates`、`selected_tags`、`extra_exclude_ids`。
-  - 社区模板通道保持 `-tags cve,http`、策略 `severity` 与全局黑名单 `-eid` 约束；自建模板通道不受社区 `-tags`、`severity` 与全局黑名单限制（含 `info`/`unknown` 级别均执行），并按协议自动分流投喂 ASM 资产：`http`/`websocket` 扫描存活 Web 站点（含 WIH 衍生站点），`tcp`/`network`/`ssl`/`javascript` 额外投喂开放端口 `ip:port`，`dns`/`whois` 额外投喂发现的子域名；`code`/`headless`/`file`/`workflows` 协议当前仅支持单目标调试，ASM 任务执行前自动跳过并记录告警日志。
+  - 社区模板通道保持 `-tags cve,http`、策略 `severity` 与全局黑名单 `-eid` 约束；自建模板通道不受社区 `-tags`、`severity` 与全局黑名单限制（含 `info`/`unknown` 级别均执行），并按协议自动分流投喂 ASM 资产：`http`/`websocket` 扫描存活 Web 站点（含 WIH 衍生站点），`tcp`/`network`/`ssl`/`javascript` 额外投喂开放端口 `ip:port`，`dns`/`whois` 额外投喂发现的子域名；`code`/`headless`/`file`/`workflows` 协议出于安全边界考量，在在线单目标调试中禁止执行，在自动化 ASM 任务执行前亦会自动跳过并记录告警日志。
   - 双通道与分桶执行相互隔离：单通道异常不会丢弃其余已成功通道的命中结果；无可执行模板或无匹配目标时安全跳过。
   - 命中结果写入 `template_source`（`custom` / `community`），`GET /api/nuclei_result/` 与 `GET /api/asset_nuclei_result/` 均支持按 `template_source` 筛选；`POST /api/task/policy/` 支持可选字段 `related_scope_id`，用于资产组风险巡航任务完成后将命中结果同步回 `asset_nuclei_result` / `asset_vuln`。

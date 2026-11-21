@@ -35,9 +35,10 @@ class ARLResource(Resource):
 
     @staticmethod
     def _parse_date_boundary(raw_value, is_end=False):
-        """解析时间范围过滤参数，支持 YYYY-MM-DD HH:MM:SS 与 YYYY-MM-DD。"""
+        """解析时间范围过滤参数，支持 YYYY-MM-DD HH:MM:SS、YYYY-MM-DD 与 ISO 8601 字符串。"""
         if isinstance(raw_value, datetime):
-            return raw_value.replace(microsecond=0)
+            dt = raw_value.astimezone().replace(tzinfo=None) if raw_value.tzinfo is not None else raw_value
+            return dt.replace(microsecond=0)
         raw = str(raw_value or "").strip()
         if not raw:
             return None
@@ -50,7 +51,23 @@ class ARLResource(Resource):
             dt = datetime.strptime(raw, "%Y-%m-%d")
             return dt.replace(hour=23, minute=59, second=59) if is_end else dt.replace(hour=0, minute=0, second=0)
         except ValueError:
+            pass
+        try:
+            iso_raw = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+            dt = datetime.fromisoformat(iso_raw)
+            if dt.tzinfo is not None:
+                dt = dt.astimezone().replace(tzinfo=None)
+            return dt.replace(microsecond=0)
+        except ValueError:
             return None
+
+    @staticmethod
+    def _aggregate(collection_obj, pipeline):
+        """执行 MongoDB 聚合查询并默认启用 allowDiskUse=True（兼容无 kwargs 的测试 mock）。"""
+        try:
+            return collection_obj.aggregate(pipeline, allowDiskUse=True)
+        except TypeError:
+            return collection_obj.aggregate(pipeline)
 
     @staticmethod
     def _format_datetime_value(value):

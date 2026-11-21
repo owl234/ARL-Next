@@ -123,7 +123,7 @@
             <div class="toolbar-left">
               <span class="toolbar-title-text">{{ assetText('assets.categoryHeading', { category: tabConfig[effectiveTab]?.tabName || assetText('tasks.assets') }) }}</span>
               <span class="toolbar-meta-count">
-                {{ assetText('assets.recordCount', { count: getAsmTabCount(activeTab) }) }}
+                {{ assetText('assets.recordCount', { count: activeFilterCount > 0 ? (pagination.total || 0) : getAsmTabCount(activeTab) }) }}
               </span>
             </div>
 
@@ -505,11 +505,12 @@
           </a-tag>
         </template>
 
-        <template v-else-if="column.key === 'source'">
+        <template v-else-if="column.key === 'wih_source'">
           <div style="word-break: break-all; color: var(--arl-text-color); line-height: 1.6;">
-            <a :href="record.source" target="_blank" style="color: var(--arl-text-color); text-decoration: none;">
-              {{ record.source || '-' }}
+            <a v-if="isHttpUrl(record.source)" :href="record.source" target="_blank" rel="noopener noreferrer" style="color: var(--arl-text-color); text-decoration: none;">
+              {{ record.source }}
             </a>
+            <span v-else>{{ record.source || '-' }}</span>
           </div>
         </template>
 
@@ -1137,7 +1138,7 @@ const asmCounts = reactive({
 });
 
 const asmTotalCount = computed(() => {
-  return Object.values(asmCounts).reduce((acc, cur) => acc + (Number(cur) || 0), 0);
+  return asmTabList.reduce((acc, tab) => acc + getAsmTabCount(tab.key), 0);
 });
 
 const activeFilterCount = computed(() => {
@@ -1854,12 +1855,12 @@ const tabConfig = reactive({
       { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
       { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
-    // WIH 表格列定义（绑定 source 键名）
+    // WIH 表格列定义（独立 wih_source 键避免与 domain.source 枚举冲突）
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
       { get title() { return assetText('tasks.recordType'); }, dataIndex: 'record_type', key: 'record_type', width: 120 },
       { get title() { return assetText('tasks.content'); }, dataIndex: 'content', key: 'content', width: 250 },
-      { get title() { return assetText('tasks.sourceJs'); }, dataIndex: 'source', key: 'source', width: 450 }, // 绑定 source
+      { get title() { return assetText('tasks.sourceJs'); }, dataIndex: 'source', key: 'wih_source', width: 450 },
       { get title() { return assetText('tasks.sourceWebsite'); }, dataIndex: 'site', key: 'wih_site', width: 250 },
       { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
@@ -2100,8 +2101,10 @@ const fetchData = async () => {
   try {
     // 🚨 修复 2：获取 computed 响应式对象的最新值
     const params = { page: pagination.current, size: pagination.pageSize, scope_id: scope_id.value };
+    const filterParams = buildAssetFilterParams(searchForm.value, config.searchFields);
+    const hasActiveFilters = Object.keys(filterParams).length > 0;
 
-    Object.assign(params, buildAssetFilterParams(searchForm.value, config.searchFields));
+    Object.assign(params, filterParams);
     const orderParam = typeof sortState !== 'undefined' && typeof buildAssetSortOrder === 'function'
       ? buildAssetSortOrder(sortState)
       : '';
@@ -2127,7 +2130,9 @@ const fetchData = async () => {
       }
       dataSource.value = items;
       pagination.total = total;
-      asmCounts[effectiveTab.value] = total;
+      if (!hasActiveFilters) {
+        asmCounts[effectiveTab.value] = total;
+      }
       selectionTracker.rememberRows(
         items,
         getAssetRowKey,
@@ -2329,7 +2334,7 @@ watch(scope_id, (newId) => {
     }
     isScopeSwitching.value = true;
     dataSource.value = [];
-    selectedRowKeys.value = [];
+    clearSelection();
 
     let restoredTab = tabCache.init();
     if (restoredTab === 'npoc_service') {
@@ -2515,6 +2520,9 @@ const submitAddSite = async () => {
       message.success(assetText('assets.websiteAdded'));
       addSiteVisible.value = false;
       tabCache.invalidateAllMemoryCaches();
+      notifyAssetMutated();
+      lastObservedMutationVersion = assetMutationVersion.value;
+      fetchAsmCounts();
       fetchData(); // 刷新表格
     } else if (res.code === 802) {
       message.error(res.message); // 弹出 "任务目标不在资产组中"
@@ -2548,6 +2556,12 @@ const getPocCount = (policy) => {
 
 // 1. 打开弹窗：智能区分勾选目标 vs 全量筛选结果集
 const openRiskModal = async () => {
+  const selectedIds = hasSelected.value ? selectedRowKeys.value.filter(k => k != null && k !== '') : [];
+  if (selectedIds.length > 500) {
+    message.warning(assetText('assets.maxBatchDeleteLimitNotice'));
+    return;
+  }
+
   try {
     message.loading({ content: assetText('assets.preparingRiskScanTargets'), key: 'risk_task' });
 
@@ -2557,38 +2571,35 @@ const openRiskModal = async () => {
       if (polRes.code === 200) policies.value = polRes.items || [];
     }
 
-    // 🎯 智能分支：如果用户在表格中勾选了具体数据行，严格仅针对勾选项下发
-    if (hasSelected.value && selectedRowKeys.value.length > 0) {
-      const selectedSites = dataSource.value
-        .filter(item => selectedRowKeys.value.includes(item._id || item.id))
-        .map(item => item.site)
-        .filter(Boolean);
-
-      if (selectedSites.length === 0) {
-        message.warning({ content: assetText('assets.theSelectedRecordsContainNoValidWebsiteTargets'), key: 'risk_task' });
-        return;
-      }
-
-      selectedRiskTargets.value = selectedSites;
-      currentResultSetId.value = '';
-      currentTargetCount.value = selectedSites.length;
-
-      message.success({ content: assetText('assets.selectedAssetsReadyForScanningCount', { count: selectedSites.length }), key: 'risk_task' });
+    selectedRiskTargets.value = [];
+    currentResultSetId.value = '';
+    let setRes;
+    if (selectedIds.length > 0) {
+      // 跨页多选：按勾选站点 _id 列表通过 POST 生成结果集，避免丢失非当前页站点
+      setRes = await request.post('/asset_site/save_result_set/', {
+        _id: selectedIds,
+        scope_id: scope_id.value
+      });
     } else {
-      // 🎯 未勾选：根据当前搜索与资产组条件打包全量结果集
-      selectedRiskTargets.value = [];
+      // 未勾选：根据当前搜索与资产组条件打包全量结果集
       const params = { scope_id: scope_id.value };
       Object.assign(params, buildAssetFilterParams(searchForm.value, tabConfig[effectiveTab.value].searchFields));
-
-      // 发起结果集保存请求
-      const setRes = await request.get('/asset_site/save_result_set/', { params });
-      if (setRes.code !== 200) throw new Error(assetText('assets.failedToCreateResultSet'));
-
-      currentResultSetId.value = setRes.data.result_set_id;
-      currentTargetCount.value = setRes.data.result_total || 0;
-
-      message.success({ content: assetText('assets.assetsReadyForScanningCount', { count: setRes.data.result_total }), key: 'risk_task' });
+      setRes = await request.get('/asset_site/save_result_set/', { params });
     }
+
+    if (setRes.code !== 200 || !setRes.data?.result_set_id) {
+      message.error({ content: setRes.message || assetText('assets.failedToCreateResultSet'), key: 'risk_task' });
+      return;
+    }
+
+    currentResultSetId.value = setRes.data.result_set_id;
+    currentTargetCount.value = setRes.data.result_total || 0;
+    message.success({
+      content: selectedIds.length > 0
+        ? assetText('assets.selectedAssetsReadyForScanningCount', { count: currentTargetCount.value })
+        : assetText('assets.assetsReadyForScanningCount', { count: currentTargetCount.value }),
+      key: 'risk_task'
+    });
 
     // 初始化弹窗数据
     riskForm.name = '';
@@ -2632,8 +2643,8 @@ const submitRiskTask = async () => {
     if (res.code === 200) {
       message.success(assetText('assets.riskScanTaskCreated'));
       riskModalVisible.value = false;
-      if (selectedRiskTargets.value.length > 0) {
-        selectedRowKeys.value = [];
+      if (hasSelected.value) {
+        clearSelection();
       }
     } else {
       message.error(assetText('tasks.failedToCreateTaskLabel') + (res.message || assetText('tasks.unknownError')));
@@ -2683,6 +2694,9 @@ const submitAddDomain = async () => {
       message.success(assetText('assets.subdomainAdded'));
       addDomainVisible.value = false;
       tabCache.invalidateAllMemoryCaches();
+      notifyAssetMutated();
+      lastObservedMutationVersion = assetMutationVersion.value;
+      fetchAsmCounts();
       fetchData(); // 自动刷新当前页面的域名列表
     } else if (res.code === 701) {
       message.error(res.message); // 原汁原味抛出：域名不在给定的资产范围中
