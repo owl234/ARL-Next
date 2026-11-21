@@ -6,6 +6,30 @@
 
 ---
 
+## [v1.5.1] - 2026-11-21
+
+### 🚀 新增功能
+- **26 维统一级联删除引擎、派生表重建与 7 大 KeepAlive 视图联动**：新增 `asset_cascade_service.py`，实现基于显式绑定隔离的资产组、目标范围、任务、持续监控及 26 个资产维度删除接口统一级联清理（单次上限 500 条），支持 L1/L2/L3 依赖边界、孤儿 IP 回收与 CIDR 保护、端点级服务剥离及 `dict`/`str` 大小写不敏感指纹剥离；基于存活宿主表重建 `cip`/`asset_cip`、`stat_finger`/`asset_stat_finger` 与 `service`/`asset_service`，并通过 `system_config` 版本号触发跨进程缓存失效；新增 `POST /api/stat_finger/delete/`、`/api/asset_overview/count` 可选 `scope_id` 并发 13 集合计数及 `POST /api/task/delete/` 的 `del_synced_asset` 开关；前端覆盖资产组详情、任务详情、资产搜索、资产组列表、任务列表、计划与监控任务及大盘共 7 大 KeepAlive 视图，通过 `assetMutationVersion`、`deletedScopeIdSet`、跨页对象清单确认（默认展开前 20 项）与越界分页自动回退保持视图状态一致。
+- **Nmap 与 Python 插件服务融合为统一单端点视图**：新增 `service_fusion.py`，在任务扫描、站点反哺、Python 插件识别与资产组派生重建链路按 `(ip, port_id)` 归一合流，优先采用协议握手结果校准 `unknown` 等弱服务名并保留 `product`、`version` 与多来源标签（`sources`）；`/api/service/` 全局模式按 `(ip, port_id)` 跨任务去重并与 `/api/asset_overview/count` 计数口径一致，新增 `/api/service/export/` 与 `/api/asset_service/export/`；资产搜索、资产组详情、任务详情与 `ChainDrawer.vue` 统一为 12 个资产维度与单端点服务表，移除二级引擎切换栏及废弃组件 `ServiceDetailModal.vue`。
+- **统一调度中心单表胶囊视图与计划任务立即执行**：重构 `PlanningTasks.vue` 将计划任务与资产持续监控融合为统一表格，通过语义胶囊区分 6 类调度类型，对齐任务列表三段式头部（顶栏大类胶囊、4 维可点击状态指标卡、检索栏与浮动批量操作条）；新增 `POST /api/task_schedule/run/` 支持任意状态手动立即派发（先派发成功后再原子递增 `run_number`），`GET /api/scheduler/` 补充 `scope_name` 关联字段，批量停止与恢复按状态预过滤并展示跳过数量。
+- **12 维度资产发现时间与更新时间统一展示、筛选及排序**：统一 26 张资产集合（13 张任务表 + 13 张资产组表）的 `save_date` 与 `update_date` 为本地时区 BSON `datetime`，全量 26 路由开放 `save_date` 区间过滤与排序（资产组接口同步支持 `update_date`），统一带时区 ISO 8601 边界归一与全局聚合表（`service`、`cip`、`stat_finger`）按最早发现/最新更新时间筛选导出的一致口径；新增 `AssetTimeCell.vue` 与单日全天区间归一，覆盖资产搜索、资产组详情、任务详情与资产画像抽屉的 12 个维度。
+
+### 🛠️ 性能与重构
+- **MongoDB 连接池治理、索引精简与幂等增量迁移加固**：规范 `MongoClient` 连接池默认参数，移除 `cip` 数组多键索引及冲突/冗余索引，全局聚合查询统一启用 `allowDiskUse=True`；在 `arlupdate.py` 中新增基于 `system_config` 原子哨兵的三项一次性幂等迁移——统一服务表两阶段安全展开迁移（先 upsert 后清理旧分组文档、保留由 `_id` 推导的 `save_date`，迁移未完成时跳过唯一索引创建）、存量级联与派生表自愈迁移、以及 26 张资产集合发现时间戳分批回填，并将启动期延迟后台迁移收敛为单串行线程以避开 Gunicorn 预加载分叉窗口。
+- **下线失效 `port_top_10` 配置并收敛默认端口类型**：移除未被扫描链路读取的 `port_top_10` 前端设置、配置接口字段、`Config.TOP_10` 与孤立函数/多语言键，`port_scan` 兜底切换为 Top100 字典；内部默认 `port_scan_type` 由 `test` 收敛为 `top100` 并保留 `test` 别名向下兼容。
+- **双语文档重构与界面截图刷新**：以使用流程视角重构中英文 `README`，同步刷新仪表盘、任务创建、系统设置、威胁情报雷达与 MCP 治理中心界面截图并修复 `tools/make_social_preview.py` 预览卡片裁切；同步更新中英双语 `docs/API_GUIDE*.md` 与 `mcp-server/README*.md`。
+
+### 🐛 问题修复与加固
+- **任务参数摘要过滤与目标域名来源修正**：后端任务启动日志（`celerytask.py`）与前端配置详情（`TaskList.vue`）按父开关过滤未启用阶段（`domain_brute`/`alt_dns`/`port_scan`/`file_leak` 等）的附属字典与端口参数；未启用 `domain_brute` 时目标域名入库来源由 `domain_brute` 更正为 `target`（`CollectSource.TARGET`）。
+- **资产组删改联动、在途任务撤销与存活栅栏**：资产组删除时同步终止运行中的企业测绘更新任务（`updating_icp_task_id`）并解绑引用（保留原始测绘数据）；资产组改名同步更新关联监控与任务显示名；监控停止与批停同步撤销在途扫描任务并重置 `next_run_date`；在 `SyncAsset` 与监控链路提交前增加资产组/目标存活校验；加固 C 段删除畸形 IP 容错与 `npoc_service` 删除后统一服务表重算。
+- **前端资产详情、搜索与调度页回归修复**：修复 `AssetSearch.vue` 批量删除缺失的 i18n 键；修复 `GroupAssetsDetail.vue` 总资产重复计入 `npoc_service`、筛选请求覆盖总量徽标、WIH `source` 列与域名来源冲突、新增站点/域名后计数与变更通知未刷新及跨页勾选清理不完整；修复 `PlanningTasks.vue` 胶囊切换未清选、批量操作异常吞错与失败误清空勾选、行按钮术语统一为「停止」及 KeepAlive 返回刷新策略列表；同步修复多套历史单测夹具并补充前后端回归测试。
+
+### 🛡️ 安全与配置
+- **风险巡航勾选站点接口 Fail-Closed 加固**：新增 `POST /api/site/save_result_set/` 与 `POST /api/asset_site/save_result_set/` 接收 JSON `_id` 列表，严格校验非空、ObjectId 合法性与单次 500 条上限，异常返回业务 `code: 400`，规避空条件退化为大范围扫描；前端资产搜索、任务详情与资产组详情勾选巡航切换为 POST 提交并在非 200 响应时阻断打开弹窗。
+- **外链安全属性、MCP E2E 凭据隔离与文档事实校准**：`GroupAssetsDetail.vue` WIH 来源链接增加 `isHttpUrl` 校验与 `rel="noopener noreferrer"`；`tools/verify_mcp_e2e.py` 向 Stdio 子进程显式注入测试密钥以规避本地管理员凭据覆盖；校准中英文 `API_GUIDE` 与 `mcp-server/README` 中的自签名证书 `ARL_CA_BUNDLE` 配置说明、Nuclei 协议阻断边界及 RFC 5737 占位示例地址，并保持双副本 `mcp-server/server.py` 与 `frontend/public/mcp/server.py` 一致。
+
+---
+
 ## [v1.5.0] - 2026-11-19
 
 ### 🚀 新增功能
