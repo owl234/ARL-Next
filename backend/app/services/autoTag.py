@@ -1,6 +1,58 @@
+import re
 from app import utils
 from app.modules import SiteAutoTag
 logger = utils.get_logger()
+
+GENERIC_SERVERS = {
+    "nginx", "apache", "iis", "tengine", "openresty", "lighttpd", "caddy",
+    "microsoft-iis", "apache-http-server", "apache-httpd", "byte-nginx",
+    "apache2 debian 默认页", "apache2 ubuntu 默认页", "iis 默认页",
+    "tencentedgeone", "edgeone", "ecdn", "dcdn", "azure edge network",
+    "lego server",
+}
+
+INFRA_TOKENS = {
+    "cdn", "waf", "proxy", "gateway", "alb", "slb", "elb", "tlb", "clb", "nlb",
+    "volcalb", "loadbalancer", "cloudflare", "akamai", "fastly", "imperva",
+    "incapsula", "envoy", "traefik", "haproxy", "squid", "varnish", "kong",
+    "edgeone", "tencentedgeone", "cloudfront", "azureedge", "alicdn", "qcloudcdn",
+    "tcdn", "ecdn", "dcdn", "volccdn", "yunjiasu", "wangsu", "cdn77", "arvancloud",
+    "esa", "apisix", "openresty", "tengine", "block",
+}
+
+VENDOR_TOKENS = {
+    "bytedance", "aliyun", "alibaba", "tencent", "qcloud", "baidu", "huawei",
+    "cloud", "aws", "amazon", "azure", "google", "microsoft", "volcengine", "volc",
+    "qiniu", "upaiyun", "jcloud", "wangsu", "chinanetcenter", "5centscdn",
+}
+
+NOISE_TOKENS = {"server", "service", "vhost", "default", "edge", "network", "page", "platform"}
+
+
+def is_infra_fingerprint(name) -> bool:
+    """判定指纹是否属于基础设施（CDN/WAF/边缘网关/负载均衡/通用 Web 服务器），此类指纹不作为业务特赦凭据"""
+    if not name or not isinstance(name, str):
+        return False
+    lower = name.lower().strip()
+    if lower in GENERIC_SERVERS:
+        return True
+    tokens = {t for t in re.split(r"[\s\-_/()]+", lower) if t}
+    if tokens.intersection(INFRA_TOKENS):
+        non_infra = tokens - INFRA_TOKENS - VENDOR_TOKENS - NOISE_TOKENS
+        if not non_infra:
+            return True
+    return False
+
+
+def has_business_fingerprint(finger_list) -> bool:
+    """判断指纹列表中是否包含至少一个非基础设施（业务/CMS/框架）指纹"""
+    if not isinstance(finger_list, list) or not finger_list:
+        return False
+    for fg in finger_list:
+        fg_name = (fg if isinstance(fg, str) else (fg.get("name", "") if isinstance(fg, dict) else "")).strip()
+        if fg_name and not is_infra_fingerprint(fg_name):
+            return True
+    return False
 
 
 class AutoTag:
@@ -14,13 +66,17 @@ class AutoTag:
         body_length = self.site_info.get("body_length", 0)
         finger = self.site_info.get("finger") or []
 
-        # 🛡️【第一性原理：指纹防误杀护盾】
-        # 若站点已识别出任何有效指纹，说明有具体运行组件/云设施承载，严禁标记为无效！
-        if finger:
+        # 仅当识别出具体业务/应用/CMS 指纹时豁免无效站点打标；纯 CDN/边缘网关/通用 Web 服务器指纹不予豁免
+        if has_business_fingerprint(finger):
             return
 
         if self.is_invalid_title():
             return self._set_invalid_tag()
+
+        # 边缘节点 / 网关拒收未绑定 Host 的空体或短错误页直接标为无效
+        if self.status in (418, 421) and body_length <= 1000:
+            self._set_invalid_tag()
+            return
 
         # 🛡️【现代 API / 云原生 / 微服务 404 保护】
         # 很多微服务、K8s 组件、REST API 根路径仅返回 404 (如 nosniff, text/plain 或 application/json)
@@ -101,9 +157,9 @@ class AutoTag:
 
     def _set_invalid_tag(self):
         """
-        打标签为无效（具备指纹豁免）
+        打标签为无效（具备业务指纹豁免）
         """
-        if self.site_info.get("finger"):
+        if has_business_fingerprint(self.site_info.get("finger")):
             return
         raw_tags = self.site_info.get("tag") or []
         if isinstance(raw_tags, str):

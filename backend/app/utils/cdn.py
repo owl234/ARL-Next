@@ -28,7 +28,7 @@ ASN_CDN_RULES = [
 CNAME_CDN_RULES = [
     {"keywords": ["wscdns.com", "wsdvs.com", "ourwebpic.com", "chinanetcenter.com", "speedcdns.com"], "name": "网宿科技 CDN"},
     {"keywords": ["kunlun", "alikunlun", "tbcdn.cn", "alicdn.com", "alicloudwaf.com"], "name": "阿里云 CDN/ESA"},
-    {"keywords": ["tc.cdntip.com", "qcloudcdn.com", "tcdn.qq.com", "edgeone.ai", "edgeone.cool", "dnsv1.com"], "name": "腾讯云 CDN/EdgeOne"},
+    {"keywords": ["tc.cdntip.com", "qcloudcdn.com", "tcdn.qq.com", "edgeone.ai", "edgeone.cool", "edgeone.site", "dnsv1.com"], "name": "腾讯云 CDN/EdgeOne"},
     {"keywords": ["cdnhwc", "huaweicloudwaf"], "name": "华为云 CDN/WAF"},
     {"keywords": ["cloudflare.net", "cloudflare.com"], "name": "Cloudflare CDN"},
     {"keywords": ["cloudfront.net"], "name": "AWS CloudFront"},
@@ -42,11 +42,19 @@ CNAME_CDN_RULES = [
     {"keywords": ["jcloud-cdn.com", "jdcdn.com", "jcloudlb.com"], "name": "京东云 CDN"},
 ]
 
+# 精确 CDN 边缘路由域正则（用于无 CNAME 的直接域名匹配，避免泛关键词误伤）
+CDN_DOMAIN_REGEX_RULES = [
+    {"pattern": re.compile(r"(?:^|\.)dnsoe\d+\.(?:com|net|cn)$"), "name": "腾讯云 CDN/EdgeOne"},
+    {"pattern": re.compile(r"(?:^|\.)dnsv\d+\.(?:com|net)$"), "name": "腾讯云 CDN/EdgeOne"},
+    {"pattern": re.compile(r"(?:^|\.)eo\.dnse\d+\.(?:com|net|cn)$"), "name": "腾讯云 CDN/EdgeOne"},
+]
+
 # 常见 CDN / WAF HTTP 响应头特征
 HEADER_CDN_INDICATORS = [
     "cf-ray", "x-amz-cf-id", "x-edge-connect-request-id",
     "x-alicdn-da-ups-status", "x-ws-request-id", "eagleid",
-    "x-cdn-request-id", "x-fastly-request-id", "x-cache-lookup"
+    "x-cdn-request-id", "x-fastly-request-id", "x-cache-lookup",
+    "eo-log-uuid", "eo-cache-status",
 ]
 
 # 常见 CDN SSL 泛域名特征
@@ -54,7 +62,8 @@ SSL_CDN_DOMAINS = [
     "kunluncan.com", "kunlunaq.com", "kunlunar.com", "wscdns.com",
     "wsdvs.com", "ourwebpic.com", "cdngslb.com", "tbcdn.cn",
     "alicdn.com", "cloudflare.com", "cloudfront.net", "fastly.net",
-    "azureedge.net", "volccdn.com", "bdydns.com"
+    "azureedge.net", "volccdn.com", "bdydns.com",
+    "edgeone.ai", "edgeone.cool", "edgeone.site",
 ]
 
 
@@ -120,6 +129,37 @@ def get_cdn_name_by_ip(ip):
     return ""
 
 
+def get_cdn_name_by_domain_strict(domain):
+    """通过严格厂商规则与正则判定域名本身是否属于已知 CDN 边缘路由域（不触发泛关键词兜底，防止误伤普通业务域）"""
+    from . import get_logger
+    logger = get_logger()
+    if not domain:
+        return ""
+
+    domain_lower = domain.lower().strip(".")
+    try:
+        _init_cdn_info()
+
+        for rule in CDN_DOMAIN_REGEX_RULES:
+            if rule["pattern"].search(domain_lower):
+                return rule["name"]
+
+        for rule in CNAME_CDN_RULES:
+            for kw in rule["keywords"]:
+                if domain_lower == kw or domain_lower.endswith("." + kw):
+                    return rule["name"]
+
+        if _cname_in_cname_list(domain_lower):
+            for item in cdn_info:
+                for target in item.get("cname_domain", []):
+                    if domain_lower == target or domain_lower.endswith("." + target):
+                        return item.get("name", "CDN")
+    except Exception as e:
+        logger.warning("error in get_cdn_name_by_domain_strict: {} {}".format(e, domain))
+
+    return ""
+
+
 def get_cdn_name_by_cname(cname):
     """通过 CNAME 域名规则及关键字判定 CDN"""
     from . import get_logger
@@ -130,6 +170,11 @@ def get_cdn_name_by_cname(cname):
     cname_lower = cname.lower().strip(".")
     try:
         _init_cdn_info()
+
+        # 0. 精确边缘路由正则匹配
+        for rule in CDN_DOMAIN_REGEX_RULES:
+            if rule["pattern"].search(cname_lower):
+                return rule["name"]
 
         # 1. 精确规则匹配
         for rule in CNAME_CDN_RULES:
@@ -176,6 +221,8 @@ def get_cdn_name_by_headers(headers: dict) -> str:
                 return "Fastly CDN"
             elif "ws-request" in indicator:
                 return "网宿科技 CDN"
+            elif indicator.startswith("eo-"):
+                return "腾讯云 CDN/EdgeOne"
             return "CDN"
 
     # 2. 检查 Via 头
@@ -193,6 +240,8 @@ def get_cdn_name_by_headers(headers: dict) -> str:
     if server:
         if "cloudflare" in server:
             return "Cloudflare"
+        elif "tencentedgeone" in server or "edgeone" in server:
+            return "腾讯云 CDN/EdgeOne"
         elif "yunjiasu" in server:
             return "百度云加速 CDN"
         elif "waf" in server or "tengine/waf" in server:

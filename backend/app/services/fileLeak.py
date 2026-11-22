@@ -264,6 +264,9 @@ class FileLeak(BaseThread):
     这个类的核心职责不是“发请求”，而是“证伪”。
     扫描器最怕的是海量的 False Positive（误报）。这个类花了一半以上的代码在做“双重验证”。
     """
+    # 网关拒收未绑定 Host 或上游不可达状态码：两轮随机基线探针一致命中时早退跳过字典爆破
+    ABORT_BASELINE_STATUS_CODES = {400, 418, 421, 502, 503, 504}
+
     def __init__(self, target, urls, concurrency=8):
         super().__init__(urls, concurrency = concurrency)
         self.target = target.rstrip("/") + "/"
@@ -285,6 +288,8 @@ class FileLeak(BaseThread):
         self.skip_302 = False
         self.location_404_url = set()
         self.is_spa_wildcard = False
+        self.abort_scan = False
+        self.abort_reason = ""
 
     def work(self, url):
         if self.error_times >= 20:
@@ -324,12 +329,20 @@ class FileLeak(BaseThread):
         if page_404.is_302() and page_404.location_url.endswith(page_404.url.payload + "/"):
             self.skip_302 = True
 
-        # 发送第二个随机探测包判定 SPA 泛解析
+        # 发送第二个随机探测包判定 SPA 泛解析与网关拒收/上游不可达早退基线
         try:
             rand_path = f"chk_probe_{uuid.uuid4().hex[:8]}"
             url_rand = URL(self.target + rand_path, rand_path)
             page_rand = Page(self.http_req(url_rand))
             self.page404_set.add(page_rand)
+            if (
+                page_404.status_code in self.ABORT_BASELINE_STATUS_CODES
+                and page_rand.status_code == page_404.status_code
+            ):
+                self.abort_scan = True
+                self.abort_reason = "dual baseline returned status {}".format(page_404.status_code)
+                logger.info("Target {} early-abort fileleak: {}".format(self.target, self.abort_reason))
+                return
             if page_404.status_code == 200 and page_rand.status_code == 200:
                 content_type = page_404.raw_req.conn.headers.get("Content-Type", "")
                 if "text/html" in content_type.lower() or "application/xhtml" in content_type.lower():
@@ -353,6 +366,10 @@ class FileLeak(BaseThread):
         logger.info("start fileleak {}".format(len(self.targets)))
 
         self.build_404_page()
+        if self.abort_scan:
+            elapse = time.time() - t1
+            logger.info("end fileleak early-abort ({}) elapse {}".format(self.abort_reason, elapse))
+            return set()
 
         self._run()
 

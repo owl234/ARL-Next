@@ -181,7 +181,10 @@ class ScanPort(object):
 
     def get_cdn_name(self, ip, domain_info):
         cname = domain_info.record_list[0] if (domain_info.type == "CNAME" and domain_info.record_list) else ""
-        return utils.get_cdn_name_comprehensive(ip=ip, cname=cname, ip_count=len(domain_info.ip_list))
+        cdn_name = utils.get_cdn_name_comprehensive(ip=ip, cname=cname, ip_count=len(domain_info.ip_list))
+        if not cdn_name and getattr(domain_info, "domain", ""):
+            cdn_name = utils.get_cdn_name_by_domain_strict(domain_info.domain)
+        return cdn_name
 
     def run(self):
         for info in self.domain_info_list:
@@ -289,6 +292,14 @@ class FindSite(object):
             if curr_ip is None and isinstance(info, dict):
                 curr_ip = info.get('ip')
 
+            cdn_name = getattr(info, 'cdn_name', None)
+            if cdn_name is None and isinstance(info, dict):
+                cdn_name = info.get('cdn_name', '')
+
+            valid_domains = [str(d).strip() for d in domains if d and str(d).strip()]
+            # 域名任务中已识别为 CDN 且有关联域名时，跳过无 Host 头的裸 IP 站点探测（仍保留关联域名探测）
+            skip_bare_ip = bool(cdn_name) and bool(valid_domains)
+
             port_info_list = getattr(info, 'port_info_list', None)
             if port_info_list is None and isinstance(info, dict):
                 port_info_list = info.get('port_info_list', info.get('port_info', []))
@@ -310,13 +321,7 @@ class FindSite(object):
                 is_80 = (port_int == 80) or (str(port_id) == "80")
                 is_443 = (port_int == 443) or (str(port_id) == "443")
 
-                for domain in domains:
-                    if not domain:
-                        continue
-                    clean_domain = str(domain).strip()
-                    if not clean_domain:
-                        continue
-
+                for clean_domain in valid_domains:
                     if is_80:
                         url_temp_list.append("http://{}".format(clean_domain))
                     elif is_443:
@@ -325,7 +330,7 @@ class FindSite(object):
                         url_temp_list.append("http://{}:{}".format(clean_domain, port_id))
                         url_temp_list.append("https://{}:{}".format(clean_domain, port_id))
 
-                if curr_ip:
+                if curr_ip and not skip_bare_ip:
                     raw_ip = str(curr_ip).strip("[] \t\r\n")
                     if raw_ip:
                         ip_host = f"[{raw_ip}]" if ":" in raw_ip else raw_ip

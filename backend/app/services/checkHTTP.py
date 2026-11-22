@@ -24,6 +24,9 @@ GATEWAY_PATHS = [
     "/system/"
 ]
 
+# 边缘节点 / 网关明确拒收未绑定 Host 的状态码（418 I'm a Teapot, 421 Misdirected Request）
+GATEWAY_REJECT_STATUS_CODES = {418, 421}
+
 
 class CheckHTTP(BaseThread):
     def __init__(self, urls, concurrency=10):
@@ -31,14 +34,14 @@ class CheckHTTP(BaseThread):
         self.timeout = (6, 6)
         self.checkout_map = {}
 
-    def check(self, url, resilient=False):
+    def check(self, url, resilient=False, meta=None):
         parsed = urllib.parse.urlsplit(url)
         is_https = (parsed.scheme.lower() == "https") or url.startswith("https://")
         try:
             conn = utils.http_req(url, method="get", timeout=self.timeout, verify=False, resilient_ssl=resilient, proxy_domain="scan")
         except (requests.exceptions.SSLError, requests.exceptions.ConnectionError, ssl.SSLError) as e:
             if not resilient and is_https:
-                return self.check(url, resilient=True)
+                return self.check(url, resilient=True, meta=meta)
             raise e
 
         if conn.status_code == 400:
@@ -51,6 +54,13 @@ class CheckHTTP(BaseThread):
             has_html = "text/html" in content_type or any(tag in content_lower for tag in (b"<html", b"<head", b"<body", b"<!doctype html"))
             has_legacy = bool(conn.headers.get("ETag") and conn.headers.get("Date"))
             if not (has_server or has_html or has_legacy):
+                return None
+
+        # 边缘/网关拒收未绑定 Host 响应：一律跳过 6 路径回退探测；空体直接丢弃，带正文放行交由 WebSiteFetch 去噪收敛
+        if conn.status_code in GATEWAY_REJECT_STATUS_CODES:
+            if isinstance(meta, dict):
+                meta["skip_fallback"] = True
+            if len(conn.content or b"") == 0:
                 return None
 
         # *** 特殊情况过滤
@@ -81,8 +91,9 @@ class CheckHTTP(BaseThread):
         is_candidate_for_fallback = (scheme == "https") or (port in GATEWAY_PORTS)
 
         out = None
+        meta = {}
         try:
-            out = self.check(url)
+            out = self.check(url, meta=meta)
         except requests.exceptions.RequestException:
             out = None
         except Exception as e:
@@ -91,9 +102,9 @@ class CheckHTTP(BaseThread):
             logger.warning(e)
 
         # 检查是否需要回退探测网关路径
-        # 条件：针对根路径、属于高危/网关端口或 https 协议，且根路径失败(out is None)或返回错误(status >= 400)
+        # 条件：针对根路径、属于高危/网关端口或 https 协议，且根路径失败(out is None)或返回错误(status >= 400)，排除 418/421 网关拒收
         is_error = (out is None) or (out.get("status", 0) >= 400)
-        if is_root and is_candidate_for_fallback and is_error:
+        if is_root and is_candidate_for_fallback and is_error and not meta.get("skip_fallback"):
             base_url = f"{parsed.scheme}://{parsed.netloc}"
             for gpath in GATEWAY_PATHS:
                 probe_url = base_url + gpath
