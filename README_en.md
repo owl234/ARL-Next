@@ -563,6 +563,13 @@ Ongoing maintenance and development of ARL-Next are supported by the open-source
   <a style="cursor: default;">
     <img src="./img/sponsor_777.jpg" width="48" height="48" style="border-radius: 50%; margin: 0 8px; vertical-align: middle;" alt="777" title="Special thanks to 777!"/>
   </a>
+  <a style="cursor: default;">
+    <img src="./img/sponsor_qingyi.jpg" width="48" height="48" style="border-radius: 50%; margin: 0 8px; vertical-align: middle;" alt="青衣" title="Special thanks to 青衣!"/>
+  </a>
+</p>
+
+<p align="center">
+  Also thanks to: <b>等风几许</b>
 </p>
 
 ---

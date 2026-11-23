@@ -565,6 +565,13 @@ ARL-Next 的持续维护与迭代离不开社区伙伴的支持，特别致谢�
   <a style="cursor: default;">
     <img src="./img/sponsor_777.jpg" width="48" height="48" style="border-radius: 50%; margin: 0 8px; vertical-align: middle;" alt="777" title="感谢 777 的支持！"/>
   </a>
+  <a style="cursor: default;">
+    <img src="./img/sponsor_qingyi.jpg" width="48" height="48" style="border-radius: 50%; margin: 0 8px; vertical-align: middle;" alt="青衣" title="感谢 青衣 的支持！"/>
+  </a>
+</p>
+
+<p align="center">
+  同时感谢：<b>等风几许</b>
 </p>
 
 ---
