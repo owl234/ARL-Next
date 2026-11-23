@@ -55,6 +55,7 @@ services:
       - DEBIAN_FRONTEND=noninteractive
       - NO_PROXY=localhost,127.0.0.1,osint-service,mongodb,rabbitmq
       - ARL_ADMIN_PASSWORD=${ARL_ADMIN_PASSWORD:-}
+      - ARL_WEB_WORKERS=${ARL_WEB_WORKERS:-4}
     ulimits:
       nofile:
         soft: 65535
@@ -67,18 +68,21 @@ services:
     networks:
       - arl-net
 
-  # Puppeteer 无头浏览器渲染专属微服务 (常驻 HTTP 服务，解决 CPU 瓶颈)
+  # Puppeteer 无头浏览器渲染专属微服务 (常驻 HTTP 服务，按需自愈轮转)
   arl-puppeteer:
     <<: *default-logging
     image: crpi-laul1izptqrf0tkf.cn-beijing.personal.cr.aliyuncs.com/owl234-arl-prod/arl-puppeteer:latest
     container_name: arl-puppeteer-prod
     restart: always
+    init: true
     mem_reservation: 256m
-    oom_score_adj: 300
+    # 无状态渲染服务可按需重启恢复，牺牲优先级设高于扫描 Worker (500)、低于 GitHub 队列 (700)
+    oom_score_adj: 600
     command: bash -c "export NODE_PATH=/usr/local/lib/node_modules && node /code/backend/app/tools/puppeteer_server.js"
     working_dir: /code
     environment:
       - TZ=Asia/Shanghai
+      - PUPPETEER_MAX_REQUESTS=${PUPPETEER_MAX_REQUESTS:-200}
     networks:
       - arl-net
 
@@ -158,7 +162,7 @@ services:
       nofile:
         soft: 65535
         hard: 65535
-    command: ["--wiredTigerCacheSizeGB", "1"]
+    command: ["--wiredTigerCacheSizeGB", "${MONGO_WT_CACHE_GB:-1}"]
     environment:
       - MONGO_INITDB_DATABASE=arl
       - MONGO_INITDB_ROOT_USERNAME=admin
