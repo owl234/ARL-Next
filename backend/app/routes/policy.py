@@ -50,12 +50,12 @@ domain_config_fields = ns.model('domainConfig', {
 '''IP 相关配置选项'''
 ip_config_fields = ns.model('ipConfig', {
     "port_scan": fields.Boolean(description="端口扫描", default=True),
-    "port_scan_type": fields.String(description="端口扫描类型(top100|top1000|all|custom，兼容历史别名 test=top100)", example="top100"),
+    "port_scan_type": fields.String(description="端口扫描类型(port_top100.txt|port_top1000.txt|port_all.txt|port_custom.txt 等系统端口字典，兼容简写 top100|top1000|all|custom 及历史别名 test=top100)", example="top100"),
     "service_detection": fields.Boolean(description="服务识别", default=False),
     "os_detection": fields.Boolean(description="操作系统识别", default=False),
     "ssl_cert": fields.Boolean(description="SSL 证书获取", default=False),
     "skip_scan_cdn_ip": fields.Boolean(description="跳过 CDN IP扫描", default=True),  # 这个参数强制生效
-    "port_custom": fields.String(description="自定义扫描端口", default="80,443"),  # 仅端口扫描类型为 custom 时生效
+    "port_custom": fields.String(description="兼容历史自定义扫描端口串（仅 port_scan_type=custom 且显式传入时生效，留空则实时读取系统设置 port_custom.txt）", default=""),
     "host_timeout_type": fields.String(description="主机超时时间类别（default|custom）", default="default"),
     "host_timeout": fields.Integer(description="主机超时时间(s)", default=900),
     "port_parallelism": fields.Integer(description="探测报文并行度", default=32),
@@ -126,14 +126,20 @@ class AddARLPolicy(ARLResource):
         domain_config = policy.pop("domain_config", {}) or {}
         domain_config = self._update_arg(domain_config, domain_config_fields)
         ip_config = policy.pop("ip_config", {}) or {}
-        port_scan_type = ip_config.get("port_scan_type", "top100")
+        port_scan_type = str(ip_config.get("port_scan_type") or "top100").strip() or "top100"
+        ip_config["port_scan_type"] = port_scan_type
         if port_scan_type == "custom":
-            port_custom = ip_config.get("port_custom") or "80,443"
-            port_list = utils.arl.build_port_custom(port_custom)
-            if isinstance(port_list, str):
-                return utils.build_ret(ErrorMsg.PortCustomInvalid, {"port_custom": port_list})
+            raw_port_custom = str(ip_config.get("port_custom") or "").strip()
+            if raw_port_custom:
+                port_list = utils.arl.build_port_custom(raw_port_custom)
+                if isinstance(port_list, str):
+                    return utils.build_ret(ErrorMsg.PortCustomInvalid, {"port_custom": port_list})
 
-            ip_config["port_custom"] = ",".join(port_list)
+                ip_config["port_custom"] = ",".join(port_list)
+            else:
+                ip_config["port_custom"] = ""
+        else:
+            ip_config["port_custom"] = ""
 
         exclude_ports = ip_config.get("exclude_ports", "")
         if exclude_ports:
@@ -341,6 +347,7 @@ class EditPolicy(ARLResource):
 
         allow_keys = gen_model_policy_keys(add_policy_fields["policy"])
         allow_keys.extend(["name", "desc", "policy"])
+        prev_port_scan_type = str(((item.get("policy") or {}).get("ip_config") or {}).get("port_scan_type") or "").strip()
 
         item = change_policy_dict(item, policy_data, allow_keys)
 
@@ -409,13 +416,24 @@ class EditPolicy(ARLResource):
                 ip_cfg.get("host_discovery_mode"), strict=False
             )
 
-        # 🛡️ 自定义端口格式校验
-        if incoming_ip.get("port_scan_type") == "custom":
-            port_custom = incoming_ip.get("port_custom") or ip_cfg.get("port_custom") or "80,443"
-            port_list = utils.arl.build_port_custom(port_custom)
-            if isinstance(port_list, str):
-                return utils.build_ret(ErrorMsg.PortCustomInvalid, {"port_custom": port_list})
-            ip_cfg["port_custom"] = ",".join(port_list)
+        # 🛡️ 自定义端口兼容与系统字典收敛校验
+        effective_port_scan_type = str(ip_cfg.get("port_scan_type") or "").strip()
+        if effective_port_scan_type == "custom":
+            if "port_custom" in incoming_ip:
+                raw_port_custom = str(incoming_ip.get("port_custom") or "").strip()
+            elif prev_port_scan_type == "custom":
+                raw_port_custom = str(ip_cfg.get("port_custom") or "").strip()
+            else:
+                raw_port_custom = ""
+            if raw_port_custom:
+                port_list = utils.arl.build_port_custom(raw_port_custom)
+                if isinstance(port_list, str):
+                    return utils.build_ret(ErrorMsg.PortCustomInvalid, {"port_custom": port_list})
+                ip_cfg["port_custom"] = ",".join(port_list)
+            else:
+                ip_cfg["port_custom"] = ""
+        elif "port_scan_type" in incoming_ip:
+            ip_cfg["port_custom"] = ""
 
         # 🛡️ 发包并发与速率参数范围防御与归一化
         try:

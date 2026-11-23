@@ -122,6 +122,16 @@ Example (force direct `-Pn` scan on an RFC 5737 block):
 {"name": "Direct segment scan", "target": "192.0.2.0/24", "port_scan": true, "port_scan_type": "top100", "host_discovery_mode": "skip"}
 ```
 
+### Port Scan Dictionary Linkage (`port_scan_type` / `port_custom`)
+
+`POST /api/task/` (top-level `port_scan_type`), `POST /api/policy/add/`, and `POST /api/policy/edit/` (`policy.ip_config.port_scan_type`) resolve ports from the port dictionaries managed under System Settings → Dictionary Arsenal (`port_top100.txt`, `port_top1000.txt`, `port_custom.txt`, `port_all.txt`, or user-created `port_*.txt` files). Tasks read the selected dictionary dynamically at execution time (shorthands `top100`, `top1000`, `all`, `custom`, and legacy alias `test` map to their corresponding dictionaries):
+
+| Configuration | Runtime Behavior |
+| :--- | :--- |
+| `port_scan_type: "port_custom.txt"` (or `"custom"` with omitted/empty `port_custom`) | Dynamically reads `port_custom.txt` from System Settings at scan time; falls back to `80,443` if the dictionary is empty |
+| `port_scan_type: "custom"` with an explicit non-empty `port_custom` (legacy/API compatibility) | Validates via `build_port_custom` and scans the stored `port_custom` string; re-saving the policy in the UI converts it to `port_custom.txt` and clears `port_custom` |
+| Any other `port_*.txt` dictionary (including user-created port dictionaries) | Dynamically reads that dictionary file at scan time; switching away from `custom` clears any stale `port_custom` value |
+
 ### Website Screenshot Toggle (`site_capture`)
 
 `POST /api/task/` (top-level `site_capture`), `POST /api/policy/add/`, and `POST /api/policy/edit/` (`policy.site_config.site_capture`) control whether ASM tasks run headless-browser screenshots. Policy-driven tasks (policy scans, risk cruising, scheduled scans, asset-group domain/IP monitoring and one-shot scans, manual site/domain additions, Fofa tasks, and MCP dispatch) inherit `site_capture` from the selected policy:

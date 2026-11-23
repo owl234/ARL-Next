@@ -67,7 +67,7 @@
               <div v-if="policyForm.domain_config.domain_brute" class="sub-config-box">
                 <a-form-item :label="pageText('pages.discoveryDictionary')" required class="inline-form-item">
                   <a-select v-model:value="policyForm.domain_config.domain_brute_type" :placeholder="pageText('pages.selectADiscoveryDictionary')" class="page-width-280">
-                    <a-select-option v-for="item in domainDicts" :key="item.name" :value="item.name">{{ item.name }}</a-select-option>
+                    <a-select-option v-for="item in domainDicts" :key="item.name" :value="item.name">{{ describeDict(item) }}</a-select-option>
                   </a-select>
                 </a-form-item>
               </div>
@@ -82,7 +82,7 @@
               <div v-if="policyForm.domain_config.alt_dns" class="sub-config-box">
                 <a-form-item :label="pageText('pages.subdomainMutationDictionary')" required class="inline-form-item">
                   <a-select v-model:value="policyForm.domain_config.alt_dns_dict" :placeholder="pageText('pages.selectAMutationDictionary')" class="page-width-280">
-                    <a-select-option v-for="item in altDnsDicts" :key="item.name" :value="item.name">{{ item.name }}</a-select-option>
+                    <a-select-option v-for="item in altDnsDicts" :key="item.name" :value="item.name">{{ describeDict(item) }}</a-select-option>
                   </a-select>
                 </a-form-item>
               </div>
@@ -127,17 +127,56 @@
                   <a-col :xs="24" :md="12">
                     <a-form-item :label="pageText('pages.portScanPolicy')" required class="inline-form-item">
                       <a-select v-model:value="policyForm.ip_config.port_scan_type" :placeholder="pageText('tasks.selectAPortScanPolicy')">
-                        <a-select-option value="custom">{{ pageText('tasks.customPorts') }}</a-select-option>
-                        <a-select-option v-for="item in portDicts" :key="item.name" :value="item.name">{{ item.name }}</a-select-option>
+                        <a-select-option v-for="item in portDicts" :key="item.name" :value="item.name">{{ describeDict(item) }}</a-select-option>
                       </a-select>
                     </a-form-item>
                   </a-col>
-                  <a-col :xs="24" :md="12" v-if="policyForm.ip_config.port_scan_type === 'custom'">
-                    <a-form-item :label="pageText('pages.customPortRange')" required class="inline-form-item">
-                      <a-input v-model:value="policyForm.ip_config.port_custom" :placeholder="pageText('pages.eG8044380008080')" />
-                    </a-form-item>
-                  </a-col>
                 </a-row>
+
+                <!-- 历史手填端口迁移提示（点击保存前显式告知变更影响） -->
+                <a-alert
+                  v-if="isEdit && legacyInlinePorts"
+                  type="warning"
+                  show-icon
+                  class="port-dict-legacy-alert"
+                  :message="pageText('pages.legacyCustomPortMigrationNotice', { ports: legacyInlinePorts })"
+                />
+
+                <!-- 系统端口字典实时联动预览与跳转维护 -->
+                <div v-if="isCustomPortDictSelected" class="port-dict-preview-box">
+                  <div class="port-dict-preview-head">
+                    <div class="port-dict-preview-meta">
+                      <span class="port-dict-preview-title">{{ pageText('pages.portDictLinkedHint') }}</span>
+                      <a-tag class="port-dict-name-tag">{{ policyForm.ip_config.port_scan_type }}</a-tag>
+                      <span v-if="!portPreview.loading && !portPreview.error" class="port-dict-count-text">
+                        {{ pageText('pages.portDictPreviewEntriesCount', { count: portPreview.total }) }}
+                      </span>
+                    </div>
+                    <div class="port-dict-preview-actions">
+                      <a-button type="link" size="small" class="port-dict-action-btn" :loading="portPreview.loading" @click="refreshPortDictPreview">
+                        <template #icon><reload-outlined /></template>
+                        {{ pageText('pages.refresh') }}
+                      </a-button>
+                      <a-button type="link" size="small" class="port-dict-action-btn" @click="openSystemPortDictSettings(policyForm.ip_config.port_scan_type)">
+                        <template #icon><setting-outlined /></template>
+                        {{ pageText('pages.managePortDictInSystemSettings') }}
+                      </a-button>
+                    </div>
+                  </div>
+                  <div class="port-dict-preview-body">
+                    <span v-if="portPreview.loading" class="port-dict-preview-muted">
+                      <a-spin size="small" class="port-dict-spin" />
+                      {{ pageText('pages.portDictPreviewLoading') }}
+                    </span>
+                    <span v-else-if="portPreview.error" class="port-dict-preview-warn">
+                      {{ pageText('pages.portDictPreviewLoadFailed') }}
+                    </span>
+                    <span v-else-if="portPreview.total === 0" class="port-dict-preview-warn">
+                      {{ pageText('pages.portDictPreviewEmptyFallback') }}
+                    </span>
+                    <code v-else class="port-dict-preview-code">{{ portPreviewSummary }}</code>
+                  </div>
+                </div>
 
                 <!-- 高级发包配置收展 -->
                 <div class="advanced-toggle-row">
@@ -255,7 +294,7 @@
               <div v-if="policyForm.file_leak" class="sub-config-box">
                 <a-form-item :label="pageText('pages.directoryAndFileDisclosureDictionary')" required class="inline-form-item">
                   <a-select v-model:value="policyForm.file_leak_dict" :placeholder="pageText('tasks.selectAFileDiscoveryWordlist')" class="page-width-280">
-                    <a-select-option v-for="item in fileLeakDicts" :key="item.name" :value="item.name">{{ item.name }}</a-select-option>
+                    <a-select-option v-for="item in fileLeakDicts" :key="item.name" :value="item.name">{{ describeDict(item) }}</a-select-option>
                   </a-select>
                 </a-form-item>
               </div>
@@ -506,12 +545,20 @@
 
 <script setup>
 import { useI18n } from 'vue-i18n';
-import { ref, reactive, shallowRef, watch, onMounted, computed } from 'vue';
+import { ref, reactive, shallowRef, watch, onMounted, onUnmounted, computed } from 'vue';
 import request from '../utils/request';
 import { message } from 'ant-design-vue';
-import { ArrowLeftOutlined, SearchOutlined } from '@ant-design/icons-vue';
+import { ArrowLeftOutlined, SearchOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons-vue';
 import { useRouter, useRoute } from 'vue-router';
 import { isAsmSupportedProtocol } from '../utils/nucleiHelpers';
+import {
+  classifyAssetDictionaries,
+  describeDictOption,
+  hasLegacyInlineCustomPorts,
+  normalizeDomainDict,
+  normalizePortDict,
+  shouldPreviewPortDict,
+} from '../utils/dictHelpers';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 
@@ -606,6 +653,16 @@ const altDnsDicts = ref([]);
 const fileLeakDicts = ref([]);
 const portDicts = ref([]);
 const hasPocLoaded = ref(false);
+const legacyInlinePorts = ref('');
+const portPreview = reactive({
+  loading: false,
+  dictName: '',
+  lines: [],
+  total: 0,
+  error: false
+});
+let portPreviewRequestId = 0;
+let needsPortPreviewRefresh = false;
 
 const domainSearch = ref('');
 const ipSearch = ref('');
@@ -618,29 +675,119 @@ const matchSearch = (text, keyword) => {
   return text.toLowerCase().includes(keyword.toLowerCase().trim());
 };
 
-const normalizeDomainDict = (val) => {
-  if (!val) return val;
-  const map = {
-    'big': 'domain_2w.txt',
-    'test': 'domain_top300.txt',
-    'domain_2w': 'domain_2w.txt',
-    'domain_top300': 'domain_top300.txt'
-  };
-  return map[val] || val;
+const describeDict = (item) => describeDictOption(item, pageText);
+
+const isCustomPortDictSelected = computed(() => (
+  Boolean(policyForm.ip_config.port_scan) && shouldPreviewPortDict(policyForm.ip_config.port_scan_type)
+));
+
+const portPreviewSummary = computed(() => {
+  if (!portPreview.lines.length) return '';
+  const joined = portPreview.lines.join(', ');
+  if (portPreview.total > portPreview.lines.length) {
+    return `${joined} ... (${pageText('pages.portDictMoreEntriesSuffix', { total: portPreview.total })})`;
+  }
+  return joined;
+});
+
+const resetPortPreview = () => {
+  portPreviewRequestId += 1;
+  portPreview.loading = false;
+  portPreview.dictName = '';
+  portPreview.lines = [];
+  portPreview.total = 0;
+  portPreview.error = false;
 };
 
-const normalizePortDict = (val) => {
-  if (!val) return val;
-  const map = {
-    'top100': 'port_top100.txt',
-    'top1000': 'port_top1000.txt',
-    'bughunter': 'port_bughunter.txt',
-    'port_top100': 'port_top100.txt',
-    'port_top1000': 'port_top1000.txt',
-    'port_bughunter': 'port_bughunter.txt'
-  };
-  return map[val] || val;
+const fetchPortDictPreview = async (dictName) => {
+  const target = String(dictName || '').trim();
+  if (!shouldPreviewPortDict(target)) {
+    resetPortPreview();
+    return;
+  }
+  const reqId = ++portPreviewRequestId;
+  portPreview.loading = true;
+  portPreview.dictName = target;
+  portPreview.error = false;
+  try {
+    const res = await request.get('/dictionary/preview', { params: { name: target, limit: 20 } });
+    if (reqId !== portPreviewRequestId) return;
+    if (res?.code === 200 && res.data) {
+      portPreview.lines = Array.isArray(res.data.lines) ? res.data.lines : [];
+      portPreview.total = Number(res.data.total || 0);
+    } else {
+      portPreview.lines = [];
+      portPreview.total = 0;
+      portPreview.error = true;
+    }
+  } catch {
+    if (reqId !== portPreviewRequestId) return;
+    portPreview.lines = [];
+    portPreview.total = 0;
+    portPreview.error = true;
+  } finally {
+    if (reqId === portPreviewRequestId) {
+      portPreview.loading = false;
+    }
+  }
 };
+
+const refreshPortDictsAndPreview = async () => {
+  try {
+    const dictRes = await request.get('/dictionary/list');
+    if (dictRes?.code === 200 && dictRes.data) {
+      const classified = classifyAssetDictionaries(dictRes.data);
+      domainDicts.value = classified.domainDicts;
+      altDnsDicts.value = classified.altDnsDicts;
+      fileLeakDicts.value = classified.fileLeakDicts;
+      portDicts.value = classified.portDicts;
+    }
+  } catch {
+    // 静默忽略后台刷新失败，保留当前已加载下拉选项
+  }
+  if (isCustomPortDictSelected.value) {
+    await fetchPortDictPreview(policyForm.ip_config.port_scan_type);
+  }
+};
+
+const refreshPortDictPreview = () => {
+  refreshPortDictsAndPreview();
+};
+
+const openSystemPortDictSettings = (dictName) => {
+  const targetDict = String(dictName || 'port_custom.txt').trim() || 'port_custom.txt';
+  const resolved = router.resolve({
+    path: '/systemSettings',
+    query: {
+      tab: 'scanning_arsenal',
+      subTab: 'dict',
+      focus: 'dict',
+      dict: targetDict
+    }
+  });
+  needsPortPreviewRefresh = true;
+  window.open(resolved.href, '_blank', 'noopener,noreferrer');
+};
+
+const handleReturnFromSettings = () => {
+  if (!needsPortPreviewRefresh) return;
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+  needsPortPreviewRefresh = false;
+  refreshPortDictsAndPreview();
+};
+
+watch(
+  () => (typeof policyForm !== 'undefined' ? [policyForm.ip_config.port_scan, policyForm.ip_config.port_scan_type] : null),
+  (val) => {
+    if (!val || typeof fetchPortDictPreview !== 'function') return;
+    const [enabled, dictName] = val;
+    if (enabled && shouldPreviewPortDict(dictName)) {
+      fetchPortDictPreview(dictName);
+    } else if (typeof resetPortPreview === 'function') {
+      resetPortPreview();
+    }
+  }
+);
 
 // ================= 面板 1：域名探测全选联动 =================
 const isAllDomainSelected = computed(() => {
@@ -858,6 +1005,9 @@ const toggleAllBrute = (e) => {
 
 // ================= 生命周期：数据加载与编辑回填 =================
 onMounted(async () => {
+  window.addEventListener('focus', handleReturnFromSettings);
+  document.addEventListener('visibilitychange', handleReturnFromSettings);
+
   try {
     const [pocRes, bruteRes, dictRes, customTplRes] = await Promise.all([
       request.get('/poc/', { params: { plugin_type: 'poc', size: 100000 } }),
@@ -871,10 +1021,11 @@ onMounted(async () => {
     }
 
     if (dictRes.code === 200 && dictRes.data) {
-      domainDicts.value = dictRes.data.filter(item => item.category && item.category.includes(pageText('pages.subdomainDiscovery')) && !item.category.includes(pageText('pages.smart')));
-      altDnsDicts.value = dictRes.data.filter(item => item.category && item.category.includes(pageText('pages.subdomainMutationDiscovery')));
-      fileLeakDicts.value = dictRes.data.filter(item => item.category && (item.category.includes(pageText('pages.directoryAndFileDisclosure')) || item.category.includes(pageText('pages.directoryAndFileDisclosures'))));
-      portDicts.value = dictRes.data.filter(item => item.category && item.category.includes(pageText('pages.portScanPolicy')) && item.name !== 'port_custom.txt' && item.name !== 'port_alive.txt');
+      const classified = classifyAssetDictionaries(dictRes.data);
+      domainDicts.value = classified.domainDicts;
+      altDnsDicts.value = classified.altDnsDicts;
+      fileLeakDicts.value = classified.fileLeakDicts;
+      portDicts.value = classified.portDicts;
 
       if (!isEdit) {
         if (domainDicts.value.length > 0) policyForm.domain_config.domain_brute_type = domainDicts.value[0].name;
@@ -945,13 +1096,18 @@ onMounted(async () => {
           if (!Array.isArray(nc.selected_tags)) nc.selected_tags = [];
         }
 
-        // 字典历史别名归一化回填
+        // 字典历史别名归一化回填；若原策略使用历史手填端口，记录并在保存前显式提示
+        const rawIpConfig = data.policy?.ip_config || {};
+        legacyInlinePorts.value = hasLegacyInlineCustomPorts(rawIpConfig)
+          ? String(rawIpConfig.port_custom || '').trim()
+          : '';
         if (policyForm.domain_config.domain_brute_type) {
           policyForm.domain_config.domain_brute_type = normalizeDomainDict(policyForm.domain_config.domain_brute_type);
         }
         if (policyForm.ip_config.port_scan_type) {
           policyForm.ip_config.port_scan_type = normalizePortDict(policyForm.ip_config.port_scan_type);
         }
+        policyForm.ip_config.port_custom = '';
         if (!['auto', 'skip', 'probe'].includes(policyForm.ip_config.host_discovery_mode)) {
           policyForm.ip_config.host_discovery_mode = 'auto';
         }
@@ -1001,6 +1157,11 @@ onMounted(async () => {
   }
 });
 
+onUnmounted(() => {
+  window.removeEventListener('focus', handleReturnFromSettings);
+  document.removeEventListener('visibilitychange', handleReturnFromSettings);
+});
+
 // ================= 提交表单 =================
 const submitPolicy = async () => {
   if (isEdit && !hasPocLoaded.value) {
@@ -1018,9 +1179,6 @@ const submitPolicy = async () => {
   if (policyForm.ip_config.port_scan) {
     if (!policyForm.ip_config.port_scan_type) {
       return message.warning(pageText('pages.selectAScanPolicyWhenPortScanningIsEnabled'));
-    }
-    if (policyForm.ip_config.port_scan_type === 'custom' && !policyForm.ip_config.port_custom?.trim()) {
-      return message.warning(pageText('pages.enterAPortRangeForTheCustomPortPolicy'));
     }
     if (policyForm.ip_config.host_timeout_type === 'custom') {
       if (!policyForm.ip_config.host_timeout || policyForm.ip_config.host_timeout < 1) {
@@ -1103,7 +1261,7 @@ const submitPolicy = async () => {
       desc: policyForm.desc || '',
       policy: {
         domain_config: { ...policyForm.domain_config },
-        ip_config: { ...policyForm.ip_config },
+        ip_config: { ...policyForm.ip_config, port_custom: '' },
         npoc_service_detection: policyForm.ip_config.service_detection,
         site_config: {
           ...policyForm.site_config,
@@ -1285,6 +1443,90 @@ const submitPolicy = async () => {
 
 .inline-form-item {
   margin-bottom: 0 !important;
+}
+
+.port-dict-legacy-alert {
+  margin-top: 10px;
+}
+
+.port-dict-preview-box {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px dashed var(--arl-border-color);
+  background: var(--arl-bg-card, #ffffff);
+}
+
+.port-dict-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.port-dict-preview-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.port-dict-preview-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--arl-text-color);
+}
+
+.port-dict-name-tag {
+  margin-inline-end: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+.port-dict-count-text {
+  font-size: 12px;
+  color: var(--arl-text-secondary, rgba(0, 0, 0, 0.55));
+}
+
+.port-dict-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.port-dict-action-btn {
+  padding: 0 4px;
+  height: 22px;
+  font-size: 12px;
+}
+
+.port-dict-preview-body {
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.port-dict-preview-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--arl-text-color);
+  background: transparent;
+}
+
+.port-dict-preview-muted {
+  color: var(--arl-text-secondary, rgba(0, 0, 0, 0.55));
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.port-dict-preview-warn {
+  color: #d48806;
+}
+
+.port-dict-spin {
+  line-height: 1;
 }
 
 .advanced-toggle-row {

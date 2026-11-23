@@ -122,6 +122,16 @@
 {"name": "内网直扫", "target": "192.0.2.0/24", "port_scan": true, "port_scan_type": "top100", "host_discovery_mode": "skip"}
 ```
 
+### 端口扫描字典联动 (`port_scan_type` / `port_custom`)
+
+`POST /api/task/`（顶层字段 `port_scan_type`）、`POST /api/policy/add/` 与 `POST /api/policy/edit/`（位于 `policy.ip_config.port_scan_type`）统一使用系统设置「字典武器库」中的端口字典（如 `port_top100.txt`、`port_top1000.txt`、`port_custom.txt`、`port_all.txt` 或用户自建的 `port_*.txt`），任务执行时动态实时读取对应字典文件（内置别名 `top100` / `top1000` / `all` / `custom` 与历史别名 `test` 均自动映射至对应字典）：
+
+| 配置组合 | 执行期行为说明 |
+| :--- | :--- |
+| `port_scan_type: "port_custom.txt"`（或 `"custom"` 且未传/留空 `port_custom`） | 执行时实时读取系统设置维护的 `port_custom.txt`；若字典为空，回退至默认端口 `80,443` |
+| `port_scan_type: "custom"` 且显式传入非空 `port_custom`（兼容历史策略/外部调用） | 按策略中保存的 `port_custom` 端口串执行（经 `build_port_custom` 校验）；通过前端编辑页重新保存策略后将切换为 `port_custom.txt` 并清空 `port_custom` |
+| 其他 `port_*.txt` 字典（含自建端口字典） | 执行时实时读取对应端口字典文件；切换为非 `custom` 类型时自动清空策略内历史 `port_custom` 残留 |
+
 ### 站点截图开关 (`site_capture`)
 
 `POST /api/task/`（顶层字段 `site_capture`）、`POST /api/policy/add/` 与 `POST /api/policy/edit/`（位于 `policy.site_config.site_capture`）支持控制 ASM 任务是否执行无头浏览器页面截图；所有基于策略下发的任务（策略侦察、风险巡航、计划任务、资产组域名/IP 监控与一次性扫描、手动添加站点/域名、Fofa 及 MCP 调度）均自动继承策略中的 `site_capture` 配置：

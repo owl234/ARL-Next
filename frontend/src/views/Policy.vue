@@ -168,6 +168,7 @@ import { message } from 'ant-design-vue';
 import { SearchOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons-vue';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import { formatNucleiPolicySummary } from '../utils/nucleiHelpers';
+import { formatPortPolicyLabel } from '../utils/dictHelpers';
 
 const { t: pageText, locale: pageLocale } = useI18n({ useScope: 'global' });
 
@@ -228,13 +229,16 @@ const dictNameMap = {
   get 'test'() { return pageText('pages.testDictionaryDomainTop300Txt'); },
   get 'domain_2w.txt'() { return pageText('pages.largeDictionaryDomain2wTxt'); },
   get 'domain_top300.txt'() { return pageText('pages.testDictionaryDomainTop300Txt'); },
-  get 'top100'() { return pageText('pages.top100Ports'); },
-  get 'top1000'() { return pageText('pages.top1000Ports'); },
+  get 'top100'() { return pageText('tasks.top100Ports'); },
+  get 'top1000'() { return pageText('tasks.top1000Ports'); },
   get 'bughunter'() { return pageText('pages.bughunterPorts'); },
-  get 'port_top100.txt'() { return pageText('pages.top100Ports'); },
-  get 'port_top1000.txt'() { return pageText('pages.top1000Ports'); },
+  get 'port_top100.txt'() { return pageText('tasks.top100Ports'); },
+  get 'port_top1000.txt'() { return pageText('tasks.top1000Ports'); },
   get 'port_bughunter.txt'() { return pageText('pages.bughunterPorts'); },
-  get 'all'() { return pageText('pages.allPorts'); }
+  get 'port_custom.txt'() { return pageText('tasks.customPorts'); },
+  get 'port_all.txt'() { return pageText('tasks.allPorts165535'); },
+  get 'all'() { return pageText('tasks.allPorts165535'); },
+  get 'custom'() { return pageText('tasks.customPorts'); }
 };
 const getDictName = (val) => (dictNameMap[val] || val || '-');
 
@@ -250,10 +254,7 @@ const getAltDnsText = (p) => {
 
 const getPortScanPolicyText = (p) => {
   if (!p?.ip_config?.port_scan) return pageText('tasks.disabled');
-  if (p.ip_config.port_scan_type === 'custom') {
-    return pageText('pages.customPortsPorts', { ports: p.ip_config.port_custom || '-' });
-  }
-  return getDictName(p.ip_config.port_scan_type);
+  return formatPortPolicyLabel(p.ip_config.port_scan_type, p.ip_config.port_custom, pageText);
 };
 
 const getFileLeakText = (p) => {

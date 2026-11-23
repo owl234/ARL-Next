@@ -1364,6 +1364,7 @@ import SyncToScopeModal from '../components/SyncToScopeModal.vue';
 import AssetScopeSelect from '../components/AssetScopeSelect.vue';
 import { getTaskAssetGroupState, hasSyncSummary } from '../utils/taskAssetGroups';
 import { buildNucleiConfigFromScope } from '../utils/nucleiHelpers';
+import { classifyAssetDictionaries } from '../utils/dictHelpers';
 
 const { t: taskText, locale: taskLocale } = useI18n({ useScope: 'global' });
 
@@ -2141,8 +2142,28 @@ const getDetailedOptions = (options) => {
   }
   if (options.port_scan === true && options.port_scan_type && options.port_scan_type !== 'null') {
     // 'test' 为历史端口类型别名，后端实际映射到 port_top100.txt
-    const typeMap = { test: 'TOP100', top100: 'TOP100', top1000: 'TOP1000', all: taskText('tasks.allPorts') };
-    detailed.push(taskText('tasks.portScanPolicyName', { name: typeMap[options.port_scan_type] || options.port_scan_type.toUpperCase() }));
+    const typeMap = {
+      test: taskText('tasks.top100Ports'),
+      top100: taskText('tasks.top100Ports'),
+      port_top100: taskText('tasks.top100Ports'),
+      'port_top100.txt': taskText('tasks.top100Ports'),
+      top1000: taskText('tasks.top1000Ports'),
+      port_top1000: taskText('tasks.top1000Ports'),
+      'port_top1000.txt': taskText('tasks.top1000Ports'),
+      all: taskText('tasks.allPorts165535'),
+      port_all: taskText('tasks.allPorts165535'),
+      'port_all.txt': taskText('tasks.allPorts165535'),
+      custom: taskText('tasks.customPorts'),
+      port_custom: taskText('tasks.customPorts'),
+      'port_custom.txt': taskText('tasks.customPorts'),
+    };
+    const inlinePorts = options.port_scan_type === 'custom' && options.port_custom
+      ? String(options.port_custom).trim()
+      : '';
+    const displayName = inlinePorts
+      ? `${taskText('tasks.customPorts')} (${inlinePorts})`
+      : (typeMap[options.port_scan_type] || options.port_scan_type);
+    detailed.push(taskText('tasks.portScanPolicyName', { name: displayName }));
   }
   if (options.port_scan === true && options.host_discovery_mode && options.host_discovery_mode !== 'auto') {
     const modeLabel = options.host_discovery_mode === 'skip'
@@ -3039,10 +3060,11 @@ onMounted(async () => {
   try {
     const dictRes = await request.get('/dictionary/list');
     if (dictRes.code === 200 && dictRes.data) {
-      domainDicts.value = dictRes.data.filter(item => item.category && item.category.includes('子域名爆破') && !item.category.includes('智能'));
-      altDnsDicts.value = dictRes.data.filter(item => item.category && item.category.includes('智能子域爆破'));
-      fileLeakDicts.value = dictRes.data.filter(item => item.category && (item.category.includes('目录文件泄露') || item.category.includes('目录与文件泄露')));
-      portDicts.value = dictRes.data.filter(item => item.category && item.category.includes('端口扫描策略') && item.name !== 'port_alive.txt');
+      const classified = classifyAssetDictionaries(dictRes.data);
+      domainDicts.value = classified.domainDicts;
+      altDnsDicts.value = classified.altDnsDicts;
+      fileLeakDicts.value = classified.fileLeakDicts;
+      portDicts.value = classified.portDicts;
 
       if (domainDicts.value.length > 0) formState.domain_brute_type = domainDicts.value[0].name;
       if (altDnsDicts.value.length > 0) formState.alt_dns_dict = altDnsDicts.value[0].name;
