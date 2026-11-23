@@ -356,6 +356,19 @@ All task collections (`site`, `domain`, `ip`, `cert`, `service`, `fileleak`, `ur
 - **Cross-Task Aggregation Semantics**: Global deduplicated endpoints (`GET /api/service/`, `GET /api/cip/`, and `GET /api/stat_finger/` without `task_id`) compute `save_date` via `$min` (first discovered) and `update_date` via `$max` (last seen). Date-range filters on `save_date` are applied post-aggregation so listed rows and `total` counts remain strictly consistent.
 - **Asset-Group Sync & Exports**: When task assets are synced to an asset group for the first time, `asset_*` inherits the task record's original `save_date` and initializes `update_date` to match; `update_date` advances only on subsequent re-scans or monitor refreshes. Plain-text `.txt` target exports remain unchanged, while certificate JSON exports (`/api/cert/export/`, `/api/asset_cert/export/`) include `save_date` and `update_date`.
 
+### Multi-Sheet Excel Report Export for Discovery Tasks
+
+`POST /api/export/batch/` exports asset data from 1 to 100 discovery tasks into a single multi-sheet `.xlsx` workbook (the legacy `GET /api/export/<task_id>` endpoint remains backward compatible):
+
+- **Request Body (JSON)**:
+  - `task_id` (required, `string[]`): 24-hex task IDs, deduplicated in input order, capped at **100** tasks per request.
+  - `sheets` (optional, `string[]`): Whitelist of sheet keys to include: `overview`, `site`, `domain`, `ip`, `service`, `vuln`, `nuclei_result`, `statist`, `wih`, `fileleak`, `cert`, `url`, `cip`. Defaults to the first 8 core and risk dimensions when omitted.
+  - `deduplicate` (optional, `boolean`, default `true`): When `true`, merges duplicate records across tasks by dimension key and aggregates matching source tasks into the source-task column, aligning the `statist` sheet with the deduplicated dataset; when `false`, preserves raw per-task rows.
+- **Limits & Response Headers**:
+  - Selected asset dimensions with 0 records are skipped automatically and noted in Task Overview; if all asset dimensions are empty, Task Overview is preserved as a fallback sheet.
+  - Running or queued tasks are exported as a snapshot of currently stored records, with live status labeled in Task Overview.
+  - The server streams output via `openpyxl` write-only mode with literal string cell encoding (mitigating formula injection) and XML control-character sanitization. Each sheet is capped at **50,000** rows; truncation is recorded in Task Overview and reported via `X-Export-Truncated` (`1` / `0`) and `X-Export-Truncated-Sheets` (comma-separated sheet keys), exposed through `Access-Control-Expose-Headers`.
+
 ---
 
 ## 5. Error Code Conventions & Client Branching

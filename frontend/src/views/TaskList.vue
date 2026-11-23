@@ -651,6 +651,11 @@
             {{ taskText('tasks.stopSelected') }}
           </a-button>
 
+          <a-button size="small" @click="openBatchExcelExportModal">
+            <template #icon><file-excel-outlined /></template>
+            {{ taskText('tasks.exportExcel') }}
+          </a-button>
+
           <a-dropdown>
             <template #overlay>
               <a-menu @click="handleBatchExport">
@@ -1315,6 +1320,13 @@
     <!-- 7. 企业资产查询弹窗与同步组件 -->
     <TycTaskModal v-model:open="tycModalVisible" @success="handleEnterpriseCreateSuccess" />
     <SyncToScopeModal v-model:open="syncModalVisible" :task="currentSyncTask" @success="handleSyncSuccess" />
+
+    <!-- 8. 资产侦查任务 Excel 导出配置弹窗（单任务 / 多任务统一入口） -->
+    <TaskExcelExportModal
+      v-model:open="excelExportModalVisible"
+      :tasks="excelExportTargets"
+      :cross-page-count="excelExportCrossPageCount"
+    />
   </div>
 </template>
 
@@ -1340,7 +1352,8 @@ import {
   CloseCircleOutlined,
   ClockCircleOutlined,
   StopOutlined,
-  SyncOutlined
+  SyncOutlined,
+  FileExcelOutlined
 } from '@ant-design/icons-vue';
 import dayjs from 'dayjs';
 import request from '../utils/request';
@@ -1361,6 +1374,7 @@ import {
 } from '../constants/taskStatus';
 import TycTaskModal from '../components/TycTaskModal.vue';
 import SyncToScopeModal from '../components/SyncToScopeModal.vue';
+import TaskExcelExportModal from '../components/TaskExcelExportModal.vue';
 import AssetScopeSelect from '../components/AssetScopeSelect.vue';
 import { getTaskAssetGroupState, hasSyncSummary } from '../utils/taskAssetGroups';
 import { buildNucleiConfigFromScope } from '../utils/nucleiHelpers';
@@ -2269,8 +2283,13 @@ const resetAdvancedFilters = () => {
 // 表格多选逻辑
 const selectedRowKeys = ref([]);
 const taskSelectionTracker = createSelectionLabelTracker();
+const taskRecordCache = new Map();
 const hasSelected = computed(() => selectedRowKeys.value.length > 0);
 let lastObservedMutationVersion = assetMutationVersion.value;
+
+const excelExportModalVisible = ref(false);
+const excelExportTargets = ref([]);
+const excelExportCrossPageCount = ref(0);
 
 const getTaskRowKey = (row) => row?._id || row?.task_id;
 const getTaskRowLabel = (row) => {
@@ -2279,8 +2298,20 @@ const getTaskRowLabel = (row) => {
   return row.target && row.target !== name ? `${name} (${row.target})` : name;
 };
 
+const rememberTaskRecords = (rows) => {
+  if (!Array.isArray(rows)) return;
+  for (const row of rows) {
+    const key = getTaskRowKey(row);
+    if (key != null && key !== '') {
+      taskRecordCache.set(String(key), row);
+    }
+  }
+};
+
 const onSelectChange = (keys, selectedRows) => {
   selectedRowKeys.value = keys;
+  rememberTaskRecords(taskList.value);
+  rememberTaskRecords(selectedRows);
   taskSelectionTracker.syncSelection(keys, selectedRows, taskList.value, getTaskRowKey, getTaskRowLabel);
 };
 
@@ -2339,6 +2370,7 @@ const fetchTasks = async (page = 1, size = 10, silent = false, includeStatistics
       pagination.total = res.total || 0;
       pagination.current = page;
       pagination.pageSize = size;
+      rememberTaskRecords(taskList.value);
       taskSelectionTracker.rememberRows(taskList.value, getTaskRowKey, getTaskRowLabel);
       lastRefreshTime.value = new Date();
     }
@@ -2610,27 +2642,48 @@ const deleteSingleTask = (record) => {
   });
 };
 
-const exportTask = async (record) => {
-  try {
-    message.loading({ content: taskText('tasks.generatingExcelExport'), key: 'exporting_excel' });
-    const res = await request.get(`/export/${record._id || record.task_id}`, {
-      responseType: 'blob'
-    });
-
-    const blob = new Blob([res], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const downloadUrl = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = `ARL_Task_${record.name || record._id}_Export.xlsx`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(downloadUrl);
-
-    message.success({ content: taskText('tasks.excelExportCompleted'), key: 'exporting_excel', duration: 2 });
-  } catch (error) {
-    message.error({ content: taskText('tasks.exportFailedCheckTheConsole'), key: 'exporting_excel', duration: 2 });
+const openBatchExcelExportModal = () => {
+  if (!hasSelected.value) {
+    message.warning(taskText('tasks.selectTasksToExportFirst'));
+    return;
   }
+
+  const validKeys = selectedRowKeys.value.filter(k => k != null && k !== '');
+  if (validKeys.length === 0) return;
+
+  const visibleIds = new Set(
+    (taskList.value || []).map(item => getTaskRowKey(item)).filter(Boolean).map(String)
+  );
+  const labels = taskSelectionTracker.getLabels(validKeys);
+
+  let crossPage = 0;
+  excelExportTargets.value = validKeys.map((rawKey, idx) => {
+    const id = String(rawKey);
+    const cached = taskRecordCache.get(id) || (taskList.value || []).find(item => String(getTaskRowKey(item)) === id);
+    if (!visibleIds.has(id)) {
+      crossPage += 1;
+    }
+    return {
+      id,
+      label: cached ? getTaskRowLabel(cached) : (labels[idx] || id),
+      status: cached?.status || '',
+    };
+  });
+  excelExportCrossPageCount.value = crossPage;
+  excelExportModalVisible.value = true;
+};
+
+const exportTask = (record) => {
+  const id = getTaskRowKey(record);
+  if (!id) return;
+  rememberTaskRecords([record]);
+  excelExportTargets.value = [{
+    id: String(id),
+    label: getTaskRowLabel(record) || String(id),
+    status: record?.status || '',
+  }];
+  excelExportCrossPageCount.value = 0;
+  excelExportModalVisible.value = true;
 };
 
 // 同步任务至资产组
@@ -3105,6 +3158,7 @@ onDeactivated(() => {
   syncVisible.value = false;
   tycModalVisible.value = false;
   syncModalVisible.value = false;
+  excelExportModalVisible.value = false;
 });
 
 onUnmounted(() => {

@@ -358,6 +358,19 @@ rules:
 - **跨任务聚合口径**：全局资产搜索中按端点/网段/指纹跨任务归并的 `GET /api/service/`、`GET /api/cip/` 与 `GET /api/stat_finger/`，严格以最早记录（`$min`）作为 `save_date`（首次发现时间），以最近观测（`$max`）作为 `update_date`（最近出现时间），且 `save_date__dgt`/`save_date__dlt` 过滤作用于归并后的首次发现时间，确保列表与总数口径一致。
 - **同步入组与导出**：任务资产首次同步至资产组时，`asset_*` 沿用任务记录的原始 `save_date`，并将 `update_date` 对齐该值，仅在后续复扫或监控刷新时推进 `update_date`。文本清单导出（`.txt`）保持原单目标格式不变，证书 JSON 导出（`/api/cert/export/`、`/api/asset_cert/export/`）同步包含 `save_date` 与 `update_date` 字段。
 
+### 资产侦查任务批量/单任务多工作表 Excel 导出
+
+`POST /api/export/batch/` 支持将 1 至 100 个资产侦查任务的资产数据合并导出为单个 `.xlsx` 多工作表报告（原有 `GET /api/export/<task_id>` 单任务导出接口保持向下兼容）：
+
+- **请求体（JSON）**：
+  - `task_id`（必填，`string[]`）：24 位任务 ID 列表，自动去重保序，单次上限 **100** 个任务。
+  - `sheets`（可选，`string[]`）：导出工作表白名单，支持 `overview`（任务概览）、`site`（站点）、`domain`（域名）、`ip`（IP）、`service`（系统服务）、`vuln`（风险漏洞）、`nuclei_result`（Nuclei 漏洞）、`statist`（资产统计）、`wih`（WIH）、`fileleak`（文件泄露）、`cert`（SSL 证书）、`url`（URL）、`cip`（C段）；缺省导出前 8 个默认维度。
+  - `deduplicate`（可选，`boolean`，默认 `true`）：开启时按各维度主键跨任务合并重复记录并在「来源任务」列汇总命中任务，同时「资产统计」按去重后口径计算；设为 `false` 时保留逐任务原始明细。
+- **边界与响应头**：
+  - 所选资产维度无数据（0 条）时自动跳过不建空工作表并在「任务概览」说明；若全部资产维度均无数据，保留「任务概览」作为兜底工作表。
+  - 进行中/排队中任务允许按导出时刻已入库数据快照导出，并在「任务概览」标注实时任务状态。
+  - 后端使用 `openpyxl` 流式写入并对所有文本单元格执行字面值转义与 XML 非法字符清理；单个工作表上限 **50,000** 行，达到上限时截断并通过响应头 `X-Export-Truncated`（`1` / `0`）与 `X-Export-Truncated-Sheets`（逗号分隔维度标识）告知客户端（同步通过 `Access-Control-Expose-Headers` 暴露）。
+
 ---
 
 ## 5. 错误码约定与客户端分支建议

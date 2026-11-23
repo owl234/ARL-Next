@@ -73,6 +73,10 @@ request.interceptors.response.use(
             return new Promise(() => {});
         }
 
+        if (response.config && response.config.returnFullResponse) {
+            return response;
+        }
+
         return res;
     },
     (error) => {
