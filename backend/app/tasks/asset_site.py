@@ -133,6 +133,8 @@ def asset_site_update_task(task_id, scope_id, scheduler_id):
 
         task.update_status(TaskStatus.ERROR)
         task.set_end_time()
+        from app.utils.task_statistics import flush_task_statistic_safely
+        flush_task_statistic_safely(task_id, logger)
 
 
 class AddAssetSiteTask(RiskCruising):

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { applyTaskStatistics, createTaskListClient } from '../src/utils/taskStatistics.js';
+import { buildTaskQueryParams } from '../src/utils/taskFilters.js';
 import { i18n } from '../src/i18n/index.js';
 
 const counts = { total: 9, active: 3, done: 4, abnormal: 2 };
@@ -80,7 +81,7 @@ function component(get) {
   const request = { get };
   const sandbox = {
     taskText: (...args) => i18n.global.t(...args),
-    request, taskListClient: createTaskListClient(request), applyTaskStatistics,
+    request, taskListClient: createTaskListClient(request), applyTaskStatistics, buildTaskQueryParams,
     taskRequestVersion: 0, enterpriseRequestVersion: 0, taskStatisticsReady: false, enterpriseStatisticsReady: false,
     assetMutationVersion: { value: 0 }, lastObservedMutationVersion: 0, clearSelection() {},
     taskMetricCounts: {}, enterpriseMetricCounts: {}, enterpriseRunningCount: { value: 0 },

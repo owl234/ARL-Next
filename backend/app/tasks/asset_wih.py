@@ -168,5 +168,7 @@ def asset_wih_update_task(task_id, scope_id, scheduler_id):
         logger.exception(e)
 
         task.base_update_task.update_task_field("status", TaskStatus.ERROR)
+        from app.utils.task_statistics import flush_task_statistic_safely
+        flush_task_statistic_safely(task_id, logger)
 
     task.base_update_task.update_task_field("end_time", utils.curr_date())

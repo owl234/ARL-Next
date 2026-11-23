@@ -73,7 +73,7 @@ For isolated regression checks, install the backend dependencies plus `pytest` a
 
 | Operation | HTTP Method & Path | Parameters / Request Payload | Prerequisites & Constraints |
 | :--- | :--- | :--- | :--- |
-| **List Tasks** | `GET /api/task/` | Query params: `target`, `status`, `page`, `size`; optionally `include_statistics=1` | Returns paginated task records |
+| **List Tasks** | `GET /api/task/` | Query params: `target`, `status`, `asset_yield`, `asset_types`, `statistic.*`, `page`, `size`; optionally `include_statistics=1` | Returns paginated task records; supports asset output filtering (`has_asset` / `no_asset`), OR asset-type selection, and 6-dimension numeric comparisons |
 | **Scan Task Statistics** | `GET /api/task/statistics` | None | Returns aggregated count per state without loading records |
 | **Enterprise Task Statistics** | `GET /api/icp/task/statistics` | None | Returns status statistics for enterprise OSINT / ICP tasks |
 | **Stop Single Task** | `GET /api/task/stop/<task_id>` | URL path param: `task_id` (24-char hex) | ⚠️ **Note: Uses GET to perform state mutation** (terminates the task). Do not use `POST` or `DELETE` |
@@ -144,6 +144,17 @@ Example (disable screenshots to reduce runtime on large scans):
 To delete currently running tasks programmatically, execute a two-stage sequence:
 1. Call `GET /api/task/stop/<task_id>` to transition the task to `stop` state;
 2. Confirm the task has reached a terminal state, then call `POST /api/task/delete/`. Deletion requests on active tasks are rejected by the server with `{"code": 104, "message": "任务运行中"}`.
+
+### Task Asset Output Filtering (`asset_yield` / `asset_types` / `statistic.*`)
+
+`GET /api/task/` supports filtering tasks by the 6 core visible asset counters in `task.statistic` (`site_cnt`, `domain_cnt`, `ip_cnt`, `wih_cnt`, `vuln_cnt`, `nuclei_result_cnt`), composing orthogonally with `status` and numeric range filters:
+
+| Parameter | Values & Behavior |
+| :--- | :--- |
+| `asset_yield=has_asset` | Matches tasks where any of the 6 core asset counters is `> 0` (regardless of task status) |
+| `asset_yield=no_asset` | Matches tasks in terminal states (`done` / `stop` / `error`) with all 6 core counters equal to `0` (or absent); combining with active statuses (e.g., `status=active`) intersects to an empty set |
+| `asset_types=<dims>` | Comma-separated allowlist: `site`, `domain`, `ip`, `wih`, `vuln`, `nuclei` (`nuclei_result` alias accepted); multiple selections match via **OR (any counter > 0)**. Non-empty input containing no valid dimension fails closed with an empty result |
+| `statistic.<key>` / `__gt` / `__lt` | Numeric equality/range filters (AND-composed) for `site_cnt`, `domain_cnt`, `ip_cnt`, `wih_cnt`, `vuln_cnt`, and `nuclei_result_cnt` (double-underscore suffix, e.g., `statistic.ip_cnt__gt=0`) |
 
 ### Aggregated Statistics Parameter (`include_statistics=1`)
 

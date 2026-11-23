@@ -369,3 +369,5 @@ def ip_task(ip_target, task_id, options):
         d.base_update_task.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         d.base_update_task.update_task_field("status", TaskStatus.ERROR)
         d.base_update_task.update_task_field("end_time", utils.curr_date())
+        from app.utils.task_statistics import flush_task_statistic_safely
+        flush_task_statistic_safely(task_id, logger)

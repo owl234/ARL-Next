@@ -10,7 +10,7 @@ from app.helpers import get_options_by_policy_id, normalize_site_capture, normal
     submit_risk_cruising, get_scope_by_scope_id, check_target_in_scope
 from app.helpers.task import get_task_data, restart_task
 from app.services.portScan import normalize_host_discovery_mode
-from app.utils.task_statistics import get_task_statistics, attach_task_statistics
+from app.utils.task_statistics import get_task_statistics, attach_task_statistics, flush_task_statistic_safely
 
 
 # 1. 成立“任务部门”：在 API 中划分出一个独立的命名空间 (Namespace)，
@@ -65,9 +65,20 @@ base_search_task_fields = {
     'statistic.domain_cnt': fields.Integer(description="域名数量等于"),
     'statistic.domain_cnt__gt': fields.Integer(description="域名数量大于"),
     'statistic.domain_cnt__lt': fields.Integer(description="域名数量小于"),
+    'statistic.ip_cnt': fields.Integer(description="IP 数量等于"),
+    'statistic.ip_cnt__gt': fields.Integer(description="IP 数量大于"),
+    'statistic.ip_cnt__lt': fields.Integer(description="IP 数量小于"),
     'statistic.wih_cnt': fields.Integer(description="WIH 数量等于"),
     'statistic.wih_cnt__gt': fields.Integer(description="WIH 数量大于"),
     'statistic.wih_cnt__lt': fields.Integer(description="WIH 数量小于"),
+    'statistic.vuln_cnt': fields.Integer(description="风险数量等于"),
+    'statistic.vuln_cnt__gt': fields.Integer(description="风险数量大于"),
+    'statistic.vuln_cnt__lt': fields.Integer(description="风险数量小于"),
+    'statistic.nuclei_result_cnt': fields.Integer(description="Nuclei 漏洞数量等于"),
+    'statistic.nuclei_result_cnt__gt': fields.Integer(description="Nuclei 漏洞数量大于"),
+    'statistic.nuclei_result_cnt__lt': fields.Integer(description="Nuclei 漏洞数量小于"),
+    'asset_yield': fields.String(description="资产产出筛选 (has_asset=核心6维任一>0, no_asset=已结束任务核心6维全为0)"),
+    'asset_types': fields.String(description="按资产维度筛选，逗号分隔白名单 (site,domain,ip,wih,vuln,nuclei)，多选按 OR 匹配"),
 }
 
 
@@ -126,10 +137,26 @@ class ARLTask(ARLResource): # 继承我们在阶段一拆解过的“大基类�
     # 提前准备好 GET 请求用的“查询参数解析器”
     parser = get_arl_parser(search_task_fields, location='args')
 
+    # 核心 6 维可见资产口径映射（站点 / 域名 / IP / WIH / 风险 / Nuclei）
+    ASSET_YIELD_FIELD_MAP = {
+        "site": "statistic.site_cnt",
+        "domain": "statistic.domain_cnt",
+        "ip": "statistic.ip_cnt",
+        "wih": "statistic.wih_cnt",
+        "vuln": "statistic.vuln_cnt",
+        "nuclei": "statistic.nuclei_result_cnt",
+    }
+    ASSET_YIELD_ALIAS_MAP = {
+        "nuclei_result": "nuclei",
+    }
+    TERMINAL_STATUSES = ["done", "stop", "error"]
+
     def build_db_query(self, args):
         args_copy = dict(args)
         tag_val = args_copy.pop("task_tag", None)
         status_val = args_copy.pop("status", None)
+        asset_yield_raw = args_copy.pop("asset_yield", None)
+        asset_types_raw = args_copy.pop("asset_types", None)
 
         # 兼容资产组同步状态别名 (syncing -> running, done/synced -> default)
         sync_status_val = args_copy.get("sync_status")
@@ -160,6 +187,52 @@ class ARLTask(ARLResource): # 继承我们在阶段一拆解过的“大基类�
             q["status"] = aggregate_status[status_val]
         elif status_val:
             q["status"] = status_val
+
+        # 资产产出筛选（与状态、数值高级筛选正交组合，通过 $and 安全合入避免覆盖已有条件）
+        yield_mode = str(asset_yield_raw or "").strip().lower()
+        asset_types_str = str(asset_types_raw or "").strip()
+        selected_dims = []
+        if asset_types_str:
+            for token in asset_types_str.split(","):
+                norm = token.strip().lower()
+                if not norm:
+                    continue
+                norm = self.ASSET_YIELD_ALIAS_MAP.get(norm, norm)
+                if norm in self.ASSET_YIELD_FIELD_MAP and norm not in selected_dims:
+                    selected_dims.append(norm)
+
+        and_clauses = []
+        if yield_mode and yield_mode not in ("has_asset", "no_asset"):
+            # 非法产出模式 fail-closed，返回空集
+            and_clauses.append({"_id": None})
+        elif yield_mode == "no_asset":
+            # “无产出”默认仅统计已结束任务（done/stop/error），避免排队/运行中任务混入空任务列表
+            and_clauses.append({"status": {"$in": list(self.TERMINAL_STATUSES)}})
+            target_dims = selected_dims if selected_dims else list(self.ASSET_YIELD_FIELD_MAP.keys())
+            for dim in target_dims:
+                and_clauses.append({self.ASSET_YIELD_FIELD_MAP[dim]: {"$not": {"$gt": 0}}})
+        elif selected_dims:
+            # 多选具体资产维度按 OR（满足任一即命中）
+            if len(selected_dims) == 1:
+                and_clauses.append({self.ASSET_YIELD_FIELD_MAP[selected_dims[0]]: {"$gt": 0}})
+            else:
+                and_clauses.append({
+                    "$or": [{self.ASSET_YIELD_FIELD_MAP[dim]: {"$gt": 0}} for dim in selected_dims]
+                })
+        elif asset_types_str:
+            # 显式传入了 asset_types 但无任何合法白名单维度，fail-closed 返回空集
+            and_clauses.append({"_id": None})
+        elif yield_mode == "has_asset":
+            and_clauses.append({
+                "$or": [{field: {"$gt": 0}} for field in self.ASSET_YIELD_FIELD_MAP.values()]
+            })
+
+        if and_clauses:
+            existing_and = q.get("$and")
+            if isinstance(existing_and, list):
+                existing_and.extend(and_clauses)
+            else:
+                q["$and"] = and_clauses
 
         return q
 
@@ -371,6 +444,7 @@ def stop_task(task_id):
         # 僵尸任务柔性退出：直接标记为已停止
         update_data = {"$set": {"status": TaskStatus.STOP, "end_time": utils.curr_date()}}
         utils.conn_db('task').update_one({'_id': ObjectId(task_id)}, update_data)
+        flush_task_statistic_safely(task_id, logger)
         return utils.build_ret(ErrorMsg.Success, {"task_id": task_id})
 
     # 5. 【核心杀手锏】：连接到 Celery 的控制台并向指定工人发送 SIGTERM 信号
@@ -386,6 +460,7 @@ def stop_task(task_id):
     # $set 是 MongoDB 专属语法，代表只更新这两个指定的字段，不影响其他字段
     update_data = {"$set": {"status": TaskStatus.STOP, "end_time": utils.curr_date()}}
     utils.conn_db('task').update_one({'_id': ObjectId(task_id)}, update_data)
+    flush_task_statistic_safely(task_id, logger)
 
     return utils.build_ret(ErrorMsg.Success, {"task_id": task_id})
 

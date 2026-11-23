@@ -1368,3 +1368,5 @@ def domain_task(base_domain, task_id, options):
         d.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         d.update_task_field("status", TaskStatus.ERROR)
         d.update_task_field("end_time", utils.curr_date())
+        from app.utils.task_statistics import flush_task_statistic_safely
+        flush_task_statistic_safely(task_id, logger)

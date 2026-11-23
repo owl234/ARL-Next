@@ -73,7 +73,7 @@
 
 | 操作事项 | HTTP 方法及完整路径 | 请求参数 / 请求体格式 | 状态要求与注意事项 |
 | :--- | :--- | :--- | :--- |
-| **查询任务列表** | `GET /api/task/` | 查询参数：`target`、`status`、`page`、`size`；可追加 `include_statistics=1` | 分页返回任务列表 |
+| **查询任务列表** | `GET /api/task/` | 查询参数：`target`、`status`、`asset_yield`、`asset_types`、`statistic.*`、`page`、`size`；可追加 `include_statistics=1` | 分页返回任务列表；支持按资产产出状态（`has_asset` / `no_asset`）、资产维度 OR 过滤及 6 维数值比较 |
 | **查询扫描任务统计** | `GET /api/task/statistics` | 无 | 仅返回各状态任务数量汇总，不遍历任务详情 |
 | **查询企业任务统计** | `GET /api/icp/task/statistics` | 无 | 仅返回企业工商/ICP 任务的全局状态统计 |
 | **停止单个任务** | `GET /api/task/stop/<task_id>` | URL 路径参数：`task_id` (24位十六进制) | ⚠️ **注意：此接口使用 GET 方法执行状态变更**（终止任务执行），切勿误认为只读接口，亦不要使用 `POST` 或 `DELETE` |
@@ -144,6 +144,17 @@
 若需通过自动化脚本删除进行中的任务，必须严格执行两阶段操作：
 1. 先调用 `GET /api/task/stop/<task_id>` 将任务终止至 `stop` 状态；
 2. 校验任务状态确认进入终态后，再调用 `POST /api/task/delete/` 提交删除。直接对进行中或排队中任务请求删除将被服务端拒绝并返回 `{"code": 104, "message": "任务运行中"}`。
+
+### 任务资产产出筛选 (`asset_yield` / `asset_types` / `statistic.*`)
+
+`GET /api/task/` 支持基于 `task.statistic` 核心 6 维可见资产（`site_cnt`、`domain_cnt`、`ip_cnt`、`wih_cnt`、`vuln_cnt`、`nuclei_result_cnt`）筛选有效任务或无产出任务，并与 `status` 及数值条件正交组合：
+
+| 参数 | 取值与行为说明 |
+| :--- | :--- |
+| `asset_yield=has_asset` | 匹配核心 6 维资产计数任一 `> 0` 的任务（不限任务状态） |
+| `asset_yield=no_asset` | 匹配处于终态（`done` / `stop` / `error`）且核心 6 维计数均为 `0`（或缺失）的任务；与进行中/排队状态（如 `status=active`）叠加时交集返回空集 |
+| `asset_types=<dims>` | 逗号分隔白名单：`site`、`domain`、`ip`、`wih`、`vuln`、`nuclei`（兼容 `nuclei_result` 别名），多选按 **OR（满足任一 > 0）** 匹配；全部为非法取值时 fail-closed 返回空集 |
+| `statistic.<key>` / `__gt` / `__lt` | 数值精确/范围过滤（AND 组合），支持 `site_cnt`、`domain_cnt`、`ip_cnt`、`wih_cnt`、`vuln_cnt`、`nuclei_result_cnt`（注意大于/小于为双下划线后缀，如 `statistic.ip_cnt__gt=0`） |
 
 ### 统计指标参数 (`include_statistics=1`)
 

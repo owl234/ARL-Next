@@ -2147,10 +2147,72 @@ def migrate_asset_discovery_timestamps(run_async=False, batch_size=500, pause_se
     return _execute()
 
 
+def backfill_terminal_task_statistics(run_async=False):
+    """
+    一次性后台补齐存量已结束（done/stop/error）且缺失 statistic 核心计数的任务记录。
+    复用 recalculate_tasks_statistics 恒定 O(13) 并发聚合批处理，通过 system_config 哨兵保证幂等。
+    """
+    def _execute():
+        import logging
+        import time
+        log = logging.getLogger()
+        sys_db = conn_db("system_config")
+        sentinel_id = "migration_backfill_terminal_task_statistics_v1"
+        record = sys_db.find_one({"_id": sentinel_id})
+        if record and record.get("status") == "completed":
+            return 0
+
+        missing_query = {
+            "status": {"$in": ["done", "stop", "error"]},
+            "$or": [
+                {"statistic": {"$exists": False}},
+                {"statistic": None},
+                {"statistic": {"$not": {"$type": "object"}}},
+                {"statistic.site_cnt": {"$exists": False}},
+                {"statistic.domain_cnt": {"$exists": False}},
+                {"statistic.ip_cnt": {"$exists": False}},
+                {"statistic.wih_cnt": {"$exists": False}},
+                {"statistic.vuln_cnt": {"$exists": False}},
+                {"statistic.nuclei_result_cnt": {"$exists": False}},
+            ],
+        }
+
+        try:
+            task_ids = [
+                str(doc["_id"])
+                for doc in conn_db("task").find(missing_query, {"_id": 1})
+                if doc.get("_id") is not None
+            ]
+            backfilled = 0
+            if task_ids:
+                from app.services.asset_cascade_service import recalculate_tasks_statistics
+                batch_size = 200
+                for i in range(0, len(task_ids), batch_size):
+                    batch = task_ids[i:i + batch_size]
+                    recalculate_tasks_statistics(batch)
+                    backfilled += len(batch)
+                log.info(f"backfill_terminal_task_statistics: backfilled {backfilled} terminal tasks.")
+
+            sys_db.update_one(
+                {"_id": sentinel_id},
+                {"$set": {"status": "completed", "completed_at": time.time(), "backfilled_count": backfilled}},
+                upsert=True,
+            )
+            return backfilled
+        except Exception as exc:
+            log.error(f"backfill_terminal_task_statistics error: {exc}", exc_info=True)
+            return 0
+
+    if run_async:
+        threading.Thread(target=_execute, name="backfill-terminal-task-stats", daemon=True).start()
+        return 0
+    return _execute()
+
+
 def start_deferred_asset_migrations():
     """
-    以单一后台守护线程串行编排派生表自愈与 26 集合发现时间归一化迁移：
-    先避开 gunicorn --preload fork 窗口，再顺序执行自愈重建与时间戳归一化，规避双后台线程并发读写同一集合的竞态。
+    以单一后台守护线程串行编排派生表自愈、存量终态任务统计补齐与 26 集合发现时间归一化迁移：
+    先避开 gunicorn --preload fork 窗口，再顺序执行自愈重建、统计回填与时间戳归一化，规避双后台线程并发读写同一集合的竞态。
     """
     def _runner():
         import logging
@@ -2159,6 +2221,7 @@ def start_deferred_asset_migrations():
         time.sleep(3)
         for name, fn in (
             ("migrate_heal_cascade_and_derived_assets", lambda: migrate_heal_cascade_and_derived_assets(run_in_thread=False)),
+            ("backfill_terminal_task_statistics", lambda: backfill_terminal_task_statistics(run_async=False)),
             ("migrate_asset_discovery_timestamps", lambda: migrate_asset_discovery_timestamps(run_async=False)),
         ):
             try:

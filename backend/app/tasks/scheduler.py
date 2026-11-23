@@ -72,6 +72,8 @@ def domain_executors(base_domain=None, scheduler_id=None, scope_id=None, options
         logger.exception(e)
         if task_id:
             conn('task').update_one({"_id": ObjectId(task_id)}, {"$set": {"status": TaskStatus.ERROR, "end_time": utils.curr_date()}})
+            from app.utils.task_statistics import flush_task_statistic_safely
+            flush_task_statistic_safely(task_id, logger)
 
 
 def wrap_domain_executors(base_domain=None, scheduler_id=None, scope_id=None, options=None, name="", task_id=None):
@@ -166,6 +168,8 @@ def wrap_domain_executors(base_domain=None, scheduler_id=None, scope_id=None, op
         domain_executor.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         domain_executor.update_task_field("status", TaskStatus.ERROR)
         domain_executor.update_task_field("end_time", utils.curr_date())
+        from app.utils.task_statistics import flush_task_statistic_safely
+        flush_task_statistic_safely(task_id, logger)
         if scope_id and base_domain:
             from app.helpers.scope import update_scope_domain_status
             update_scope_domain_status(scope_id, base_domain, "error", task_id)
@@ -273,6 +277,8 @@ def oneshot_domain_executors(base_domain=None, scope_id=None, options=None, name
         domain_executor.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         domain_executor.update_task_field("status", TaskStatus.ERROR)
         domain_executor.update_task_field("end_time", utils.curr_date())
+        from app.utils.task_statistics import flush_task_statistic_safely
+        flush_task_statistic_safely(task_id, logger)
         if scope_id and base_domain:
             from app.helpers.scope import update_scope_domain_status
             update_scope_domain_status(scope_id, base_domain, "error", task_id)
@@ -804,6 +810,8 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options, task_id=None
         logger.exception(e)
         if task_id:
             conn('task').update_one({"_id": ObjectId(task_id)}, {"$set": {"status": TaskStatus.ERROR, "end_time": utils.curr_date()}})
+            from app.utils.task_statistics import flush_task_statistic_safely
+            flush_task_statistic_safely(task_id, logger)
         return
 
     executor = IPExecutor(target, scope_id, task_name, scheduler_id, options)
@@ -823,6 +831,8 @@ def ip_executor(target, scope_id, task_name, scheduler_id, options, task_id=None
         executor.base_update_task.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         executor.base_update_task.update_task_field("status", TaskStatus.ERROR)
         executor.base_update_task.update_task_field("end_time", utils.curr_date())
+        from app.utils.task_statistics import flush_task_statistic_safely
+        flush_task_statistic_safely(getattr(executor, 'task_id', None) or task_id, logger)
         from app.helpers.scope import update_scope_domain_status
         for ip in target.split():
             update_scope_domain_status(scope_id, ip, "error", getattr(executor, 'task_id', None))
@@ -884,6 +894,8 @@ def oneshot_ip_executors(target, scope_id, task_name, options, task_id=None):
         executor.base_update_task.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         executor.base_update_task.update_task_field("status", TaskStatus.ERROR)
         executor.base_update_task.update_task_field("end_time", utils.curr_date())
+        from app.utils.task_statistics import flush_task_statistic_safely
+        flush_task_statistic_safely(getattr(executor, 'task_id', None) or task_id, logger)
         from app.helpers.scope import update_scope_domain_status
         for ip in target.split():
             update_scope_domain_status(scope_id, ip, "error", getattr(executor, 'task_id', None))

@@ -250,5 +250,7 @@ class RiskCruising(CommonTask):
             except Exception as e:
                 self.update_task_field("status", TaskStatus.ERROR)
                 self.update_task_field("end_time", utils.curr_date())
+                from app.utils.task_statistics import flush_task_statistic_safely
+                flush_task_statistic_safely(self.task_id, logger)
                 logger.exception(e)
 
