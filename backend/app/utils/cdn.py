@@ -49,6 +49,36 @@ CDN_DOMAIN_REGEX_RULES = [
     {"pattern": re.compile(r"(?:^|\.)eo\.dnse\d+\.(?:com|net|cn)$"), "name": "腾讯云 CDN/EdgeOne"},
 ]
 
+# 多租户公共 CDN CNAME 边缘路由子域正则（严格要求位于路由前缀之下，保留根域及 ns/www 等常规子域）
+CDN_CNAME_ROUTING_SUBDOMAIN_PATTERNS = [
+    re.compile(r"^.+\.eo\.dnse\d+\.(?:com|net|cn)$"),
+    re.compile(r"^.+\.(?:pages|eo)\.dnsoe\d+\.(?:com|net|cn)$"),
+    re.compile(r"^.+\.cdn\.dnsv\d+\.(?:com|net|cn)$"),
+    re.compile(r"^.+\.(?:cdns|pages)\.edgeone\.(?:ai|cool|site)$"),
+    re.compile(r"^.+\.(?:tc|sp|ov|live)\.cdntip\.com$"),
+    re.compile(r"^.+\.w\.kunlun(?:sl|gr|sa|ca|aq|ar|no|pi|so|ta)\.com$"),
+    re.compile(r"^.+\.alikunlun\.com$"),
+]
+
+
+def is_cdn_cname_routing_subdomain(domain: str, base_domain: str = None) -> bool:
+    """
+    判断域名是否为已知多租户 CDN CNAME 边缘路由前缀下的第三方客户子域
+    （如 *.eo.dnse5.com、*.pages.dnsoe5.com、*.cdn.dnsv1.com）。
+    - 仅匹配明确路由前缀之下的子域，保留根域（dnse5.com）及常规子域（ns1.dnse5.com / ad1.dnsv1.net）。
+    - 若与任务显式指定的 base_domain 完全一致则豁免，避免误伤定向单域探测。
+    """
+    if not domain or not isinstance(domain, str):
+        return False
+    domain_lower = domain.lower().strip().rstrip(".")
+    if not domain_lower:
+        return False
+    if base_domain:
+        base_lower = str(base_domain).lower().strip().rstrip(".")
+        if domain_lower == base_lower:
+            return False
+    return any(pattern.match(domain_lower) for pattern in CDN_CNAME_ROUTING_SUBDOMAIN_PATTERNS)
+
 # 常见 CDN / WAF HTTP 响应头特征
 HEADER_CDN_INDICATORS = [
     "cf-ray", "x-amz-cf-id", "x-edge-connect-request-id",

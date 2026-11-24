@@ -49,7 +49,15 @@ from .time import curr_date, time2date, curr_date_obj, date2time, to_datetime_ob
 from .url import rm_similar_url, get_hostname, normal_url, same_netloc, verify_cert, url_ext
 from .cert import get_cert, extract_domains_from_cert
 from .arlupdate import arl_update
-from .cdn import get_cdn_name_by_cname, get_cdn_name_by_domain_strict, get_cdn_name_by_ip, get_cdn_name_by_headers, get_cdn_name_by_ssl, get_cdn_name_comprehensive
+from .cdn import (
+    get_cdn_name_by_cname,
+    get_cdn_name_by_domain_strict,
+    get_cdn_name_by_ip,
+    get_cdn_name_by_headers,
+    get_cdn_name_by_ssl,
+    get_cdn_name_comprehensive,
+    is_cdn_cname_routing_subdomain,
+)
 try:
     from .device import device_info
 except ImportError:

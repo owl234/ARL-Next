@@ -1,15 +1,16 @@
+import concurrent.futures
+import time
 from celery import current_task
 from celery.exceptions import MaxRetriesExceededError, Retry
 from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo.errors import PyMongoError
-from app.utils import conn_db as conn, arl_task_id_var
+from app.utils import conn_db as conn, arl_task_id_var, ContextAwareThreadPoolExecutor
 from .domain import DomainTask
 from .ip import IPTask
 from app import utils
 from app.modules import TaskStatus, CollectSource, SchedulerStatus
-from app.services import sync_asset, build_domain_info, sync_asset
-import time
+from app.services import sync_asset, build_domain_info
 from app.scheduler import update_scheduler_run
 from app.services import webhook
 from app.services.commonTask import TaskHeartbeat
@@ -288,6 +289,13 @@ def oneshot_domain_executors(base_domain=None, scope_id=None, options=None, name
 
 # ***域名监控任务　＊＊＊
 class DomainExecutor(DomainTask):
+    WILDCARD_PROBE_CONCURRENCY = 15
+    WILDCARD_MAX_PARENTS = 200
+    WILDCARD_MIN_CHILDREN = 2
+    WILDCARD_PROBE_BUDGET_SECONDS = 120.0
+    LARGE_DOMAIN_BUILD_WARN_THRESHOLD = 2000
+    SLOW_DOMAIN_BUILD_WARN_SECONDS = 120.0
+
     def __init__(self, base_domain, task_id, options):
         super().__init__(base_domain, task_id, options)
         self.domain_set = set()
@@ -318,7 +326,21 @@ class DomainExecutor(DomainTask):
         with self.safe_phase("domain_sync", base_update, critical=True):
             self.set_scope_domain()
             target_scope_domains = {d for d in self.scope_domain_set if d == self.base_domain or d.endswith("." + self.base_domain)}
-            new_domain_set = self.domain_set | target_scope_domains
+            raw_domain_set = self.domain_set | target_scope_domains
+            filtered_cdn_routing = 0
+            new_domain_set = set()
+            for dom in raw_domain_set:
+                if utils.is_cdn_cname_routing_subdomain(dom, base_domain=self.base_domain):
+                    filtered_cdn_routing += 1
+                    continue
+                new_domain_set.add(dom)
+            if filtered_cdn_routing > 0:
+                logger.info(
+                    "domain_sync filtered %d third-party CDN CNAME routing subdomains for %s (remaining=%d)",
+                    filtered_cdn_routing,
+                    self.base_domain,
+                    len(new_domain_set),
+                )
             self.new_domain_set = new_domain_set
             self.set_wildcard_ip_set()
             self.set_domain_info_list()
@@ -392,7 +414,14 @@ class DomainExecutor(DomainTask):
         """
         self.domain_info_list = []
         self.record_map = {}
-        logger.info("start build domain monitor task, new domain {}".format(len(self.new_domain_set)))
+        candidate_count = len(self.new_domain_set or ())
+        logger.info("start build domain monitor task, new domain {}".format(candidate_count))
+        if candidate_count >= self.LARGE_DOMAIN_BUILD_WARN_THRESHOLD:
+            logger.warning(
+                "domain_sync build_domain_info processing large candidate set for %s: %d domains",
+                self.base_domain,
+                candidate_count,
+            )
         t1 = time.time()
 
         self.task_tag = "task" #标记为正常任务，让build_domain_info 工作
@@ -404,6 +433,14 @@ class DomainExecutor(DomainTask):
             new = self.clear_wildcard_domain_info(new)
 
         elapse = time.time() - t1
+        if elapse >= self.SLOW_DOMAIN_BUILD_WARN_SECONDS:
+            logger.warning(
+                "domain_sync build_domain_info slow completion for %s: candidates=%d resolved=%d elapse=%.2fs",
+                self.base_domain,
+                candidate_count,
+                len(new),
+                elapse,
+            )
         logger.info("end build domain monitor task  {}, elapse {}".format(
             len(new), elapse))
 
@@ -414,23 +451,109 @@ class DomainExecutor(DomainTask):
         self.save_domain_info_list(new, CollectSource.MONITOR)
         self.domain_info_list = new
 
-    def set_wildcard_ip_set(self):
-        """
-        针对每个可能存在泛解析的父级域名进行独立探测，建立 (parent_domain -> wildcard_metadata) 映射
-        采用 3 次探活交叉验证与公共 CDN 排除，避免 Anycast/轮询 IP 污染与误杀合法业务
-        """
-        self.wildcard_map = {}
-        parent_domains = set()
+    def _select_wildcard_probe_parents(self):
         base = (getattr(self, "base_domain", None) or "").lower().strip()
-        for domain in self.new_domain_set:
+        parent_child_counts = {}
+        for domain in (self.new_domain_set or ()):
             if not domain:
                 continue
             curr = domain.lower().strip()
             if base:
                 while curr.endswith("." + base):
                     curr = curr.split(".", 1)[1]
-                    parent_domains.add(curr)
-                parent_domains.add(base)
+                    parent_child_counts[curr] = parent_child_counts.get(curr, 0) + 1
+
+        total_unique_parents = len(parent_child_counts) + (1 if base and base not in parent_child_counts else 0)
+        intermediates = [
+            (parent, cnt)
+            for parent, cnt in parent_child_counts.items()
+            if parent != base and cnt >= self.WILDCARD_MIN_CHILDREN
+        ]
+        # 按子节点聚集度降序优先探测（同权重下浅层父域优先），确保真实泛解析区优先命中
+        intermediates.sort(key=lambda item: (-item[1], item[0].count("."), item[0]))
+
+        max_parents = max(1, int(self.WILDCARD_MAX_PARENTS))
+        probe_parents = []
+        if base:
+            probe_parents.append(base)
+        remaining_slots = max(0, max_parents - len(probe_parents))
+        probe_parents.extend(parent for parent, _ in intermediates[:remaining_slots])
+
+        return probe_parents, total_unique_parents, len(intermediates)
+
+    def _probe_wildcard_parent(self, parent, deadline, public_cdn_roots):
+        if time.monotonic() >= deadline:
+            return parent, None, True
+
+        samples_ip = []
+        samples_cname = []
+        for attempt in range(3):
+            if time.monotonic() >= deadline:
+                return parent, None, True
+            rand = "wf" + utils.random_choices(6) + "." + parent
+            ips_list, transient_failed = utils.get_ip_with_status(rand, log_flag=False, retries=1)
+            ips = set(ips_list or [])
+            if ips:
+                samples_ip.append(ips)
+                # 仅当 A 记录解析出 IP 时才补查 CNAME，规避 NXDOMAIN 场景下 50% 的无效查询
+                cnames = {
+                    c.lower().strip().rstrip(".")
+                    for c in (utils.get_cname(rand, log_flag=False, retries=1) or [])
+                    if c
+                }
+                if cnames:
+                    samples_cname.append(cnames)
+            else:
+                # 确定性 NXDOMAIN/NoAnswer 说明该父域不存在泛解析，首次即可早退
+                if not transient_failed and len(samples_ip) == 0:
+                    return parent, None, False
+                remaining = 2 - attempt
+                if len(samples_ip) + remaining < 2:
+                    break
+
+        if len(samples_ip) >= 2:
+            all_ips = set.union(*samples_ip)
+            is_rotating = not (len(samples_ip) == 3 and samples_ip[0] == samples_ip[1] == samples_ip[2])
+            static_cnames = set()
+            if len(samples_cname) >= 2:
+                common_cnames = set.intersection(*samples_cname)
+                for cname in common_cnames:
+                    cname_norm = cname.lower().strip().rstrip(".")
+                    if not any(cname_norm == cdn or cname_norm.endswith("." + cdn) for cdn in public_cdn_roots):
+                        static_cnames.add(cname_norm)
+
+            return parent, {
+                "ips": all_ips,
+                "is_rotating": is_rotating,
+                "static_cnames": static_cnames,
+            }, False
+
+        return parent, None, False
+
+    def set_wildcard_ip_set(self):
+        """
+        针对每个可能存在泛解析的父级域名进行并发探测，建立 (parent_domain -> wildcard_metadata) 映射。
+        采用子节点聚集度裁剪 + 确定性 NXDOMAIN 早退 + 阶段耗时预算，避免深层子域树触发串行 DNS 爆炸。
+        """
+        self.wildcard_map = {}
+        if not self.new_domain_set:
+            logger.info("start get wildcard_map with 0 wildcard zones")
+            return
+
+        probe_parents, total_unique_parents, eligible_intermediates = self._select_wildcard_probe_parents()
+        if not probe_parents:
+            logger.info("start get wildcard_map with 0 wildcard zones")
+            return
+
+        if total_unique_parents > len(probe_parents):
+            logger.info(
+                "wildcard probe pruned parent_domains for %s: total=%d eligible(>=%d children)=%d selected=%d",
+                self.base_domain,
+                total_unique_parents,
+                self.WILDCARD_MIN_CHILDREN,
+                eligible_intermediates,
+                len(probe_parents),
+            )
 
         public_cdn_roots = {
             "kunlunsl.com", "alicdn.com", "cloudflare.net",
@@ -438,37 +561,54 @@ class DomainExecutor(DomainTask):
             "cloudflaressl.com"
         }
 
-        for parent in parent_domains:
-            samples_ip = []
-            samples_cname = []
-            for _ in range(3):
-                rand = "wf" + utils.random_choices(6) + "." + parent
-                ips = set(utils.get_ip(rand, log_flag=False) or [])
-                cnames = {c.lower().strip().rstrip(".") for c in (utils.get_cname(rand, log_flag=False) or []) if c}
-                if ips:
-                    samples_ip.append(ips)
-                if cnames:
-                    samples_cname.append(cnames)
+        t_start = time.monotonic()
+        budget = max(0.05, float(self.WILDCARD_PROBE_BUDGET_SECONDS))
+        deadline = t_start + budget
+        max_workers = max(1, min(int(self.WILDCARD_PROBE_CONCURRENCY), len(probe_parents)))
 
-            if len(samples_ip) >= 2:
-                all_ips = set.union(*samples_ip)
-                is_rotating = not (len(samples_ip) == 3 and samples_ip[0] == samples_ip[1] == samples_ip[2])
-                static_cnames = set()
-                if len(samples_cname) >= 2:
-                    common_cnames = set.intersection(*samples_cname)
-                    for cname in common_cnames:
-                        cname_norm = cname.lower().strip().rstrip(".")
-                        if not any(cname_norm == cdn or cname_norm.endswith("." + cdn) for cdn in public_cdn_roots):
-                            static_cnames.add(cname_norm)
+        probed_count = 0
+        budget_hit = False
+        with ContextAwareThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {
+                executor.submit(self._probe_wildcard_parent, parent, deadline, public_cdn_roots): parent
+                for parent in probe_parents
+            }
+            try:
+                remaining_budget = max(0.01, deadline - time.monotonic())
+                for fut in concurrent.futures.as_completed(future_map, timeout=remaining_budget):
+                    parent, wc_entry, skipped_due_budget = fut.result()
+                    if skipped_due_budget:
+                        budget_hit = True
+                        continue
+                    probed_count += 1
+                    if wc_entry is not None:
+                        self.wildcard_map[parent] = wc_entry
+                        logger.info(
+                            f"detected wildcard zone: *.{parent} -> ips:{len(wc_entry['ips'])}, "
+                            f"rotating:{wc_entry['is_rotating']}, static_cnames:{wc_entry['static_cnames']}"
+                        )
+            except concurrent.futures.TimeoutError:
+                budget_hit = True
+            finally:
+                for fut in future_map:
+                    if not fut.done():
+                        fut.cancel()
 
-                self.wildcard_map[parent] = {
-                    "ips": all_ips,
-                    "is_rotating": is_rotating,
-                    "static_cnames": static_cnames
-                }
-                logger.info(f"detected wildcard zone: *.{parent} -> ips:{len(all_ips)}, rotating:{is_rotating}, static_cnames:{static_cnames}")
+        elapse = time.monotonic() - t_start
+        if budget_hit:
+            logger.warning(
+                "wildcard probe hit %.1fs budget for %s (probed=%d/%d, detected=%d, elapse=%.2fs)",
+                budget,
+                self.base_domain,
+                probed_count,
+                len(probe_parents),
+                len(self.wildcard_map),
+                elapse,
+            )
 
-        logger.info("start get wildcard_map with {} wildcard zones".format(len(self.wildcard_map)))
+        logger.info("start get wildcard_map with {} wildcard zones (probed={}, elapse={:.2f}s)".format(
+            len(self.wildcard_map), probed_count, elapse
+        ))
 
     def clear_wildcard_domain_info(self, info_list):
         if not getattr(self, 'wildcard_map', None):

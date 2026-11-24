@@ -717,6 +717,9 @@ class DomainTask(CommonTask):
             if utils.check_domain_black(domain):
                 continue
 
+            if utils.is_cdn_cname_routing_subdomain(domain, base_domain=self.base_domain):
+                continue
+
             fake = {
                 "domain": domain,
                 "type": "CNAME",

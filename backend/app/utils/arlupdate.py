@@ -746,6 +746,133 @@ def ensure_builtin_dicts():
     except Exception as e:
         logging.getLogger().warning(f"Failed to auto-seed/update port_alive.txt: {e}")
 
+    ensure_dnsserver_dict(dict_dir=dict_dir)
+
+
+DEFAULT_DNS_SERVERS = (
+    "223.5.5.5",
+    "223.6.6.6",
+    "119.29.29.29",
+    "114.114.114.114",
+    "114.114.115.115",
+    "180.76.76.76",
+    "1.2.4.8",
+    "210.2.4.8",
+    "8.8.8.8",
+    "8.8.4.4",
+    "1.1.1.1",
+    "1.0.0.1",
+    "9.9.9.9",
+    "208.67.222.222",
+    "208.67.220.220",
+)
+
+DEAD_DNS_SERVERS_V1 = frozenset({
+    "182.254.116.116",
+    "182.254.118.118",
+    "117.85.70.226",
+})
+
+
+def ensure_dnsserver_dict(dict_dir=None):
+    """
+    确保内置上游 DNS 列表存在，并对存量持久化卷 arl_app_dicts 中的 dnsserver.txt
+    执行一次性幂等清理：仅剔除已知失效公共 DNS IP，保留用户自定义条目与注释；
+    通过 system_config 哨兵保证后续用户手工修改不被覆盖，且严禁将文件写空。
+    """
+    import os
+    import time
+    import logging
+    from app.config import Config
+
+    logger = logging.getLogger()
+    if dict_dir is None:
+        dict_dir = os.path.join(
+            Config.basedir if hasattr(Config, "basedir") else os.path.dirname(os.path.dirname(__file__)),
+            "dicts",
+        )
+    dnsserver_path = os.path.join(dict_dir, "dnsserver.txt")
+
+    def _write_lines_atomic(path, lines):
+        content = "\n".join(lines) + "\n"
+        tmp_path = f"{path}.tmp.{os.getpid()}"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, path)
+        except OSError:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+    try:
+        if not os.path.exists(dnsserver_path):
+            os.makedirs(dict_dir, exist_ok=True)
+            _write_lines_atomic(dnsserver_path, DEFAULT_DNS_SERVERS)
+            logger.info("Successfully auto-seeded missing dnsserver.txt into dicts volume.")
+            return {"action": "seeded", "removed": []}
+
+        sentinel_id = "migration_prune_dead_dnsservers_v1"
+        sys_db = conn_db("system_config")
+        record = sys_db.find_one({"_id": sentinel_id})
+        if record and record.get("status") == "completed":
+            return {"action": "skipped", "removed": []}
+
+        with open(dnsserver_path, "r", encoding="utf-8", errors="ignore") as f:
+            raw_lines = f.read().splitlines()
+
+        kept_lines = []
+        removed = []
+        for line in raw_lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and stripped in DEAD_DNS_SERVERS_V1:
+                removed.append(stripped)
+                continue
+            kept_lines.append(line)
+
+        remaining_servers = [
+            line.strip()
+            for line in kept_lines
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+        seeded_fallback = False
+        if not remaining_servers:
+            _write_lines_atomic(dnsserver_path, DEFAULT_DNS_SERVERS)
+            seeded_fallback = True
+            logger.info("Re-seeded empty/all-dead dnsserver.txt with clean baseline DNS servers.")
+        elif removed:
+            _write_lines_atomic(dnsserver_path, kept_lines)
+            logger.info(
+                "Pruned %d dead DNS server(s) from persisted dnsserver.txt: %s",
+                len(removed),
+                ", ".join(sorted(set(removed))),
+            )
+
+        sys_db.update_one(
+            {"_id": sentinel_id},
+            {
+                "$set": {
+                    "status": "completed",
+                    "completed_at": time.time(),
+                    "removed": sorted(set(removed)),
+                    "seeded_fallback": seeded_fallback,
+                }
+            },
+            upsert=True,
+        )
+        return {
+            "action": "fallback_seeded" if seeded_fallback else ("pruned" if removed else "noop"),
+            "removed": sorted(set(removed)),
+        }
+    except Exception as e:
+        logger.warning(f"Failed to auto-seed/update dnsserver.txt: {e}")
+        return {"action": "error", "removed": []}
+
 
 def fingerprint_info_update():
     """
