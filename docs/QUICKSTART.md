@@ -17,7 +17,23 @@
 ## 前置条件
 
 - 一台可访问的服务器，已放行 **5173** TCP 端口（安全组与本机防火墙均需放行）。
-- 服务器具备 root 权限；推荐配置 **4 核 4G 及以上**；脚本会自动补齐 Docker 与 Swap，无需预装。
+- 服务器具备 root 权限；推荐配置 **4 核 4G 及以上**；脚本会自动补齐 Docker、Swap、内核连接表参数与低内存自适应档位，无需预装。
+
+<details>
+<summary><b>可选：4G 低内存档位参数（.env）与 earlyoom 防换页死锁护栏说明</b></summary>
+<br/>
+
+- **低内存自适应档位**：当宿主机物理内存 `≤ 4608MB`（4G 档位）时，`start-prod.sh` 仅在部署目录 `.env` 缺失对应键时自动补齐轻量默认值（不覆盖既有手工配置）；内存充裕（`> 4G`）则维持标准默认参数：
+
+  | `.env` 参数 | 4G 档位默认 | 标准默认（`> 4G`） | 作用说明 |
+  | :--- | :--- | :--- | :--- |
+  | `ARL_WEB_WORKERS` | `2` | `4` | Gunicorn Web 进程数 |
+  | `MONGO_WT_CACHE_GB` | `0.5` | `1` | MongoDB WiredTiger 缓存上限（GB） |
+  | `PUPPETEER_MAX_REQUESTS` | `100` | `200` | 无头浏览器单实例请求轮转阈值 |
+
+- **内核与 `earlyoom` 护栏**：脚本会同步调优 `vm.*` 与 `nf_conntrack`（连接表上限仅向上扩容至至少 `262144`，收敛 `established=600s` / `time_wait=30s`），并在检测到 `systemd` 时按 best-effort 尝试安装启用 `earlyoom`（优先回收 Chromium 渲染进程、保护 `sshd`/`mongod`/`rabbitmq`，离线或无源环境自动跳过不阻断部署）。如需保留手工修改的 `earlyoom` 配置，请在 `/etc/default/earlyoom` 或 `/etc/sysconfig/earlyoom` 中添加 `ARL_EARLYOOM_CUSTOM=1`。
+
+</details>
 
 ---
 
