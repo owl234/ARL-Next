@@ -14,11 +14,11 @@ COPY . .
 RUN pnpm run build
 
 # 官方 Debian 镜像使用 Trixie。仅复用签名密钥和容器入口脚本。
-FROM nginx:1.30.7-trixie@sha256:7fad6c0dff97965adbddf28027d934b111fc0221a554315dc274712f3fba24d3 AS nginx-upstream
+FROM nginx:1.30.8-trixie@sha256:755983e0e0e568e4c86297cc91485d7a6f9fb73e42d8a19cdba3eac9e8b8cfc9 AS nginx-upstream
 
 # 阶段二：使用官方 Bookworm 软件包，保留旧内核所需的 glibc 运行环境。
 FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
-ENV NGINX_VERSION=1.30.7
+ENV NGINX_VERSION=1.30.8
 COPY --from=nginx-upstream /etc/apt/keyrings/nginx-archive-keyring.gpg /etc/apt/keyrings/
 RUN groupadd --system --gid 101 nginx \
     && useradd --system --uid 101 --gid nginx --no-create-home --home /nonexistent --shell /bin/false nginx \
