@@ -304,6 +304,88 @@
                   <span class="status-option-item"><span class="status-dot error"></span> {{ taskText('tasks.failedStopped') }}</span>
                 </a-select-option>
               </a-select>
+
+              <a-popover
+                v-model:open="assetYieldPopoverOpen"
+                trigger="click"
+                placement="bottomLeft"
+                overlayClassName="task-yield-popover"
+              >
+                <template #content>
+                  <div class="asset-yield-popover-body">
+                    <div class="yield-section-title">{{ taskText('tasks.assetYieldQuickSection') }}</div>
+                    <div class="yield-mode-list">
+                      <button
+                        type="button"
+                        class="yield-mode-option"
+                        :class="{ 'is-selected': !assetYieldActive }"
+                        @click="selectAssetYieldMode('')"
+                      >
+                        <div class="yield-mode-main">
+                          <span class="yield-mode-dot all"></span>
+                          <span class="yield-mode-name">{{ taskText('tasks.assetYieldAll') }}</span>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        class="yield-mode-option"
+                        :class="{ 'is-selected': searchForm.asset_yield === 'has_asset' && searchForm.asset_types.length === 0 }"
+                        @click="selectAssetYieldMode('has_asset')"
+                      >
+                        <div class="yield-mode-main">
+                          <span class="yield-mode-dot has"></span>
+                          <span class="yield-mode-name">{{ taskText('tasks.assetYieldHasAsset') }}</span>
+                        </div>
+                        <div class="yield-mode-hint">{{ taskText('tasks.assetYieldHasAssetHint') }}</div>
+                      </button>
+                      <button
+                        type="button"
+                        class="yield-mode-option"
+                        :class="{ 'is-selected': searchForm.asset_yield === 'no_asset' }"
+                        @click="selectAssetYieldMode('no_asset')"
+                      >
+                        <div class="yield-mode-main">
+                          <span class="yield-mode-dot empty"></span>
+                          <span class="yield-mode-name">{{ taskText('tasks.assetYieldNoAsset') }}</span>
+                        </div>
+                        <div class="yield-mode-hint">{{ taskText('tasks.assetYieldNoAssetHint') }}</div>
+                      </button>
+                    </div>
+
+                    <a-divider style="margin: 8px 0;" />
+
+                    <div class="yield-section-title">{{ taskText('tasks.assetYieldDimensionsSection') }}</div>
+                    <div class="yield-dim-grid">
+                      <button
+                        v-for="dim in assetYieldDimensionOptions"
+                        :key="dim.key"
+                        type="button"
+                        class="yield-dim-chip"
+                        :class="{ 'is-selected': searchForm.asset_types.includes(dim.key) }"
+                        @click="toggleAssetYieldDimension(dim.key)"
+                      >
+                        {{ dim.label }}
+                      </button>
+                    </div>
+                  </div>
+                </template>
+                <a-button
+                  size="small"
+                  class="asset-yield-trigger-btn"
+                  :class="{
+                    'is-active': assetYieldActive,
+                    'is-empty-mode': searchForm.asset_yield === 'no_asset'
+                  }"
+                >
+                  <span class="yield-trigger-text">{{ assetYieldTriggerLabel }}</span>
+                  <close-circle-outlined
+                    v-if="assetYieldActive"
+                    class="yield-trigger-clear"
+                    @click.stop="clearAssetYieldFilter"
+                  />
+                  <down-outlined v-else class="yield-trigger-arrow" />
+                </a-button>
+              </a-popover>
             </div>
 
             <div class="filter-actions-group">
@@ -415,6 +497,25 @@
               </div>
 
               <div class="filter-item">
+                <span class="filter-label">{{ taskText('tasks.ipsLabel') }}</span>
+                <a-input-group compact class="count-input-group">
+                  <a-select v-model:value="searchForm.ip_operator" size="small" style="width: 65px;">
+                    <a-select-option value="=">=</a-select-option>
+                    <a-select-option value=">">&gt;</a-select-option>
+                    <a-select-option value="<">&lt;</a-select-option>
+                  </a-select>
+                  <a-input
+                    v-model:value="searchForm.ip_count"
+                    :placeholder="taskText('tasks.count')"
+                    style="width: 115px;"
+                    size="small"
+                    allowClear
+                    @pressEnter="onSearch"
+                  />
+                </a-input-group>
+              </div>
+
+              <div class="filter-item">
                 <span class="filter-label">{{ taskText('tasks.wihRecords') }}</span>
                 <a-input-group compact class="count-input-group">
                   <a-select v-model:value="searchForm.wih_operator" size="small" style="width: 65px;">
@@ -424,6 +525,44 @@
                   </a-select>
                   <a-input
                     v-model:value="searchForm.wih_count"
+                    :placeholder="taskText('tasks.count')"
+                    style="width: 115px;"
+                    size="small"
+                    allowClear
+                    @pressEnter="onSearch"
+                  />
+                </a-input-group>
+              </div>
+
+              <div class="filter-item">
+                <span class="filter-label">{{ taskText('tasks.risksLabel') }}</span>
+                <a-input-group compact class="count-input-group">
+                  <a-select v-model:value="searchForm.vuln_operator" size="small" style="width: 65px;">
+                    <a-select-option value="=">=</a-select-option>
+                    <a-select-option value=">">&gt;</a-select-option>
+                    <a-select-option value="<">&lt;</a-select-option>
+                  </a-select>
+                  <a-input
+                    v-model:value="searchForm.vuln_count"
+                    :placeholder="taskText('tasks.count')"
+                    style="width: 115px;"
+                    size="small"
+                    allowClear
+                    @pressEnter="onSearch"
+                  />
+                </a-input-group>
+              </div>
+
+              <div class="filter-item">
+                <span class="filter-label">{{ taskText('tasks.nucleiLabel') }}</span>
+                <a-input-group compact class="count-input-group">
+                  <a-select v-model:value="searchForm.nuclei_operator" size="small" style="width: 65px;">
+                    <a-select-option value="=">=</a-select-option>
+                    <a-select-option value=">">&gt;</a-select-option>
+                    <a-select-option value="<">&lt;</a-select-option>
+                  </a-select>
+                  <a-input
+                    v-model:value="searchForm.nuclei_count"
                     :placeholder="taskText('tasks.count')"
                     style="width: 115px;"
                     size="small"
@@ -510,6 +649,11 @@
           <a-button size="small" @click="handleBatchStop">
             <template #icon><stop-outlined /></template>
             {{ taskText('tasks.stopSelected') }}
+          </a-button>
+
+          <a-button size="small" @click="openBatchExcelExportModal">
+            <template #icon><file-excel-outlined /></template>
+            {{ taskText('tasks.exportExcel') }}
           </a-button>
 
           <a-dropdown>
@@ -1176,6 +1320,13 @@
     <!-- 7. 企业资产查询弹窗与同步组件 -->
     <TycTaskModal v-model:open="tycModalVisible" @success="handleEnterpriseCreateSuccess" />
     <SyncToScopeModal v-model:open="syncModalVisible" :task="currentSyncTask" @success="handleSyncSuccess" />
+
+    <!-- 8. 资产侦查任务 Excel 导出配置弹窗（单任务 / 多任务统一入口） -->
+    <TaskExcelExportModal
+      v-model:open="excelExportModalVisible"
+      :tasks="excelExportTargets"
+      :cross-page-count="excelExportCrossPageCount"
+    />
   </div>
 </template>
 
@@ -1201,11 +1352,19 @@ import {
   CloseCircleOutlined,
   ClockCircleOutlined,
   StopOutlined,
-  SyncOutlined
+  SyncOutlined,
+  FileExcelOutlined
 } from '@ant-design/icons-vue';
 import dayjs from 'dayjs';
 import request from '../utils/request';
 import { applyTaskStatistics, createTaskListClient } from '../utils/taskStatistics';
+import {
+  buildTaskQueryParams,
+  countActiveAdvancedFilters,
+  formatAssetYieldTriggerLabel,
+  isAssetYieldFilterActive,
+  normalizeAssetYieldDimensions
+} from '../utils/taskFilters';
 import { useGlobalPageSize } from '../utils/useGlobalPageSize';
 import { describeTaskFanout } from '../utils/targetParse';
 import {
@@ -1215,9 +1374,11 @@ import {
 } from '../constants/taskStatus';
 import TycTaskModal from '../components/TycTaskModal.vue';
 import SyncToScopeModal from '../components/SyncToScopeModal.vue';
+import TaskExcelExportModal from '../components/TaskExcelExportModal.vue';
 import AssetScopeSelect from '../components/AssetScopeSelect.vue';
 import { getTaskAssetGroupState, hasSyncSummary } from '../utils/taskAssetGroups';
 import { buildNucleiConfigFromScope } from '../utils/nucleiHelpers';
+import { classifyAssetDictionaries } from '../utils/dictHelpers';
 
 const { t: taskText, locale: taskLocale } = useI18n({ useScope: 'global' });
 
@@ -1995,8 +2156,28 @@ const getDetailedOptions = (options) => {
   }
   if (options.port_scan === true && options.port_scan_type && options.port_scan_type !== 'null') {
     // 'test' 为历史端口类型别名，后端实际映射到 port_top100.txt
-    const typeMap = { test: 'TOP100', top100: 'TOP100', top1000: 'TOP1000', all: taskText('tasks.allPorts') };
-    detailed.push(taskText('tasks.portScanPolicyName', { name: typeMap[options.port_scan_type] || options.port_scan_type.toUpperCase() }));
+    const typeMap = {
+      test: taskText('tasks.top100Ports'),
+      top100: taskText('tasks.top100Ports'),
+      port_top100: taskText('tasks.top100Ports'),
+      'port_top100.txt': taskText('tasks.top100Ports'),
+      top1000: taskText('tasks.top1000Ports'),
+      port_top1000: taskText('tasks.top1000Ports'),
+      'port_top1000.txt': taskText('tasks.top1000Ports'),
+      all: taskText('tasks.allPorts165535'),
+      port_all: taskText('tasks.allPorts165535'),
+      'port_all.txt': taskText('tasks.allPorts165535'),
+      custom: taskText('tasks.customPorts'),
+      port_custom: taskText('tasks.customPorts'),
+      'port_custom.txt': taskText('tasks.customPorts'),
+    };
+    const inlinePorts = options.port_scan_type === 'custom' && options.port_custom
+      ? String(options.port_custom).trim()
+      : '';
+    const displayName = inlinePorts
+      ? `${taskText('tasks.customPorts')} (${inlinePorts})`
+      : (typeMap[options.port_scan_type] || options.port_scan_type);
+    detailed.push(taskText('tasks.portScanPolicyName', { name: displayName }));
   }
   if (options.port_scan === true && options.host_discovery_mode && options.host_discovery_mode !== 'auto') {
     const modeLabel = options.host_discovery_mode === 'skip'
@@ -2018,23 +2199,67 @@ const getDetailedOptions = (options) => {
 
 // 搜索表单与高级筛选折叠状态
 const isAdvancedFilterOpen = ref(false);
+const assetYieldPopoverOpen = ref(false);
 const searchForm = reactive({
   name: '', target: '', task_id: '', type: undefined,
-  status: '', site_count: '', site_operator: '=',
-  domain_count: '', domain_operator: '=', wih_count: '', wih_operator: '=',
+  status: '', asset_yield: '', asset_types: [],
+  site_count: '', site_operator: '=',
+  domain_count: '', domain_operator: '=',
+  ip_count: '', ip_operator: '=',
+  wih_count: '', wih_operator: '=',
+  vuln_count: '', vuln_operator: '=',
+  nuclei_count: '', nuclei_operator: '=',
   sync_status: undefined
 });
 
-const activeAdvancedFilterCount = computed(() => {
-  let count = 0;
-  if (searchForm.task_id) count++;
-  if (searchForm.type) count++;
-  if (searchForm.sync_status) count++;
-  if (searchForm.site_count !== '' && searchForm.site_count !== null && searchForm.site_count !== undefined) count++;
-  if (searchForm.domain_count !== '' && searchForm.domain_count !== null && searchForm.domain_count !== undefined) count++;
-  if (searchForm.wih_count !== '' && searchForm.wih_count !== null && searchForm.wih_count !== undefined) count++;
-  return count;
+const assetYieldDimensionOptions = computed(() => [
+  { key: 'site', label: taskText('tasks.websites') },
+  { key: 'domain', label: taskText('tasks.domains') },
+  { key: 'ip', label: 'IP' },
+  { key: 'wih', label: 'WIH' },
+  { key: 'vuln', label: taskText('tasks.risks') },
+  { key: 'nuclei', label: 'Nuclei' },
+]);
+
+const assetYieldActive = computed(() => isAssetYieldFilterActive(searchForm));
+
+const assetYieldTriggerLabel = computed(() => {
+  const dimLabelMap = Object.fromEntries(assetYieldDimensionOptions.value.map((item) => [item.key, item.label]));
+  return formatAssetYieldTriggerLabel(searchForm, dimLabelMap, {
+    allTrigger: taskText('tasks.assetYieldTriggerAll'),
+    hasAssetShort: taskText('tasks.assetYieldHasAssetShort'),
+    noAsset: taskText('tasks.assetYieldNoAsset'),
+    selectedDims: (labels) => taskText('tasks.assetYieldSelectedDims', { labels }),
+    selectedDimsMore: (labels, count) => taskText('tasks.assetYieldSelectedDimsMore', { labels, count }),
+  });
 });
+
+const selectAssetYieldMode = (mode) => {
+  searchForm.asset_yield = mode;
+  searchForm.asset_types = [];
+  if (mode !== 'has_asset') {
+    assetYieldPopoverOpen.value = false;
+  }
+  onSearch();
+};
+
+const toggleAssetYieldDimension = (dimKey) => {
+  const current = normalizeAssetYieldDimensions(searchForm.asset_types);
+  const exists = current.includes(dimKey);
+  const next = exists ? current.filter((item) => item !== dimKey) : normalizeAssetYieldDimensions([...current, dimKey]);
+  searchForm.asset_types = next;
+  searchForm.asset_yield = next.length > 0 ? 'has_asset' : '';
+  onSearch();
+};
+
+const clearAssetYieldFilter = () => {
+  searchForm.asset_yield = '';
+  searchForm.asset_types = [];
+  assetYieldPopoverOpen.value = false;
+  onSearch();
+};
+
+const activeAdvancedFilterCount = computed(() => countActiveAdvancedFilters(searchForm));
 
 const resetAdvancedFilters = () => {
   searchForm.task_id = '';
@@ -2044,16 +2269,27 @@ const resetAdvancedFilters = () => {
   searchForm.site_operator = '=';
   searchForm.domain_count = '';
   searchForm.domain_operator = '=';
+  searchForm.ip_count = '';
+  searchForm.ip_operator = '=';
   searchForm.wih_count = '';
   searchForm.wih_operator = '=';
+  searchForm.vuln_count = '';
+  searchForm.vuln_operator = '=';
+  searchForm.nuclei_count = '';
+  searchForm.nuclei_operator = '=';
   onSearch();
 };
 
 // 表格多选逻辑
 const selectedRowKeys = ref([]);
 const taskSelectionTracker = createSelectionLabelTracker();
+const taskRecordCache = new Map();
 const hasSelected = computed(() => selectedRowKeys.value.length > 0);
 let lastObservedMutationVersion = assetMutationVersion.value;
+
+const excelExportModalVisible = ref(false);
+const excelExportTargets = ref([]);
+const excelExportCrossPageCount = ref(0);
 
 const getTaskRowKey = (row) => row?._id || row?.task_id;
 const getTaskRowLabel = (row) => {
@@ -2062,8 +2298,20 @@ const getTaskRowLabel = (row) => {
   return row.target && row.target !== name ? `${name} (${row.target})` : name;
 };
 
+const rememberTaskRecords = (rows) => {
+  if (!Array.isArray(rows)) return;
+  for (const row of rows) {
+    const key = getTaskRowKey(row);
+    if (key != null && key !== '') {
+      taskRecordCache.set(String(key), row);
+    }
+  }
+};
+
 const onSelectChange = (keys, selectedRows) => {
   selectedRowKeys.value = keys;
+  rememberTaskRecords(taskList.value);
+  rememberTaskRecords(selectedRows);
   taskSelectionTracker.syncSelection(keys, selectedRows, taskList.value, getTaskRowKey, getTaskRowLabel);
 };
 
@@ -2111,26 +2359,7 @@ const fetchTasks = async (page = 1, size = 10, silent = false, includeStatistics
   const requestVersion = ++taskRequestVersion;
   if (!silent) loading.value = true;
   try {
-    const queryParams = { page, size };
-
-    if (searchForm.name) queryParams.name = searchForm.name;
-    if (searchForm.target) queryParams.target = searchForm.target;
-    if (searchForm.status) queryParams.status = searchForm.status;
-    if (searchForm.task_id) queryParams._id = searchForm.task_id;
-    if (searchForm.type) queryParams.task_tag = searchForm.type;
-    if (searchForm.sync_status) queryParams.sync_status = searchForm.sync_status;
-
-    const appendCountParam = (count, operator, baseKey) => {
-      if (count !== '' && count !== null && count !== undefined) {
-        if (operator === '=') queryParams[baseKey] = count;
-        else if (operator === '>') queryParams[`${baseKey}_gt`] = count;
-        else if (operator === '<') queryParams[`${baseKey}_lt`] = count;
-      }
-    };
-
-    appendCountParam(searchForm.site_count, searchForm.site_operator, 'statistic.site_cnt');
-    appendCountParam(searchForm.domain_count, searchForm.domain_operator, 'statistic.domain_cnt');
-    appendCountParam(searchForm.wih_count, searchForm.wih_operator, 'statistic.wih_cnt');
+    const queryParams = buildTaskQueryParams(searchForm, { page, size });
 
     const res = await taskListClient.get('/task/', queryParams, includeStatistics);
     if (requestVersion !== taskRequestVersion) return;
@@ -2141,6 +2370,7 @@ const fetchTasks = async (page = 1, size = 10, silent = false, includeStatistics
       pagination.total = res.total || 0;
       pagination.current = page;
       pagination.pageSize = size;
+      rememberTaskRecords(taskList.value);
       taskSelectionTracker.rememberRows(taskList.value, getTaskRowKey, getTaskRowLabel);
       lastRefreshTime.value = new Date();
     }
@@ -2158,10 +2388,16 @@ const onSearch = () => {
 const resetSearch = () => {
   Object.assign(searchForm, {
     name: '', target: '', task_id: '', type: undefined,
-    status: '', site_count: '', site_operator: '=',
-    domain_count: '', domain_operator: '=', wih_count: '', wih_operator: '=',
+    status: '', asset_yield: '', asset_types: [],
+    site_count: '', site_operator: '=',
+    domain_count: '', domain_operator: '=',
+    ip_count: '', ip_operator: '=',
+    wih_count: '', wih_operator: '=',
+    vuln_count: '', vuln_operator: '=',
+    nuclei_count: '', nuclei_operator: '=',
     sync_status: undefined
   });
+  assetYieldPopoverOpen.value = false;
   onSearch();
 };
 
@@ -2406,27 +2642,48 @@ const deleteSingleTask = (record) => {
   });
 };
 
-const exportTask = async (record) => {
-  try {
-    message.loading({ content: taskText('tasks.generatingExcelExport'), key: 'exporting_excel' });
-    const res = await request.get(`/export/${record._id || record.task_id}`, {
-      responseType: 'blob'
-    });
-
-    const blob = new Blob([res], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const downloadUrl = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = `ARL_Task_${record.name || record._id}_Export.xlsx`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(downloadUrl);
-
-    message.success({ content: taskText('tasks.excelExportCompleted'), key: 'exporting_excel', duration: 2 });
-  } catch (error) {
-    message.error({ content: taskText('tasks.exportFailedCheckTheConsole'), key: 'exporting_excel', duration: 2 });
+const openBatchExcelExportModal = () => {
+  if (!hasSelected.value) {
+    message.warning(taskText('tasks.selectTasksToExportFirst'));
+    return;
   }
+
+  const validKeys = selectedRowKeys.value.filter(k => k != null && k !== '');
+  if (validKeys.length === 0) return;
+
+  const visibleIds = new Set(
+    (taskList.value || []).map(item => getTaskRowKey(item)).filter(Boolean).map(String)
+  );
+  const labels = taskSelectionTracker.getLabels(validKeys);
+
+  let crossPage = 0;
+  excelExportTargets.value = validKeys.map((rawKey, idx) => {
+    const id = String(rawKey);
+    const cached = taskRecordCache.get(id) || (taskList.value || []).find(item => String(getTaskRowKey(item)) === id);
+    if (!visibleIds.has(id)) {
+      crossPage += 1;
+    }
+    return {
+      id,
+      label: cached ? getTaskRowLabel(cached) : (labels[idx] || id),
+      status: cached?.status || '',
+    };
+  });
+  excelExportCrossPageCount.value = crossPage;
+  excelExportModalVisible.value = true;
+};
+
+const exportTask = (record) => {
+  const id = getTaskRowKey(record);
+  if (!id) return;
+  rememberTaskRecords([record]);
+  excelExportTargets.value = [{
+    id: String(id),
+    label: getTaskRowLabel(record) || String(id),
+    status: record?.status || '',
+  }];
+  excelExportCrossPageCount.value = 0;
+  excelExportModalVisible.value = true;
 };
 
 // 同步任务至资产组
@@ -2856,10 +3113,11 @@ onMounted(async () => {
   try {
     const dictRes = await request.get('/dictionary/list');
     if (dictRes.code === 200 && dictRes.data) {
-      domainDicts.value = dictRes.data.filter(item => item.category && item.category.includes('子域名爆破') && !item.category.includes('智能'));
-      altDnsDicts.value = dictRes.data.filter(item => item.category && item.category.includes('智能子域爆破'));
-      fileLeakDicts.value = dictRes.data.filter(item => item.category && (item.category.includes('目录文件泄露') || item.category.includes('目录与文件泄露')));
-      portDicts.value = dictRes.data.filter(item => item.category && item.category.includes('端口扫描策略') && item.name !== 'port_alive.txt');
+      const classified = classifyAssetDictionaries(dictRes.data);
+      domainDicts.value = classified.domainDicts;
+      altDnsDicts.value = classified.altDnsDicts;
+      fileLeakDicts.value = classified.fileLeakDicts;
+      portDicts.value = classified.portDicts;
 
       if (domainDicts.value.length > 0) formState.domain_brute_type = domainDicts.value[0].name;
       if (altDnsDicts.value.length > 0) formState.alt_dns_dict = altDnsDicts.value[0].name;
@@ -2894,11 +3152,13 @@ onActivated(() => {
 onDeactivated(() => {
   stopSmartPolling();
   // 离开页面时安全收起弹窗，避免浮层遮挡其他视图
+  assetYieldPopoverOpen.value = false;
   visible.value = false;
   fofaVisible.value = false;
   syncVisible.value = false;
   tycModalVisible.value = false;
   syncModalVisible.value = false;
+  excelExportModalVisible.value = false;
 });
 
 onUnmounted(() => {
@@ -3104,6 +3364,150 @@ onUnmounted(() => {
 .status-dot.done { background: #52c41a; }
 .status-dot.stop { background: #faad14; }
 .status-dot.error { background: #ff4d4f; }
+
+.asset-yield-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  color: var(--arl-text-secondary);
+}
+
+.asset-yield-trigger-btn.is-active {
+  border-color: var(--arl-theme-color);
+  background: var(--arl-theme-soft-bg);
+  color: var(--arl-theme-color);
+  font-weight: 500;
+}
+
+.asset-yield-trigger-btn.is-active.is-empty-mode {
+  border-color: #d97706;
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+}
+
+.yield-trigger-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yield-trigger-arrow {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.yield-trigger-clear {
+  font-size: 12px;
+  opacity: 0.75;
+  transition: opacity 0.15s ease;
+}
+
+.yield-trigger-clear:hover {
+  opacity: 1;
+}
+
+:global(.task-yield-popover .ant-popover-inner) {
+  padding: 10px 12px;
+}
+
+:global(.task-yield-popover .asset-yield-popover-body) {
+  width: 288px;
+}
+
+:global(.task-yield-popover .yield-section-title) {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--arl-text-secondary);
+  margin-bottom: 6px;
+}
+
+:global(.task-yield-popover .yield-mode-list) {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+:global(.task-yield-popover .yield-mode-option) {
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+:global(.task-yield-popover .yield-mode-option:hover) {
+  background: var(--arl-bg-light);
+}
+
+:global(.task-yield-popover .yield-mode-option.is-selected) {
+  border-color: var(--arl-theme-color);
+  background: var(--arl-theme-soft-bg);
+}
+
+:global(.task-yield-popover .yield-mode-main) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:global(.task-yield-popover .yield-mode-dot) {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+:global(.task-yield-popover .yield-mode-dot.all) { background: #8c8c8c; }
+:global(.task-yield-popover .yield-mode-dot.has) { background: #52c41a; }
+:global(.task-yield-popover .yield-mode-dot.empty) { background: #faad14; }
+
+:global(.task-yield-popover .yield-mode-name) {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--arl-text-color);
+}
+
+:global(.task-yield-popover .yield-mode-hint) {
+  font-size: 11px;
+  color: var(--arl-text-secondary);
+  line-height: 1.4;
+  margin-top: 2px;
+  padding-left: 12px;
+}
+
+:global(.task-yield-popover .yield-dim-grid) {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+:global(.task-yield-popover .yield-dim-chip) {
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--arl-border-color);
+  background: var(--arl-bg-white);
+  color: var(--arl-text-color);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+:global(.task-yield-popover .yield-dim-chip:hover) {
+  border-color: var(--arl-theme-color);
+  color: var(--arl-theme-color);
+}
+
+:global(.task-yield-popover .yield-dim-chip.is-selected) {
+  border-color: var(--arl-theme-color);
+  background: var(--arl-theme-soft-bg);
+  color: var(--arl-theme-color);
+  font-weight: 600;
+}
 
 /* 折叠高级筛选卡片 */
 .advanced-filter-panel {

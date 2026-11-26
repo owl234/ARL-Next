@@ -23,7 +23,9 @@ base_search_fields = {
     "geo_asn.number": fields.Integer(description="AS number"),
     "geo_asn.organization": fields.String(description="AS organization"),
     "geo_city.region_name": fields.String(description="GEO region_name"),
-    "is_cdn": fields.String(description="是否为CDN (true/false)")
+    "is_cdn": fields.String(description="是否为CDN (true/false)"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
 }
 
 base_search_fields.update(base_query_fields)

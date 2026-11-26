@@ -41,6 +41,7 @@ class DNSQueryBase(object):
 
         """下面是过滤掉不合法的数据"""
         subdomains = []
+        filtered_cdn_routing = 0
 
         for domain in domains:
             domain = domain.strip("*.")
@@ -62,14 +63,26 @@ class DNSQueryBase(object):
             if utils.check_domain_black(domain):
                 continue
 
+            # 过滤已知多租户 CDN CNAME 边缘路由下的第三方客户子域
+            if utils.is_cdn_cname_routing_subdomain(domain, base_domain=target):
+                filtered_cdn_routing += 1
+                continue
+
             if utils.domain_parsed(domain):
                 subdomains.append(domain)
 
         subdomains = list(set(subdomains))
 
         t2 = time.time()
-        self.logger.info("end query {} on {}, source result:{}, real result:{} ({:.2f}s)".format(
-            target, self.source_name, len(domains), len(subdomains), t2 - t1))
+        if filtered_cdn_routing > 0:
+            self.logger.info(
+                "end query {} on {}, source result:{}, real result:{}, filtered_cdn_routing:{} ({:.2f}s)".format(
+                    target, self.source_name, len(domains), len(subdomains), filtered_cdn_routing, t2 - t1
+                )
+            )
+        else:
+            self.logger.info("end query {} on {}, source result:{}, real result:{} ({:.2f}s)".format(
+                target, self.source_name, len(domains), len(subdomains), t2 - t1))
 
         return subdomains
 

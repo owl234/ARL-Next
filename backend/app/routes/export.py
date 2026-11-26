@@ -1,7 +1,7 @@
 #coding: utf-8
 
-from flask import  make_response
-from flask_restx import Resource, Namespace
+from flask import make_response, request
+from flask_restx import Resource, Namespace, fields
 from openpyxl import Workbook
 from bson import ObjectId
 import re
@@ -18,11 +18,88 @@ from openpyxl.styles import Font
 from app.utils import get_logger, auth
 from app import utils
 from app.utils.excel_export import append_literal_row, set_literal_cell
+from app.services.task_excel_export import (
+    DEFAULT_SHEETS,
+    TaskExcelExportError,
+    build_tasks_excel_report,
+)
+from . import ARLResource
 from urllib.parse import quote
 
 ns = Namespace('export', description="任务报告导出接口")
 
 logger = get_logger()
+
+batch_excel_export_fields = ns.model('BatchExcelExport', {
+    'task_id': fields.List(fields.String(description="任务 ID"), required=True),
+    'sheets': fields.List(
+        fields.String(description="导出的工作表维度列表"),
+        required=False,
+        default=list(DEFAULT_SHEETS),
+    ),
+    'deduplicate': fields.Boolean(
+        required=False,
+        default=True,
+        description="跨任务资产是否按各维度主键去重合并",
+    ),
+})
+
+
+@ns.route('/batch/')
+class ARLBatchExcelExport(ARLResource):
+    @auth
+    @ns.expect(batch_excel_export_fields)
+    def post(self):
+        """
+        单任务/多任务合并 Excel 报告导出
+        """
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            msg = "请求体必须为 JSON 对象"
+            return utils.build_ret({"code": 400, "message": msg}, {"error": msg}), 400
+
+        task_id_list = payload.get("task_id")
+        sheets = payload.get("sheets")
+        raw_dedup = payload.get("deduplicate", True)
+        if raw_dedup is None:
+            deduplicate = True
+        elif isinstance(raw_dedup, bool):
+            deduplicate = raw_dedup
+        else:
+            msg = "deduplicate 参数必须为布尔值"
+            return utils.build_ret({"code": 400, "message": msg}, {"error": msg}), 400
+
+        try:
+            result = build_tasks_excel_report(
+                task_id_list=task_id_list,
+                sheets=sheets,
+                deduplicate=deduplicate,
+            )
+        except TaskExcelExportError as exc:
+            return utils.build_ret(
+                {"code": exc.status_code, "message": exc.message},
+                {"error": exc.message},
+            ), exc.status_code
+        except Exception as exc:
+            logger.exception("Batch excel export failed: %s", exc)
+            return utils.build_ret(
+                {"code": 500, "message": "Excel 导出失败，请稍后重试"},
+                {"error": str(exc)},
+            ), 500
+
+        encoded_name = quote(result.filename)
+        response = make_response(result.content)
+        response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        response.headers['Content-Disposition'] = f"attachment; filename=\"ARL_Export.xlsx\"; filename*=UTF-8''{encoded_name}"
+        response.headers['X-Export-Truncated'] = '1' if result.truncated_sheets else '0'
+        response.headers['X-Export-Truncated-Sheets'] = ','.join(result.truncated_sheets)
+        response.headers['X-Export-Empty-Sheets'] = ','.join(result.empty_sheets)
+        response.headers['X-Export-Included-Sheets'] = ','.join(result.included_sheets)
+        response.headers['Access-Control-Expose-Headers'] = (
+            'Content-Disposition, X-Export-Truncated, X-Export-Truncated-Sheets, '
+            'X-Export-Empty-Sheets, X-Export-Included-Sheets'
+        )
+        return response
 
 
 @ns.route('/<string:task_id>')

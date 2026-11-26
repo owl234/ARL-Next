@@ -4,6 +4,7 @@
 供 REST API (/api/mcp/asset_profile) 与 原生异步 MCP SSE 服务 (app/mcp_server.py) 共同复用。
 """
 
+import datetime
 import ipaddress
 import re
 from bson import ObjectId
@@ -17,13 +18,17 @@ logger = get_logger()
 
 
 def _clean_empty(val):
-    """递归剥离字典/列表中的空值，最小化上下文 Token 占用"""
+    """递归剥离字典/列表中的空值，并将 BSON 时间等非原生 JSON 类型安全格式化"""
     if isinstance(val, dict):
         cleaned = {k: _clean_empty(v) for k, v in val.items()}
         return {k: v for k, v in cleaned.items() if v not in (None, "", [], {})}
     if isinstance(val, list):
         cleaned = [_clean_empty(v) for v in val]
         return [v for v in cleaned if v not in (None, "", [], {})]
+    if isinstance(val, datetime.datetime):
+        return val.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(val, datetime.date):
+        return val.strftime("%Y-%m-%d")
     if isinstance(val, str):
         s = val.strip()
         return s if s and s not in ("-", "None", "null") else None

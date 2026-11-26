@@ -256,7 +256,7 @@ test('中英文提交的扫描策略保留端口、字典、插件和 Nuclei 参
     const form = page.read('policyForm');
     form.name = ' 用户策略 '; form.desc = '保留描述';
     Object.assign(form.domain_config, { domain_brute: true, domain_brute_type: 'domain_2w.txt', alt_dns: true, alt_dns_dict: 'altdns_default.txt' });
-    Object.assign(form.ip_config, { port_scan: true, port_scan_type: 'custom', port_custom: '80,443,8443', service_detection: true });
+    Object.assign(form.ip_config, { port_scan: true, port_scan_type: 'port_custom.txt', service_detection: true });
     form.site_config.nuclei_scan = true;
     form.file_leak = true; form.file_leak_dict = 'file_top_200.txt';
     await page.read('submitPolicy')();
@@ -267,7 +267,8 @@ test('中英文提交的扫描策略保留端口、字典、插件和 Nuclei 参
   assert.deepEqual(results[1], results[0]);
   const data = results[0][0].data;
   assert.equal(data.name, '用户策略');
-  assert.equal(data.policy.ip_config.port_custom, '80,443,8443');
+  assert.equal(data.policy.ip_config.port_scan_type, 'port_custom.txt');
+  assert.equal(data.policy.ip_config.port_custom, '');
   assert.equal(data.policy.domain_config.domain_brute_type, 'domain_2w.txt');
   assert.deepEqual(data.policy.site_config.nuclei_config, {
     include_community: true,
@@ -280,7 +281,7 @@ test('中英文提交的扫描策略保留端口、字典、插件和 Nuclei 参
   assert.equal(data.policy.poc_config[0].vul_name, '用户漏洞名称');
 });
 
-test('策略校验在两种语言下均阻止缺少字典或端口的扫描配置', async () => {
+test('策略校验在两种语言下均阻止缺少字典或端口策略的扫描配置', async () => {
   for (const locale of ['zh-CN', 'en-US']) {
     i18n.global.locale.value = locale;
     const calls = [];
@@ -291,7 +292,7 @@ test('策略校验在两种语言下均阻止缺少字典或端口的扫描配�
     await submit();
     assert.equal(calls.length, 0);
     form.domain_config.domain_brute_type = 'domain_2w.txt';
-    form.ip_config.port_scan = true; form.ip_config.port_scan_type = 'custom';
+    form.ip_config.port_scan = true; form.ip_config.port_scan_type = undefined;
     await submit();
     assert.equal(calls.length, 0);
     assert.equal(page.notices.filter(row => row.key === 'warning').length, 2);

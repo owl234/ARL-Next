@@ -44,8 +44,16 @@ function fixture(tab, task = 'task-a') {
     searchForm: ref(tab === 'url' ? { status_code: ['403', '200'], title: 'admin' } : {}),
     pagination: { current: 2, pageSize: 20, total: 0 }, loading: ref(false),
     dataSource: ref([]), selectedRowKeys: ref(['selected-id']), hasSelected: ref(true),
+    selectionTracker: { rememberRows() {}, syncSelection() {}, getLabels: keys => keys, clear() {} },
+    buildSelectionConfirmContent: options => options,
+    getAssetRecordDisplayLabel: (_tab, row) => row?._id || row?.name || '',
+    clearSelection() { context.selectedRowKeys.value = []; },
+    assetMutationVersion: ref(0),
+    notifyAssetMutated() {},
+    lastObservedMutationVersion: 0,
+    fetchTaskStats() {},
     lastFetchedPage: 1, lastFetchedSize: 20,
-    tabCache: { updateMemoryCache() {}, saveCurrentTab() {}, invalidateMemoryCache() {} },
+    tabCache: { updateMemoryCache() {}, saveCurrentTab() {}, invalidateMemoryCache() {}, invalidateAllMemoryCaches() {} },
     request: {
       async get(url, options) { calls.push({ method: 'GET', url, ...plain(options) }); return { code: 200, items: [], total: 0 }; },
       async post(url, body) { calls.push({ method: 'POST', url, body: plain(body) }); return { code: 200 }; }
@@ -84,7 +92,7 @@ for (const tab of ['url', 'cip']) {
     await page.confirmations[0].onOk();
     assert.deepEqual(page.calls.slice(0, 3).map(call => call.url), [`/${tab}/`, `/${tab}/export/`, `/${tab}/delete/`]);
     assert.equal(page.calls[1].params.task_id, 'task-a');
-    assert.deepEqual(page.calls[2].body, { _id: ['selected-id'] });
+    assert.deepEqual(page.calls[2].body, { _id: ['selected-id'], task_id: 'task-a', source_type: 'task' });
     assert.ok(page.calls.every(call => !call.url.startsWith('/asset_') && !call.url.startsWith('/site/')));
   });
 }
@@ -118,18 +126,32 @@ testInBothLanguages('global URL, C-segment and fingerprint views read asset-grou
   assert.equal(exportPage.calls[0].url, '/url/export/');
 });
 
-testInBothLanguages('aggregated fingerprint statistics have stable keys and cannot dispatch deletion', () => {
+testInBothLanguages('task fingerprint statistics have stable keys and support scoped deletion while global view stays read-only', async () => {
   const page = fixture('stat_finger');
-  assert.equal(page.context.canDeleteAssets.value, false);
+  assert.equal(page.context.canDeleteAssets.value, true);
   assert.equal(page.context.canSelectAssets.value, true);
   assert.equal(page.context.getAssetRowKey({ name: 'nginx', cnt: 3 }), 'nginx');
   assert.equal(page.context.getAssetRowKey({ _id: 'real-id', name: 'nginx' }), 'real-id');
   page.invoke('handleBatchDelete');
-  assert.equal(page.confirmations.length, 0);
-  assert.equal(page.calls.length, 0);
-  assert.ok(page.notices.some(notice => notice.key === 'warning'));
+  assert.equal(page.confirmations.length, 1);
+  await page.confirmations[0].onOk();
+  assert.equal(page.calls.length, 2);
+  assert.equal(page.calls[0].url, '/stat_finger/delete/');
+  assert.deepEqual(page.calls[0].body, {
+    _id: ['selected-id'],
+    name: ['selected-id'],
+    task_id: 'task-a',
+    source_type: 'task',
+  });
   assert.ok(page.descriptor.template.content.includes('v-if="canDeleteAssets"'));
   assert.ok(page.descriptor.template.content.includes(':row-selection="canSelectAssets ?'));
+
+  const globalPage = fixture('stat_finger', '');
+  assert.equal(globalPage.context.canDeleteAssets.value, false);
+  globalPage.invoke('handleBatchDelete');
+  assert.equal(globalPage.confirmations.length, 0);
+  assert.equal(globalPage.calls.length, 0);
+  assert.ok(globalPage.notices.some(notice => notice.key === 'warning'));
 });
 
 testInBothLanguages('switching back to a deletable tab restores selection and deletion capability', () => {

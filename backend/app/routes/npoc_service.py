@@ -13,6 +13,8 @@ base_search_fields = {
     'host': fields.String(required=False, description="host"),
     'port': fields.String(description="端口号"),
     'target': fields.String(description="目标"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
     "task_id": fields.String(description="任务ID")
 }
 

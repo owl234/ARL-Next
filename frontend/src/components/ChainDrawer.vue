@@ -159,7 +159,7 @@
                     <div class="kv-item"><span class="kv-label">{{ assetText('assets.title') }}</span><span class="kv-value">{{ siteItem.title || '-' }}</span></div>
                     <div class="kv-item"><span class="kv-label">{{ assetText('assets.webServerLabel') }}</span><span class="kv-value">{{ siteItem.http_server || '-' }}</span></div>
                     <div class="kv-item"><span class="kv-label">{{ assetText('assets.ipLabel') }}</span><span class="kv-value font-mono">{{ siteItem.ip || '-' }}</span></div>
-                    <div class="kv-item"><span class="kv-label">{{ assetText('assets.updated') }}</span><span class="kv-value">{{ siteItem.update_date || siteItem.save_date || '-' }}</span></div>
+                    <div class="kv-item"><span class="kv-label">{{ assetText('assets.discoveredUpdatedAtLabel') }}</span><span class="kv-value"><AssetTimeCell :record="siteItem" :show-secondary="true" secondary-mode="update" inline /></span></div>
                   </div>
                   <div v-if="siteItem.finger && siteItem.finger.length" class="site-finger-row">
                     <span class="kv-label">{{ assetText('assets.fingerprints') }}</span>
@@ -201,6 +201,9 @@
                     <span v-for="(ip, idx) in record.ips" :key="idx" class="font-mono font-tag">{{ ip }}</span>
                   </div>
                   <span v-else class="font-mono">{{ record.ips || '-' }}</span>
+                </template>
+                <template v-else-if="column.key === 'save_date'">
+                  <AssetTimeCell :record="record" :show-secondary="true" secondary-mode="update" />
                 </template>
               </template>
             </a-table>
@@ -246,6 +249,9 @@
                 <template v-else-if="column.key === 'asn'">
                   <span>{{ record.geo_asn?.organization || '-' }}</span>
                 </template>
+                <template v-else-if="column.key === 'save_date'">
+                  <AssetTimeCell :record="record" :show-secondary="true" secondary-mode="update" />
+                </template>
               </template>
             </a-table>
           </a-card>
@@ -271,6 +277,10 @@
                     <span class="cert-san-value font-mono">{{ certItem.cert.extensions.subjectAltName }}</span>
                   </div>
                   <div class="cert-field-row"><b>{{ assetText('assets.validity') }}</b><span>{{ certItem.cert.validity?.start || '-' }} {{ assetText('tasks.to') }} {{ certItem.cert.validity?.end || '-' }}</span></div>
+                  <div v-if="certItem.save_date || certItem.update_date" class="cert-field-row">
+                    <b>{{ assetText('assets.discoveredUpdatedAtLabel') }}</b>
+                    <AssetTimeCell :record="certItem" :show-secondary="true" secondary-mode="update" inline />
+                  </div>
                 </div>
               </div>
             </div>
@@ -318,6 +328,9 @@
                     >{{ src === 'npoc' ? assetText('assets.pythonPluginServicesLabel') : 'Nmap' }}</a-tag>
                   </div>
                 </template>
+                <template v-else-if="column.key === 'save_date'">
+                  <AssetTimeCell :record="record" :show-secondary="true" secondary-mode="update" />
+                </template>
               </template>
             </a-table>
           </a-card>
@@ -345,6 +358,9 @@
                 <template v-if="column.key === 'url'">
                   <a :href="record.url" target="_blank" rel="noopener noreferrer" class="drawer-break-link font-mono">{{ record.url }}</a>
                 </template>
+                <template v-else-if="column.key === 'save_date'">
+                  <AssetTimeCell :record="record" :show-secondary="true" secondary-mode="update" />
+                </template>
               </template>
             </a-table>
           </a-card>
@@ -371,6 +387,9 @@
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'url'">
                   <a :href="record.url" target="_blank" rel="noopener noreferrer" class="drawer-break-link font-mono">{{ record.url }}</a>
+                </template>
+                <template v-else-if="column.key === 'save_date'">
+                  <AssetTimeCell :record="record" :show-secondary="true" secondary-mode="update" />
                 </template>
               </template>
             </a-table>
@@ -405,8 +424,8 @@
                 <template v-else-if="column.key === 'domain_count'">
                   <a-tag color="blue" class="font-mono">{{ assetText('assets.domainCount', { count: record.domain_count ?? (record.domain_list?.length || 0) }) }}</a-tag>
                 </template>
-                <template v-else-if="column.key === 'update_date'">
-                  <span class="drawer-muted-time">{{ record.update_date || record.save_date || '-' }}</span>
+                <template v-else-if="column.key === 'save_date' || column.key === 'update_date'">
+                  <AssetTimeCell :record="record" :show-secondary="true" secondary-mode="update" />
                 </template>
               </template>
             </a-table>
@@ -437,6 +456,9 @@
                 </template>
                 <template v-else-if="column.key === 'cnt'">
                   <span class="font-mono font-bold">{{ assetText('assets.websiteCount', { count: record.cnt }) }}</span>
+                </template>
+                <template v-else-if="column.key === 'save_date'">
+                  <AssetTimeCell :record="record" :show-secondary="true" secondary-mode="update" />
                 </template>
               </template>
             </a-table>
@@ -473,6 +495,9 @@
                   </a>
                   <span v-else>-</span>
                 </template>
+                <template v-else-if="column.key === 'save_date'">
+                  <AssetTimeCell :record="record" :show-secondary="true" secondary-mode="update" />
+                </template>
               </template>
             </a-table>
           </a-card>
@@ -494,6 +519,9 @@
                   <span class="vuln-name">{{ v.vul_name || v.title || assetText('assets.unknownRisk') }}</span>
                 </div>
                 <div class="vuln-target font-mono">{{ v.target }}</div>
+                <div v-if="v.save_date || v.update_date" class="drawer-muted-time" style="margin-top: 4px;">
+                  <AssetTimeCell :record="v" :show-secondary="true" secondary-mode="update" inline />
+                </div>
               </div>
             </div>
           </a-card>
@@ -524,6 +552,9 @@
                   </a-tag>
                 </div>
                 <div class="vuln-target font-mono">{{ n.vuln_url || n.target }}</div>
+                <div v-if="n.save_date || n.update_date" class="drawer-muted-time" style="margin-top: 4px;">
+                  <AssetTimeCell :record="n" :show-secondary="true" secondary-mode="update" inline />
+                </div>
               </div>
             </div>
           </a-card>
@@ -577,6 +608,7 @@ import {
 import request from '../utils/request';
 import { isCustomNucleiResult } from '../utils/nucleiHelpers';
 import AuthenticatedImage from './AuthenticatedImage.vue';
+import AssetTimeCell from './AssetTimeCell.vue';
 import { formatGeo } from '../utils/formatGeo';
 import { copyText } from '../utils/clipboard';
 
@@ -715,7 +747,8 @@ const scrollToTop = () => {
 const domainCols = [
   { get title() { return assetText('tasks.subdomains'); }, dataIndex: 'domain', key: 'domain' },
   { get title() { return assetText('tasks.type'); }, dataIndex: 'type', key: 'type', width: 90, align: 'center' },
-  { get title() { return assetText('assets.resolvedIps'); }, key: 'ips' }
+  { get title() { return assetText('assets.resolvedIps'); }, key: 'ips' },
+  { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 175 }
 ];
 
 const ipCols = [
@@ -723,14 +756,15 @@ const ipCols = [
   { title: 'CDN', key: 'cdn', width: 140 },
   { get title() { return assetText('tasks.openPorts'); }, key: 'port_info' },
   { get title() { return assetText('assets.location'); }, key: 'geo', width: 140 },
-  { get title() { return assetText('assets.asOrganization'); }, key: 'asn' }
+  { get title() { return assetText('assets.asOrganization'); }, key: 'asn' },
+  { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 175 }
 ];
 
 const cipCols = [
   { get title() { return assetText('assets.cClassNetwork'); }, dataIndex: 'cidr_ip', key: 'cidr_ip', width: 180 },
   { get title() { return assetText('tasks.associatedIps'); }, key: 'ip_count', width: 120, align: 'center' },
   { get title() { return assetText('tasks.associatedDomains'); }, key: 'domain_count', width: 120, align: 'center' },
-  { get title() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', width: 160 }
+  { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 175 }
 ];
 
 const serviceCols = [
@@ -738,14 +772,15 @@ const serviceCols = [
   { get title() { return assetText('tasks.ipPort'); }, key: 'ip_port', width: 180 },
   { get title() { return assetText('tasks.product'); }, dataIndex: 'product', key: 'product', width: 180 },
   { get title() { return assetText('tasks.version'); }, dataIndex: 'version', key: 'version', width: 120 },
-  { get title() { return assetText('tasks.source'); }, key: 'sources', width: 160 }
+  { get title() { return assetText('tasks.source'); }, key: 'sources', width: 160 },
+  { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 175 }
 ];
 
 const fileleakCols = [
   { title: 'URL', key: 'url' },
   { get title() { return assetText('tasks.title'); }, dataIndex: 'title', key: 'title', width: 160 },
   { get title() { return assetText('tasks.statusCode'); }, dataIndex: 'status_code', key: 'status_code', width: 80, align: 'center' },
-  { get title() { return assetText('assets.updatedAtLabel'); }, dataIndex: 'update_date', key: 'update_date', width: 160 }
+  { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 175 }
 ];
 
 const urlCols = [
@@ -753,38 +788,50 @@ const urlCols = [
   { get title() { return assetText('tasks.title'); }, dataIndex: 'title', key: 'title', width: 160 },
   { get title() { return assetText('tasks.statusCode'); }, dataIndex: 'status_code', key: 'status_code', width: 80, align: 'center' },
   { get title() { return assetText('tasks.source'); }, dataIndex: 'source', key: 'source', width: 110 },
-  { get title() { return assetText('assets.updatedAtLabel'); }, dataIndex: 'update_date', key: 'update_date', width: 160 }
+  { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 175 }
 ];
 
 const fingerCols = [
   { get title() { return assetText('assets.fingerprintComponent'); }, dataIndex: 'finger_name', key: 'finger_name' },
-  { get title() { return assetText('assets.relatedWebsites'); }, key: 'cnt', width: 140, align: 'center' }
+  { get title() { return assetText('assets.relatedWebsites'); }, key: 'cnt', width: 140, align: 'center' },
+  { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 175 }
 ];
 
 const wihCols = [
   { get title() { return assetText('tasks.type'); }, dataIndex: 'record_type', key: 'record_type', width: 100 },
   { get title() { return assetText('assets.sensitiveContent'); }, dataIndex: 'content', key: 'content' },
   { get title() { return assetText('assets.sourceJavascriptWebsite'); }, key: 'source', width: 220 },
-  { get title() { return assetText('assets.updatedAtLabel'); }, dataIndex: 'update_date', key: 'update_date', width: 160 }
+  { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 175 }
 ];
 
-// 动态汇总当前目标关联站点的技术栈与指纹
+// 动态汇总当前目标关联站点的技术栈与指纹（同时收敛首次发现与最近更新时间）
 const statFingerList = computed(() => {
   if (!chainData.value || !Array.isArray(chainData.value.site)) return [];
   const map = {};
   for (const s of chainData.value.site) {
     if (Array.isArray(s.finger)) {
+      const sSave = s.save_date || s.update_date || '';
+      const sUpd = s.update_date || s.save_date || '';
       for (const f of s.finger) {
         const name = f?.name || f;
         if (name && typeof name === 'string' && name.trim()) {
-          map[name.trim()] = (map[name.trim()] || 0) + 1;
+          const clean = name.trim();
+          if (!map[clean]) {
+            map[clean] = { finger_name: clean, cnt: 1, save_date: sSave, update_date: sUpd };
+          } else {
+            map[clean].cnt += 1;
+            if (sSave && (!map[clean].save_date || sSave < map[clean].save_date)) {
+              map[clean].save_date = sSave;
+            }
+            if (sUpd && (!map[clean].update_date || sUpd > map[clean].update_date)) {
+              map[clean].update_date = sUpd;
+            }
+          }
         }
       }
     }
   }
-  return Object.entries(map)
-    .map(([finger_name, cnt]) => ({ finger_name, cnt }))
-    .sort((a, b) => b.cnt - a.cnt);
+  return Object.values(map).sort((a, b) => b.cnt - a.cnt);
 });
 
 const unifiedServiceList = computed(() => {
@@ -796,6 +843,8 @@ const unifiedServiceList = computed(() => {
     if (!ip && !port) return;
     const key = `${ip}:${port}`;
     const existing = map.get(key);
+    const inSave = ep.save_date || ep.update_date || '';
+    const inUpd = ep.update_date || ep.save_date || '';
     if (!existing) {
       map.set(key, {
         ip,
@@ -803,7 +852,9 @@ const unifiedServiceList = computed(() => {
         service_name: ep.service_name || 'unknown',
         product: ep.product || '',
         version: ep.version || '',
-        sources: Array.from(new Set(ep.sources || ['nmap']))
+        sources: Array.from(new Set(ep.sources || ['nmap'])),
+        save_date: inSave,
+        update_date: inUpd
       });
       return;
     }
@@ -812,6 +863,8 @@ const unifiedServiceList = computed(() => {
     }
     if (!existing.product && ep.product) existing.product = ep.product;
     if (!existing.version && ep.version) existing.version = ep.version;
+    if (inSave && (!existing.save_date || inSave < existing.save_date)) existing.save_date = inSave;
+    if (inUpd && (!existing.update_date || inUpd > existing.update_date)) existing.update_date = inUpd;
     const mergedSrc = new Set([...(existing.sources || []), ...(ep.sources || [])]);
     existing.sources = ['nmap', 'npoc'].filter(s => mergedSrc.has(s));
     if (!existing.sources.length) existing.sources = ['nmap'];
@@ -825,7 +878,9 @@ const unifiedServiceList = computed(() => {
         service_name: s.service_name,
         product: s.product || s.service_info?.[0]?.product || '',
         version: s.version || s.service_info?.[0]?.version || '',
-        sources: Array.isArray(s.sources) && s.sources.length ? s.sources : ['nmap']
+        sources: Array.isArray(s.sources) && s.sources.length ? s.sources : ['nmap'],
+        save_date: s.save_date,
+        update_date: s.update_date
       });
     } else if (Array.isArray(s.service_info)) {
       for (const inf of s.service_info) {
@@ -835,7 +890,9 @@ const unifiedServiceList = computed(() => {
           service_name: inf.service_name || s.service_name,
           product: inf.product || '',
           version: inf.version || '',
-          sources: Array.isArray(s.sources) && s.sources.length ? s.sources : ['nmap']
+          sources: Array.isArray(s.sources) && s.sources.length ? s.sources : ['nmap'],
+          save_date: s.save_date,
+          update_date: s.update_date
         });
       }
     }
@@ -860,7 +917,9 @@ const unifiedServiceList = computed(() => {
       service_name: n.scheme || n.service_name || 'unknown',
       product: n.product || '',
       version: n.version || '',
-      sources: ['npoc']
+      sources: ['npoc'],
+      save_date: n.save_date,
+      update_date: n.update_date
     }, true);
   }
 

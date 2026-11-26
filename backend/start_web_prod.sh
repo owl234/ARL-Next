@@ -27,5 +27,14 @@ rm -f /tmp/config.yaml.tmp
 echo "🛡️ 正在确保默认管理员账号存在..."
 python3 inject_user.py
 
-echo "🚀 正在前台拉起 Web Backend API (高并发生产模式)..."
-gunicorn --preload -b 0.0.0.0:5000 app.main:arl_app -w 4 --threads 4 --worker-class gthread -t 120 --max-requests 1000 --max-requests-jitter 50
+WEB_WORKERS="${ARL_WEB_WORKERS:-4}"
+if ! [[ "$WEB_WORKERS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "⚠️ 警告：ARL_WEB_WORKERS=${WEB_WORKERS} 非法，已回退为默认值 4"
+    WEB_WORKERS=4
+elif [ "$WEB_WORKERS" -gt 16 ]; then
+    echo "⚠️ 警告：ARL_WEB_WORKERS=${WEB_WORKERS} 超出上限，已收敛为 16"
+    WEB_WORKERS=16
+fi
+
+echo "🚀 正在前台拉起 Web Backend API (workers=${WEB_WORKERS}, threads=4)..."
+gunicorn --preload -b 0.0.0.0:5000 app.main:arl_app -w "$WEB_WORKERS" --threads 4 --worker-class gthread -t 120 --max-requests 1000 --max-requests-jitter 50

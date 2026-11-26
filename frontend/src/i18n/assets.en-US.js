@@ -538,5 +538,9 @@ export default {
   "collapseList": "Collapse list",
   "assetGroupDeletedRedirectNotice": "This asset group has been deleted; redirected back to the asset group list",
   "batchDeleteCount": "Batch Delete ({count})",
-  "maxBatchDeleteLimitNotice": "A maximum of 500 records can be deleted per batch. Please reduce your selection and try again."
+  "maxBatchDeleteLimitNotice": "A maximum of 500 records can be deleted per batch. Please reduce your selection and try again.",
+  "discoveredUpdatedAtLabel": "Discovered / Updated",
+  "discoveredLatestAtLabel": "Discovered / Last seen",
+  "updatedShortPrefix": "Updated",
+  "latestShortPrefix": "Last seen"
 };

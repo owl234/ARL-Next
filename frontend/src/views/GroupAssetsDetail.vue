@@ -123,7 +123,7 @@
             <div class="toolbar-left">
               <span class="toolbar-title-text">{{ assetText('assets.categoryHeading', { category: tabConfig[effectiveTab]?.tabName || assetText('tasks.assets') }) }}</span>
               <span class="toolbar-meta-count">
-                {{ assetText('assets.recordCount', { count: getAsmTabCount(activeTab) }) }}
+                {{ assetText('assets.recordCount', { count: activeFilterCount > 0 ? (pagination.total || 0) : getAsmTabCount(activeTab) }) }}
               </span>
             </div>
 
@@ -296,13 +296,14 @@
       :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange, preserveSelectedRowKeys: true }"
       :loading="loading"
       :dataSource="dataSource"
-      :columns="columns"
+      :columns="tableColumns"
       :pagination="false"
       :scroll="pagination.pageSize >= 100 ? { y: tableScrollY, x: 'max-content' } : { x: 'max-content' }"
       :virtual="pagination.pageSize >= 100"
       size="small"
       class="modern-clean-table"
       :rowKey="getAssetRowKey"
+      @change="handleTableSortChange"
     >
       <template #bodyCell="{ column, record, index }">
 
@@ -504,11 +505,12 @@
           </a-tag>
         </template>
 
-        <template v-else-if="column.key === 'source'">
+        <template v-else-if="column.key === 'wih_source'">
           <div style="word-break: break-all; color: var(--arl-text-color); line-height: 1.6;">
-            <a :href="record.source" target="_blank" style="color: var(--arl-text-color); text-decoration: none;">
-              {{ record.source || '-' }}
+            <a v-if="isHttpUrl(record.source)" :href="record.source" target="_blank" rel="noopener noreferrer" style="color: var(--arl-text-color); text-decoration: none;">
+              {{ record.source }}
             </a>
+            <span v-else>{{ record.source || '-' }}</span>
           </div>
         </template>
 
@@ -645,8 +647,8 @@
         <template v-else-if="column.key === 'host'">
           <span>{{ record.ip || record.host }}{{ record.port ? ':' + record.port : '' }}</span>
         </template>
-        <template v-else-if="column.key === 'update_date'">
-          <span>{{ record.update_date || record.insert_time || '-' }}</span>
+        <template v-else-if="column.key === 'save_date' || column.key === 'update_date'">
+          <AssetTimeCell :record="record" :show-secondary="true" secondary-mode="update" />
         </template>
       </template>
 
@@ -976,8 +978,9 @@ import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
 import { isCustomNucleiResult, isHttpUrl, formatRiskPolicyLabel } from '../utils/nucleiHelpers';
 import AuthenticatedImage from '../components/AuthenticatedImage.vue';
+import AssetTimeCell from '../components/AssetTimeCell.vue';
 import HttpStatusFilter from '../components/HttpStatusFilter.vue';
-import { buildAssetFilterParams, formatAssetFilterOperator } from '../utils/assetFilters';
+import { buildAssetFilterParams, buildAssetSortOrder, extractTableSortState, formatAssetFilterOperator } from '../utils/assetFilters';
 import { formatGeo } from '../utils/formatGeo';
 import { message, Modal } from 'ant-design-vue';
 import dayjs from 'dayjs';
@@ -1135,7 +1138,7 @@ const asmCounts = reactive({
 });
 
 const asmTotalCount = computed(() => {
-  return Object.values(asmCounts).reduce((acc, cur) => acc + (Number(cur) || 0), 0);
+  return asmTabList.reduce((acc, tab) => acc + getAsmTabCount(tab.key), 0);
 });
 
 const activeFilterCount = computed(() => {
@@ -1770,6 +1773,7 @@ const tabConfig = reactive({
       { get label() { return assetText('tasks.fingerprints'); }, key: 'finger', operator: '=' },
       { get label() { return assetText('tasks.faviconHash'); }, key: 'favicon.hash', operator: '=' },
       { get label() { return assetText('tasks.tags'); }, key: 'tag', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
       { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
@@ -1779,7 +1783,7 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.title'); }, dataIndex: 'title', key: 'title', width: 200 },
       { get title() { return assetText('tasks.headers'); }, key: 'headers', width: 360 },
       { get title() { return assetText('tasks.fingerprints'); }, key: 'finger', width: 200 },
-      { get title() { return assetText('assets.updatedAtLabel'); }, dataIndex: 'update_date', key: 'update_date', width: 160, align: 'center' },
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true },
       { get title() { return assetText('tasks.screenshot'); }, key: 'screenshot', width: 250 }
     ]
   },
@@ -1787,24 +1791,23 @@ const tabConfig = reactive({
     url: '/asset_domain/',
     exportUrl: '/asset_domain/export/',
     get tabName() { return assetText('tasks.subdomains'); },
-    // 🚨 修复：严格对齐截图中的 6 个搜索框顺序和文案
     searchFields: [
       { get label() { return assetText('tasks.domains'); }, key: 'domain', operator: '=' },
       { get label() { return assetText('tasks.recordValue'); }, key: 'record', operator: '=' },
       { get label() { return assetText('tasks.type'); }, key: 'type', operator: '=' }, // 调整到第 3 位
       { label: 'IP', key: 'ips', operator: '=' },    // 调整到第 4 位
       { get label() { return assetText('tasks.source'); }, key: 'source', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
       { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
-      // ... cols 保持不变，上一轮猜得完全正确 ...
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
       { get title() { return assetText('tasks.domains'); }, dataIndex: 'domain', key: 'domain', width: 220 },
       { get title() { return assetText('tasks.dnsRecordType'); }, dataIndex: 'type', key: 'type', width: 100 },
       { get title() { return assetText('tasks.recordValue'); }, key: 'record', width: 280 },
       { get title() { return assetText('tasks.associatedIps'); }, key: 'ips', width: 280 },
       { get title() { return assetText('tasks.source'); }, dataIndex: 'source', key: 'source', width: 150 },
-      { get title() { return assetText('assets.updatedAtLabel'); }, dataIndex: 'update_date', key: 'update_date', width: 180 }
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
   ip: {
@@ -1818,6 +1821,7 @@ const tabConfig = reactive({
       { get label() { return assetText('tasks.operatingSystem'); }, key: 'os_info.name', operator: '=' }, // ARL 默认 OS 字段名
       { get label() { return assetText('tasks.domains'); }, key: 'domain', operator: '=' },
       { label: 'CDN', key: 'cdn_name', operator: '=', get placeholder() { return assetText('tasks.enterACdnProviderOrOriginServer'); } },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
       { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
@@ -1829,7 +1833,7 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.cdnStatus'); }, key: 'ip_cdn_tag', width: 150 },
       { get title() { return assetText('assets.location'); }, key: 'geo_city', width: 180 },
       { get title() { return assetText('assets.asOrganization'); }, key: 'geo_asn', width: 280 },
-      { get title() { return assetText('assets.updatedAtLabel'); }, dataIndex: 'update_date', key: 'update_date', width: 180 }
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
   wih: {
@@ -1847,16 +1851,18 @@ const tabConfig = reactive({
       },
       { get label() { return assetText('tasks.content'); }, key: 'content', operator: '=' },
       { get label() { return assetText('tasks.sourceJs'); }, key: 'source', operator: '=' },
-      { get label() { return assetText('tasks.sourceWebsite'); }, key: 'site', operator: '=' }
+      { get label() { return assetText('tasks.sourceWebsite'); }, key: 'site', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
+      { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
-    // WIH 表格列定义（绑定 source 键名）
+    // WIH 表格列定义（独立 wih_source 键避免与 domain.source 枚举冲突）
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
       { get title() { return assetText('tasks.recordType'); }, dataIndex: 'record_type', key: 'record_type', width: 120 },
       { get title() { return assetText('tasks.content'); }, dataIndex: 'content', key: 'content', width: 250 },
-      { get title() { return assetText('tasks.sourceJs'); }, dataIndex: 'source', key: 'source', width: 450 }, // 绑定 source
+      { get title() { return assetText('tasks.sourceJs'); }, dataIndex: 'source', key: 'wih_source', width: 450 },
       { get title() { return assetText('tasks.sourceWebsite'); }, dataIndex: 'site', key: 'wih_site', width: 250 },
-      { get title() { return assetText('assets.updatedAtLabel'); }, dataIndex: 'update_date', key: 'update_date', width: 180 }
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
   cert: {
@@ -1869,13 +1875,14 @@ const tabConfig = reactive({
       { get label() { return assetText('tasks.subject'); }, key: 'cert.subject_dn', operator: '=' },
       { label: 'SHA-1', key: 'cert.fingerprint.sha1', operator: '=' },
       { get label() { return assetText('tasks.subjectAlternativeNames'); }, key: 'cert.extensions.subjectAltName', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
       { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
       { get title() { return assetText('tasks.host'); }, key: 'host', width: 180 },
       { get title() { return assetText('tasks.sslCertificateInformation'); }, key: 'cert_detail', width: 900 },
-      { get title() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', width: 180 }
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
   service: {
@@ -1898,6 +1905,7 @@ const tabConfig = reactive({
           { get label() { return assetText('assets.pythonPluginServicesLabel'); }, value: 'npoc' }
         ]
       },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
       { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
@@ -1907,7 +1915,7 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.product'); }, key: 'product', width: 220 },
       { get title() { return assetText('tasks.version'); }, key: 'version', width: 140 },
       { get title() { return assetText('tasks.source'); }, key: 'service_sources', width: 180 },
-      { get title() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', width: 180 }
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
   fileleak: {
@@ -1918,6 +1926,7 @@ const tabConfig = reactive({
       { get label() { return assetText('tasks.title'); }, key: 'title', operator: '=' },
       { get label() { return assetText('tasks.statusCode'); }, key: 'status_code', type: 'httpStatus' },
       { get label() { return assetText('tasks.bodyLength'); }, key: 'content_length', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
       { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
@@ -1926,7 +1935,7 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.title'); }, dataIndex: 'title', key: 'title', width: 250 },
       { get title() { return assetText('tasks.statusCode'); }, dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
       { get title() { return assetText('tasks.bodyLength'); }, dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' },
-      { get title() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', width: 180 }
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
   url: {
@@ -1939,6 +1948,7 @@ const tabConfig = reactive({
       { get label() { return assetText('tasks.statusCode'); }, key: 'status_code', type: 'httpStatus' },
       { get label() { return assetText('tasks.bodyLength'); }, key: 'content_length', operator: '=' },
       { get label() { return assetText('tasks.source'); }, key: 'source', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
       { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
@@ -1948,7 +1958,7 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.statusCode'); }, dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
       { get title() { return assetText('tasks.bodyLength'); }, dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' },
       { get title() { return assetText('tasks.source'); }, dataIndex: 'source', key: 'source', width: 150 },
-      { get title() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', width: 180 }
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
   vuln: {
@@ -1958,7 +1968,9 @@ const tabConfig = reactive({
       { get label() { return assetText('tasks.vulnerabilityName'); }, key: 'vul_name', operator: '=' },
       { get label() { return assetText('tasks.category'); }, key: 'vul_category', operator: '=' },
       { get label() { return assetText('tasks.applicationName'); }, key: 'app_name', operator: '=' },
-      { get label() { return assetText('tasks.target'); }, key: 'target', operator: '=' }
+      { get label() { return assetText('tasks.target'); }, key: 'target', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
+      { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
@@ -1967,7 +1979,7 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.applicationName'); }, dataIndex: 'app_name', key: 'app_name', width: 150 },
       { get title() { return assetText('tasks.target'); }, dataIndex: 'target', key: 'target', width: 200 },
       { get title() { return assetText('tasks.credentials'); }, key: 'verify_data', width: 350 },
-      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'insert_time', key: 'insert_time', width: 160 }
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
   npoc_service: {
@@ -1977,7 +1989,9 @@ const tabConfig = reactive({
       { get label() { return assetText('tasks.protocol'); }, key: 'scheme', operator: '=' },
       { get label() { return assetText('tasks.host'); }, key: 'host', operator: '=' },
       { get label() { return assetText('tasks.port'); }, key: 'port', operator: '=' },
-      { get label() { return assetText('tasks.target'); }, key: 'target', operator: '=' }
+      { get label() { return assetText('tasks.target'); }, key: 'target', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
+      { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
@@ -1985,7 +1999,7 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.host'); }, dataIndex: 'host', key: 'host', width: 200 },
       { get title() { return assetText('tasks.port'); }, dataIndex: 'port', key: 'port', width: 100, align: 'center' },
       { get title() { return assetText('tasks.target'); }, dataIndex: 'target', key: 'target', width: 250 },
-      { get title() { return assetText('tasks.savedAt'); }, dataIndex: 'insert_time', key: 'insert_time', width: 180 }
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
   cip: {
@@ -1994,6 +2008,7 @@ const tabConfig = reactive({
     get tabName() { return assetText('tasks.cClassNetworks'); },
     searchFields: [
       { get label() { return assetText('tasks.cClassNetworks'); }, key: 'cidr_ip', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
       { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
@@ -2001,7 +2016,7 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.cClassNetworks'); }, dataIndex: 'cidr_ip', key: 'cidr_ip', width: 300 },
       { get title() { return assetText('tasks.ipCount'); }, key: 'ip_count_col', width: 150, align: 'center' },
       { get title() { return assetText('tasks.domainCount'); }, key: 'domain_count_col', width: 150, align: 'center' },
-      { get title() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', width: 180 }
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
   nuclei_result: {
@@ -2021,7 +2036,9 @@ const tabConfig = reactive({
       },
       { get label() { return assetText('tasks.target'); }, key: 'target', operator: '=' },
       { get label() { return assetText('tasks.vulnerableUrl'); }, key: 'vuln_url', operator: '=' },
-      { get label() { return assetText('tasks.vulnerabilityName'); }, key: 'vuln_name', operator: '=' }
+      { get label() { return assetText('tasks.vulnerabilityName'); }, key: 'vuln_name', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
+      { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
@@ -2029,8 +2046,8 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.target'); }, dataIndex: 'target', key: 'target', width: 200 },
       { get title() { return assetText('tasks.vulnerableUrl'); }, key: 'nuclei_vuln_url', width: 300 },
       { get title() { return assetText('tasks.vulnerabilityName'); }, dataIndex: 'vuln_name', key: 'vuln_name', width: 200 },
-      { get title() { return assetText('tasks.severity'); }, dataIndex: 'vuln_severity', key: 'vul_severity', width: 100, align: 'center' },
-      { get title() { return assetText('tasks.savedAt'); }, dataIndex: 'insert_time', key: 'insert_time', width: 160 },
+      { get title() { return assetText('tasks.severity'); }, dataIndex: 'vuln_severity', key: 'vuln_severity', width: 100, align: 'center' },
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true },
       { get title() { return assetText('tasks.verificationCommand'); }, key: 'verify_command', width: 350 }
     ]
   },
@@ -2045,13 +2062,14 @@ const tabConfig = reactive({
         hasOperatorSelect: true,
         operators: ['模糊匹配', '精确匹配']
       },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' },
       { get label() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 80, align: 'center' },
       { get title() { return assetText('tasks.fingerprints'); }, key: 'finger_name', width: 500 },
       { get title() { return assetText('tasks.count'); }, dataIndex: 'cnt', key: 'cnt', width: 200 },
-      { get title() { return assetText('assets.updatedAtLabel'); }, key: 'update_date', width: 180 }
+      { get title() { return assetText('assets.discoveredUpdatedAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   }
 });
@@ -2063,6 +2081,16 @@ const tabCache = createTabStateCache({
 });
 
 const columns = ref(tabConfig.site.cols);
+const sortState = reactive({ field: '', order: null });
+const tableColumns = computed(() => (columns.value || []).map(col => {
+  if (!col?.sorter) return col;
+  const colField = col.key || col.dataIndex;
+  return {
+    ...col,
+    get title() { return col.title; },
+    sortOrder: sortState.field === colField ? sortState.order : null
+  };
+}));
 
 const fetchData = async () => {
   const config = tabConfig[effectiveTab.value];
@@ -2073,8 +2101,16 @@ const fetchData = async () => {
   try {
     // 🚨 修复 2：获取 computed 响应式对象的最新值
     const params = { page: pagination.current, size: pagination.pageSize, scope_id: scope_id.value };
+    const filterParams = buildAssetFilterParams(searchForm.value, config.searchFields);
+    const hasActiveFilters = Object.keys(filterParams).length > 0;
 
-    Object.assign(params, buildAssetFilterParams(searchForm.value, config.searchFields));
+    Object.assign(params, filterParams);
+    const orderParam = typeof sortState !== 'undefined' && typeof buildAssetSortOrder === 'function'
+      ? buildAssetSortOrder(sortState)
+      : '';
+    if (orderParam) {
+      params.order = orderParam;
+    }
     const res = await request.get(config.url, { params });
     // 竞态防御：若响应到达时 Tab 已切换，丢弃过期响应
     if (effectiveTab.value !== currentReqTab) return;
@@ -2088,13 +2124,15 @@ const fetchData = async () => {
         if (clampedPage !== pagination.current) {
           pagination.current = clampedPage;
           lastFetchedPage = clampedPage;
-          tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, clampedPage);
+          tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, clampedPage, typeof sortState !== 'undefined' ? { ...sortState } : undefined);
           return fetchData();
         }
       }
       dataSource.value = items;
       pagination.total = total;
-      asmCounts[effectiveTab.value] = total;
+      if (!hasActiveFilters) {
+        asmCounts[effectiveTab.value] = total;
+      }
       selectionTracker.rememberRows(
         items,
         getAssetRowKey,
@@ -2104,7 +2142,7 @@ const fetchData = async () => {
       lastFetchedSize = pagination.pageSize;
       // 更新当前 Tab 内存数据缓存并持久化轻量搜索状态
       tabCache.updateMemoryCache(effectiveTab.value, dataSource.value, pagination.total, pagination.pageSize);
-      tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, pagination.current);
+      tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, pagination.current, typeof sortState !== 'undefined' ? { ...sortState } : undefined);
     }
   } catch (error) {
     if (effectiveTab.value === currentReqTab) {
@@ -2119,13 +2157,28 @@ const fetchData = async () => {
 
 const onSearch = () => {
   pagination.current = 1;
-  tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, 1);
+  tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, 1, typeof sortState !== 'undefined' ? { ...sortState } : undefined);
   fetchData();
 };
 const resetSearch = () => {
   searchForm.value = {};
+  if (typeof sortState !== 'undefined') {
+    sortState.field = '';
+    sortState.order = null;
+  }
   tabCache.resetTabState(effectiveTab.value);
   pagination.current = 1;
+  fetchData();
+};
+const handleTableSortChange = (_pag, _filters, sorter) => {
+  const next = extractTableSortState(sorter, 'save_date');
+  if (sortState.field === next.field && sortState.order === next.order) return;
+  sortState.field = next.field;
+  sortState.order = next.order;
+  pagination.current = 1;
+  lastFetchedPage = 1;
+  tabCache.invalidateMemoryCache(effectiveTab.value);
+  tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, 1, { ...sortState });
   fetchData();
 };
 const handleTableChange = (page, pageSize) => {
@@ -2224,17 +2277,20 @@ const handleBatchDelete = () => {
 
 watch(activeTab, (newVal, oldVal) => {
   if (oldVal && tabConfig[oldVal] && !isScopeSwitching.value) {
-    // 离开旧选项卡前，仅在非切组且有效交互时保存当前搜索表单、操作符和页码
-    tabCache.saveCurrentTab(oldVal, searchForm.value, pagination.current);
+    // 离开旧选项卡前，仅在非切组且有效交互时保存当前搜索表单、操作符、页码与排序
+    tabCache.saveCurrentTab(oldVal, searchForm.value, pagination.current, { ...sortState });
   }
 
   if (tabConfig[newVal]) {
     columns.value = tabConfig[newVal].cols;
     clearSelection();
 
-    // 恢复新选项卡的搜索表单、操作符与页码
+    // 恢复新选项卡的搜索表单、操作符、排序与页码
     searchForm.value = tabCache.getTabSearchForm(newVal);
     tabCache.applyTabOperators(newVal);
+    const savedSort = tabCache.getTabSort(newVal);
+    sortState.field = savedSort.field;
+    sortState.order = savedSort.order;
     pagination.current = tabCache.getTabPage(newVal) || 1;
 
     // 检查内存数据缓存：若已加载过且单页条数匹配则直接秒开渲染，不重复向后端发请求
@@ -2278,7 +2334,7 @@ watch(scope_id, (newId) => {
     }
     isScopeSwitching.value = true;
     dataSource.value = [];
-    selectedRowKeys.value = [];
+    clearSelection();
 
     let restoredTab = tabCache.init();
     if (restoredTab === 'npoc_service') {
@@ -2294,6 +2350,9 @@ watch(scope_id, (newId) => {
         columns.value = tabConfig[effectiveTab.value].cols;
         searchForm.value = tabCache.getTabSearchForm(effectiveTab.value);
         tabCache.applyTabOperators(effectiveTab.value);
+        const savedSort = tabCache.getTabSort(effectiveTab.value);
+        sortState.field = savedSort.field;
+        sortState.order = savedSort.order;
         pagination.current = tabCache.getTabPage(effectiveTab.value) || 1;
       }
       const cached = tabCache.getMemoryCache(effectiveTab.value, pagination.pageSize);
@@ -2461,6 +2520,9 @@ const submitAddSite = async () => {
       message.success(assetText('assets.websiteAdded'));
       addSiteVisible.value = false;
       tabCache.invalidateAllMemoryCaches();
+      notifyAssetMutated();
+      lastObservedMutationVersion = assetMutationVersion.value;
+      fetchAsmCounts();
       fetchData(); // 刷新表格
     } else if (res.code === 802) {
       message.error(res.message); // 弹出 "任务目标不在资产组中"
@@ -2494,6 +2556,12 @@ const getPocCount = (policy) => {
 
 // 1. 打开弹窗：智能区分勾选目标 vs 全量筛选结果集
 const openRiskModal = async () => {
+  const selectedIds = hasSelected.value ? selectedRowKeys.value.filter(k => k != null && k !== '') : [];
+  if (selectedIds.length > 500) {
+    message.warning(assetText('assets.maxBatchDeleteLimitNotice'));
+    return;
+  }
+
   try {
     message.loading({ content: assetText('assets.preparingRiskScanTargets'), key: 'risk_task' });
 
@@ -2503,38 +2571,35 @@ const openRiskModal = async () => {
       if (polRes.code === 200) policies.value = polRes.items || [];
     }
 
-    // 🎯 智能分支：如果用户在表格中勾选了具体数据行，严格仅针对勾选项下发
-    if (hasSelected.value && selectedRowKeys.value.length > 0) {
-      const selectedSites = dataSource.value
-        .filter(item => selectedRowKeys.value.includes(item._id || item.id))
-        .map(item => item.site)
-        .filter(Boolean);
-
-      if (selectedSites.length === 0) {
-        message.warning({ content: assetText('assets.theSelectedRecordsContainNoValidWebsiteTargets'), key: 'risk_task' });
-        return;
-      }
-
-      selectedRiskTargets.value = selectedSites;
-      currentResultSetId.value = '';
-      currentTargetCount.value = selectedSites.length;
-
-      message.success({ content: assetText('assets.selectedAssetsReadyForScanningCount', { count: selectedSites.length }), key: 'risk_task' });
+    selectedRiskTargets.value = [];
+    currentResultSetId.value = '';
+    let setRes;
+    if (selectedIds.length > 0) {
+      // 跨页多选：按勾选站点 _id 列表通过 POST 生成结果集，避免丢失非当前页站点
+      setRes = await request.post('/asset_site/save_result_set/', {
+        _id: selectedIds,
+        scope_id: scope_id.value
+      });
     } else {
-      // 🎯 未勾选：根据当前搜索与资产组条件打包全量结果集
-      selectedRiskTargets.value = [];
+      // 未勾选：根据当前搜索与资产组条件打包全量结果集
       const params = { scope_id: scope_id.value };
       Object.assign(params, buildAssetFilterParams(searchForm.value, tabConfig[effectiveTab.value].searchFields));
-
-      // 发起结果集保存请求
-      const setRes = await request.get('/asset_site/save_result_set/', { params });
-      if (setRes.code !== 200) throw new Error(assetText('assets.failedToCreateResultSet'));
-
-      currentResultSetId.value = setRes.data.result_set_id;
-      currentTargetCount.value = setRes.data.result_total || 0;
-
-      message.success({ content: assetText('assets.assetsReadyForScanningCount', { count: setRes.data.result_total }), key: 'risk_task' });
+      setRes = await request.get('/asset_site/save_result_set/', { params });
     }
+
+    if (setRes.code !== 200 || !setRes.data?.result_set_id) {
+      message.error({ content: setRes.message || assetText('assets.failedToCreateResultSet'), key: 'risk_task' });
+      return;
+    }
+
+    currentResultSetId.value = setRes.data.result_set_id;
+    currentTargetCount.value = setRes.data.result_total || 0;
+    message.success({
+      content: selectedIds.length > 0
+        ? assetText('assets.selectedAssetsReadyForScanningCount', { count: currentTargetCount.value })
+        : assetText('assets.assetsReadyForScanningCount', { count: currentTargetCount.value }),
+      key: 'risk_task'
+    });
 
     // 初始化弹窗数据
     riskForm.name = '';
@@ -2578,8 +2643,8 @@ const submitRiskTask = async () => {
     if (res.code === 200) {
       message.success(assetText('assets.riskScanTaskCreated'));
       riskModalVisible.value = false;
-      if (selectedRiskTargets.value.length > 0) {
-        selectedRowKeys.value = [];
+      if (hasSelected.value) {
+        clearSelection();
       }
     } else {
       message.error(assetText('tasks.failedToCreateTaskLabel') + (res.message || assetText('tasks.unknownError')));
@@ -2629,6 +2694,9 @@ const submitAddDomain = async () => {
       message.success(assetText('assets.subdomainAdded'));
       addDomainVisible.value = false;
       tabCache.invalidateAllMemoryCaches();
+      notifyAssetMutated();
+      lastObservedMutationVersion = assetMutationVersion.value;
+      fetchAsmCounts();
       fetchData(); // 自动刷新当前页面的域名列表
     } else if (res.code === 701) {
       message.error(res.message); // 原汁原味抛出：域名不在给定的资产范围中

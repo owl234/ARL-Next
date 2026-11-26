@@ -45,11 +45,19 @@ from .domain import (
 )
 from .ip import is_vaild_ip_target, not_in_black_ips, get_ip_asn, get_ip_city, get_ip_type, is_v4_ip, is_v6_ip
 from .arl import arl_domain, get_asset_domain_by_id
-from .time import curr_date, time2date, curr_date_obj, date2time
+from .time import curr_date, time2date, curr_date_obj, date2time, to_datetime_obj, format_datetime_str
 from .url import rm_similar_url, get_hostname, normal_url, same_netloc, verify_cert, url_ext
 from .cert import get_cert, extract_domains_from_cert
 from .arlupdate import arl_update
-from .cdn import get_cdn_name_by_cname, get_cdn_name_by_ip, get_cdn_name_by_headers, get_cdn_name_by_ssl, get_cdn_name_comprehensive
+from .cdn import (
+    get_cdn_name_by_cname,
+    get_cdn_name_by_domain_strict,
+    get_cdn_name_by_ip,
+    get_cdn_name_by_headers,
+    get_cdn_name_by_ssl,
+    get_cdn_name_comprehensive,
+    is_cdn_cname_routing_subdomain,
+)
 try:
     from .device import device_info
 except ImportError:
@@ -529,15 +537,24 @@ def safe_insert_asset(collection, unique_keys, item):
                     
     from app.utils.monitor_diff import tag_monitor_diff
     tag_monitor_diff(collection, item)
-                    
+
     if item.get("change_status") == "unchanged":
         return
-        
+
+    save_dt = to_datetime_obj(item.get("save_date")) or curr_date_obj()
+    item["save_date"] = save_dt
+
     # 如果没凑齐 unique_keys，就直接退化成 insert_one（这种情况应该属于脏数据或特殊表）
     if not query or len(query) != len(unique_keys):
         conn_db(collection).insert_one(item)
     else:
-        conn_db(collection).update_one(query, {"$set": item}, upsert=True)
+        set_doc = dict(item)
+        set_doc.pop("save_date", None)
+        conn_db(collection).update_one(
+            query,
+            {"$set": set_doc, "$setOnInsert": {"save_date": save_dt}},
+            upsert=True,
+        )
 
 
 from pymongo import UpdateOne
@@ -550,19 +567,23 @@ def safe_insert_asset_many(collection, unique_keys, items):
     """
     if not items:
         return
-        
+
     from app.utils.monitor_diff import tag_monitor_diff
     for item in items:
         tag_monitor_diff(collection, item)
-    
+
     items = [item for item in items if item.get("change_status") != "unchanged"]
     if not items:
         return
-    
+
     operations = []
     insert_items = []
-    
+    default_now = curr_date_obj()
+
     for item in items:
+        save_dt = to_datetime_obj(item.get("save_date")) or default_now
+        item["save_date"] = save_dt
+
         query = {}
         for k in unique_keys:
             val = item.get(k)
@@ -580,11 +601,15 @@ def safe_insert_asset_many(collection, unique_keys, items):
                             break
                     if curr is not None:
                         query[k] = curr
-                        
+
         if not query or len(query) != len(unique_keys):
             insert_items.append(item)
         else:
-            operations.append(UpdateOne(query, {"$set": item}, upsert=True))
+            set_doc = dict(item)
+            set_doc.pop("save_date", None)
+            operations.append(
+                UpdateOne(query, {"$set": set_doc, "$setOnInsert": {"save_date": save_dt}}, upsert=True)
+            )
             
     if insert_items:
         conn_db(collection).insert_many(insert_items)

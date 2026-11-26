@@ -538,5 +538,9 @@ export default {
   "collapseList": "Свернуть список",
   "assetGroupDeletedRedirectNotice": "Эта группа активов была удалена; выполнен возврат к списку групп активов",
   "batchDeleteCount": "Удалить выбранные ({count})",
-  "maxBatchDeleteLimitNotice": "За один раз можно удалить не более 500 записей. Уменьшите выбор и повторите попытку."
+  "maxBatchDeleteLimitNotice": "За один раз можно удалить не более 500 записей. Уменьшите выбор и повторите попытку.",
+  "discoveredUpdatedAtLabel": "Обнаружено / Обновлено",
+  "discoveredLatestAtLabel": "Обнаружено / Последний раз",
+  "updatedShortPrefix": "Обн.",
+  "latestShortPrefix": "Посл."
 };

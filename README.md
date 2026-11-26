@@ -330,7 +330,7 @@ ARL-Next 同时面向 **AI Agent 协同** 与 **传统自动化编排** 开放�
 宿主机更新守护进程会自动拉取最新镜像、同步编排脚本与版本文件，并在后台完成容器重启与就绪检查，通常无需登录终端。
 
 > [!WARNING]
-> 更新过程会重启后台 Worker 容器，**正在运行的扫描任务将被中断**（重启后标记为「异常失败」）。建议在任务空闲时段执行。
+> 更新过程会重启后台 Worker 容器，**进行中的扫描任务将被中断**（重启后标记为「异常失败」）。建议在任务空闲时段执行。
 
 <details>
 <summary><b>方案二：终端标准手动升级</b></summary>
@@ -565,6 +565,13 @@ ARL-Next 的持续维护与迭代离不开社区伙伴的支持，特别致谢�
   <a style="cursor: default;">
     <img src="./img/sponsor_777.jpg" width="48" height="48" style="border-radius: 50%; margin: 0 8px; vertical-align: middle;" alt="777" title="感谢 777 的支持！"/>
   </a>
+  <a style="cursor: default;">
+    <img src="./img/sponsor_qingyi.jpg" width="48" height="48" style="border-radius: 50%; margin: 0 8px; vertical-align: middle;" alt="青衣" title="感谢 青衣 的支持！"/>
+  </a>
+</p>
+
+<p align="center">
+  同时感谢：<b>等风几许</b>
 </p>
 
 ---

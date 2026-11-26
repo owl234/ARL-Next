@@ -538,5 +538,9 @@ export default {
   "collapseList": "收起清单",
   "assetGroupDeletedRedirectNotice": "当前查看的资产组已被删除，已自动返回资产组列表",
   "batchDeleteCount": "批量删除 ({count})",
-  "maxBatchDeleteLimitNotice": "单次批量删除最多支持 500 条记录，请缩减勾选数量后重试"
+  "maxBatchDeleteLimitNotice": "单次批量删除最多支持 500 条记录，请缩减勾选数量后重试",
+  "discoveredUpdatedAtLabel": "发现 / 更新时间",
+  "discoveredLatestAtLabel": "发现 / 最近出现",
+  "updatedShortPrefix": "更新",
+  "latestShortPrefix": "最近"
 };

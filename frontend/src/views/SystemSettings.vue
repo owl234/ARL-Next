@@ -2796,9 +2796,30 @@ const currentFilteredDicts = computed(() => {
   return group ? group.children || [] : [];
 });
 
+const pendingDeepLinkDict = ref('');
+
+const selectDictByName = (dictName) => {
+  const targetName = String(dictName || '').trim();
+  if (!targetName) return false;
+  for (const group of treeData.value) {
+    const found = (group.children || []).find((item) => item.subTitle === targetName);
+    if (found) {
+      selectedCategoryKeys.value = [group.key];
+      menuSearch.value = '';
+      handleUnifiedSelect([found.key]);
+      pendingDeepLinkDict.value = '';
+      return true;
+    }
+  }
+  return false;
+};
+
 watch(treeData, (newVal) => {
   if (menuOpenKeys.value.length === 0 && newVal.length > 0) {
     menuOpenKeys.value = newVal.map((g) => g.key);
+  }
+  if (pendingDeepLinkDict.value && selectDictByName(pendingDeepLinkDict.value)) {
+    return;
   }
   if (
     newVal.length > 0
@@ -3394,6 +3415,7 @@ const applyRouteDeepLink = (query) => {
   if (!query) return;
   const rawTab = query.tab;
   const rawFocus = query.focus;
+  const rawDict = String(query.dict || '').trim();
 
   if (rawTab === 'system_general') {
     if (rawFocus === 'proxy') {
@@ -3409,6 +3431,14 @@ const applyRouteDeepLink = (query) => {
   } else if (rawTab && LEGACY_TAB_MAP[rawTab]) {
     const mapped = LEGACY_TAB_MAP[rawTab];
     applyDomainAndSubTab(mapped.tab, query.subTab || mapped.subTab);
+  } else if (rawDict) {
+    applyDomainAndSubTab('scanning_arsenal', 'dict');
+  }
+
+  if (rawDict) {
+    if (!selectDictByName(rawDict)) {
+      pendingDeepLinkDict.value = rawDict;
+    }
   }
 
   if (rawFocus) {
@@ -3426,9 +3456,9 @@ const applyRouteDeepLink = (query) => {
 };
 
 watch(
-  () => [route.query.tab, route.query.subTab, route.query.focus],
-  ([tab, subTab, focus]) => {
-    if (tab || subTab || focus) {
+  () => [route.query.tab, route.query.subTab, route.query.focus, route.query.dict],
+  ([tab, subTab, focus, dict]) => {
+    if (tab || subTab || focus || dict) {
       applyRouteDeepLink(route.query);
       if (activeKey.value === 'egress_guardrails' && guardrailSubTab.value === 'proxy') {
         proxyPanelRef.value?.fetchProxyConfig?.(false);

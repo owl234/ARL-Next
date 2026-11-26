@@ -13,7 +13,9 @@ base_search_fields = {
     'cidr_ip': fields.String(required=False, description="C段"),
     "task_id": fields.String(description="任务 ID"),
     "ip_count": fields.Integer(description="IP 个数"),
-    "domain_count": fields.Integer(description="解析到该 C 段域名个数")
+    "domain_count": fields.Integer(description="解析到该 C 段域名个数"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
 }
 
 base_search_fields.update(base_query_fields)
@@ -36,10 +38,12 @@ class CIPResource(ARLResource):
         orderby_list = default_field.get('order', [("_id", -1)])
 
         query = self.build_db_query(args)
+        is_global = "task_id" not in query
+        post_save_date_filter = query.pop("save_date", None) if is_global else None
 
-        pipeline = [{"$match": query}]
+        pipeline = [{"$match": dict(query)}]
 
-        if "task_id" not in query:
+        if is_global:
             pipeline.extend([
                 {
                     "$group": {
@@ -47,12 +51,15 @@ class CIPResource(ARLResource):
                         "cidr_ip": {"$first": "$cidr_ip"},
                         "ip_list_all": {"$push": {"$ifNull": ["$ip_list", []]}},
                         "domain_list_all": {"$push": {"$ifNull": ["$domain_list", []]}},
-                        "save_date": {"$max": "$save_date"},
+                        "save_date": {"$min": "$save_date"},
+                        "latest_save_date": {"$max": "$save_date"},
+                        "raw_update_date": {"$max": "$update_date"},
                         "task_id": {"$first": "$task_id"}
                     }
                 },
                 {
                     "$addFields": {
+                        "update_date": {"$max": ["$raw_update_date", "$latest_save_date"]},
                         "ip_list": {
                             "$reduce": {
                                 "input": "$ip_list_all",
@@ -78,10 +85,14 @@ class CIPResource(ARLResource):
                 {
                     "$project": {
                         "ip_list_all": 0,
-                        "domain_list_all": 0
+                        "domain_list_all": 0,
+                        "latest_save_date": 0,
+                        "raw_update_date": 0
                     }
                 }
             ])
+            if post_save_date_filter is not None:
+                pipeline.append({"$match": {"save_date": post_save_date_filter}})
 
         pipeline.append({
             "$addFields": {
@@ -100,16 +111,28 @@ class CIPResource(ARLResource):
             sort_dict = {}
             for field, direction in orderby_list:
                 sort_dict[field] = direction
+            if "cidr_ip" not in sort_dict:
+                sort_dict["cidr_ip"] = 1
             pipeline.append({"$sort": sort_dict})
 
         pipeline.append({"$skip": size * (page - 1)})
         pipeline.append({"$limit": size})
 
-        result = list(conn(collection).aggregate(pipeline))
+        result = list(self._aggregate(conn(collection), pipeline))
 
-        if "task_id" not in query:
-            # 全局搜索：实际总数为去重后的C段数
-            count = len(conn(collection).distinct("cidr_ip", query))
+        if is_global:
+            if post_save_date_filter is not None:
+                count_pipeline = [
+                    {"$match": query},
+                    {"$group": {"_id": "$cidr_ip", "save_date": {"$min": "$save_date"}}},
+                    {"$match": {"save_date": post_save_date_filter}},
+                    {"$group": {"_id": None, "total": {"$sum": 1}}},
+                ]
+                agg_cnt = list(self._aggregate(conn(collection), count_pipeline))
+                count = agg_cnt[0]["total"] if agg_cnt else 0
+            else:
+                # 全局搜索：实际总数为去重后的C段数
+                count = len(conn(collection).distinct("cidr_ip", query))
         else:
             if not query:
                 count = conn(collection).estimated_document_count()
@@ -117,12 +140,15 @@ class CIPResource(ARLResource):
                 count = conn(collection).count_documents(query)
 
         items = self.build_return_items(result)
+        resp_query = dict(query)
+        if post_save_date_filter is not None:
+            resp_query["save_date"] = post_save_date_filter
 
         special_keys = ["_id", "save_date", "update_date", "create_time"]
-        for key in query:
+        for key in resp_query:
             if key in special_keys:
-                query[key] = str(query[key])
-            raw_value = query[key]
+                resp_query[key] = str(resp_query[key])
+            raw_value = resp_query[key]
             if isinstance(raw_value, dict):
                 if "$not" in raw_value:
                     if isinstance(raw_value["$not"], type(re.compile(""))):
@@ -133,10 +159,31 @@ class CIPResource(ARLResource):
             "size": size,
             "total": count,
             "items": items,
-            "query": query,
+            "query": resp_query,
             "code": 200
         }
         return data
+
+    def send_export_file(self, args, _type):
+        """
+        全局 cip 导出在携带 save_date 筛选时与列表口径保持一致（按跨任务 $min(save_date) 聚合后过滤）。
+        """
+        if _type == "cip":
+            query = self._build_export_query(args, _type)
+            if "task_id" not in query and "save_date" in query:
+                post_save_date_filter = query.pop("save_date")
+                pipeline = [
+                    {"$match": dict(query)},
+                    {"$group": {"_id": "$cidr_ip", "save_date": {"$min": "$save_date"}}},
+                    {"$match": {"save_date": post_save_date_filter}},
+                ]
+                items_set = {
+                    doc["_id"]
+                    for doc in self._aggregate(conn(_type), pipeline)
+                    if doc.get("_id")
+                }
+                return self.send_file(items_set, _type)
+        return super().send_export_file(args, _type)
 
 
 @ns.route('/')

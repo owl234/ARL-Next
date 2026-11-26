@@ -280,7 +280,7 @@ check_and_configure_swap() {
 # 5.5 宿主机内存预检 (已移除 mem_limit 硬限制后的部署侧补偿：只告警不阻断)
 check_host_memory() {
     echo "⚙️ 正在检查宿主机物理内存..."
-    local total_mb=$(free -m | awk '/^Mem:/ {print $2}')
+    local total_mb="${ARL_HOST_MEM_MB:-$(free -m 2>/dev/null | awk '/^Mem:/ {print $2}')}"
     if [ -z "$total_mb" ]; then
         echo "⚠️ 无法读取宿主机内存信息，跳过预检（首页内存占用卡片可实时查看）。"
         return 0
@@ -293,25 +293,195 @@ check_host_memory() {
     fi
 }
 
-# 6. 宿主机内核防假死与扫描性能调优 (swappiness/vfs_cache_pressure/overcommit)
+# 辅助：仅在 .env 中缺失某键时写入默认值，严禁覆盖用户手工配置
+ensure_env_default() {
+    local env_file="$1"
+    local key="$2"
+    local value="$3"
+
+    if [ ! -f "$env_file" ]; then
+        (umask 077 && : > "$env_file")
+    fi
+
+    if grep -Eq "^[[:space:]]*(export[[:space:]]+)?${key}=" "$env_file" 2>/dev/null; then
+        return 1
+    fi
+
+    printf '%s=%s\n' "$key" "$value" >> "$env_file"
+    return 0
+}
+
+# 5.6 按宿主机物理内存自适应配置低内存档位（仅补缺写入 .env，不覆盖用户自定义值）
+configure_memory_profile() {
+    local total_mb="${ARL_HOST_MEM_MB:-$(free -m 2>/dev/null | awk '/^Mem:/ {print $2}')}"
+    local env_file="${ARL_ENV_FILE:-.env}"
+    local low_mem_threshold_mb=4608
+
+    if ! [[ "$total_mb" =~ ^[0-9]+$ ]]; then
+        echo "⚠️ 无法读取宿主机物理内存，跳过自适应内存档位配置。"
+        return 0
+    fi
+
+    if [ "$total_mb" -le "$low_mem_threshold_mb" ] 2>/dev/null; then
+        echo "⚙️ 检测到低内存宿主机 (${total_mb}MB ≤ 4G 档位)，正在向 ${env_file} 补齐轻量运行参数（已有配置保持不变）..."
+        local updated=()
+        if ensure_env_default "$env_file" "ARL_WEB_WORKERS" "2"; then
+            updated+=("ARL_WEB_WORKERS=2")
+        fi
+        if ensure_env_default "$env_file" "MONGO_WT_CACHE_GB" "0.5"; then
+            updated+=("MONGO_WT_CACHE_GB=0.5")
+        fi
+        if ensure_env_default "$env_file" "PUPPETEER_MAX_REQUESTS" "100"; then
+            updated+=("PUPPETEER_MAX_REQUESTS=100")
+        fi
+
+        if [ "${#updated[@]}" -gt 0 ]; then
+            echo "✅ 已写入 4G 轻量档位参数：${updated[*]}（如需调整可直接编辑 ${env_file}）"
+        else
+            echo "✅ ${env_file} 已包含自定义内存档位参数，保留既有配置。"
+        fi
+    else
+        echo "✅ 宿主机内存充裕 (${total_mb}MB > 4G 档位)，保持标准全速默认配置 (ARL_WEB_WORKERS=4, MONGO_WT_CACHE_GB=1, PUPPETEER_MAX_REQUESTS=200)。"
+    fi
+}
+
+# 6. 宿主机内核防假死与扫描性能调优 (vm + nf_conntrack)
 tune_system_kernel_parameters() {
-    echo "⚙️ 正在配置宿主机内核性能与防假死参数 (swappiness=10, vfs_cache_pressure=50, overcommit_memory=1)..."
-    
-    # 动态应用参数
+    echo "⚙️ 正在配置宿主机内核性能与防假死参数 (vm.* & nf_conntrack)..."
+
+    local sysctl_dir="${ARL_SYSCTL_DIR:-/etc/sysctl.d}"
+    local sysctl_conf="${ARL_SYSCTL_CONF:-/etc/sysctl.conf}"
+    local nf_dir="${ARL_PROC_NETFILTER_DIR:-/proc/sys/net/netfilter}"
+    local target_ct_max=262144
+    local apply_conntrack=0
+
+    # 动态应用内存参数
     sysctl -w vm.swappiness=10 &>/dev/null || true
     sysctl -w vm.vfs_cache_pressure=50 &>/dev/null || true
     sysctl -w vm.overcommit_memory=1 &>/dev/null || true
-    
-    # 持久化写入 /etc/sysctl.conf (去重并追加)
-    if [ -f /etc/sysctl.conf ]; then
-        sed -i '/vm.swappiness/d' /etc/sysctl.conf
-        sed -i '/vm.vfs_cache_pressure/d' /etc/sysctl.conf
-        sed -i '/vm.overcommit_memory/d' /etc/sysctl.conf
-        echo "vm.swappiness = 10" >> /etc/sysctl.conf
-        echo "vm.vfs_cache_pressure = 50" >> /etc/sysctl.conf
-        echo "vm.overcommit_memory = 1" >> /etc/sysctl.conf
+
+    # 探测 nf_conntrack（仅在默认路径下按需加载内核模块）
+    if [ ! -d "$nf_dir" ] && [ "$nf_dir" = "/proc/sys/net/netfilter" ]; then
+        modprobe nf_conntrack &>/dev/null || true
     fi
-    echo "✅ 宿主机内核参数调优完成（已持久化至 /etc/sysctl.conf）！"
+
+    if [ -d "$nf_dir" ]; then
+        apply_conntrack=1
+        local cur_ct_max=""
+        if [ -r "${nf_dir}/nf_conntrack_max" ]; then
+            cur_ct_max=$(cat "${nf_dir}/nf_conntrack_max" 2>/dev/null | tr -d '[:space:]' || true)
+        fi
+        if ! [[ "$cur_ct_max" =~ ^[0-9]+$ ]]; then
+            cur_ct_max=$(sysctl -n net.netfilter.nf_conntrack_max 2>/dev/null | tr -d '[:space:]' || true)
+        fi
+        # 仅向上扩容，绝不把高配主机已有更大上限调小
+        if [[ "$cur_ct_max" =~ ^[0-9]+$ ]] && [ "$cur_ct_max" -gt "$target_ct_max" ] 2>/dev/null; then
+            target_ct_max="$cur_ct_max"
+        fi
+        sysctl -w "net.netfilter.nf_conntrack_max=${target_ct_max}" &>/dev/null || true
+        sysctl -w net.netfilter.nf_conntrack_tcp_timeout_established=600 &>/dev/null || true
+        sysctl -w net.netfilter.nf_conntrack_tcp_timeout_time_wait=30 &>/dev/null || true
+    fi
+
+    # 优先写入独立 /etc/sysctl.d/99-arl-tuning.conf，否则回退 /etc/sysctl.conf
+    if [ -d "$sysctl_dir" ]; then
+        local tuning_file="${sysctl_dir}/99-arl-tuning.conf"
+        {
+            echo "# ARL-Next managed kernel tuning"
+            echo "vm.swappiness = 10"
+            echo "vm.vfs_cache_pressure = 50"
+            echo "vm.overcommit_memory = 1"
+            if [ "$apply_conntrack" -eq 1 ]; then
+                echo "net.netfilter.nf_conntrack_max = ${target_ct_max}"
+                echo "net.netfilter.nf_conntrack_tcp_timeout_established = 600"
+                echo "net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30"
+            fi
+        } > "$tuning_file"
+        if [ "$apply_conntrack" -eq 1 ]; then
+            echo "✅ 宿主机内核参数调优完成（vm.* + nf_conntrack_max=${target_ct_max}，已持久化至 ${tuning_file}）！"
+        else
+            echo "✅ 宿主机内核内存参数调优完成（未检测到 nf_conntrack 接口已跳过连接表调优，已持久化至 ${tuning_file}）！"
+        fi
+    elif [ -f "$sysctl_conf" ]; then
+        sed -i '/^vm\.swappiness[[:space:]]*=/d' "$sysctl_conf"
+        sed -i '/^vm\.vfs_cache_pressure[[:space:]]*=/d' "$sysctl_conf"
+        sed -i '/^vm\.overcommit_memory[[:space:]]*=/d' "$sysctl_conf"
+        echo "vm.swappiness = 10" >> "$sysctl_conf"
+        echo "vm.vfs_cache_pressure = 50" >> "$sysctl_conf"
+        echo "vm.overcommit_memory = 1" >> "$sysctl_conf"
+        if [ "$apply_conntrack" -eq 1 ]; then
+            sed -i '/^net\.netfilter\.nf_conntrack_max[[:space:]]*=/d' "$sysctl_conf"
+            sed -i '/^net\.netfilter\.nf_conntrack_tcp_timeout_established[[:space:]]*=/d' "$sysctl_conf"
+            sed -i '/^net\.netfilter\.nf_conntrack_tcp_timeout_time_wait[[:space:]]*=/d' "$sysctl_conf"
+            echo "net.netfilter.nf_conntrack_max = ${target_ct_max}" >> "$sysctl_conf"
+            echo "net.netfilter.nf_conntrack_tcp_timeout_established = 600" >> "$sysctl_conf"
+            echo "net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30" >> "$sysctl_conf"
+        fi
+        echo "✅ 宿主机内核参数调优完成（已持久化至 ${sysctl_conf}）！"
+    fi
+}
+
+# 6.5 宿主机用户态防换页死锁护栏 (earlyoom，best-effort 绝不阻断部署，兼容 systemd 219)
+configure_earlyoom_guard() {
+    echo "⚙️ 正在检查宿主机防内存换页死锁护栏 (earlyoom)..."
+
+    local systemd_run_dir="${ARL_SYSTEMD_RUN_DIR:-/run/systemd/system}"
+    if ! command -v systemctl &>/dev/null || [ ! -d "$systemd_run_dir" ]; then
+        echo "ℹ️  当前宿主机未启用 systemd，跳过 earlyoom 自动配置。"
+        return 0
+    fi
+
+    if ! command -v earlyoom &>/dev/null; then
+        detect_os_and_pkg_manager
+        if [ "$PKG_MANAGER" = "apt-get" ]; then
+            echo "📦 正在尝试通过 apt-get 安装 earlyoom..."
+            run_cmd_with_timeout 60 apt-get update -qq &>/dev/null || true
+            run_cmd_with_timeout 120 env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq earlyoom &>/dev/null || true
+        elif [ "$PKG_MANAGER" = "dnf" ] || [ "$PKG_MANAGER" = "yum" ]; then
+            echo "📦 正在尝试通过 ${PKG_MANAGER} 安装 earlyoom..."
+            run_cmd_with_timeout 120 "$PKG_MANAGER" install -y -q earlyoom &>/dev/null || true
+        fi
+    fi
+
+    if ! command -v earlyoom &>/dev/null; then
+        echo "⚠️ 当前软件源未安装 earlyoom（常见于离线环境或未启用 EPEL 的 CentOS/RHEL），已优雅跳过。"
+        echo "   建议在低内存宿主机按需手动安装 earlyoom 以降低 Swap 耗尽假死风险。"
+        return 0
+    fi
+
+    local default_dir="${ARL_EARLYOOM_DEFAULT_DIR:-/etc/default}"
+    local sysconfig_dir="${ARL_EARLYOOM_SYSCONFIG_DIR:-/etc/sysconfig}"
+    local cfg_file=""
+    if [ -d "$default_dir" ] && { [ -f "${default_dir}/earlyoom" ] || [ ! -d "$sysconfig_dir" ]; }; then
+        cfg_file="${default_dir}/earlyoom"
+    elif [ -d "$sysconfig_dir" ]; then
+        cfg_file="${sysconfig_dir}/earlyoom"
+    elif [ -d "$default_dir" ]; then
+        cfg_file="${default_dir}/earlyoom"
+    fi
+
+    if [ -n "$cfg_file" ]; then
+        if [ -f "$cfg_file" ] && grep -Eq '^[[:space:]]*ARL_EARLYOOM_CUSTOM=1' "$cfg_file" 2>/dev/null; then
+            echo "ℹ️  检测到 ${cfg_file} 含 ARL_EARLYOOM_CUSTOM=1，保留自定义 earlyoom 参数。"
+        else
+            cat > "$cfg_file" <<'EOF'
+# ARL-Next managed earlyoom configuration
+# 如需保留手工修改，请在文件内添加 ARL_EARLYOOM_CUSTOM=1
+EARLYOOM_ARGS="-r 60 -m 8 -s 15 --prefer '(chromium|chrome)' --avoid '(sshd|mongod|beam\.smp|dockerd|containerd|systemd)'"
+EOF
+        fi
+    fi
+
+    # 兼容 systemd 219：拆分 enable 与 restart，不使用 --now
+    run_cmd_with_timeout 30 systemctl enable earlyoom &>/dev/null || true
+    run_cmd_with_timeout 30 systemctl restart earlyoom &>/dev/null || true
+
+    if systemctl is-active earlyoom &>/dev/null; then
+        echo "✅ earlyoom 防换页死锁护栏已启用（优先回收 Chromium，保护 SSH/MongoDB/RabbitMQ）！"
+    else
+        echo "⚠️ earlyoom 服务未能启动（不阻断部署），请按需执行 'systemctl status earlyoom' 排查。"
+    fi
+    return 0
 }
 
 # 7. 检查宿主机磁盘剩余空间 (至少预留 2GB)
@@ -465,7 +635,9 @@ check_docker_daemon || exit 1
 check_and_install_compose
 check_and_configure_swap
 check_host_memory
+configure_memory_profile
 tune_system_kernel_parameters
+configure_earlyoom_guard
 
 # 1. 宿主机 Docker 守护进程性能调优 (userland-proxy)
 DOCKER_CONFIG_DIR="/etc/docker"

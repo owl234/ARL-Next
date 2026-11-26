@@ -97,7 +97,7 @@ test('operator and date conditions coexist and fields from another tab are exclu
   const params = buildAssetFilterParams({ status: [200, 403], finger: 'nginx', length: 123,
     update_date: [dayjs('2026-10-01'), dayjs('2026-10-12')], unrelated: 'ignore' }, fields);
   assert.deepEqual(params, { status__in: '200,403', finger__eq: 'nginx', length__gt: 123,
-    update_date__dgt: '2026-10-01 00:00:00', update_date__dlt: '2026-10-12 00:00:00' });
+    update_date__dgt: '2026-10-01 00:00:00', update_date__dlt: '2026-10-12 23:59:59' });
 });
 
 test('tab cache round trip preserves multiselect and date filters', () => {

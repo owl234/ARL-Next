@@ -23,7 +23,7 @@
 
 ---
 
-## ⚡ 10-Second Quick Start (Choose by Your Client)
+## ⚡ Quick Start (Choose by Your Client)
 
 > [!TIP]
 > **💡 Recommended Practice**: Log in to the ARL-Next Web Console and open **「MCP Center」** in the left sidebar (or click **「MCP」** in the top navigation bar) to issue least-privilege scoped MCP keys (`asset:read` read-only intelligence vs. `task:dispatch` task scheduling), configure per-tool switches and rate quotas, inspect invocation audit logs, and copy or export ready-to-use client configurations with one click. For manual configuration, copy the snippet matching your client below:
@@ -48,8 +48,8 @@
     }
   }
   ```
-  *(Note: If your client does not support custom headers, direct URL query authentication is supported: `"url": "https://arl.example.com:5173/mcp/sse?token=<Token>"`)*
-- **Alternative Mode: Private IP / Self-Signed TLS (Stdio Bridge)** *(Bypasses Node.js TLS rejection)*:
+  *(Note: If your client does not support custom headers, prefer using a least-privilege dedicated MCP key with `"url": "https://arl.example.com:5173/mcp/sse?token=<MCP_Key>"`; headers remain recommended to avoid exposing credentials in gateway logs)*
+- **Alternative Mode: Private IP / Self-Signed TLS (Stdio Bridge)** *(Copy server `certs/arl.crt` locally and set `ARL_CA_BUNDLE` to keep chain verification while avoiding Node.js TLS rejection)*:
   ```json
   {
     "mcpServers": {
@@ -57,8 +57,9 @@
         "command": "python3",
         "args": ["/absolute/path/to/ARL-Next/mcp-server/server.py"],
         "env": {
-          "ARL_HOST": "https://192.168.1.100:5173",
-          "ARL_TOKEN": "<Token copied from ARL Web Console>"
+          "ARL_HOST": "https://192.0.2.100:5173",
+          "ARL_TOKEN": "<Token copied from ARL Web Console>",
+          "ARL_CA_BUNDLE": "/absolute/path/to/arl.crt"
         }
       }
     }
@@ -93,8 +94,9 @@
         "command": "python3",
         "args": ["/absolute/path/to/ARL-Next/mcp-server/server.py"],
         "env": {
-          "ARL_HOST": "https://192.168.1.100:5173",
-          "ARL_TOKEN": "<Token copied from ARL Web Console>"
+          "ARL_HOST": "https://192.0.2.100:5173",
+          "ARL_TOKEN": "<Token copied from ARL Web Console>",
+          "ARL_CA_BUNDLE": "/absolute/path/to/arl.crt"
         }
       }
     }
@@ -111,7 +113,7 @@ Register globally with a single CLI command without creating virtual environment
 claude mcp add -s user arl-next \
   python3 "$(pwd)/mcp-server/server.py" \
   --env ARL_HOST="https://arl.example.com:5173" \
-  --env ARL_TOKEN="<Token copied from ARL Web Console or ARL_auth.md>"
+  --env ARL_TOKEN="<Token copied from ARL Web Console MCP Center>"
 ```
 
 ---
@@ -134,11 +136,11 @@ ARL-Next MCP registers 6 standardized tools with read-only reconnaissance enable
 | Tool Name | Core Purpose | Default Access | Typical Application |
 | :--- | :--- | :--- | :--- |
 | `get_asset_profile` | 5-Dimensional Asset Profile | **Read-Only (Open)** | Query ports, services, Web fingerprints, TLS certs, historical vulnerabilities, and file leaks |
-| `get_enterprise_profile` | Enterprise Ecosystem Profile | **Read-Only (Open)** | Query corporate structure, ICP domains, mobile apps, mini programs, official accounts, Weibo, and investments |
-| `search_assets` | Full-Database Search | **Read-Only (Open)** | Search sites, domains, IPs, or vulnerabilities by keyword |
-| `get_task_status` | Task Status Tracking | **Read-Only (Open)** | Inspect real-time progress percentages and metric summaries of a 24-character task ID |
+| `get_enterprise_profile` | Enterprise Ecosystem Profile | **Read-Only (Open)** | Query corporate structure, ICP domains, mobile apps, mini programs, quick apps, official accounts, Weibo, and investments |
+| `search_assets` | Conditional Asset Search | **Read-Only (Open)** | Search a single selected asset collection (`site`/`domain`/`ip`/`vuln`) by keyword (bounded by `max_search_limit`) |
+| `get_task_status` | Task Status Tracking | **Read-Only (Open)** | Inspect execution status, timestamps, and asset metric summaries of a 24-character task ID |
 | `create_scan_task` | Submit Scan Task | **Guarded (Requires Auth)** | Trigger ARL regular reconnaissance or periodic risk-cruising tasks |
-| `stop_scan_task` | Cancel Scan Task | **Guarded (Requires Auth)** | Abort a queued or actively executing task |
+| `stop_scan_task` | Cancel Scan Task | **Guarded (Requires Auth)** | Abort a queued or in-progress task |
 
 ### 2. Typical Agent Prompts & Interactions
 
@@ -165,7 +167,7 @@ Once connected, interact with your AI Agent using natural language (see [`docs/M
 - **🔴 Symptom**: Cursor or Claude Desktop rejects connection with an untrusted certificate error.
 - **🔍 Root Cause**: Cursor and Claude Desktop run on Electron / Node.js, which strictly validates TLS certificates against trusted system CAs and rejects private LAN IPs or self-signed certs.
 - **⚡ Solution (Recommended)**:
-  1. **Preferred**: Switch to the **「Local Stdio Bridge」** configuration. The exported Python script natively handles self-signed CA chains and IP SAN adaptation without TLS blocking.
+  1. **Preferred**: Switch to the **「Local Stdio Bridge」** configuration. Same-host loopback deployments auto-discover local `certs/arl.crt`; for remote self-signed IP deployments, copy the server certificate to the client and set `ARL_CA_BUNDLE` (keeps chain verification while skipping hostname checks for missing IP SANs).
   2. **If persisting with Remote SSE**: Import the server's CA certificate (`certs/arl.crt`) into your operating system's trusted root certification authorities (macOS Keychain set to "Always Trust" / Windows Certificate Manager). (Note: Adding `NODE_TLS_REJECT_UNAUTHORIZED` in `mcp.json` has no effect as SSE transport does not spawn subprocesses).
 
 ### Q2: Requests return `401 Unauthorized` or `Invalid or expired token`
@@ -200,7 +202,7 @@ To prevent token waste in agent contexts, both the MCP server and client scripts
 
 | Deployment Scenario | `ARL_HOST` Value | Verification Behavior |
 | :--- | :--- | :--- |
-| **Client on the same host** | `https://127.0.0.1:5173` | **None needed.** Automatically trusts `certs/arl.crt` (or path in `ARL_auth.md`) |
+| **Client on the same host** | `https://127.0.0.1:5173` | **None needed.** Automatically trusts local `certs/arl.crt` |
 | **Trusted public certificate** | `https://arl.example.com` | **None needed.** Full certificate chain and hostname verification |
 | **Remote self-signed (IP access)** | `https://<server-ip>:5173` | Copy server certificate to client and set `ARL_CA_BUNDLE=/abs/path/arl.crt` |
 

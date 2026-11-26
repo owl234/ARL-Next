@@ -16,6 +16,8 @@ base_search_fields = {
     'content': fields.String(description="内容"),
     'source': fields.String(description="来源 JS URL"),
     'site': fields.String(description="站点URL"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
     'task_id': fields.String(description="任务ID"),
 }
 

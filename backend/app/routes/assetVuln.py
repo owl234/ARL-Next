@@ -15,6 +15,10 @@ base_search_fields = {
     'vul_name': fields.String(description="漏洞名称"),
     'app_name': fields.String(description="应用名"),
     'target': fields.String(description="目标"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
+    "update_date__dgt": fields.String(description="更新时间大于等于"),
+    "update_date__dlt": fields.String(description="更新时间小于等于"),
     "scope_id": fields.String(description="资产范围ID")
 }
 

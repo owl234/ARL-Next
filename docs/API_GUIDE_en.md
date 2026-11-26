@@ -35,7 +35,7 @@
   ```http
   Token: <your-token>
   ```
-- **No account credentials in URLs**: `?token=` is no longer accepted. Authentication decorators return HTTP 401 with JSON `code: 401`; continue checking JSON `code` for other legacy business errors.
+- **No account credentials in URLs**: `?token=` is no longer accepted on `/api/*` REST endpoints so full account credentials stay out of gateway and proxy logs (`/mcp/sse` should only use a dedicated scoped MCP key when query auth is unavoidable, preferring headers). Authentication decorators return HTTP 401 with JSON `code: 401`; continue checking JSON `code` for other legacy business errors.
 - **Sessions and migration**: Login/refresh tokens use cryptographic randomness and expire after 24 hours. Legacy sessions receive a one-time 24-hour grace period; restarts do not extend it. Successful legacy-password login upgrades MD5 to scrypt. Existing passwords are preserved; new/reset passwords require 12–1024 characters and no longer use a fixed initial value. Long-running integrations may use a separately configured, full-privilege `API_KEY` (MCP: `ARL_TOKEN`), with an appropriate rotation policy.
 - **Login limits**: MongoDB atomic counters allow 10 attempts per account per five minutes (account counter cleared on success) and 60 per backend peer address per minute. The production gateway separately limits each actual client IP to five per minute with a burst of five. Excess attempts return HTTP 429; backend responses include `Retry-After`.
 - **Screenshots and downloads**: Screenshots require Header authentication; the frontend displays authenticated Blobs and releases their URLs. Nuclei exports use authenticated downloads. For large backups, call authenticated `POST /api/backup/download_ticket` with `{"filename":"arl_backup_....tar.gz"}`, then download using `GET /api/backup/download/<filename>?ticket=<ticket>`. Tickets expire after 60 seconds, are scoped to one file, are consumed atomically once, and are revoked by logout/session rotation/API Key rotation. They cannot authenticate other APIs. Request a new ticket after an interrupted download.
@@ -73,7 +73,7 @@ For isolated regression checks, install the backend dependencies plus `pytest` a
 
 | Operation | HTTP Method & Path | Parameters / Request Payload | Prerequisites & Constraints |
 | :--- | :--- | :--- | :--- |
-| **List Tasks** | `GET /api/task/` | Query params: `target`, `status`, `page`, `size`; optionally `include_statistics=1` | Returns paginated task records |
+| **List Tasks** | `GET /api/task/` | Query params: `target`, `status`, `asset_yield`, `asset_types`, `statistic.*`, `page`, `size`; optionally `include_statistics=1` | Returns paginated task records; supports asset output filtering (`has_asset` / `no_asset`), OR asset-type selection, and 6-dimension numeric comparisons |
 | **Scan Task Statistics** | `GET /api/task/statistics` | None | Returns aggregated count per state without loading records |
 | **Enterprise Task Statistics** | `GET /api/icp/task/statistics` | None | Returns status statistics for enterprise OSINT / ICP tasks |
 | **Stop Single Task** | `GET /api/task/stop/<task_id>` | URL path param: `task_id` (24-char hex) | ⚠️ **Note: Uses GET to perform state mutation** (terminates the task). Do not use `POST` or `DELETE` |
@@ -84,7 +84,7 @@ For isolated regression checks, install the backend dependencies plus `pytest` a
 | **Backfill Missing Details** | `POST /api/icp/backfill_details/<task_id>` | URL path param: `task_id`; optional JSON: `{"query_types": ["app", "mapp", "kapp"]}` | Requires terminal task state; backfills empty `serviceName` entries without a 100-item batch cap (refreshing `dataId=0` or rotated IDs by filing number), merges cross-source duplicates, and recalculates statistics in place |
 | **Delete Task** | `POST /api/task/delete/` | JSON: `{"task_id": ["<task_id>"], "del_task_data": false, "del_synced_asset": false}` | ⚠️ **State Constraint**: Only tasks in terminal states (`done`, `stop`, `error`) can be deleted; active tasks return error code `104`. `del_synced_asset` defaults to `false` (preserving asset group archives) and only takes effect when `del_task_data: true`, removing `asset_*` records exclusively produced by the deleted task(s) and rebuilding derived collections |
 | **Restart Task** | `POST /api/task/restart/` | JSON: `{"task_id": ["<task_id>"]}` | Only stopped/finished tasks can be restarted |
-| **Run Scheduled Task Now** | `POST /api/task_schedule/run/` | JSON: `{"_id": ["<schedule_id>"]}` | Immediately dispatches the selected scheduled scan(s) into the scheduling queue, incrementing `run_number` and updating `last_run_date` (recalculates `next_run_date` when a recurring schedule is in `scheduled` state) |
+| **Run Scheduled Task Now** | `POST /api/task_schedule/run/` | JSON: `{"_id": ["<schedule_id>"]}` | Immediately dispatches the selected scheduled scan(s) into the scheduling queue (regardless of current schedule status), atomically incrementing `run_number` and updating `last_run_date` only after dispatch succeeds (recalculates `next_run_date` when a recurring schedule is in `scheduled` state); rejects empty lists or invalid IDs |
 
 ### Associate New Scan Tasks with Asset Groups
 
@@ -122,6 +122,16 @@ Example (force direct `-Pn` scan on an RFC 5737 block):
 {"name": "Direct segment scan", "target": "192.0.2.0/24", "port_scan": true, "port_scan_type": "top100", "host_discovery_mode": "skip"}
 ```
 
+### Port Scan Dictionary Linkage (`port_scan_type` / `port_custom`)
+
+`POST /api/task/` (top-level `port_scan_type`), `POST /api/policy/add/`, and `POST /api/policy/edit/` (`policy.ip_config.port_scan_type`) resolve ports from the port dictionaries managed under System Settings → Dictionary Arsenal (`port_top100.txt`, `port_top1000.txt`, `port_custom.txt`, `port_all.txt`, or user-created `port_*.txt` files). Tasks read the selected dictionary dynamically at execution time (shorthands `top100`, `top1000`, `all`, `custom`, and legacy alias `test` map to their corresponding dictionaries):
+
+| Configuration | Runtime Behavior |
+| :--- | :--- |
+| `port_scan_type: "port_custom.txt"` (or `"custom"` with omitted/empty `port_custom`) | Dynamically reads `port_custom.txt` from System Settings at scan time; falls back to `80,443` if the dictionary is empty |
+| `port_scan_type: "custom"` with an explicit non-empty `port_custom` (legacy/API compatibility) | Validates via `build_port_custom` and scans the stored `port_custom` string; re-saving the policy in the UI converts it to `port_custom.txt` and clears `port_custom` |
+| Any other `port_*.txt` dictionary (including user-created port dictionaries) | Dynamically reads that dictionary file at scan time; switching away from `custom` clears any stale `port_custom` value |
+
 ### Website Screenshot Toggle (`site_capture`)
 
 `POST /api/task/` (top-level `site_capture`), `POST /api/policy/add/`, and `POST /api/policy/edit/` (`policy.site_config.site_capture`) control whether ASM tasks run headless-browser screenshots. Policy-driven tasks (policy scans, risk cruising, scheduled scans, asset-group domain/IP monitoring and one-shot scans, manual site/domain additions, Fofa tasks, and MCP dispatch) inherit `site_capture` from the selected policy:
@@ -144,6 +154,17 @@ Example (disable screenshots to reduce runtime on large scans):
 To delete currently running tasks programmatically, execute a two-stage sequence:
 1. Call `GET /api/task/stop/<task_id>` to transition the task to `stop` state;
 2. Confirm the task has reached a terminal state, then call `POST /api/task/delete/`. Deletion requests on active tasks are rejected by the server with `{"code": 104, "message": "任务运行中"}`.
+
+### Task Asset Output Filtering (`asset_yield` / `asset_types` / `statistic.*`)
+
+`GET /api/task/` supports filtering tasks by the 6 core visible asset counters in `task.statistic` (`site_cnt`, `domain_cnt`, `ip_cnt`, `wih_cnt`, `vuln_cnt`, `nuclei_result_cnt`), composing orthogonally with `status` and numeric range filters:
+
+| Parameter | Values & Behavior |
+| :--- | :--- |
+| `asset_yield=has_asset` | Matches tasks where any of the 6 core asset counters is `> 0` (regardless of task status) |
+| `asset_yield=no_asset` | Matches tasks in terminal states (`done` / `stop` / `error`) with all 6 core counters equal to `0` (or absent); combining with active statuses (e.g., `status=active`) intersects to an empty set |
+| `asset_types=<dims>` | Comma-separated allowlist: `site`, `domain`, `ip`, `wih`, `vuln`, `nuclei` (`nuclei_result` alias accepted); multiple selections match via **OR (any counter > 0)**. Non-empty input containing no valid dimension fails closed with an empty result |
+| `statistic.<key>` / `__gt` / `__lt` | Numeric equality/range filters (AND-composed) for `site_cnt`, `domain_cnt`, `ip_cnt`, `wih_cnt`, `vuln_cnt`, and `nuclei_result_cnt` (double-underscore suffix, e.g., `statistic.ip_cnt__gt=0`) |
 
 ### Aggregated Statistics Parameter (`include_statistics=1`)
 
@@ -298,12 +319,12 @@ Example response:
 
 All 26 dimension delete endpoints (13 unprefixed `/api/<dim>/delete/`, including `POST /api/stat_finger/delete/`; and 13 prefixed `/api/asset_<dim>/delete/`) follow unified hierarchy cascading, scope isolation, and derived-collection rebuild rules:
 
-- **Batch Limit & Input Validation**: Each delete call accepts at most **500** target identifiers (`_id` / `name` / CIDR); empty lists, invalid IDs, or oversized batches fail fast with code `400`. Both `GET /api/stat_finger/` and `GET /api/asset_stat_finger/` project `"_id"` equal to the fingerprint `name`, and their delete endpoints accept `_id` or `name`. `POST /api/cip/delete/` and `POST /api/asset_cip/delete/` accept both 24-hex ObjectIds and CIDR strings.
+- **Batch Limit & Input Validation**: Each delete call accepts at most **500** target identifiers (`_id` / `name` / CIDR); empty lists, invalid IDs, or oversized batches fail fast with business error `code: 400`. Both `GET /api/stat_finger/` and `GET /api/asset_stat_finger/` project `"_id"` equal to the fingerprint `name`, and their delete endpoints accept `_id` or `name`. `POST /api/cip/delete/` and `POST /api/asset_cip/delete/` accept both 24-hex ObjectIds and CIDR strings.
 - **Scope Isolation (`source_type`)**:
   - **Asset Group Namespace (`/api/asset_<dim>/delete/`)**: Accepts optional `scope_id`; deletes strictly within that group's `asset_*` collections and tasks explicitly bound to it (`scope_id`, `sync_scope_id`, `synced_scope_id`, `options.scope_id`, `options.related_scope_id`, `options.scheduler_id`), leaving other asset groups and unbound standalone tasks intact.
   - **Task & Global Namespace (`/api/<dim>/delete/`)**: Accepts optional `task_id` and `source_type` (`"task"` default or `"global"`). Under `"task"`, deletion stays scoped to the target task (plus its explicitly bound asset group and sibling bound tasks if bound); pass `"source_type": "global"` explicitly to cascade across all asset groups and tasks.
 - **Hierarchy Cascade & Derived Rebuilds**:
-  - Deleting higher-level entities cascades down the asset hierarchy (e.g., deleting a domain removes its subdomains, sites, URLs, file leaks, vulns, Nuclei findings, WIH records, and orphan IPs unreferenced by surviving domains or CIDR configs; deleting an IP unbinds `domain.ips` while preserving the domain; deleting a `service` strips only the exact `(service_name, ip, port_id)` endpoints in that document without wiping unrelated IPs sharing the same service name; deleting `stat_finger` pulls the fingerprint entry from host sites while retaining the sites).
+  - Deleting higher-level entities cascades down the asset hierarchy (e.g., deleting a domain removes matching sites, URLs, file leaks, vulns, Nuclei findings, WIH records, and orphan IPs unreferenced by surviving domains or CIDR configs; deleting an IP unbinds `domain.ips` while preserving the domain; deleting a `service` strips only the exact `(service_name, ip, port_id)` endpoints in that document without wiping unrelated IPs sharing the same service name; deleting `stat_finger` pulls the fingerprint entry from host sites while retaining the sites).
   - After mutation, derived collections (`cip` / `asset_cip`, `stat_finger` / `asset_stat_finger`, `service` / `asset_service`) are rebuilt from surviving host tables, affected `task.statistic` counters are recalculated, and cross-process dashboard/monitor caches are invalidated.
 - **Asset Group & Scheduler Linkage**:
   - Deleting an asset group (`POST /api/asset_scope/delete/`) or removing seed targets (`GET /api/asset_scope/delete/`, `POST /api/asset_scope/update/`) synchronously cleans up its 13 `asset_*` collections, schedulers, and explicitly bound tasks; any in-flight enterprise recon update (`updating_icp_task_id`) is terminated and `icp_task.synced_scope_id`/`synced_scope_name` are unset while preserving `icp_task` and `icp_asset`. Renaming an asset group updates default-named `scheduler.name`, `icp_task.synced_scope_name`, and bound task scope-name fields.
@@ -319,8 +340,34 @@ The site, URL, and file leak lists in Global Asset Search, Task Details, and Ass
 - **Backward Compatibility**: Existing scalar parameters (`status=200`, `status_code=200`) remain supported; if both scalar and multiselect parameters are provided, their intersection is applied. Task execution status filters retain their existing format.
 
 > [!NOTE]
-> - Example: `GET /api/site/?task_id=<task_id>&status__in=200,403` selects sites from that task with status 200 or 403. The same parameters apply to `/api/site/export/` and `/api/site/save_result_set/`. For asset group queries, replace the parameter with `scope_id` and query `/api/asset_site/`.
+> - Example: `GET /api/site/?task_id=<task_id>&status__in=200,403` selects sites from that task with status 200 or 403. The same parameters apply to `/api/site/export/` and filter-based `GET /api/site/save_result_set/`. For asset group queries, replace the parameter with `scope_id` and query `/api/asset_site/`.
+> - **Save Result Set by Selected Site IDs**: `POST /api/site/save_result_set/` (`{"_id": ["<site_id>"], "task_id": "<optional task_id>"}`) and `POST /api/asset_site/save_result_set/` (`{"_id": ["<asset_site_id>"], "scope_id": "<optional scope_id>"}`) save result sets from up to 500 selected site records, strictly validating non-empty 24-hex ObjectIds (returning business `code: 400` on invalid/empty input to prevent empty-filter fallback).
 > - Current support is restricted to status code field enumeration and field-level AND combinations; arbitrary boolean expressions or cross-field OR logic are not supported.
+
+### Discovery & Update Time Filtering and Sorting Across 12 Asset Dimensions
+
+All task collections (`site`, `domain`, `ip`, `cert`, `service`, `fileleak`, `url`, `cip`, `stat_finger`, `wih`, `vuln`, `nuclei_result`, plus legacy `npoc_service`) and their asset-group counterparts (`asset_*`) persist `save_date` (first discovered timestamp, plus `update_date` on `asset_*`) as server-local BSON `datetime` values and serialize them as `YYYY-MM-DD HH:MM:SS` strings in responses:
+
+- **Inclusive Date-Range Filtering**:
+  - All 12 task and asset-group endpoints accept `save_date__dgt` (`>=`) and `save_date__dlt` (`<=`);
+  - All 12 asset-group endpoints (`/api/asset_*/`) additionally accept `update_date__dgt` (`>=`) and `update_date__dlt` (`<=`);
+  - Values accept `YYYY-MM-DD HH:MM:SS` or date-only `YYYY-MM-DD` (expanded to `00:00:00` for lower bounds and `23:59:59` for upper bounds).
+- **Server-Side Sorting**: All list endpoints accept `order=-save_date` (newest discovered first) and `order=+save_date` (oldest discovered first). Omitting `order` preserves each dimension's default ordering (`-_id` for standard lists, IP+domain count descending for `cip`/`asset_cip`, hit count descending for `stat_finger`/`asset_stat_finger`).
+- **Cross-Task Aggregation Semantics**: Global deduplicated endpoints (`GET /api/service/`, `GET /api/cip/`, and `GET /api/stat_finger/` without `task_id`) compute `save_date` via `$min` (first discovered) and `update_date` via `$max` (last seen). Date-range filters on `save_date` are applied post-aggregation so listed rows and `total` counts remain strictly consistent.
+- **Asset-Group Sync & Exports**: When task assets are synced to an asset group for the first time, `asset_*` inherits the task record's original `save_date` and initializes `update_date` to match; `update_date` advances only on subsequent re-scans or monitor refreshes. Plain-text `.txt` target exports remain unchanged, while certificate JSON exports (`/api/cert/export/`, `/api/asset_cert/export/`) include `save_date` and `update_date`.
+
+### Multi-Sheet Excel Report Export for Discovery Tasks
+
+`POST /api/export/batch/` exports asset data from 1 to 100 discovery tasks into a single multi-sheet `.xlsx` workbook (the legacy `GET /api/export/<task_id>` endpoint remains backward compatible):
+
+- **Request Body (JSON)**:
+  - `task_id` (required, `string[]`): 24-hex task IDs, deduplicated in input order, capped at **100** tasks per request.
+  - `sheets` (optional, `string[]`): Whitelist of sheet keys to include: `overview`, `site`, `domain`, `ip`, `service`, `vuln`, `nuclei_result`, `statist`, `wih`, `fileleak`, `cert`, `url`, `cip`. Defaults to the first 8 core and risk dimensions when omitted.
+  - `deduplicate` (optional, `boolean`, default `true`): When `true`, merges duplicate records across tasks by dimension key and aggregates matching source tasks into the source-task column, aligning the `statist` sheet with the deduplicated dataset; when `false`, preserves raw per-task rows.
+- **Limits & Response Headers**:
+  - Selected asset dimensions with 0 records are skipped automatically and noted in Task Overview; if all asset dimensions are empty, Task Overview is preserved as a fallback sheet.
+  - Running or queued tasks are exported as a snapshot of currently stored records, with live status labeled in Task Overview.
+  - The server streams output via `openpyxl` write-only mode with literal string cell encoding (mitigating formula injection) and XML control-character sanitization. Each sheet is capped at **50,000** rows; truncation is recorded in Task Overview and reported via `X-Export-Truncated` (`1` / `0`) and `X-Export-Truncated-Sheets` (comma-separated sheet keys), exposed through `Access-Control-Expose-Headers`.
 
 ---
 
@@ -384,7 +431,7 @@ ARL-Next integrates the Model Context Protocol (MCP 2024-11-05 specification) fo
 | Tool Name | Category | Primary Inputs | Description | Activation Condition |
 | :--- | :--- | :--- | :--- | :--- |
 | `get_asset_profile` | Read-only Profile | `target` (required), `task_id` (optional) | Unified asset intelligence correlation (IPs, ports, services, fingerprints, certs, vulns, leaks) | Enabled by default |
-| `get_enterprise_profile` | Read-only Profile | `target` (required), `category`, `page`, `size`, `task_id` | Enterprise ecosystem profile and organizational structure (corporate background, ICP domains, mobile apps, mini programs, fast apps, official accounts, Weibo, investments) | Enabled by default |
+| `get_enterprise_profile` | Read-only Profile | `target` (required), `category`, `page`, `size`, `task_id` | Enterprise ecosystem profile and organizational structure (corporate background, ICP domains, mobile apps, mini programs, quick apps, official accounts, Weibo, investments) | Enabled by default |
 | `search_assets` | Read-only Search | `query` (required), `asset_type`, `limit` | Searches sites, IPs, domains, or known vulnerabilities | Enabled by default |
 | `get_task_status` | Read-only Status | `task_id` (required) | Inspects scanning progress, execution state, and metric counts | Enabled by default |
 | `create_scan_task` | Controlled Dispatch | `name`, `target`, `policy_id` | Uses standard target validation and queue routing | Tool enabled in governance settings and `task:dispatch` scope |
@@ -398,7 +445,7 @@ ARL-Next integrates the Model Context Protocol (MCP 2024-11-05 specification) fo
 
 > [!NOTE]
 > - Production Nginx reverse proxy routes `/mcp/sse` with unbuffered streaming and a 24-hour persistent timeout;
-> - When accessing self-signed IP deployments, if the client drops connections due to TLS chain verification, use the local Stdio script (built-in certificate pinning) or import the server CA certificate into the operating system trust store.
+> - When accessing self-signed IP deployments, if the client drops connections due to TLS chain verification, use the local Stdio script (auto-loads `certs/arl.crt` on local loopback; for remote IP deployments, copy the server certificate to the client and set `ARL_CA_BUNDLE` to keep chain verification while adapting for missing IP SAN hostnames) or import the server CA certificate into the operating system trust store.
 
 - Invalid scopes, expiry values and tool switches are rejected. Partial policy updates retain omitted switches. Search filters are literal text and list page sizes are bounded to 1–100.
 - MCP bodies are limited to 16 MiB, with at most 16 in-flight requests per session and 64 per service. Processing is enqueued before HTTP 202; accepted work remains counted after disconnect and undeliverable responses time out.
@@ -518,11 +565,11 @@ Custom template lifecycle and online debugging are exposed under `/api/nuclei/te
   - `create`, `update`, and `import` validate top-level YAML mapping, `id` (`a-zA-Z0-9_.-`), `info.name`, `info.author` (string or non-empty list of strings), `info.severity` allowlist (`info`, `low`, `medium`, `high`, `critical`, `unknown`), and at least one non-empty protocol/workflow section (`http`, `requests`, `dns`, `tcp`, `network`, `ssl`, `websocket`, `whois`, `code`, `javascript`, `headless`, `file`, `workflows`).
   - When the `nuclei` binary is present on `PATH`, semantic validation additionally runs `nuclei -duc -no-color -validate` (falling back to static checks when absent). Validation errors and duplicate IDs return `code: 999` on `create`/`update`, while failed items in `import` are rejected and reported in `fail_details`.
 - **Online Single-Target Dry Run (`POST /api/nuclei/template/test/`)**:
-  - **Protocol-Aware Target Normalization**: Rejects whitespace, newlines/control characters, and leading `-` arguments. Prepends `http://` for `http`/`headless` targets without a scheme (preserving `ws(s)://`/`http(s)://` for `websocket`), and strips unintended `http(s)://` schemes and paths for `dns`/`tcp`/`network`/`ssl`/`whois` templates.
+  - **Restricted Protocol Guard & Protocol-Aware Target Normalization**: Rejects templates containing restricted protocols (`code`, `headless`, `file`, `workflows`). Rejects whitespace, newlines/control characters, and leading `-` arguments. Prepends `http://` for `http` targets without a scheme (preserving `ws(s)://`/`http(s)://` for `websocket`), and strips unintended `http(s)://` schemes and paths for `dns`/`tcp`/`network`/`ssl`/`whois` templates.
   - **Proxy Alignment & Output Cleaning**: Reuses the `scan` domain proxy policy (`apply_to_nuclei`) with credentials masked in logs and output; strips ANSI escape codes and extracts structured matches via `-jle` (falling back to plain stdout parsing on legacy Nuclei builds).
   - **Response Fields**: On success (`code: 200`), `data` contains `matched`, `matched_count`, `findings` (`template_id`, `name`, `severity`, `matched_at`, `curl_command`, `extracted_results`), `target`, `output`, `returncode`, and `cost_seconds`. When `nuclei` exits non-zero, the endpoint returns `code: 999` with a concise error summary in `message` while preserving diagnostic `output` and `returncode` in `data`.
 - **ASM Channel Isolation & Protocol-Based Target Routing**:
   - `nuclei_config` (supported by `POST /api/task/`, `POST /api/policy/add/`, and `POST /api/policy/edit/`) accepts `include_community` (boolean, default `true`; set `false` for custom-only scans), `severity` (community channel allowlist, default `["low","medium","high","critical"]`), `exclude_blacklist` (boolean, default `true`, community channel only), `custom_template_mode` (`all_enabled` / `selected` / `tags` / `none`), `selected_custom_templates`, `selected_tags`, and `extra_exclude_ids`.
-  - The community channel enforces `-tags cve,http`, policy `severity`, and global `-eid` blocklist rules. Custom template channels bypass community `-tags`, `severity` (allowing `info`/`unknown` templates to run), and the global blocklist, routing ASM assets by protocol: `http`/`websocket` target alive web sites (including WIH-discovered sites), `tcp`/`network`/`ssl`/`javascript` also target discovered open `ip:port` endpoints, and `dns`/`whois` also target discovered subdomains. `code`, `headless`, `file`, and `workflows` templates are currently supported for dry runs only and are skipped before automated ASM execution with warning logs.
+  - The community channel enforces `-tags cve,http`, policy `severity`, and global `-eid` blocklist rules. Custom template channels bypass community `-tags`, `severity` (allowing `info`/`unknown` templates to run), and the global blocklist, routing ASM assets by protocol: `http`/`websocket` target alive web sites (including WIH-discovered sites), `tcp`/`network`/`ssl`/`javascript` also target discovered open `ip:port` endpoints, and `dns`/`whois` also target discovered subdomains. For security boundary isolation, `code`, `headless`, `file`, and `workflows` templates are blocked from online single-target dry runs and skipped before automated ASM execution with warning logs.
   - Channels are fault-isolated: an error in one channel preserves findings from succeeded channels, and channels with zero runnable templates or zero targets are skipped cleanly.
   - Findings record `template_source` (`custom` or `community`), filterable via `GET /api/nuclei_result/` and `GET /api/asset_nuclei_result/`. `POST /api/task/policy/` accepts an optional `related_scope_id` so risk cruising tasks launched from an asset group sync findings back to `asset_nuclei_result` and `asset_vuln`.

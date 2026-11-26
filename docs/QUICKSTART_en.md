@@ -17,7 +17,23 @@
 ## Prerequisites
 
 - A reachable server with TCP port **5173** open (security group and host firewall).
-- Root access on the server; **4-core CPU, 4GB RAM or higher** recommended; the script installs Docker and Swap automatically.
+- Root access on the server; **4-core CPU, 4GB RAM or higher** recommended; the script installs Docker, Swap, kernel conntrack tuning, and an adaptive low-memory profile automatically.
+
+<details>
+<summary><b>Optional: 4GB low-memory profile (.env) and earlyoom swap-thrashing guardrail</b></summary>
+<br/>
+
+- **Adaptive low-memory profile**: On hosts with `≤ 4608MB` RAM (4GB tier), `start-prod.sh` populates missing lightweight defaults in `.env` without overwriting existing user values; hosts above 4GB keep the standard defaults:
+
+  | `.env` Variable | 4GB Tier Default | Standard Default (`> 4GB`) | Purpose |
+  | :--- | :--- | :--- | :--- |
+  | `ARL_WEB_WORKERS` | `2` | `4` | Gunicorn Web worker count |
+  | `MONGO_WT_CACHE_GB` | `0.5` | `1` | MongoDB WiredTiger cache cap (GB) |
+  | `PUPPETEER_MAX_REQUESTS` | `100` | `200` | Requests per headless browser rotation |
+
+- **Kernel & `earlyoom` guardrails**: The script tunes `vm.*` and `nf_conntrack` (raising `nf_conntrack_max` to at least `262144` without lowering higher host limits, with `established=600s` and `time_wait=30s`), and enables `earlyoom` on a best-effort basis when `systemd` is active (preferring Chromium processes, avoiding `sshd`/`mongod`/`rabbitmq`, and skipping gracefully when packages are unavailable). To preserve manual `earlyoom` overrides, add `ARL_EARLYOOM_CUSTOM=1` to `/etc/default/earlyoom` or `/etc/sysconfig/earlyoom`.
+
+</details>
 
 ---
 

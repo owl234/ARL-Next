@@ -121,7 +121,7 @@ class HTTPStatusTests(unittest.TestCase):
             for node in ast.parse(path.read_text()).body:
                 if isinstance(node, ast.ClassDef) and node.name in class_names:
                     node = copy.deepcopy(node)
-                    node.body = [n for n in node.body if not isinstance(n, ast.FunctionDef) or n.name == 'get']
+                    node.body = [n for n in node.body if not isinstance(n, ast.FunctionDef) or n.name == 'get' or n.name.startswith('_')]
                     exec(compile(ast.fix_missing_locations(ast.Module(body=[node], type_ignores=[])), str(path), 'exec'), env)
             api.add_namespace(env['ns'])
         self.client = self.app.test_client()

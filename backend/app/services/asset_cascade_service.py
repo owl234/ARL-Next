@@ -462,7 +462,13 @@ def recalculate_tasks_statistics(task_ids):
     return stats_by_tid
 
 
-def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", "stat_finger", "service")):
+def _rebuild_derived_for_owner(
+    owner_field,
+    owner_id,
+    is_asset,
+    targets=("cip", "stat_finger", "service"),
+    preserve_existing_npoc=True,
+):
     """
     基于存活宿主表全量重算单个作用域（资产组或任务）的三大派生集合：
       - cip / asset_cip：双向归并 ip + domain 生成 /24 C 段统计
@@ -476,16 +482,31 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
     # 若需重算 cip 或 service，仅读取一次 ip 宿主表减少 I/O
     ip_docs = None
     if "cip" in target_set or "service" in target_set:
-        proj = {"ip": 1, "_id": 0}
+        proj = {"ip": 1, "save_date": 1, "update_date": 1, "_id": 0}
         if "cip" in target_set:
             proj["domain"] = 1
         if "service" in target_set:
             proj["port_info"] = 1
         ip_docs = list(_db(f"{prefix}ip").find({owner_field: owner_id}, proj))
 
+    def _pick_min_dt(a, b):
+        da = utils.to_datetime_obj(a)
+        db = utils.to_datetime_obj(b)
+        if da and db:
+            return min(da, db)
+        return da or db
+
+    def _pick_max_dt(a, b):
+        da = utils.to_datetime_obj(a)
+        db = utils.to_datetime_obj(b)
+        if da and db:
+            return max(da, db)
+        return da or db
+
     # 1. 重算 cip / asset_cip
     if "cip" in target_set:
         ip_domains_map = {}
+        ip_time_map = {}
         for doc in ip_docs:
             ip_val = doc.get("ip")
             if not ip_val or ":" in str(ip_val):
@@ -497,6 +518,9 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                 dom_set.update(d for d in raw_doms if isinstance(d, str) and d)
             elif isinstance(raw_doms, str) and raw_doms:
                 dom_set.add(raw_doms)
+            ts_entry = ip_time_map.setdefault(ip_str, {"save": None, "upd": None})
+            ts_entry["save"] = _pick_min_dt(ts_entry["save"], doc.get("save_date"))
+            ts_entry["upd"] = _pick_max_dt(ts_entry["upd"], doc.get("update_date") or doc.get("save_date"))
 
         if ip_domains_map:
             for d_doc in _db(f"{prefix}domain").find(
@@ -517,18 +541,21 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                 cidr = IP(f"{ip_str}/24", make_net=True).strNormal(1)
             except Exception:
                 continue
-            entry = cip_map.setdefault(cidr, {"ip_set": set(), "domain_set": set()})
+            entry = cip_map.setdefault(cidr, {"ip_set": set(), "domain_set": set(), "save": None, "upd": None})
             entry["ip_set"].add(ip_str)
             entry["domain_set"].update(dom_set)
+            ip_ts = ip_time_map.get(ip_str) or {}
+            entry["save"] = _pick_min_dt(entry["save"], ip_ts.get("save"))
+            entry["upd"] = _pick_max_dt(entry["upd"], ip_ts.get("upd"))
 
         cip_col = _db(f"{prefix}cip")
         desired_cidrs = set(cip_map.keys())
-        existing_cidrs = {
-            doc.get("cidr_ip")
-            for doc in cip_col.find({owner_field: owner_id}, {"cidr_ip": 1, "_id": 0})
+        existing_cip_map = {
+            doc.get("cidr_ip"): doc
+            for doc in cip_col.find({owner_field: owner_id}, {"cidr_ip": 1, "save_date": 1, "update_date": 1, "_id": 0})
             if doc.get("cidr_ip")
         }
-        stale_cidrs = list(existing_cidrs - desired_cidrs)
+        stale_cidrs = list(set(existing_cip_map.keys()) - desired_cidrs)
         if stale_cidrs:
             for chunk in _chunked(stale_cidrs):
                 cip_col.delete_many({owner_field: owner_id, "cidr_ip": {"$in": chunk}})
@@ -537,6 +564,9 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
         for cidr, info in cip_map.items():
             ip_list = sorted(info["ip_set"])
             domain_list = sorted(info["domain_set"])
+            ex_doc = existing_cip_map.get(cidr) or {}
+            min_save = _pick_min_dt(ex_doc.get("save_date"), info["save"]) or now
+            max_upd = _pick_max_dt(ex_doc.get("update_date"), info["upd"]) or min_save
             set_doc = {
                 owner_field: owner_id,
                 "cidr_ip": cidr,
@@ -545,10 +575,9 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                 "domain_list": domain_list,
                 "domain_count": len(domain_list),
             }
-            update_spec = {"$set": set_doc}
+            update_spec = {"$set": set_doc, "$setOnInsert": {"save_date": min_save}}
             if is_asset:
-                set_doc["update_date"] = now
-                update_spec["$setOnInsert"] = {"save_date": now}
+                set_doc["update_date"] = max_upd
             ops.append(UpdateOne({owner_field: owner_id, "cidr_ip": cidr}, update_spec, upsert=True))
         for chunk in _chunked(ops):
             cip_col.bulk_write(chunk, ordered=False)
@@ -556,10 +585,12 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
     # 2. 重算 stat_finger / asset_stat_finger
     if "stat_finger" in target_set:
         finger_map = {}
-        for s_doc in _db(f"{prefix}site").find({owner_field: owner_id}, {"finger": 1, "_id": 0}):
+        for s_doc in _db(f"{prefix}site").find({owner_field: owner_id}, {"finger": 1, "save_date": 1, "update_date": 1, "_id": 0}):
             fingers = s_doc.get("finger")
             if not isinstance(fingers, list):
                 continue
+            s_save = s_doc.get("save_date")
+            s_upd = s_doc.get("update_date") or s_save
             seen_in_site = set()
             for item in fingers:
                 if isinstance(item, dict):
@@ -575,33 +606,37 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                     continue
                 seen_in_site.add(key)
                 if key not in finger_map:
-                    finger_map[key] = {"name": fname, "cnt": 1}
+                    finger_map[key] = {"name": fname, "cnt": 1, "save": utils.to_datetime_obj(s_save), "upd": utils.to_datetime_obj(s_upd)}
                 else:
                     finger_map[key]["cnt"] += 1
+                    finger_map[key]["save"] = _pick_min_dt(finger_map[key]["save"], s_save)
+                    finger_map[key]["upd"] = _pick_max_dt(finger_map[key]["upd"], s_upd)
 
         sf_col = _db(f"{prefix}stat_finger")
-        desired_names = {v["name"]: v["cnt"] for v in finger_map.values()}
-        existing_names = {
-            doc.get("name")
-            for doc in sf_col.find({owner_field: owner_id}, {"name": 1, "_id": 0})
+        desired_info = {v["name"]: v for v in finger_map.values()}
+        existing_sf_map = {
+            doc.get("name"): doc
+            for doc in sf_col.find({owner_field: owner_id}, {"name": 1, "save_date": 1, "update_date": 1, "_id": 0})
             if doc.get("name")
         }
-        stale_names = list(existing_names - set(desired_names.keys()))
+        stale_names = list(set(existing_sf_map.keys()) - set(desired_info.keys()))
         if stale_names:
             for chunk in _chunked(stale_names):
                 sf_col.delete_many({owner_field: owner_id, "name": {"$in": chunk}})
 
         ops = []
-        for fname, cnt in desired_names.items():
+        for fname, info in desired_info.items():
+            ex_doc = existing_sf_map.get(fname) or {}
+            min_save = _pick_min_dt(ex_doc.get("save_date"), info["save"]) or now
+            max_upd = _pick_max_dt(ex_doc.get("update_date"), info["upd"]) or min_save
             set_doc = {
                 owner_field: owner_id,
                 "name": fname,
-                "cnt": cnt,
+                "cnt": info["cnt"],
             }
-            update_spec = {"$set": set_doc}
+            update_spec = {"$set": set_doc, "$setOnInsert": {"save_date": min_save}}
             if is_asset:
-                set_doc["update_date"] = now
-                update_spec["$setOnInsert"] = {"save_date": now}
+                set_doc["update_date"] = max_upd
             ops.append(UpdateOne({owner_field: owner_id, "name": fname}, update_spec, upsert=True))
         for chunk in _chunked(ops):
             sf_col.bulk_write(chunk, ordered=False)
@@ -622,6 +657,8 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
             port_info_list = doc.get("port_info")
             if not ip_val or not isinstance(port_info_list, list):
                 continue
+            doc_save = utils.to_datetime_obj(doc.get("save_date"))
+            doc_upd = utils.to_datetime_obj(doc.get("update_date")) or doc_save
             for p in port_info_list:
                 if not isinstance(p, dict):
                     continue
@@ -630,6 +667,9 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                 if not svc_name or port_id is None:
                     continue
                 ep_key = (ip_val, port_id)
+                raw_port_sources = p.get("sources") or ["nmap"]
+                if not preserve_existing_npoc:
+                    raw_port_sources = [s for s in raw_port_sources if s != "npoc"] or ["nmap"]
                 ep_doc = build_service_endpoint_doc(
                     owner_field=owner_field,
                     owner_id=owner_id,
@@ -639,7 +679,9 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
                     product=p.get("product") or "",
                     version=p.get("version") or "",
                     target=p.get("target") or "",
-                    sources=p.get("sources") or ["nmap"],
+                    sources=raw_port_sources,
+                    save_date=doc_save,
+                    update_date=doc_upd,
                 )
                 endpoint_map[ep_key] = merge_endpoint_records(endpoint_map.get(ep_key), ep_doc)
 
@@ -666,11 +708,11 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
             if ep_key not in endpoint_map:
                 stale_doc_ids.append(ex_doc["_id"])
             else:
-                # 保留存量端点的 save_date 及已归并的 npoc 来源
+                # 保留存量端点的最早 save_date、最新 update_date 及已归并的 npoc 来源（npoc_service 显式删除重算时除外）
                 cur = endpoint_map[ep_key]
-                if ex_doc.get("save_date") and not cur.get("save_date"):
-                    cur["save_date"] = ex_doc["save_date"]
-                if "npoc" in (ex_doc.get("sources") or []):
+                cur["save_date"] = _pick_min_dt(ex_doc.get("save_date"), cur.get("save_date"))
+                cur["update_date"] = _pick_max_dt(ex_doc.get("update_date"), cur.get("update_date"))
+                if preserve_existing_npoc and "npoc" in (ex_doc.get("sources") or []):
                     endpoint_map[ep_key] = merge_endpoint_records(ex_doc, cur)
 
         if stale_doc_ids:
@@ -682,17 +724,19 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
             set_doc = dict(ep_doc)
             set_doc.pop("_id", None)
             set_doc[owner_field] = owner_id
-            saved_ts = set_doc.pop("save_date", None)
+            saved_ts = utils.to_datetime_obj(set_doc.pop("save_date", None)) or now
+            upd_ts = utils.to_datetime_obj(set_doc.pop("update_date", None)) or saved_ts
             if is_asset:
-                set_doc["update_date"] = now
+                set_doc["update_date"] = upd_ts
                 update_spec = {
                     "$set": set_doc,
-                    "$setOnInsert": {"save_date": saved_ts or now},
+                    "$setOnInsert": {"save_date": saved_ts},
                 }
             else:
-                if saved_ts:
-                    set_doc["save_date"] = saved_ts
-                update_spec = {"$set": set_doc}
+                update_spec = {
+                    "$set": set_doc,
+                    "$setOnInsert": {"save_date": saved_ts},
+                }
             ops.append(
                 UpdateOne(
                     {owner_field: owner_id, "ip": ip_val, "port_id": port_id},
@@ -704,22 +748,26 @@ def _rebuild_derived_for_owner(owner_field, owner_id, is_asset, targets=("cip", 
             svc_col.bulk_write(chunk, ordered=False)
 
 
-def rebuild_scope_derived_collections(scope_ids, targets=("cip", "stat_finger", "service")):
+def rebuild_scope_derived_collections(scope_ids, targets=("cip", "stat_finger", "service"), preserve_existing_npoc=True):
     """基于存活宿主表重算指定资产组的 asset_cip / asset_stat_finger / asset_service。"""
     unique_sids = list(dict.fromkeys(str(s) for s in (scope_ids or []) if s))
     for sid in unique_sids:
         try:
-            _rebuild_derived_for_owner("scope_id", sid, is_asset=True, targets=targets)
+            _rebuild_derived_for_owner(
+                "scope_id", sid, is_asset=True, targets=targets, preserve_existing_npoc=preserve_existing_npoc
+            )
         except Exception as e:
             logger.error(f"rebuild_scope_derived_collections failed for scope {sid}: {e}")
 
 
-def rebuild_task_derived_collections(task_ids, targets=("cip", "stat_finger", "service")):
+def rebuild_task_derived_collections(task_ids, targets=("cip", "stat_finger", "service"), preserve_existing_npoc=True):
     """基于存活宿主表重算指定任务的 cip / stat_finger / service。"""
     unique_tids = list(dict.fromkeys(str(t) for t in (task_ids or []) if t))
     for tid in unique_tids:
         try:
-            _rebuild_derived_for_owner("task_id", tid, is_asset=False, targets=targets)
+            _rebuild_derived_for_owner(
+                "task_id", tid, is_asset=False, targets=targets, preserve_existing_npoc=preserve_existing_npoc
+            )
         except Exception as e:
             logger.error(f"rebuild_task_derived_collections failed for task {tid}: {e}")
 
@@ -1365,7 +1413,7 @@ def _cascade_delete_services_in_side(endpoint_tuples, empty_service_names, is_as
 
 
 def _cascade_delete_stat_fingers_in_side(finger_names, is_asset, owner_ids=None, global_mode=False):
-    """从 site.finger / asset_site.finger 剥离目标指纹（兼容 dict 与 str 双格式，保留宿主站点）并删除 stat_finger。"""
+    """从 site.finger / asset_site.finger 剥离目标指纹（兼容 dict 与 str 双格式及大小写不敏感匹配，保留宿主站点）并删除 stat_finger。"""
     names = list(dict.fromkeys(str(n).strip() for n in (finger_names or []) if n and isinstance(n, str)))
     if not names:
         return set()
@@ -1375,10 +1423,14 @@ def _cascade_delete_stat_fingers_in_side(finger_names, is_asset, owner_ids=None,
     track_field = "scope_id" if is_asset else "task_id"
     affected_owners = set()
 
-    # 1. 删除 stat_finger / asset_stat_finger 中精确匹配项
+    # 聚合统计按 name.lower() 大小写不敏感归并，删除时同样使用全词大小写不敏感匹配，避免异大小写指纹删后复活
+    ci_pattern = "^(?:" + "|".join(re.escape(n) for n in names) + ")$"
+    ci_regex = {"$regex": ci_pattern, "$options": "i"}
+
+    # 1. 删除 stat_finger / asset_stat_finger 中大小写不敏感匹配项
     _, sf_owners, _ = _delete_with_owner_tracking(
         f"{prefix}stat_finger",
-        {"name": {"$in": names}},
+        {"$or": [{"name": {"$in": names}}, {"name": ci_regex}]},
         owner_field=owner_field,
         owner_ids=owner_ids,
         track_field=track_field,
@@ -1389,15 +1441,23 @@ def _cascade_delete_stat_fingers_in_side(finger_names, is_asset, owner_ids=None,
     site_col = _db(f"{prefix}site")
     match_site_or = [
         {"finger.name": {"$in": names}},
+        {"finger.name": ci_regex},
         {"finger": {"$in": names}},
+        {"finger": ci_regex},
     ]
     if global_mode:
         q = {"$or": match_site_or}
         for doc in site_col.find(q, {track_field: 1, "_id": 0}):
             if doc.get(track_field):
                 affected_owners.add(str(doc[track_field]))
-        site_col.update_many({"finger.name": {"$in": names}}, {"$pull": {"finger": {"name": {"$in": names}}}})
-        site_col.update_many({"finger": {"$in": names}}, {"$pull": {"finger": {"$in": names}}})
+        site_col.update_many(
+            {"$or": [{"finger.name": {"$in": names}}, {"finger.name": ci_regex}]},
+            {"$pull": {"finger": {"name": ci_regex}}},
+        )
+        site_col.update_many(
+            {"$or": [{"finger": {"$in": names}}, {"finger": ci_regex}]},
+            {"$pull": {"finger": ci_regex}},
+        )
     elif owner_ids:
         for chunk in _chunked(owner_ids):
             q = {"$and": [{owner_field: {"$in": chunk}}, {"$or": match_site_or}]}
@@ -1405,12 +1465,12 @@ def _cascade_delete_stat_fingers_in_side(finger_names, is_asset, owner_ids=None,
                 if doc.get(track_field):
                     affected_owners.add(str(doc[track_field]))
             site_col.update_many(
-                {owner_field: {"$in": chunk}, "finger.name": {"$in": names}},
-                {"$pull": {"finger": {"name": {"$in": names}}}},
+                {owner_field: {"$in": chunk}, "$or": [{"finger.name": {"$in": names}}, {"finger.name": ci_regex}]},
+                {"$pull": {"finger": {"name": ci_regex}}},
             )
             site_col.update_many(
-                {owner_field: {"$in": chunk}, "finger": {"$in": names}},
-                {"$pull": {"finger": {"$in": names}}},
+                {owner_field: {"$in": chunk}, "$or": [{"finger": {"$in": names}}, {"finger": ci_regex}]},
+                {"$pull": {"finger": ci_regex}},
             )
 
     return affected_owners
@@ -2038,14 +2098,26 @@ def _cascade_delete_dimension_records_impl(category, ids_or_keys, source_type, s
                     q_ip = {} if global_mode else {"scope_id": {"$in": scope_id_list}}
                     for doc in _db("asset_ip").find(q_ip, {"ip": 1, "_id": 0}):
                         ip_v = doc.get("ip")
-                        if ip_v and any(ipaddress.ip_address(ip_v) in net for net in cidr_nets if ":" not in ip_v):
-                            target_ips.add(ip_v)
+                        if not ip_v or not isinstance(ip_v, str) or ":" in ip_v:
+                            continue
+                        try:
+                            ip_obj = ipaddress.ip_address(ip_v.strip())
+                        except ValueError:
+                            continue
+                        if any(ip_obj in net for net in cidr_nets):
+                            target_ips.add(ip_v.strip())
                 if global_mode or task_id_list:
                     q_ip = {} if global_mode else {"task_id": {"$in": task_id_list}}
                     for doc in _db("ip").find(q_ip, {"ip": 1, "_id": 0}):
                         ip_v = doc.get("ip")
-                        if ip_v and any(ipaddress.ip_address(ip_v) in net for net in cidr_nets if ":" not in ip_v):
-                            target_ips.add(ip_v)
+                        if not ip_v or not isinstance(ip_v, str) or ":" in ip_v:
+                            continue
+                        try:
+                            ip_obj = ipaddress.ip_address(ip_v.strip())
+                        except ValueError:
+                            continue
+                        if any(ip_obj in net for net in cidr_nets):
+                            target_ips.add(ip_v.strip())
 
             # 直接删除显式选中的 cip / asset_cip 文档（覆盖无关联 ip 文档的孤立 C 段）
             if obj_ids:
@@ -2220,6 +2292,16 @@ def _cascade_delete_dimension_records_impl(category, ids_or_keys, source_type, s
                     track_field="task_id",
                 )
                 affected_tasks.update(t_aff)
+
+        if category == "npoc_service":
+            if affected_scopes:
+                rebuild_scope_derived_collections(
+                    list(affected_scopes), targets=("service",), preserve_existing_npoc=False
+                )
+            if affected_tasks:
+                rebuild_task_derived_collections(
+                    list(affected_tasks), targets=("service",), preserve_existing_npoc=False
+                )
 
         if affected_tasks:
             recalculate_tasks_statistics(list(affected_tasks))

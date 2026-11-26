@@ -113,37 +113,52 @@ def run_future_scan(item):
 
 # 立即手动触发计划任务执行
 def run_task_schedule(_id):
-    query = {'_id': bson.ObjectId(_id)}
-    item = find_task_schedule(_id)
+    if not _id or not bson.ObjectId.is_valid(str(_id)):
+        return None
+    oid = bson.ObjectId(str(_id))
+    query = {'_id': oid}
+    item = find_task_schedule(oid)
     if not item:
         return None
 
-    item["run_number"] = item.get("run_number", 0) + 1
-    item["last_run_time"] = int(time.time())
-    item["last_run_date"] = utils.curr_date()
-
-    if item.get("schedule_type") == "recurrent_scan":
-        if item.get("status") == TaskScheduleStatus.SCHEDULED and item.get("cron"):
-            item["next_run_date"] = get_next_run_date(item["cron"])
-    elif item.get("schedule_type") == "future_scan":
-        start_time = item.get("start_time", 0)
-        if 0 < start_time <= time.time():
-            item["status"] = TaskScheduleStatus.DONE
-            item["next_run_date"] = "-"
-
-    utils.conn_db('task_schedule').find_one_and_replace(query, item)
-
+    # 先校验并派发扫描任务；仅派发成功后才原子更新运行计数与时间戳，避免提交失败留下假计数
     try:
         submit_task_schedule(item)
     except Exception as e:
         return str(e)
 
-    return item
+    now_ts = int(time.time())
+    now_str = utils.curr_date()
+    set_fields = {
+        "last_run_time": now_ts,
+        "last_run_date": now_str,
+    }
+
+    if item.get("schedule_type") == "recurrent_scan":
+        if item.get("status") == TaskScheduleStatus.SCHEDULED and item.get("cron"):
+            set_fields["next_run_date"] = get_next_run_date(item["cron"])
+    elif item.get("schedule_type") == "future_scan":
+        start_time = item.get("start_time", 0)
+        if 0 < start_time <= now_ts:
+            set_fields["status"] = TaskScheduleStatus.DONE
+            set_fields["next_run_date"] = "-"
+
+    utils.conn_db('task_schedule').update_one(
+        query,
+        {"$inc": {"run_number": 1}, "$set": set_fields},
+    )
+
+    updated = dict(item)
+    updated["run_number"] = item.get("run_number", 0) + 1
+    updated.update(set_fields)
+    return updated
 
 
 # 查找计划任务
 def find_task_schedule(_id):
-    query = {'_id': bson.ObjectId(_id)}
+    if not _id or not bson.ObjectId.is_valid(str(_id)):
+        return None
+    query = {'_id': bson.ObjectId(str(_id))}
     item = utils.conn_db('task_schedule').find_one(query)
     return item
 

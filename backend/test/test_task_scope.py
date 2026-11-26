@@ -64,8 +64,8 @@ class ScopeFixture(unittest.TestCase):
         self.logger.addHandler(logging.NullHandler())
         self.logger.propagate = False
         names = ['app', 'app.utils', 'app.utils.security_policy', 'app.helpers', 'app.helpers.task',
-                 'app.helpers.scope', 'app.services', 'app.services.syncAsset', 'app.services.task_scope_sync',
-                 'app.celerytask', 'app.modules', 'app.utils.monitor_diff']
+                 'app.helpers.scope', 'app.services', 'app.services.service_fusion', 'app.services.syncAsset',
+                 'app.services.task_scope_sync', 'app.celerytask', 'app.modules', 'app.utils.monitor_diff']
         modules = {name: module(name) for name in names}
         self.patch = patch.dict(sys.modules, modules)
         self.patch.start()
@@ -75,11 +75,17 @@ class ScopeFixture(unittest.TestCase):
         self.utils.get_logger = lambda: self.logger
         self.utils.curr_date = lambda: '2026-10-12 12:00:00'
         self.utils.curr_date_obj = lambda: datetime(2026, 10, 12, 12)
+        self.utils.to_datetime_obj = lambda val, fallback_oid=None: val if isinstance(val, datetime) else datetime(2026, 10, 12, 12)
         self.utils.truncate_string = lambda value: value[:200]
         self.utils.message_push = lambda **kwargs: self.pushes.append(kwargs)
         self.utils.build_ret = lambda error, data: dict(error if isinstance(error, dict) else {'code': 400, 'message': error}, data=data)
         modules['app'].utils = self.utils
         modules['app'].services = modules['app.services']
+        sf_spec = importlib.util.spec_from_file_location('app.services.service_fusion', ROOT / 'app/services/service_fusion.py')
+        sf_mod = importlib.util.module_from_spec(sf_spec)
+        sf_spec.loader.exec_module(sf_mod)
+        sys.modules['app.services.service_fusion'] = sf_mod
+        modules['app.services'].service_fusion = sf_mod
         modules['app'].celerytask = modules['app.celerytask']
         modules['app.celerytask'].arl_task = self.queue
         modules['app.utils.monitor_diff'].log_monitor_diff_summary = lambda task_id: None

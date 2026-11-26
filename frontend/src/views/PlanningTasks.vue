@@ -411,7 +411,7 @@
                 :disabled="record.status === 'stop' || record.status === 'done'"
                 @click="handleSingleAction('stop', record)"
               >
-                {{ record.source === 'monitor' ? taskText('tasks.pause') : taskText('tasks.stop') }}
+                {{ taskText('tasks.stop') }}
               </a-button>
 
               <a-button
@@ -728,6 +728,9 @@ const resolveCategoryFromQuery = (tabVal) => {
 const activeCategory = ref(resolveCategoryFromQuery(route.query.tab));
 
 const onCategoryChange = (cat) => {
+  if (activeCategory.value !== cat) {
+    clearSelection();
+  }
   activeCategory.value = cat;
   pagination.current = 1;
   if (cat === 'planning' && filterForm.sub_type && !String(filterForm.sub_type).startsWith('plan_')) {
@@ -747,6 +750,7 @@ const onCategoryChange = (cat) => {
 watch(() => route.query.tab, (newTab) => {
   const targetCat = resolveCategoryFromQuery(newTab);
   if (activeCategory.value !== targetCat) {
+    clearSelection();
     activeCategory.value = targetCat;
     pagination.current = 1;
   }
@@ -1109,19 +1113,36 @@ const fetchScopeList = async () => {
 };
 
 // ================= 单行与批量操作分发 =================
+const isRowEligibleForAction = (action, row) => {
+  if (!row) return false;
+  if (action === 'run' || action === 'delete') return true;
+  if (action === 'stop') {
+    return row.status === 'running' || row.status === 'scheduled';
+  }
+  if (action === 'recover') {
+    if (row.source === 'monitor') return row.status === 'stop';
+    return row.status === 'stop' || row.status === 'done';
+  }
+  return true;
+};
+
 const executeDispatchedActions = async (actionType, targetUids) => {
   const planIds = [];
   const monitorIds = [];
+  const planUids = [];
+  const monitorUids = [];
 
   for (const uid of targetUids) {
     if (String(uid).startsWith('planning:')) {
       planIds.push(String(uid).slice('planning:'.length));
+      planUids.push(uid);
     } else if (String(uid).startsWith('monitor:')) {
       monitorIds.push(String(uid).slice('monitor:'.length));
+      monitorUids.push(uid);
     }
   }
 
-  const tasks = [];
+  const dispatches = [];
 
   if (planIds.length > 0) {
     const planActionUrlMap = {
@@ -1132,7 +1153,11 @@ const executeDispatchedActions = async (actionType, targetUids) => {
     };
     const url = planActionUrlMap[actionType];
     if (url) {
-      tasks.push(request.post(url, { _id: planIds }));
+      dispatches.push({
+        source: 'planning',
+        uids: planUids,
+        promise: request.post(url, { _id: planIds })
+      });
     }
   }
 
@@ -1149,35 +1174,58 @@ const executeDispatchedActions = async (actionType, targetUids) => {
         actionType === 'delete' || monitorIds.length > 1
           ? { scheduler_id: monitorIds }
           : { scheduler_id: monitorIds[0] };
-      tasks.push(request.post(url, payload));
+      dispatches.push({
+        source: 'monitor',
+        uids: monitorUids,
+        promise: request.post(url, payload)
+      });
     }
   }
 
-  if (tasks.length === 0) return;
+  if (dispatches.length === 0) return false;
 
-  try {
-    const results = await Promise.all(tasks);
-    const failed = results.find((r) => r.code !== 200);
-    if (failed) {
-      message.error(failed.message || taskText('tasks.operationFailedLabel'));
+  const settled = await Promise.allSettled(dispatches.map((d) => d.promise));
+  const errorMessages = [];
+  const succeededUids = [];
+  let monitorSucceeded = false;
+
+  settled.forEach((entry, idx) => {
+    const meta = dispatches[idx];
+    if (entry.status === 'fulfilled' && entry.value?.code === 200) {
+      succeededUids.push(...meta.uids);
+      if (meta.source === 'monitor') {
+        monitorSucceeded = true;
+      }
+    } else if (entry.status === 'fulfilled') {
+      errorMessages.push(entry.value?.message || taskText('tasks.operationFailedLabel'));
     } else {
-      message.success(taskText('tasks.operationCompleted'));
+      errorMessages.push(taskText('tasks.requestFailed'));
     }
+  });
 
-    if (monitorIds.length > 0) {
-      notifyAssetMutated();
-      lastObservedMutationVersion = assetMutationVersion.value;
-    }
-
-    if (actionType === 'delete') {
-      const deletedSet = new Set(targetUids);
-      selectedRowKeys.value = selectedRowKeys.value.filter((k) => !deletedSet.has(k));
-    }
-
-    await fetchAllSchedules();
-  } catch (error) {
-    message.error(taskText('tasks.requestFailed'));
+  if (errorMessages.length > 0) {
+    message.error([...new Set(errorMessages)].join('；'));
+  } else {
+    message.success(taskText('tasks.operationCompleted'));
   }
+
+  if (monitorSucceeded) {
+    notifyAssetMutated();
+    lastObservedMutationVersion = assetMutationVersion.value;
+  }
+
+  if (actionType === 'delete' && succeededUids.length > 0) {
+    const deletedSet = new Set(succeededUids);
+    selectedRowKeys.value = selectedRowKeys.value.filter((k) => !deletedSet.has(k));
+    if (selectedRowKeys.value.length === 0) {
+      selectionTracker.clear();
+    }
+  }
+
+  if (succeededUids.length > 0) {
+    await fetchAllSchedules();
+  }
+  return errorMessages.length === 0;
 };
 
 const handleSingleAction = (actionType, record) => {
@@ -1247,9 +1295,25 @@ const handleBatchAction = (action) => {
   const selectedUids = selectedRowKeys.value.filter((k) => k != null && k !== '');
   if (!selectedUids.length) return;
 
-  const selectedLabels = selectionTracker.getLabels(selectedUids);
-  const includesMonitor = selectedUids.some((k) => String(k).startsWith('monitor:'));
+  const rowMap = new Map(normalizedRows.value.map((r) => [r.uid, r]));
+  const eligibleUids = selectedUids.filter((uid) => {
+    const row = rowMap.get(uid);
+    return row ? isRowEligibleForAction(action, row) : (action === 'run' || action === 'delete');
+  });
+  const skippedCount = selectedUids.length - eligibleUids.length;
+
+  if (!eligibleUids.length) {
+    message.warning(taskText('tasks.noEligibleSchedulesForAction', { count: selectedUids.length, action: current.text }));
+    return;
+  }
+
+  const selectedLabels = selectionTracker.getLabels(eligibleUids);
+  const includesMonitor = eligibleUids.some((k) => String(k).startsWith('monitor:'));
   const isDestructive = action === 'delete' || action === 'stop';
+  const baseSummary = taskText('tasks.applyActionToTheSelectedTasksCount', { count: eligibleUids.length, action: current.text });
+  const summaryText = skippedCount > 0
+    ? `${baseSummary}${taskText('tasks.batchActionSkippedNotice', { skipped: skippedCount })}`
+    : baseSummary;
 
   Modal.confirm({
     title: taskText('tasks.confirmAction', { action: current.title }),
@@ -1259,7 +1323,7 @@ const handleBatchAction = (action) => {
       alertType: isDestructive && includesMonitor ? 'warning' : '',
       alertMessage: isDestructive && includesMonitor ? current.title : '',
       alertDescription: isDestructive && includesMonitor ? taskText('tasks.monitorBatchStopDeleteWarning') : '',
-      summary: taskText('tasks.applyActionToTheSelectedTasksCount', { count: selectedUids.length, action: current.text }),
+      summary: summaryText,
       listHeading: taskText('tasks.selectedSchedulesListHeading'),
       items: selectedLabels,
       expandText: (total) => taskText('assets.expandAllCount', { count: total }),
@@ -1269,10 +1333,7 @@ const handleBatchAction = (action) => {
     okType: current.type,
     cancelText: taskText('tasks.cancel'),
     onOk: async () => {
-      await executeDispatchedActions(action, selectedUids);
-      if (action === 'delete') {
-        clearSelection();
-      }
+      await executeDispatchedActions(action, eligibleUids);
     }
   });
 };
@@ -1523,6 +1584,7 @@ onActivated(() => {
     }
   }
   fetchAllSchedules(!mutated);
+  fetchPolicyList();
   fetchScopeList();
   startSmartPolling();
 });

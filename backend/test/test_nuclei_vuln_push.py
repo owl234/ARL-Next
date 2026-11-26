@@ -340,6 +340,7 @@ class SyncDeduplicationAndLifecycleTests(unittest.TestCase):
         utils_pkg.get_logger = lambda: self.logger
         utils_pkg.curr_date = lambda: "2026-11-18 21:00:00"
         utils_pkg.curr_date_obj = lambda: datetime(2026, 11, 18, 21, 0)
+        utils_pkg.to_datetime_obj = lambda val, fallback_oid=None: val if isinstance(val, datetime) else datetime(2026, 11, 18, 21, 0)
         utils_pkg.message_push = lambda **kwargs: self.summary_pushes.append(kwargs)
         utils_pkg.push = push_mod
         utils_pkg.monitor_diff = monitor_diff_mod
@@ -348,6 +349,7 @@ class SyncDeduplicationAndLifecycleTests(unittest.TestCase):
         app_pkg.services = services_pkg
         app_pkg.modules = modules_mod
 
+        service_fusion_mod = types.ModuleType("app.services.service_fusion")
         self._patcher = patch.dict(
             sys.modules,
             {
@@ -359,12 +361,19 @@ class SyncDeduplicationAndLifecycleTests(unittest.TestCase):
                 "app.helpers.scope": scope_mod,
                 "app.modules": modules_mod,
                 "app.services": services_pkg,
+                "app.services.service_fusion": service_fusion_mod,
                 "app.services.syncAsset": sync_mod,
                 "app.services.task_scope_sync": task_scope_sync_mod,
             },
         )
         self._patcher.start()
         self.addCleanup(self._patcher.stop)
+
+        sf_spec = importlib.util.spec_from_file_location("app.services.service_fusion", ROOT / "app/services/service_fusion.py")
+        sf_loaded = importlib.util.module_from_spec(sf_spec)
+        sf_spec.loader.exec_module(sf_loaded)
+        sys.modules["app.services.service_fusion"] = sf_loaded
+        services_pkg.service_fusion = sf_loaded
 
         sync_env = sync_mod.__dict__
         sync_env.update(copy=copy, re=re, ObjectId=ObjectId, utils=utils_pkg, conn=self.db.__getitem__, logger=self.logger)

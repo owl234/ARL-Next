@@ -273,6 +273,17 @@ def handle_task_failure(sender=None, task_id=None, exception=None, args=None, kw
             )
             if update_ret.matched_count == 0:
                 logger.info(f"Task {db_id} was already finalized or stopped, skipping failure overwrite.")
+            elif target_collection == 'task':
+                try:
+                    from app.utils.task_statistics import flush_task_statistic_safely
+                    threading.Thread(
+                        target=flush_task_statistic_safely,
+                        args=(str(db_id), logger, utils.conn_db),
+                        daemon=True,
+                        name=f"FlushTaskStat-{db_id}"
+                    ).start()
+                except Exception as stat_err:
+                    logger.warning(f"Failed to spawn flush_task_statistic_safely thread for task {db_id}: {stat_err}")
         except Exception as db_err:
             logger.error(f"Failed to update task {db_id} status on failure: {db_err}")
 

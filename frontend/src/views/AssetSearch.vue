@@ -114,6 +114,16 @@
                         </a-select-option>
                       </a-select>
 
+                      <!-- 日期区间选择 -->
+                      <a-range-picker
+                        v-else-if="field.type === 'dateRange'"
+                        v-model:value="searchForm[field.key]"
+                        :placeholder="[assetText('tasks.startDate'), assetText('tasks.endDate')]"
+                        style="width: 100%;"
+                        size="small"
+                        @change="onSearch"
+                      />
+
                       <!-- 组合操作符输入框 (如 模糊匹配/精确匹配、等于/大于/小于) -->
                       <div
                         v-else-if="field.hasOperatorSelect"
@@ -209,13 +219,14 @@
     <a-table :sticky="pagination.pageSize >= 100 ? false : stickyConfig"
         :loading="loading"
         :dataSource="dataSource"
-        :columns="columns"
+        :columns="tableColumns"
         :pagination="false"
         :scroll="pagination.pageSize >= 100 ? { y: tableScrollY, x: 'max-content' } : { x: 'max-content' }"
         :virtual="pagination.pageSize >= 100"
         size="small"
         :rowKey="getAssetRowKey"
         :row-selection="tabConfig[effectiveTab]?.deleteUrl ? { selectedRowKeys: selectedRowKeys, onChange: onSelectChange, preserveSelectedRowKeys: true } : null"
+        @change="handleTableSortChange"
     >
             <template #bodyCell="{ column, record, index }">
         <template v-if="column.key === 'index'">
@@ -435,8 +446,12 @@
             >{{ src === 'npoc' ? assetText('assets.pythonPluginServicesLabel') : 'Nmap' }}</a-tag>
           </div>
         </template>
-        <template v-else-if="column.key === 'service_time'">
-          <span>{{ record.update_date || record.save_date || record.insert_time || '-' }}</span>
+        <template v-else-if="column.key === 'save_date' || column.key === 'service_time'">
+          <AssetTimeCell
+            :record="record"
+            :show-secondary="['service', 'cip', 'stat_finger'].includes(effectiveTab)"
+            secondary-mode="latest"
+          />
         </template>
 
         <template v-else-if="column.key === 'template_id'">
@@ -601,8 +616,9 @@ import { useRoute } from 'vue-router';
 import request from '../utils/request';
 import { isCustomNucleiResult, isHttpUrl, formatRiskPolicyLabel } from '../utils/nucleiHelpers';
 import AuthenticatedImage from '../components/AuthenticatedImage.vue';
+import AssetTimeCell from '../components/AssetTimeCell.vue';
 import HttpStatusFilter from '../components/HttpStatusFilter.vue';
-import { buildAssetFilterParams, formatAssetFilterOperator } from '../utils/assetFilters';
+import { buildAssetFilterParams, buildAssetSortOrder, extractTableSortState, formatAssetFilterOperator } from '../utils/assetFilters';
 import { message, Modal } from 'ant-design-vue';
 import {
   SearchOutlined,
@@ -849,20 +865,20 @@ const tabConfig = reactive({
         operators: ['模糊匹配', '精确匹配']
       },
       { get label() { return assetText('tasks.faviconHash'); }, key: 'favicon.hash', operator: '=' },
-      { get label() { return assetText('tasks.tags'); }, key: 'tag', operator: '=' }
+      { get label() { return assetText('tasks.tags'); }, key: 'tag', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
-    // 💥 修复：删除了瞎加的 IP、端口和操作列，完全对齐原版站点表格！表格控制
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
       { get title() { return assetText('tasks.websites'); }, key: 'site', width: 250 },
       { get title() { return assetText('tasks.statusCode'); }, dataIndex: 'status', key: 'status', width: 100, align: 'center' },
       { get title() { return assetText('tasks.title'); }, dataIndex: 'title', key: 'title', width: 200 },
-      { get title() { return assetText('tasks.headers'); }, key: 'headers',width: 500},
+      { get title() { return assetText('tasks.headers'); }, key: 'headers', width: 500 },
       { get title() { return assetText('tasks.fingerprints'); }, key: 'finger', width: 150 },
+      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true },
       { get title() { return assetText('tasks.screenshot'); }, key: 'screenshot', width: 280 } // 保持宽度给图片留足空间
     ]
   },
-  // 💡 新增：子域名 Tab 的 1:1 配置
   domain: {
     url: '/domain/',
     deleteUrl: '/domain/delete/',
@@ -873,7 +889,8 @@ const tabConfig = reactive({
       { get label() { return assetText('tasks.recordValue'); }, key: 'record', operator: '=' },
       { get label() { return assetText('tasks.type'); }, key: 'type', operator: '=' },
       { label: 'IP', key: 'ips', operator: '=' },
-      { get label() { return assetText('tasks.source'); }, key: 'source', operator: '=' }
+      { get label() { return assetText('tasks.source'); }, key: 'source', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
@@ -881,19 +898,18 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.dnsRecordType'); }, dataIndex: 'type', key: 'type', width: 120 },
       { get title() { return assetText('tasks.recordValue'); }, key: 'record', width: 300 },
       { get title() { return assetText('tasks.associatedIps'); }, key: 'ips', width: 250 },
-      { get title() { return assetText('tasks.source'); }, dataIndex: 'source', key: 'source', width: 150 }
+      { get title() { return assetText('tasks.source'); }, dataIndex: 'source', key: 'source', width: 150 },
+      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
 
-  // 💡 新增：IP Tab 的 1:1 配置
   ip: {
     url: '/ip/',
-    deleteUrl: '/ip/delete/', // 视上一轮测试情况，如果删不掉请改回 '/site/delete/'
+    deleteUrl: '/ip/delete/',
     exportUrl: '/ip/export/',
     get exportName() { return assetText('tasks.ipPorts'); },
     searchFields: [
       { label: 'IP', key: 'ip', operator: '=' },
-      // 🚨 核心修复：对齐后端的嵌套对象查询字段
       { get label() { return assetText('tasks.port'); }, key: 'port_info.port_id', operator: '=' },
       { get label() { return assetText('tasks.operatingSystem'); }, key: 'os_info.name', operator: '=' },
       { get label() { return assetText('tasks.domains'); }, key: 'domain', operator: '=' },
@@ -907,10 +923,10 @@ const tabConfig = reactive({
           { get label() { return assetText('tasks.publicPublic'); }, value: 'PUBLIC' },
           { get label() { return assetText('tasks.privatePrivate'); }, value: 'PRIVATE' }
         ]
-      }
+      },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
-      // ... 列配置保持不变 ...
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
       { title: 'IP', dataIndex: 'ip', key: 'ip', width: 160 },
       { get title() { return assetText('tasks.operatingSystem'); }, key: 'os_info', width: 150 },
@@ -918,10 +934,10 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.associatedDomains'); }, key: 'domain', width: 250 },
       { title: 'CDN', dataIndex: 'cdn_name', key: 'cdn_name', width: 150 },
       { get title() { return assetText('assets.location'); }, key: 'geo_city', width: 180 },
-      { get title() { return assetText('assets.asOrganization'); }, key: 'geo_asn', width: 280 }
+      { get title() { return assetText('assets.asOrganization'); }, key: 'geo_asn', width: 280 },
+      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
-  // 💡 重新构建：1:1 对齐截图的 SSL证书 配置
   cert: {
     url: '/cert/',
     deleteUrl: '/cert/delete/',
@@ -932,16 +948,18 @@ const tabConfig = reactive({
       { get label() { return assetText('tasks.issuer'); }, key: 'cert.issuer_dn', operator: '=' },
       { get label() { return assetText('tasks.subject'); }, key: 'cert.subject_dn', operator: '=' },
       { label: 'SHA-1', key: 'cert.fingerprint.sha1', operator: '=' },
-      { get label() { return assetText('tasks.subjectAlternativeNames'); }, key: 'cert.extensions.subjectAltName', operator: '=' }
+      { get label() { return assetText('tasks.subjectAlternativeNames'); }, key: 'cert.extensions.subjectAltName', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
       { get title() { return assetText('tasks.host'); }, key: 'host', width: 180 },
-      { get title() { return assetText('tasks.sslCertificateInformation'); }, key: 'cert_detail', width: 900 } // 留出巨大的空间给卡片
+      { get title() { return assetText('tasks.sslCertificateInformation'); }, key: 'cert_detail', width: 900 },
+      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
 
-  // 💡 统一服务 Tab 配置（融合 Nmap 端口服务与 Python 插件服务，按单端点平铺）
+  // 统一服务 Tab 配置（融合 Nmap 端口服务与 Python 插件服务，按单端点跨任务归并）
   service: {
     url: '/service/',
     deleteUrl: '/service/delete/',
@@ -962,7 +980,8 @@ const tabConfig = reactive({
           { label: 'Nmap', value: 'nmap' },
           { get label() { return assetText('assets.pythonPluginServicesLabel'); }, value: 'npoc' }
         ]
-      }
+      },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
@@ -971,36 +990,35 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.product'); }, key: 'product', width: 220 },
       { get title() { return assetText('tasks.version'); }, key: 'version', width: 140 },
       { get title() { return assetText('tasks.source'); }, key: 'service_sources', width: 180 },
-      { get title() { return assetText('tasks.savedAt'); }, key: 'service_time', width: 170 }
+      { get title() { return assetText('assets.discoveredLatestAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
 
-  // 💡 新增：文件泄露 Tab 的 1:1 配置
   fileleak: {
     url: '/fileleak/',
     deleteUrl: '/fileleak/delete/',
-    // 🚨 同样不配置 exportUrl，隐身导出按钮
     searchFields: [
       { label: 'URL', key: 'url', operator: '=' },
       { get label() { return assetText('tasks.title'); }, key: 'title', operator: '=' },
       { get label() { return assetText('tasks.statusCode'); }, key: 'status_code', type: 'httpStatus' },
-      { get label() { return assetText('tasks.bodyLength'); }, key: 'content_length', operator: '=' }
+      { get label() { return assetText('tasks.bodyLength'); }, key: 'content_length', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
-      { title: 'URL', key: 'fileleak_url', width: 500 }, // 用专属 key 渲染超链接
+      { title: 'URL', key: 'fileleak_url', width: 500 },
       { get title() { return assetText('tasks.title'); }, dataIndex: 'title', key: 'title', width: 250 },
       { get title() { return assetText('tasks.statusCode'); }, dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
-      { get title() { return assetText('tasks.bodyLength'); }, dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' }
+      { get title() { return assetText('tasks.bodyLength'); }, dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' },
+      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
 
-  // 💡 新增：URL信息 Tab 的 1:1 配置
   url: {
     url: '/url/',
     deleteUrl: '/url/delete/',
-    exportUrl: '/url/export/', // 恢复导出接口
-    get exportName() { return assetText('tasks.urls'); },     // 自动生成 URL 导出按钮
+    exportUrl: '/url/export/',
+    get exportName() { return assetText('tasks.urls'); },
     searchFields: [
       { label: 'URL', key: 'url', operator: '=' },
       { get label() { return assetText('tasks.title'); }, key: 'title', operator: '=' },
@@ -1025,28 +1043,29 @@ const tabConfig = reactive({
           { get label() { return assetText('tasks.fuzzing'); }, value: 'fuzz' }
         ],
         operator: '='
-      }
+      },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
-      { title: 'URL', key: 'url_link', width: 450 }, // 专用 key 渲染超链接
+      { title: 'URL', key: 'url_link', width: 450 },
       { get title() { return assetText('tasks.title'); }, dataIndex: 'title', key: 'title', width: 200 },
       { get title() { return assetText('tasks.statusCode'); }, dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
       { get title() { return assetText('tasks.bodyLength'); }, dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' },
-      { get title() { return assetText('tasks.source'); }, dataIndex: 'source', key: 'source', width: 150 }
+      { get title() { return assetText('tasks.source'); }, dataIndex: 'source', key: 'source', width: 150 },
+      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
 
-  // 💡 新增：风险 Tab 的 1:1 配置
   vuln: {
     url: '/vuln/',
     deleteUrl: '/vuln/delete/',
-    // 🚨 截图显示无导出按钮，所以不配置 exportUrl
     searchFields: [
       { get label() { return assetText('tasks.vulnerabilityName'); }, key: 'vul_name', operator: '=' },
-      { get label() { return assetText('tasks.category'); }, key: 'vul_category', operator: '=' }, // ARL 常用的类别字段名
+      { get label() { return assetText('tasks.category'); }, key: 'vul_category', operator: '=' },
       { get label() { return assetText('tasks.applicationName'); }, key: 'app_name', operator: '=' },
-      { get label() { return assetText('tasks.target'); }, key: 'target', operator: '=' }
+      { get label() { return assetText('tasks.target'); }, key: 'target', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
@@ -1054,21 +1073,20 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.category'); }, dataIndex: 'vul_category', key: 'vul_category', width: 120 },
       { get title() { return assetText('tasks.applicationName'); }, dataIndex: 'app_name', key: 'app_name', width: 150 },
       { get title() { return assetText('tasks.target'); }, dataIndex: 'target', key: 'target', width: 200 },
-      { get title() { return assetText('tasks.credentials'); }, key: 'verify_data', width: 350 }, // 凭证通常较长，用插槽渲染
-      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'insert_time', key: 'insert_time', width: 160 }
+      { get title() { return assetText('tasks.credentials'); }, key: 'verify_data', width: 350 },
+      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
 
-  // 💡 新增：Python 插件服务 Tab 的 1:1 配置
   npoc_service: {
     url: '/npoc_service/',
     deleteUrl: '/npoc_service/delete/',
-    // 🚨 截图显示无导出按钮，不配置 exportUrl
     searchFields: [
       { get label() { return assetText('tasks.protocol'); }, key: 'scheme', operator: '=' },
       { get label() { return assetText('tasks.host'); }, key: 'host', operator: '=' },
       { get label() { return assetText('tasks.port'); }, key: 'port', operator: '=' },
-      { get label() { return assetText('tasks.target'); }, key: 'target', operator: '=' }
+      { get label() { return assetText('tasks.target'); }, key: 'target', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
@@ -1076,32 +1094,31 @@ const tabConfig = reactive({
       { get title() { return assetText('tasks.host'); }, dataIndex: 'host', key: 'host', width: 200 },
       { get title() { return assetText('tasks.port'); }, dataIndex: 'port', key: 'port', width: 100, align: 'center' },
       { get title() { return assetText('tasks.target'); }, dataIndex: 'target', key: 'target', width: 250 },
-      { get title() { return assetText('tasks.savedAt'); }, dataIndex: 'insert_time', key: 'insert_time', width: 180 }
+      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
 
-  // 💡 新增：C段 Tab 的 1:1 配置
   cip: {
     url: '/cip/',
     deleteUrl: '/cip/delete/',
-    exportUrl: '/cip/export/', // 恢复导出接口
-    get exportName() { return assetText('tasks.cClassNetworks'); },         // 自动生成 C 段导出按钮
+    exportUrl: '/cip/export/',
+    get exportName() { return assetText('tasks.cClassNetworks'); },
     searchFields: [
-      { get label() { return assetText('tasks.cClassNetworks'); }, key: 'cidr_ip', operator: '=' }
+      { get label() { return assetText('tasks.cClassNetworks'); }, key: 'cidr_ip', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
       { get title() { return assetText('tasks.cClassNetworks'); }, dataIndex: 'cidr_ip', key: 'cidr_ip', width: 300 },
       { get title() { return assetText('tasks.ipCount'); }, key: 'ip_count_col', width: 150, align: 'center' },
-      { get title() { return assetText('tasks.domainCount'); }, key: 'domain_count_col', width: 150, align: 'center' }
+      { get title() { return assetText('tasks.domainCount'); }, key: 'domain_count_col', width: 150, align: 'center' },
+      { get title() { return assetText('assets.discoveredLatestAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
 
-  // 💡 新增：nuclei Tab 的 1:1 配置
   nuclei_result: {
     url: '/nuclei_result/',
-    deleteUrl: '/nuclei_result/delete/', // 视后端情况，如果报错可改为 '/site/delete/'
-    // 🚨 截图显示无导出按钮，不配置 exportUrl
+    deleteUrl: '/nuclei_result/delete/',
     searchFields: [
       { get label() { return assetText('tasks.templateId'); }, key: 'template_id', operator: '=' },
       {
@@ -1129,25 +1146,24 @@ const tabConfig = reactive({
           { get label() { return assetText('assets.low'); }, value: 'low' },
           { get label() { return assetText('assets.informational'); }, value: 'info' }
         ]
-      }
+      },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
       { get title() { return assetText('tasks.templateId'); }, dataIndex: 'template_id', key: 'template_id', width: 210 },
       { get title() { return assetText('tasks.target'); }, dataIndex: 'target', key: 'target', width: 200 },
-      { get title() { return assetText('tasks.vulnerableUrl'); }, key: 'nuclei_vuln_url', width: 300 }, // 用专用 key 渲染超链接
+      { get title() { return assetText('tasks.vulnerableUrl'); }, key: 'nuclei_vuln_url', width: 300 },
       { get title() { return assetText('tasks.vulnerabilityName'); }, dataIndex: 'vuln_name', key: 'vuln_name', width: 200 },
       { get title() { return assetText('tasks.severity'); }, dataIndex: 'vuln_severity', key: 'vuln_severity', width: 100, align: 'center' },
-      { get title() { return assetText('tasks.savedAt'); }, dataIndex: 'insert_time', key: 'insert_time', width: 160 },
-      { get title() { return assetText('tasks.verificationCommand'); }, key: 'verify_command', width: 350 } // 命令可能很长，用插槽防撑破
+      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true },
+      { get title() { return assetText('tasks.verificationCommand'); }, key: 'verify_command', width: 350 }
     ]
   },
 
-  // 💡 新增：指纹统计 Tab 的 1:1 配置
   stat_finger: {
     url: '/stat_finger/',
     deleteUrl: '/stat_finger/delete/',
-    // 🚨 截图显示无导出按钮
     searchFields: [
       {
         get label() { return assetText('tasks.fingerprints'); },
@@ -1155,18 +1171,17 @@ const tabConfig = reactive({
         operator: '模糊匹配',
         hasOperatorSelect: true,
         operators: ['模糊匹配', '精确匹配']
-      } // 后端字段是 name
+      },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 80, align: 'center' },
-      { get title() { return assetText('tasks.fingerprints'); }, key: 'finger_name', width: 500 }, // 用专用 key 渲染青蓝字体
-      { get title() { return assetText('tasks.count'); }, dataIndex: 'cnt', key: 'cnt', width: 200 }
+      { get title() { return assetText('tasks.fingerprints'); }, key: 'finger_name', width: 500 },
+      { get title() { return assetText('tasks.count'); }, dataIndex: 'cnt', key: 'cnt', width: 200 },
+      { get title() { return assetText('assets.discoveredLatestAtLabel'); }, dataIndex: 'save_date', key: 'save_date', width: 185, sorter: true }
     ]
   },
 
-
-  // 💡 新增：WIH (Web Info Hunter) Tab 的 1:1 配置
-// 💡 修复：WIH (Web Info Hunter) Tab 配置
   wih: {
     url: '/wih/',
     deleteUrl: '/wih/delete/',
@@ -1182,14 +1197,16 @@ const tabConfig = reactive({
       },
       { get label() { return assetText('tasks.content'); }, key: 'content', operator: '=' },
       { get label() { return assetText('tasks.sourceJs'); }, key: 'source', operator: '=' },
-      { get label() { return assetText('tasks.sourceWebsite'); }, key: 'site', operator: '=' }
+      { get label() { return assetText('tasks.sourceWebsite'); }, key: 'site', operator: '=' },
+      { get label() { return assetText('tasks.discoveredAt'); }, key: 'save_date', type: 'dateRange' }
     ],
     cols: [
       { get title() { return assetText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
       { get title() { return assetText('tasks.recordType'); }, dataIndex: 'record_type', key: 'record_type', width: 120 },
       { get title() { return assetText('tasks.content'); }, dataIndex: 'content', key: 'content', width: 250 },
       { get title() { return assetText('tasks.sourceJs'); }, key: 'wih_source', width: 450 },
-      { get title() { return assetText('tasks.sourceWebsite'); }, dataIndex: 'site', key: 'wih_site', width: 250 }
+      { get title() { return assetText('tasks.sourceWebsite'); }, dataIndex: 'site', key: 'wih_site', width: 250 },
+      { get title() { return assetText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   }
 });
@@ -1201,6 +1218,16 @@ const tabCache = createTabStateCache({
 });
 
 const columns = ref(tabConfig[effectiveTab.value]?.cols || tabConfig.site.cols);
+const sortState = reactive({ field: '', order: null });
+const tableColumns = computed(() => (columns.value || []).map(col => {
+  if (!col?.sorter) return col;
+  const colField = col.key || col.dataIndex;
+  return {
+    ...col,
+    get title() { return col.title; },
+    sortOrder: sortState.field === colField ? sortState.order : null
+  };
+}));
 
 const getAssetRowKey = (record) => record?._id || record?.id || record?.name || record?.cidr_ip;
 const selectedRowKeys = ref([]);
@@ -1229,13 +1256,13 @@ const handleBatchDelete = () => {
   const currentTab = effectiveTab.value;
   const config = tabConfig[currentTab];
   if (!config || !config.deleteUrl) {
-    message.warning(assetText('tasks.thisAssetCategoryDoesNotSupportDeletion'));
+    message.warning(assetText('tasks.thisAssetTypeDoesNotSupportBatchDeletion'));
     return;
   }
 
   const validKeys = selectedRowKeys.value.filter(key => key != null && key !== '');
   if (!validKeys.length) {
-    message.warning(assetText('tasks.pleaseSelectAtLeastOneRecord'));
+    message.warning(assetText('tasks.noDeletableAssetRecordsFoundRefreshThePage'));
     return;
   }
   if (validKeys.length > 500) {
@@ -1253,7 +1280,7 @@ const handleBatchDelete = () => {
       alertType: 'error',
       alertMessage: assetText('assets.globalCascadeDeleteWarningTitle'),
       alertDescription: assetText('assets.globalCascadeDeleteWarningDesc'),
-      summary: assetText('tasks.confirmDeleteSelectedRecords', { count: validKeys.length }),
+      summary: assetText('tasks.deleteTheSelectedRecordsCountFromType', { count: validKeys.length, type: currentTabLabel.value }),
       listHeading: assetText('assets.selectedRecordsWillBeDeleted'),
       items: selectedLabels,
       expandText: (total) => assetText('assets.expandAllCount', { count: total }),
@@ -1278,10 +1305,10 @@ const handleBatchDelete = () => {
           fetchOverviewCounts();
           fetchData();
         } else {
-          message.error(res.message || assetText('tasks.deleteFailed'));
+          message.error(res.message || assetText('tasks.deletionFailedLabel'));
         }
       } catch (e) {
-        message.error(assetText('tasks.deleteFailed'));
+        message.error(assetText('tasks.deletionFailedLabel'));
       }
     }
   });
@@ -1298,6 +1325,12 @@ const fetchData = async () => {
   try {
     const params = { page: pagination.current, size: pagination.pageSize };
     Object.assign(params, buildAssetFilterParams(searchForm.value, config.searchFields));
+    const orderParam = typeof sortState !== 'undefined' && typeof buildAssetSortOrder === 'function'
+      ? buildAssetSortOrder(sortState)
+      : '';
+    if (orderParam) {
+      params.order = orderParam;
+    }
     const res = await request.get(config.url, { params });
     // 竞态防御：若响应到达时 Tab 已切换，丢弃过期响应
     if (effectiveTab.value !== currentReqTab) return;
@@ -1310,7 +1343,7 @@ const fetchData = async () => {
         if (pagination.current > maxPage) {
           pagination.current = maxPage;
           lastFetchedPage = maxPage;
-          tabCache.saveCurrentTab(currentTab, searchForm.value, maxPage);
+          tabCache.saveCurrentTab(currentTab, searchForm.value, maxPage, typeof sortState !== 'undefined' ? { ...sortState } : undefined);
           return await fetchData();
         }
       }
@@ -1320,7 +1353,7 @@ const fetchData = async () => {
       lastFetchedSize = pagination.pageSize;
       selectionTracker.rememberRows(items, getAssetRowKey, (row) => getAssetRecordDisplayLabel(currentTab, row));
       tabCache.updateMemoryCache(currentTab, dataSource.value, pagination.total, pagination.pageSize);
-      tabCache.saveCurrentTab(currentTab, searchForm.value, pagination.current);
+      tabCache.saveCurrentTab(currentTab, searchForm.value, pagination.current, typeof sortState !== 'undefined' ? { ...sortState } : undefined);
     }
   } catch (error) {
     if (effectiveTab.value === currentReqTab) {
@@ -1364,13 +1397,28 @@ const handleExport = async () => {
 
 const onSearch = () => {
   pagination.current = 1;
-  tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, 1);
+  tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, 1, typeof sortState !== 'undefined' ? { ...sortState } : undefined);
   fetchData();
 };
 const resetSearch = () => {
   searchForm.value = {};
+  if (typeof sortState !== 'undefined') {
+    sortState.field = '';
+    sortState.order = null;
+  }
   tabCache.resetTabState(effectiveTab.value);
   pagination.current = 1;
+  fetchData();
+};
+const handleTableSortChange = (_pag, _filters, sorter) => {
+  const next = extractTableSortState(sorter, 'save_date');
+  if (sortState.field === next.field && sortState.order === next.order) return;
+  sortState.field = next.field;
+  sortState.order = next.order;
+  pagination.current = 1;
+  lastFetchedPage = 1;
+  tabCache.invalidateMemoryCache(effectiveTab.value);
+  tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, 1, { ...sortState });
   fetchData();
 };
 const handleTableChange = (page, pageSize) => {
@@ -1400,7 +1448,7 @@ const handleTableChange = (page, pageSize) => {
 
 watch(activeTab, (newVal, oldVal) => {
   if (oldVal && tabConfig[oldVal] && !isHydrating.value) {
-    tabCache.saveCurrentTab(oldVal, searchForm.value, pagination.current);
+    tabCache.saveCurrentTab(oldVal, searchForm.value, pagination.current, { ...sortState });
   }
   clearSelection();
 
@@ -1408,9 +1456,12 @@ watch(activeTab, (newVal, oldVal) => {
   if (tabConfig[currentTab]) {
     columns.value = tabConfig[currentTab].cols;
 
-    // 恢复新选项卡的搜索表单、操作符与页码
+    // 恢复新选项卡的搜索表单、操作符、排序与页码
     searchForm.value = tabCache.getTabSearchForm(currentTab);
     tabCache.applyTabOperators(currentTab);
+    const savedSort = tabCache.getTabSort(currentTab);
+    sortState.field = savedSort.field;
+    sortState.order = savedSort.order;
     pagination.current = tabCache.getTabPage(currentTab);
 
     // 检查 URL query 是否为当前 Tab 提供了下钻参数覆盖
@@ -1461,6 +1512,9 @@ onMounted(() => {
     columns.value = tabConfig[currentTab].cols;
     searchForm.value = tabCache.getTabSearchForm(currentTab);
     tabCache.applyTabOperators(currentTab);
+    const savedSort = tabCache.getTabSort(currentTab);
+    sortState.field = savedSort.field;
+    sortState.order = savedSort.order;
     pagination.current = tabCache.getTabPage(currentTab);
 
     // 若 URL query 有额外搜索参数，覆盖进 searchForm 并保存
@@ -1521,8 +1575,10 @@ const targetCount = ref(0);
 const currentResultSetId = ref('');
 
 const openRiskModal = async () => {
-  targetCount.value = hasSelected.value ? selectedRowKeys.value.length : pagination.total;
+  const selectedIds = hasSelected.value ? selectedRowKeys.value.filter(k => k != null && k !== '') : [];
+  targetCount.value = selectedIds.length > 0 ? selectedIds.length : pagination.total;
   if (targetCount.value === 0) return message.warning(assetText('tasks.noAssetTargetsAreAvailableForScanning'));
+  if (selectedIds.length > 500) return message.warning(assetText('assets.maxBatchDeleteLimitNotice'));
 
   riskForm.policy_id = undefined;
   riskForm.name = '';
@@ -1531,10 +1587,11 @@ const openRiskModal = async () => {
 
   try {
     const policyPromise = request.get('/policy/', { params: { size: 1000 } });
-    const setParams = hasSelected.value
-      ? { _id: selectedRowKeys.value.join(',') }
-      : buildAssetFilterParams(searchForm.value, tabConfig[effectiveTab.value].searchFields);
-    const resultSetPromise = request.get('/site/save_result_set/', { params: setParams });
+    const resultSetPromise = selectedIds.length > 0
+      ? request.post('/site/save_result_set/', { _id: selectedIds })
+      : request.get('/site/save_result_set/', {
+          params: buildAssetFilterParams(searchForm.value, tabConfig[effectiveTab.value].searchFields)
+        });
     const [policyRes, resultSetRes] = await Promise.all([policyPromise, resultSetPromise]);
 
     if (policyRes.code === 200) {
@@ -1543,11 +1600,13 @@ const openRiskModal = async () => {
         label: formatRiskPolicyLabel(item, assetText)
       }));
     }
-    if (resultSetRes.code === 200) {
-      currentResultSetId.value = resultSetRes.data.result_set_id;
-      if (resultSetRes.data.result_total !== undefined) {
-        targetCount.value = resultSetRes.data.result_total;
-      }
+    if (resultSetRes.code !== 200 || !resultSetRes.data?.result_set_id) {
+      message.error({ content: resultSetRes.message || assetText('assets.failedToPrepareData'), key: 'risk_prepare', duration: 2 });
+      return;
+    }
+    currentResultSetId.value = resultSetRes.data.result_set_id;
+    if (resultSetRes.data.result_total !== undefined) {
+      targetCount.value = resultSetRes.data.result_total;
     }
 
     message.success({ content: assetText('assets.ready'), key: 'risk_prepare', duration: 2 });

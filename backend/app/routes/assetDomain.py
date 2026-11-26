@@ -22,8 +22,10 @@ base_search_fields = {
     'ips': fields.String(description="IP"),
     'source': fields.String(description="来源"),
     "task_id": fields.String(description="来源任务 ID"),
-    "update_date__dgt": fields.String(description="更新时间大于"),
-    "update_date__dlt": fields.String(description="更新时间小于"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
+    "update_date__dgt": fields.String(description="更新时间大于等于"),
+    "update_date__dlt": fields.String(description="更新时间小于等于"),
     'scope_id': fields.String(description="范围 ID")
 }
 

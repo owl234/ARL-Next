@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ARL-Next MCP 模块生产全链路自动化探活套件 (E2E Verification Suite)
+"""ARL-Next MCP 模块端到端自动化探活套件 (E2E Verification Suite)
 
 验证维度：
   1. 前端静态资产与直链分发 (/mcpCenter, /mcp/server.py)
   2. 后端 REST 治理 API (/api/mcp/overview, /api/mcp/config, /api/mcp/keys, /api/mcp/logs)
   3. 远程原生 MCP 协议握手与双向交互 (GET /mcp/sse + POST /mcp/message JSON-RPC)
-  4. MongoDB 审计日志落盘与微秒级延迟验证
-  5. 测试凭据与临时资源的自愈清理闭环
+  4. MongoDB 审计日志落盘与响应耗时记录验证
+  5. 测试凭据与临时资源的自动清理闭环
 """
 
 import os
@@ -64,7 +64,7 @@ def run_tests():
     host, token, basic_auth = resolve_target()
     ssl_ctx = make_ssl_ctx()
     print("=" * 60)
-    print(f"🚀 开始 ARL-Next MCP 生产全链路自动化探活")
+    print(f"🚀 开始 ARL-Next MCP 端到端自动化探活")
     print(f"🎯 目标主机: {host.split('://')[0]}://<CENSORED_HOST>")
     print("=" * 60)
 
@@ -446,7 +446,7 @@ def run_tests():
                 print(f"  ✗ 清理临时密钥失败: {e}")
 
     print("\n" + "=" * 60)
-    print("🎉 ARL-Next MCP 生产全链路所有 6 项探活验证全部通过！")
+    print("🎉 ARL-Next MCP 全部 6 项端到端探活验证通过！")
     print("=" * 60)
     return True
 

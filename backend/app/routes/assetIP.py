@@ -23,8 +23,10 @@ base_search_fields = {
     'os_info.name': fields.String(description="操作系统名称"),
 
     "task_id": fields.String(description="任务ID"),
-    "update_date__dgt": fields.String(description="更新时间大于"),
-    "update_date__dlt": fields.String(description="更新时间小于"),
+    "save_date__dgt": fields.String(description="发现时间大于等于"),
+    "save_date__dlt": fields.String(description="发现时间小于等于"),
+    "update_date__dgt": fields.String(description="更新时间大于等于"),
+    "update_date__dlt": fields.String(description="更新时间小于等于"),
     "scope_id": fields.String(description="资产范围ID"),
     "ip_type": fields.String(description="IP类型，公网(PUBLIC)和内网(PRIVATE)"),
     "cdn_name": fields.String(description="CDN 厂商名称"),

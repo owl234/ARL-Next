@@ -89,10 +89,11 @@ class RiskCruising(CommonTask):
         from app.services.service_fusion import sync_npoc_items_to_service_and_ip
         logger.info("start npoc_service_detection {}".format(len(self.sniffer_target_set)))
         result = npoc.run_sniffer(self.sniffer_target_set)
+        now_dt = utils.curr_date_obj()
         for item in result:
             self.npoc_service_target_set.add(item["target"])
             item["task_id"] = self.task_id
-            item["save_date"] = utils.curr_date()
+            item["save_date"] = now_dt
         if result:
             utils.safe_insert_asset_many('npoc_service', ['task_id', 'target'], result)
             sync_npoc_items_to_service_and_ip(self.task_id, result)
@@ -116,9 +117,10 @@ class RiskCruising(CommonTask):
 
         result = npoc_instance.result
         if result:
+            now_dt = utils.curr_date_obj()
             for item in result:
                 item["task_id"] = self.task_id
-                item["save_date"] = utils.curr_date()
+                item["save_date"] = now_dt
                 if "plg_name" in item:
                     item["plugin_name"] = item.get("plg_name")
                 if "target" in item:
@@ -145,9 +147,10 @@ class RiskCruising(CommonTask):
 
         result = npoc_instance.result
         if result:
+            now_dt = utils.curr_date_obj()
             for item in result:
                 item["task_id"] = self.task_id
-                item["save_date"] = utils.curr_date()
+                item["save_date"] = now_dt
                 if "plg_name" in item:
                     item["plugin_name"] = item.get("plg_name")
                 if "target" in item:
@@ -247,5 +250,7 @@ class RiskCruising(CommonTask):
             except Exception as e:
                 self.update_task_field("status", TaskStatus.ERROR)
                 self.update_task_field("end_time", utils.curr_date())
+                from app.utils.task_statistics import flush_task_statistic_safely
+                flush_task_statistic_safely(self.task_id, logger)
                 logger.exception(e)
 

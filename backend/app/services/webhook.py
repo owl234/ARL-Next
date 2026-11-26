@@ -230,11 +230,21 @@ class NucleiVulnWebHook(BaseAssetWebHook):
         return {k: raw.get(k) for k in allowed if k in raw}
 
     def _serialize_results(self):
+        import datetime
         serialized = []
         for item in self.nuclei_results[:self.limit_num]:
             if not isinstance(item, dict):
                 continue
-            serialized.append({k: item.get(k) for k in self._RESULT_FIELDS if k in item})
+            row = {}
+            for k in self._RESULT_FIELDS:
+                if k in item:
+                    val = item.get(k)
+                    if k == "save_date" and isinstance(val, datetime.datetime):
+                        dt = val.astimezone().replace(tzinfo=None) if val.tzinfo is not None else val
+                        row[k] = dt.replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+                    else:
+                        row[k] = val
+            serialized.append(row)
         return serialized
 
     def build_data(self):

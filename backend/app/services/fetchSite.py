@@ -89,16 +89,17 @@ class FetchSite(BaseThread):
         except Exception:
             pass
 
-        # 若根路径请求失败或返回错误（status >= 400），且属于网关端口或 HTTPS 协议，触发网关回退探测
-        from .checkHTTP import GATEWAY_PORTS, GATEWAY_PATHS
+        # 若根路径请求失败或返回错误（status >= 400），且属于网关端口或 HTTPS 协议，触发网关回退探测（排除 418/421 网关拒收）
+        from .checkHTTP import GATEWAY_PORTS, GATEWAY_PATHS, GATEWAY_REJECT_STATUS_CODES
         path = parsed.path or "/"
         is_root = (path == "/" or path == "")
         port = parsed.port or (443 if is_https else 80)
         is_candidate_for_fallback = is_https or (port in GATEWAY_PORTS)
         is_error = (conn is None) or (conn.status_code >= 400)
+        is_gateway_reject = (conn is not None) and (conn.status_code in GATEWAY_REJECT_STATUS_CODES)
 
         effective_url = site
-        if is_root and is_candidate_for_fallback and is_error:
+        if is_root and is_candidate_for_fallback and is_error and not is_gateway_reject:
             base_url = f"{parsed.scheme}://{parsed.netloc}"
             for gpath in GATEWAY_PATHS:
                 probe_url = base_url + gpath
@@ -128,6 +129,7 @@ class FetchSite(BaseThread):
         except Exception:
             body_simhash = ""
 
+        skip_favicon = is_gateway_reject and len(conn.content or b"") == 0
         item = {
             "site": site[:200],
             "hostname": hostname,
@@ -139,7 +141,7 @@ class FetchSite(BaseThread):
             "body_length": len(conn.content),
             "simhash": body_simhash,
             "finger": [],
-            "favicon": fetch_favicon(effective_url, html_content=conn.content)
+            "favicon": {} if skip_favicon else fetch_favicon(effective_url, html_content=conn.content)
         }
 
         self.fetch_fingerprint(item, content=conn.content)

@@ -417,11 +417,12 @@ def sync_service_from_site(task_id, site_info_list):
                     product=final_prod,
                     version=final_ver,
                     sources=final_sources,
-                    save_date=(existing_ep.get("save_date") if existing_ep else None) or utils.curr_date(),
+                    save_date=utils.to_datetime_obj(existing_ep.get("save_date") if existing_ep else None) or utils.curr_date_obj(),
                 )
+                saved_dt = ep_doc.pop("save_date", None) or utils.curr_date_obj()
                 utils.conn_db('service').update_one(
                     {"task_id": task_id, "ip": ip, "port_id": port},
-                    {"$set": ep_doc},
+                    {"$set": ep_doc, "$setOnInsert": {"save_date": saved_dt}},
                     upsert=True,
                 )
 
@@ -608,11 +609,16 @@ class WebSiteFetch(object):
         logger.info("save_site_info site:{}, {}".format(len(self.site_info_list), self.__str__()))
         if self.site_info_list:
             from pymongo import UpdateOne
+            now_dt = utils.curr_date_obj()
             operations = []
             for info in self.site_info_list:
+                save_dt = utils.to_datetime_obj(info.get("save_date")) or now_dt
+                info["save_date"] = save_dt
+                set_doc = dict(info)
+                set_doc.pop("save_date", None)
                 operations.append(UpdateOne(
                     {'task_id': info['task_id'], 'site': info['site']},
-                    {'$set': info},
+                    {'$set': set_doc, '$setOnInsert': {'save_date': save_dt}},
                     upsert=True
                 ))
             if operations:
@@ -636,9 +642,11 @@ class WebSiteFetch(object):
         services.site_screenshot(capture_targets, concurrency=4, capture_dir=capture_save_dir)
 
     def site_spider(self):
-        # *** 执行静态爬虫
+        # *** 执行静态爬虫（跳过泛解析/默认后端阻断集合）
         entry_urls_list = []  # 是一个二维数组
         for site in self.available_sites:
+            if self._is_catch_all_site(site):
+                continue
             o = urlparse(site)
             if o.path != "":
                 continue
@@ -646,6 +654,9 @@ class WebSiteFetch(object):
             entry_urls = [site]
             entry_urls.extend(self.search_engines_result.get(site, []))
             entry_urls_list.append(entry_urls)
+
+        if not entry_urls_list:
+            return
 
         site_spider_result = services.site_spider_thread(entry_urls_list)
         spider_urls = []
@@ -726,7 +737,8 @@ class WebSiteFetch(object):
         try:
             conn = utils.http_req(url, headers={"Host": host_header},
                                   timeout=self.CATCH_ALL_CONTROL_TIMEOUT,
-                                  allow_redirects=True, verify=False)
+                                  allow_redirects=True, verify=False,
+                                  proxy_domain="scan")
         except Exception:
             return None
 
@@ -812,39 +824,11 @@ class WebSiteFetch(object):
 
         return snap1
 
-    GENERIC_SERVERS = {
-        "nginx", "apache", "iis", "tengine", "openresty", "lighttpd", "caddy",
-        "microsoft-iis", "apache-http-server", "apache-httpd", "byte-nginx",
-        "apache2 debian 默认页", "apache2 ubuntu 默认页", "iis 默认页"
-    }
-
-    INFRA_TOKENS = {
-        "cdn", "waf", "proxy", "gateway", "alb", "slb", "elb", "tlb", "clb", "nlb",
-        "volcalb", "loadbalancer", "cloudflare", "akamai", "fastly", "imperva",
-        "incapsula", "envoy", "traefik", "haproxy", "squid", "varnish", "kong"
-    }
-
-    VENDOR_TOKENS = {
-        "bytedance", "aliyun", "tencent", "baidu", "huawei", "cloud", "aws",
-        "azure", "google", "microsoft", "volcengine", "volc"
-    }
-
-    NOISE_TOKENS = {"server", "service", "vhost", "default", "edge"}
-
     @classmethod
     def _is_infra_fingerprint(cls, name):
-        """判定指纹是否属于基础设施（CDN/WAF/网关/负载均衡/通用Web服务器），此类指纹不能作为业务特赦凭据"""
-        if not name or not isinstance(name, str):
-            return False
-        lower = name.lower().strip()
-        if lower in cls.GENERIC_SERVERS:
-            return True
-        tokens = set(re.split(r"[\s\-_/]+", lower))
-        if tokens.intersection(cls.INFRA_TOKENS):
-            non_infra = tokens - cls.INFRA_TOKENS - cls.VENDOR_TOKENS - cls.NOISE_TOKENS
-            if not non_infra:
-                return True
-        return False
+        """判定指纹是否属于基础设施（CDN/WAF/网关/负载均衡/通用Web服务器），统一复用 autoTag 单一事实源"""
+        from app.services.autoTag import is_infra_fingerprint
+        return is_infra_fingerprint(name)
 
     @classmethod
     def _has_business_amnesty(cls, item):
@@ -951,13 +935,21 @@ class WebSiteFetch(object):
             scheme = parsed.scheme or "http"
             port = parsed.port or (443 if scheme == "https" else 80)
             hostname = item.get("hostname") or parsed.hostname or ""
-            entry = entry_map.setdefault((ip, scheme, port), {"hostname": hostname, "items": []})
+            entry_key = (ip, scheme, port)
+            entry = entry_map.get(entry_key)
+            if entry is None:
+                entry = {"hostname": hostname, "items": []}
+                entry_map[entry_key] = entry
+            elif not self._wildcard_parent(entry["hostname"]) and self._wildcard_parent(hostname):
+                # 若同入口首条为裸 IP，后续遇到真实域名时自动回填，避免跳过整个入口的双探针对照
+                entry["hostname"] = hostname
             entry["items"].append(item)
 
         if not entry_map:
             return
 
-        entries = list(entry_map.items())[:self.CATCH_ALL_CONTROL_MAX_ENTRY]
+        # 优先探测站点数最多的入口（Python sort 稳定，同数量保持原有顺序）
+        entries = sorted(entry_map.items(), key=lambda kv: len(kv[1]["items"]), reverse=True)[:self.CATCH_ALL_CONTROL_MAX_ENTRY]
 
         def _probe(idx):
             (ip, scheme, port), entry = entries[idx]
@@ -1023,22 +1015,44 @@ class WebSiteFetch(object):
             logger.info("filter_catch_all_by_control_probe: probed {} entries, marked {} default-backend sites".format(
                 len(entries), marked_cnt))
 
+    def _items_body_equivalent(self, item_a, item_b) -> bool:
+        """判定两个同状态码错误响应的正文是否等价（空体一致或 SimHash 汉明距离在阈值内）"""
+        len_a = item_a.get("body_length")
+        if len_a is None:
+            len_a = len(item_a.get("content", b"")) if "content" in item_a else 0
+        len_b = item_b.get("body_length")
+        if len_b is None:
+            len_b = len(item_b.get("content", b"")) if "content" in item_b else 0
+
+        if int(len_a) == 0 and int(len_b) == 0:
+            return True
+
+        sim_a = item_a.get("simhash") or ""
+        sim_b = item_b.get("simhash") or ""
+        if sim_a and sim_b:
+            return self._simhash_within_distance(sim_a, sim_b)
+
+        return abs(int(len_a) - int(len_b)) <= 50
+
     def filter_catch_all_vhost(self):
         """
         第二道防线：对抓取到的站点结果进行默认后端/泛解析反代去噪与聚类兜底。
-        针对状态码 {400, 403, 404, 500, 502, 503, 504}，按 (ip, status, length_bin, title) 聚类。
-        当聚类数量 >= 10 时，保留第 1 个作为代表站点打标，其余剔除，并在下游扫描中全面阻断。
+        1. 单 IP 聚类：针对状态码 {400, 403, 404, 418, 421, 500, 502, 503, 504}，按 (ip, status, length_bin, title) 聚类，>= 10 收敛为 1 条代表站点；
+        2. 全任务跨 IP 聚类兜底：应对 CDN 多节点分散场景，按 (status, length_bin, title, http_server) 且正文 SimHash 一致（或均空体）跨 IP 聚合，>= 10 收敛为 1 条代表站点并在全部下游阻断。
         """
         if not self.site_info_list:
             return
 
-        target_status_codes = {400, 403, 404, 500, 502, 503, 504}
+        should_block = True
+        if hasattr(self, 'options') and isinstance(self.options, dict):
+            should_block = self.options.get("block_catch_all", True)
+
+        target_status_codes = {400, 403, 404, 418, 421, 500, 502, 503, 504}
         clusters = defaultdict(list)
 
         for item in self.site_info_list:
-            # 已经由首道防线（对照探针）处理过的默认后端跳过，避免重复聚类；
+            # 已经由首道防线（对照探针）处理过的默认后端跳过，避免重复单 IP 聚类；
             # 具备业务特赦的站点享有绝对豁免权，严禁被第二层粗粒度聚类误杀 (Fix Issue #49)
-            # (同时覆盖 MAX_ENTRY 截断未入探针、网络超时未建基准的极端边界场景)
             if item.get("is_catch_all") or self._has_business_amnesty(item):
                 continue
 
@@ -1093,7 +1107,81 @@ class WebSiteFetch(object):
                 for d_item in site_items[1:]:
                     d_site = d_item.get("site")
                     if d_site:
-                        discarded_sites_set.add(d_site)
+                        if should_block:
+                            discarded_sites_set.add(d_site)
+                        self.catch_all_sites.add(d_site)
+                        cut_d = utils.url.cut_filename(d_site)
+                        if cut_d:
+                            self.catch_all_sites.add(cut_d)
+
+        # 跨 IP 聚合兜底：针对 CDN 多边缘 IP 分散返回完全相同默认错误页的场景（不豁免已打标 catch_all 的跨 IP 冗余代表，统一收口为 1 条）
+        cross_ip_buckets = defaultdict(list)
+        for item in self.site_info_list:
+            site = item.get("site")
+            if site and site in discarded_sites_set:
+                continue
+            if self._has_business_amnesty(item):
+                continue
+
+            status = item.get("status")
+            if status not in target_status_codes:
+                continue
+
+            body_len = item.get("body_length")
+            if body_len is None:
+                body_len = len(item.get("content", b"")) if "content" in item else 0
+            length_bin = int(body_len / 100) * 100
+            title = (item.get("title") or "").strip()
+            http_server = (item.get("http_server") or "").strip().lower()
+            cross_ip_buckets[(status, length_bin, title, http_server)].append(item)
+
+        cross_ip_discarded = 0
+        for (status, _length_bin, _title, _http_server), bucket_items in cross_ip_buckets.items():
+            if len(bucket_items) < 10:
+                continue
+
+            # 桶内按正文等价性（均为空体或 SimHash 接近）细分子簇
+            sub_clusters = []
+            for item in bucket_items:
+                placed = False
+                for sc in sub_clusters:
+                    if self._items_body_equivalent(item, sc[0]):
+                        sc.append(item)
+                        placed = True
+                        break
+                if not placed:
+                    sub_clusters.append([item])
+
+            for sc in sub_clusters:
+                if len(sc) < 10:
+                    continue
+                rep = sc[0]
+                if "tag" not in rep or not isinstance(rep.get("tag"), list):
+                    rep["tag"] = []
+                if "catch_all_vhost" not in rep["tag"]:
+                    rep["tag"].append("catch_all_vhost")
+                rep["is_catch_all"] = True
+                rep["catch_all_evidence"] = {
+                    "mode": "cross_ip_cluster",
+                    "cluster_size": len(sc),
+                    "distinct_ips": len({x.get("ip") for x in sc if x.get("ip")}),
+                    "status": status,
+                    "http_server": rep.get("http_server") or "",
+                }
+
+                rep_site = rep.get("site")
+                if rep_site:
+                    self.catch_all_sites.add(rep_site)
+                    cut_rep = utils.url.cut_filename(rep_site)
+                    if cut_rep:
+                        self.catch_all_sites.add(cut_rep)
+
+                for d_item in sc[1:]:
+                    d_site = d_item.get("site")
+                    if d_site:
+                        if should_block:
+                            discarded_sites_set.add(d_site)
+                            cross_ip_discarded += 1
                         self.catch_all_sites.add(d_site)
                         cut_d = utils.url.cut_filename(d_site)
                         if cut_d:
@@ -1103,7 +1191,8 @@ class WebSiteFetch(object):
             self.site_info_list = [s for s in self.site_info_list if s.get("site") not in discarded_sites_set]
             if self.available_sites:
                 self.available_sites = [s for s in self.available_sites if s not in discarded_sites_set]
-            logger.info("filter_catch_all_vhost: filtered {} redundant default vhost sites, retained representative sites".format(len(discarded_sites_set)))
+            logger.info("filter_catch_all_vhost: filtered {} redundant default vhost sites (cross_ip={}), retained representative sites".format(
+                len(discarded_sites_set), cross_ip_discarded))
 
     def fetch_site(self):
         # ***站点信息获取***
@@ -1168,9 +1257,10 @@ class WebSiteFetch(object):
 
         result = run_risk_cruising(plugins=plugins, targets=poc_targets)
         if result:
+            now_dt = utils.curr_date_obj()
             for item in result:
                 item["task_id"] = self.task_id
-                item["save_date"] = utils.curr_date()
+                item["save_date"] = now_dt
                 if "plg_name" in item:
                     item["plugin_name"] = item.get("plg_name")
                 if "target" in item:
@@ -1243,9 +1333,10 @@ class WebSiteFetch(object):
         else:
             scan_results = nuclei_scan(list(self.poc_sites), options=self.options)
         if scan_results:
+            now_dt = utils.curr_date_obj()
             for item in scan_results:
                 item["task_id"] = self.task_id
-                item["save_date"] = utils.curr_date()
+                item["save_date"] = now_dt
             utils.safe_insert_asset_many('nuclei_result', ['task_id', 'template_id', 'host'], scan_results)
 
         logger.info("end nuclei_scan， result:{}".format(len(scan_results)))
@@ -1296,7 +1387,17 @@ class WebSiteFetch(object):
             self.wih_domain_set.add(record.content)
 
     def run_web_info_hunter(self):
-        records = set(services.run_wih(self.sites))
+        candidate_sites = getattr(self, "available_sites", None)
+        if candidate_sites is None:
+            candidate_sites = getattr(self, "sites", [])
+        is_catch_all = getattr(self, "_is_catch_all_site", None)
+        if callable(is_catch_all):
+            wih_targets = [site for site in candidate_sites if not is_catch_all(site)]
+        else:
+            wih_targets = list(candidate_sites)
+        if not wih_targets:
+            return
+        records = set(services.run_wih(wih_targets))
         all_items = []
         for record in records:
             # 先判断记录是否已经存在

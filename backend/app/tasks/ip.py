@@ -203,7 +203,7 @@ class IPTask(CommonTask):
         from app.services.service_fusion import build_service_endpoint_doc
         self.service_info_list = []
         seen_endpoints = set()
-        now_str = utils.curr_date()
+        now_dt = utils.curr_date_obj()
         for _data in self.ip_info_list:
             ip_val = _data.get("ip")
             port_info_list = _data.get("port_info") or []
@@ -220,7 +220,7 @@ class IPTask(CommonTask):
                         product=_info.get("product") or "",
                         version=_info.get("version") or "",
                         sources=["nmap"],
-                        save_date=now_str,
+                        save_date=now_dt,
                     )
                     ep_key = (ep_doc["ip"], ep_doc["port_id"])
                     if ep_key in seen_endpoints:
@@ -242,10 +242,11 @@ class IPTask(CommonTask):
                 targets.append("{}:{}".format(ip_info["ip"], port_info["port_id"]))
 
         result = run_sniffer(targets)
+        now_dt = utils.curr_date_obj()
         for item in result:
             self.npoc_service_target_set.add(item["target"])
             item["task_id"] = self.task_id
-            item["save_date"] = utils.curr_date()
+            item["save_date"] = now_dt
         if result:
             utils.safe_insert_asset_many('npoc_service', ['task_id', 'target'], result)
             sync_npoc_items_to_service_and_ip(self.task_id, result)
@@ -264,9 +265,10 @@ class IPTask(CommonTask):
         targets += list(self.npoc_service_target_set)
         result = run_risk_cruising(targets=targets, plugins=plugins)
         if result:
+            now_dt = utils.curr_date_obj()
             for item in result:
                 item["task_id"] = self.task_id
-                item["save_date"] = utils.curr_date()
+                item["save_date"] = now_dt
             utils.safe_insert_asset_many('vuln', ['task_id', 'target', 'plugin_name'], result)
 
     def run(self):
@@ -367,3 +369,5 @@ def ip_task(ip_target, task_id, options):
         d.base_update_task.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         d.base_update_task.update_task_field("status", TaskStatus.ERROR)
         d.base_update_task.update_task_field("end_time", utils.curr_date())
+        from app.utils.task_statistics import flush_task_statistic_safely
+        flush_task_statistic_safely(task_id, logger)

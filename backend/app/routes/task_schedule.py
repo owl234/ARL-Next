@@ -252,20 +252,29 @@ class RunARLTaskScheduler(ARLResource):
         立即执行计划任务
         """
         args = self.parse_args(run_task_schedule_fields)
-        job_id_list = args.get("_id", [])
+        job_id_list = args.get("_id") or []
 
         ret_data = {"_id": job_id_list}
+        if not isinstance(job_id_list, list) or len(job_id_list) == 0:
+            return utils.build_ret({"code": 400, "message": "请提供有效的计划任务 ID 列表"}, ret_data)
 
+        clean_ids = []
         for scheduler_id in job_id_list:
-            item = task_schedule.find_task_schedule(scheduler_id)
+            if not isinstance(scheduler_id, str) or not ObjectId.is_valid(scheduler_id.strip()):
+                return utils.build_ret(ErrorMsg.TaskScheduleNotFound, {"_id": scheduler_id})
+            sid = scheduler_id.strip()
+            item = task_schedule.find_task_schedule(sid)
             if not item:
                 return utils.build_ret(ErrorMsg.TaskScheduleNotFound, ret_data)
+            clean_ids.append(sid)
 
-        for scheduler_id in job_id_list:
+        for scheduler_id in clean_ids:
             res = task_schedule.run_task_schedule(scheduler_id)
+            if res is None:
+                return utils.build_ret(ErrorMsg.TaskScheduleNotFound, {"_id": scheduler_id})
             if isinstance(res, str):
                 return utils.build_ret(ErrorMsg.Error, {"error": res})
 
-        return utils.build_ret(ErrorMsg.Success, ret_data)
+        return utils.build_ret(ErrorMsg.Success, {"_id": clean_ids})
 
 

@@ -223,12 +223,13 @@
         :row-selection="canSelectAssets ? { selectedRowKeys: selectedRowKeys, onChange: onSelectChange, preserveSelectedRowKeys: true } : null"
         :loading="loading"
         :dataSource="dataSource"
-        :columns="columns"
+        :columns="tableColumns"
         :pagination="false"
         :scroll="pagination.pageSize >= 100 ? { y: 'calc(100vh - 380px)', x: 'max-content' } : { x: 'max-content' }"
         :virtual="pagination.pageSize >= 100"
         size="small"
         :rowKey="getAssetRowKey"
+        @change="handleTableSortChange"
     >
       <template #bodyCell="{ column, record, index }">
 
@@ -498,8 +499,12 @@
             >{{ src === 'npoc' ? taskText('tasks.pythonPluginServices') : 'Nmap' }}</a-tag>
           </div>
         </template>
-        <template v-else-if="column.key === 'service_time'">
-          <span>{{ record.update_date || record.save_date || record.insert_time || '-' }}</span>
+        <template v-else-if="column.key === 'save_date' || column.key === 'service_time'">
+          <AssetTimeCell
+            :record="record"
+            :show-secondary="!taskId && ['service', 'cip', 'stat_finger'].includes(effectiveTab)"
+            secondary-mode="latest"
+          />
         </template>
 
         <template v-else-if="column.key === 'template_id'">
@@ -728,8 +733,9 @@ import { useRoute, useRouter } from 'vue-router';
 import request from '../utils/request';
 import { isCustomNucleiResult, isHttpUrl, formatRiskPolicyLabel } from '../utils/nucleiHelpers';
 import AuthenticatedImage from '../components/AuthenticatedImage.vue';
+import AssetTimeCell from '../components/AssetTimeCell.vue';
 import HttpStatusFilter from '../components/HttpStatusFilter.vue';
-import { formatAssetFilterOperator, buildAssetFilterParams } from '../utils/assetFilters';
+import { formatAssetFilterOperator, buildAssetFilterParams, buildAssetSortOrder, extractTableSortState } from '../utils/assetFilters';
 import { message, Modal } from 'ant-design-vue';
 import {
   ArrowLeftOutlined,
@@ -1143,8 +1149,9 @@ const tabConfig = reactive({
       { get title() { return taskText('tasks.websites'); }, key: 'site', width: 250 },
       { get title() { return taskText('tasks.statusCode'); }, dataIndex: 'status', key: 'status', width: 100, align: 'center' },
       { get title() { return taskText('tasks.title'); }, dataIndex: 'title', key: 'title', width: 200 },
-      { get title() { return taskText('tasks.headers'); }, key: 'headers',width: 500},
+      { get title() { return taskText('tasks.headers'); }, key: 'headers', width: 500 },
       { get title() { return taskText('tasks.fingerprints'); }, key: 'finger', width: 150 },
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true },
       { get title() { return taskText('tasks.screenshot'); }, key: 'screenshot', width: 280 }
     ]
   },
@@ -1167,7 +1174,8 @@ const tabConfig = reactive({
       { get title() { return taskText('tasks.dnsRecordType'); }, dataIndex: 'type', key: 'type', width: 120 },
       { get title() { return taskText('tasks.recordValue'); }, key: 'record', width: 300 },
       { get title() { return taskText('tasks.associatedIps'); }, key: 'ips', width: 250 },
-      { get title() { return taskText('tasks.source'); }, dataIndex: 'source', key: 'source', width: 150 }
+      { get title() { return taskText('tasks.source'); }, dataIndex: 'source', key: 'source', width: 150 },
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
   ip: {
@@ -1203,7 +1211,8 @@ const tabConfig = reactive({
       { get title() { return taskText('tasks.associatedDomains'); }, key: 'domain', width: 250 },
       { get title() { return taskText('tasks.cdnStatus'); }, key: 'ip_cdn_tag', width: 150 },
       { get title() { return taskText('tasks.geoLocation'); }, key: 'geo_city', width: 180 },
-      { title: 'AS', key: 'geo_asn', width: 280 }
+      { title: 'AS', key: 'geo_asn', width: 280 },
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
   cert: {
@@ -1222,7 +1231,8 @@ const tabConfig = reactive({
       { get title() { return taskText('tasks.no'); }, key: 'index', width: 60, align: 'center' },
       { get title() { return taskText('tasks.changeStatus'); }, key: 'change_status', width: 100, align: 'center' },
       { get title() { return taskText('tasks.host'); }, key: 'host', width: 180 },
-      { get title() { return taskText('tasks.sslCertificateInformation'); }, key: 'cert_detail', width: 900 }
+      { get title() { return taskText('tasks.sslCertificateInformation'); }, key: 'cert_detail', width: 900 },
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
   service: {
@@ -1255,7 +1265,7 @@ const tabConfig = reactive({
       { get title() { return taskText('tasks.product'); }, key: 'product', width: 220 },
       { get title() { return taskText('tasks.version'); }, key: 'version', width: 140 },
       { get title() { return taskText('tasks.source'); }, key: 'service_sources', width: 180 },
-      { get title() { return taskText('tasks.savedAt'); }, key: 'service_time', width: 170 }
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
   fileleak: {
@@ -1273,7 +1283,8 @@ const tabConfig = reactive({
       { title: 'URL', key: 'fileleak_url', width: 500 },
       { get title() { return taskText('tasks.title'); }, dataIndex: 'title', key: 'title', width: 250 },
       { get title() { return taskText('tasks.statusCode'); }, dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
-      { get title() { return taskText('tasks.bodyLength'); }, dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' }
+      { get title() { return taskText('tasks.bodyLength'); }, dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' },
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
   url: {
@@ -1316,7 +1327,8 @@ const tabConfig = reactive({
       { get title() { return taskText('tasks.title'); }, dataIndex: 'title', key: 'title', width: 200 },
       { get title() { return taskText('tasks.statusCode'); }, dataIndex: 'status_code', key: 'status_code', width: 100, align: 'center' },
       { get title() { return taskText('tasks.bodyLength'); }, dataIndex: 'content_length', key: 'content_length', width: 120, align: 'center' },
-      { get title() { return taskText('tasks.source'); }, dataIndex: 'source', key: 'source', width: 150 }
+      { get title() { return taskText('tasks.source'); }, dataIndex: 'source', key: 'source', width: 150 },
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
   vuln: {
@@ -1336,7 +1348,7 @@ const tabConfig = reactive({
       { get title() { return taskText('tasks.applicationName'); }, dataIndex: 'app_name', key: 'app_name', width: 150 },
       { get title() { return taskText('tasks.target'); }, dataIndex: 'target', key: 'target', width: 200 },
       { get title() { return taskText('tasks.credentials'); }, key: 'verify_data', width: 350 },
-      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'insert_time', key: 'insert_time', width: 160 }
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
   npoc_service: {
@@ -1357,7 +1369,7 @@ const tabConfig = reactive({
       { get title() { return taskText('tasks.host'); }, dataIndex: 'host', key: 'host', width: 200 },
       { get title() { return taskText('tasks.port'); }, dataIndex: 'port', key: 'port', width: 100, align: 'center' },
       { get title() { return taskText('tasks.target'); }, dataIndex: 'target', key: 'target', width: 250 },
-      { get title() { return taskText('tasks.savedAt'); }, dataIndex: 'insert_time', key: 'insert_time', width: 180 }
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
   cip: {
@@ -1374,7 +1386,8 @@ const tabConfig = reactive({
       { get title() { return taskText('tasks.changeStatus'); }, key: 'change_status', width: 100, align: 'center' },
       { get title() { return taskText('tasks.cClassNetworks'); }, dataIndex: 'cidr_ip', key: 'cidr_ip', width: 300 },
       { get title() { return taskText('tasks.ipCount'); }, key: 'ip_count_col', width: 150, align: 'center' },
-      { get title() { return taskText('tasks.domainCount'); }, key: 'domain_count_col', width: 150, align: 'center' }
+      { get title() { return taskText('tasks.domainCount'); }, key: 'domain_count_col', width: 150, align: 'center' },
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
   nuclei_result: {
@@ -1404,7 +1417,7 @@ const tabConfig = reactive({
       { get title() { return taskText('tasks.vulnerableUrl'); }, key: 'nuclei_vuln_url', width: 300 },
       { get title() { return taskText('tasks.vulnerabilityName'); }, dataIndex: 'vuln_name', key: 'vuln_name', width: 200 },
       { get title() { return taskText('tasks.severity'); }, dataIndex: 'vuln_severity', key: 'vuln_severity', width: 100, align: 'center' },
-      { get title() { return taskText('tasks.savedAt'); }, dataIndex: 'insert_time', key: 'insert_time', width: 160 },
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true },
       { get title() { return taskText('tasks.verificationCommand'); }, key: 'verify_command', width: 350 }
     ]
   },
@@ -1425,14 +1438,12 @@ const tabConfig = reactive({
     cols: [
       { get title() { return taskText('tasks.no'); }, key: 'index', width: 80, align: 'center' },
       { get title() { return taskText('tasks.changeStatus'); }, key: 'change_status', width: 100, align: 'center' },
-      { get title() { return taskText('tasks.fingerprints'); }, key: 'finger_name', width: 500 }, // 用专用 key 渲染青蓝字体
-      { get title() { return taskText('tasks.count'); }, dataIndex: 'cnt', key: 'cnt', width: 200 }
+      { get title() { return taskText('tasks.fingerprints'); }, key: 'finger_name', width: 500 },
+      { get title() { return taskText('tasks.count'); }, dataIndex: 'cnt', key: 'cnt', width: 200 },
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   },
 
-
-  // 💡 新增：WIH (Web Info Hunter) Tab 的 1:1 配置
-// 💡 修复：WIH (Web Info Hunter) Tab 配置
   wih: {
     url: '/wih/',
     deleteUrl: '/wih/delete/',
@@ -1456,7 +1467,8 @@ const tabConfig = reactive({
       { get title() { return taskText('tasks.recordType'); }, dataIndex: 'record_type', key: 'record_type', width: 120 },
       { get title() { return taskText('tasks.content'); }, dataIndex: 'content', key: 'content', width: 250 },
       { get title() { return taskText('tasks.sourceJs'); }, key: 'wih_source', width: 450 },
-      { get title() { return taskText('tasks.sourceWebsite'); }, dataIndex: 'site', key: 'wih_site', width: 250 }
+      { get title() { return taskText('tasks.sourceWebsite'); }, dataIndex: 'site', key: 'wih_site', width: 250 },
+      { get title() { return taskText('tasks.discoveredAt'); }, dataIndex: 'save_date', key: 'save_date', width: 170, sorter: true }
     ]
   }
 });
@@ -1464,7 +1476,7 @@ const tabConfig = reactive({
 // 任务视图查询任务结果集合；全局查看与同页其他页签一致，使用资产组集合。
 const resolveAssetEndpoint = (config) => (taskId.value ? config?.url : config?.globalUrl || config?.url);
 
-// 任务集合中的记录可按 ID 删除；指纹统计为聚合结果，全局视图为资产组集合。
+// 仅任务详情上下文（存在 taskId）允许按维度发起批量删除；全局查看回退资产组集合只读展示。
 const canDeleteAssets = computed(() => !!taskId.value && !!tabConfig[effectiveTab.value]?.deleteUrl);
 const canSelectAssets = computed(() => canDeleteAssets.value);
 const getAssetRowKey = (record) => record?._id || record?.id || record?.name || record?.cidr_ip;
@@ -1477,6 +1489,16 @@ const tabCache = createTabStateCache({
 });
 
 const columns = ref(tabConfig.site.cols);
+const sortState = reactive({ field: '', order: null });
+const tableColumns = computed(() => (columns.value || []).map(col => {
+  if (!col?.sorter) return col;
+  const colField = col.key || col.dataIndex;
+  return {
+    ...col,
+    get title() { return col.title; },
+    sortOrder: sortState.field === colField ? sortState.order : null
+  };
+}));
 
 // 加载数据 (兼容单任务与全局查看)
 const fetchData = async (isPolling = false) => {
@@ -1501,6 +1523,12 @@ const fetchData = async (isPolling = false) => {
     }
 
     Object.assign(params, buildAssetFilterParams(searchForm.value, config.searchFields));
+    const orderParam = typeof sortState !== 'undefined' && typeof buildAssetSortOrder === 'function'
+      ? buildAssetSortOrder(sortState)
+      : '';
+    if (orderParam) {
+      params.order = orderParam;
+    }
 
     const res = await request.get(resolveAssetEndpoint(config), { params });
     // 竞态防御：若响应到达时 Tab 已切换，丢弃过期响应
@@ -1514,7 +1542,7 @@ const fetchData = async (isPolling = false) => {
         if (clampedPage !== pagination.current) {
           pagination.current = clampedPage;
           lastFetchedPage = clampedPage;
-          tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, clampedPage);
+          tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, clampedPage, typeof sortState !== 'undefined' ? { ...sortState } : undefined);
           return fetchData(isPolling);
         }
       }
@@ -1528,7 +1556,7 @@ const fetchData = async (isPolling = false) => {
       lastFetchedPage = pagination.current;
       lastFetchedSize = pagination.pageSize;
       tabCache.updateMemoryCache(effectiveTab.value, dataSource.value, pagination.total, pagination.pageSize);
-      tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, pagination.current);
+      tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, pagination.current, typeof sortState !== 'undefined' ? { ...sortState } : undefined);
     }
   } catch (error) {
     if (!isPolling && effectiveTab.value === currentReqTab) {
@@ -1662,14 +1690,30 @@ const handleBatchDelete = () => {
 
 const onSearch = () => {
   pagination.current = 1;
-  tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, 1);
+  tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, 1, typeof sortState !== 'undefined' ? { ...sortState } : undefined);
   fetchData();
 };
 
 const resetSearch = () => {
   searchForm.value = {};
+  if (typeof sortState !== 'undefined') {
+    sortState.field = '';
+    sortState.order = null;
+  }
   tabCache.resetTabState(effectiveTab.value);
   pagination.current = 1;
+  fetchData();
+};
+
+const handleTableSortChange = (_pag, _filters, sorter) => {
+  const next = extractTableSortState(sorter, 'save_date');
+  if (sortState.field === next.field && sortState.order === next.order) return;
+  sortState.field = next.field;
+  sortState.order = next.order;
+  pagination.current = 1;
+  lastFetchedPage = 1;
+  tabCache.invalidateMemoryCache(effectiveTab.value);
+  tabCache.saveCurrentTab(effectiveTab.value, searchForm.value, 1, { ...sortState });
   fetchData();
 };
 
@@ -1817,7 +1861,7 @@ watch(activeTab, (newVal, oldVal) => {
   if (oldVal === 'syslog') {
     stopSyslogTimer();
   } else if (oldVal && tabConfig[oldVal] && !isHydrating.value) {
-    tabCache.saveCurrentTab(oldVal, searchForm.value, pagination.current);
+    tabCache.saveCurrentTab(oldVal, searchForm.value, pagination.current, { ...sortState });
   }
 
   if (newVal === 'syslog') {
@@ -1828,9 +1872,12 @@ watch(activeTab, (newVal, oldVal) => {
     columns.value = tabConfig[newVal].cols;
     clearSelection();
 
-    // 恢复新选项卡的搜索表单、操作符与页码
+    // 恢复新选项卡的搜索表单、操作符、排序与页码
     searchForm.value = tabCache.getTabSearchForm(newVal);
     tabCache.applyTabOperators(newVal);
+    const savedSort = tabCache.getTabSort(newVal);
+    sortState.field = savedSort.field;
+    sortState.order = savedSort.order;
     pagination.current = tabCache.getTabPage(newVal) || 1;
 
     // 检查内存数据缓存（传入 pagination.pageSize 进行容量匹配校验）
@@ -1879,6 +1926,9 @@ const reloadTaskData = () => {
       columns.value = tabConfig[effectiveTab.value].cols;
       searchForm.value = tabCache.getTabSearchForm(effectiveTab.value);
       tabCache.applyTabOperators(effectiveTab.value);
+      const savedSort = tabCache.getTabSort(effectiveTab.value);
+      sortState.field = savedSort.field;
+      sortState.order = savedSort.order;
       pagination.current = tabCache.getTabPage(effectiveTab.value) || 1;
 
       const cached = tabCache.getMemoryCache(effectiveTab.value, pagination.pageSize);
@@ -1934,6 +1984,12 @@ const openRiskModal = async () => {
     return;
   }
 
+  const selectedIds = hasSelected.value ? selectedRowKeys.value.filter(k => k != null && k !== '') : [];
+  if (selectedIds.length > 500) {
+    message.warning(taskText('assets.maxBatchDeleteLimitNotice'));
+    return;
+  }
+
   riskForm.policy_id = undefined;
   riskForm.name = '';
   currentResultSetId.value = '';
@@ -1943,14 +1999,17 @@ const openRiskModal = async () => {
   try {
     const policyPromise = request.get('/policy/', { params: { size: 1000 } });
 
-    const setParams = {};
-    if (hasSelected.value) {
-      setParams._id = selectedRowKeys.value.join(',');
+    let resultSetPromise;
+    if (selectedIds.length > 0) {
+      const payload = { _id: selectedIds };
+      if (taskId.value) payload.task_id = taskId.value;
+      resultSetPromise = request.post('/site/save_result_set/', payload);
     } else {
+      const setParams = {};
       if (taskId.value) setParams.task_id = taskId.value;
       Object.assign(setParams, buildAssetFilterParams(searchForm.value, tabConfig[effectiveTab.value].searchFields));
+      resultSetPromise = request.get('/site/save_result_set/', { params: setParams });
     }
-    const resultSetPromise = request.get('/site/save_result_set/', { params: setParams });
 
     const [policyRes, resultSetRes] = await Promise.all([policyPromise, resultSetPromise]);
 
@@ -1961,11 +2020,14 @@ const openRiskModal = async () => {
       }));
     }
 
-    if (resultSetRes.code === 200) {
-      currentResultSetId.value = resultSetRes.data.result_set_id;
-      if (resultSetRes.data.result_total !== undefined) {
-        targetCount.value = resultSetRes.data.result_total;
-      }
+    if (resultSetRes.code !== 200 || !resultSetRes.data?.result_set_id) {
+      message.error({ content: resultSetRes.message || taskText('tasks.failedToPrepareDataCheckTheConsole'), key: 'risk_prepare', duration: 2 });
+      return;
+    }
+
+    currentResultSetId.value = resultSetRes.data.result_set_id;
+    if (resultSetRes.data.result_total !== undefined) {
+      targetCount.value = resultSetRes.data.result_total;
     }
 
     message.success({ content: taskText('tasks.dataIsReady'), key: 'risk_prepare', duration: 2 });

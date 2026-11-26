@@ -34,6 +34,7 @@ class DomainSiteUpdate(object):
                 
             tag_monitor_diff("domain", domain_info)
             if domain_info.get("change_status") != "unchanged":
+                domain_info["save_date"] = utils.to_datetime_obj(domain_info.get("save_date")) or utils.curr_date_obj()
                 utils.conn_db('domain').insert_one(domain_info)
                 filtered_list.append(domain_info_obj)
 
@@ -85,11 +86,16 @@ class DomainSiteUpdate(object):
 
         if site_info_list:
             from pymongo import UpdateOne
+            now_dt = utils.curr_date_obj()
             operations = []
             for info in site_info_list:
+                save_dt = utils.to_datetime_obj(info.get("save_date")) or now_dt
+                info["save_date"] = save_dt
+                set_doc = dict(info)
+                set_doc.pop("save_date", None)
                 operations.append(UpdateOne(
                     {'task_id': info['task_id'], 'site': info['site']},
-                    {'$set': info},
+                    {'$set': set_doc, '$setOnInsert': {'save_date': save_dt}},
                     upsert=True
                 ))
             if operations:

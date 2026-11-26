@@ -181,7 +181,10 @@ class ScanPort(object):
 
     def get_cdn_name(self, ip, domain_info):
         cname = domain_info.record_list[0] if (domain_info.type == "CNAME" and domain_info.record_list) else ""
-        return utils.get_cdn_name_comprehensive(ip=ip, cname=cname, ip_count=len(domain_info.ip_list))
+        cdn_name = utils.get_cdn_name_comprehensive(ip=ip, cname=cname, ip_count=len(domain_info.ip_list))
+        if not cdn_name and getattr(domain_info, "domain", ""):
+            cdn_name = utils.get_cdn_name_by_domain_strict(domain_info.domain)
+        return cdn_name
 
     def run(self):
         for info in self.domain_info_list:
@@ -289,6 +292,14 @@ class FindSite(object):
             if curr_ip is None and isinstance(info, dict):
                 curr_ip = info.get('ip')
 
+            cdn_name = getattr(info, 'cdn_name', None)
+            if cdn_name is None and isinstance(info, dict):
+                cdn_name = info.get('cdn_name', '')
+
+            valid_domains = [str(d).strip() for d in domains if d and str(d).strip()]
+            # 域名任务中已识别为 CDN 且有关联域名时，跳过无 Host 头的裸 IP 站点探测（仍保留关联域名探测）
+            skip_bare_ip = bool(cdn_name) and bool(valid_domains)
+
             port_info_list = getattr(info, 'port_info_list', None)
             if port_info_list is None and isinstance(info, dict):
                 port_info_list = info.get('port_info_list', info.get('port_info', []))
@@ -310,13 +321,7 @@ class FindSite(object):
                 is_80 = (port_int == 80) or (str(port_id) == "80")
                 is_443 = (port_int == 443) or (str(port_id) == "443")
 
-                for domain in domains:
-                    if not domain:
-                        continue
-                    clean_domain = str(domain).strip()
-                    if not clean_domain:
-                        continue
-
+                for clean_domain in valid_domains:
                     if is_80:
                         url_temp_list.append("http://{}".format(clean_domain))
                     elif is_443:
@@ -325,7 +330,7 @@ class FindSite(object):
                         url_temp_list.append("http://{}:{}".format(clean_domain, port_id))
                         url_temp_list.append("https://{}:{}".format(clean_domain, port_id))
 
-                if curr_ip:
+                if curr_ip and not skip_bare_ip:
                     raw_ip = str(curr_ip).strip("[] \t\r\n")
                     if raw_ip:
                         ip_host = f"[{raw_ip}]" if ":" in raw_ip else raw_ip
@@ -712,6 +717,9 @@ class DomainTask(CommonTask):
             if utils.check_domain_black(domain):
                 continue
 
+            if utils.is_cdn_cname_routing_subdomain(domain, base_domain=self.base_domain):
+                continue
+
             fake = {
                 "domain": domain,
                 "type": "CNAME",
@@ -844,7 +852,7 @@ class DomainTask(CommonTask):
         from app.services.service_fusion import build_service_endpoint_doc
         self.service_info_list = []
         seen_endpoints = set()
-        now_str = utils.curr_date()
+        now_dt = utils.curr_date_obj()
         for _data in self.ip_info_list:
             port_info_list = _data.port_info_list
             for _info in port_info_list:
@@ -858,7 +866,7 @@ class DomainTask(CommonTask):
                         product=_info.product or "",
                         version=_info.version or "",
                         sources=["nmap"],
-                        save_date=now_str,
+                        save_date=now_dt,
                     )
                     ep_key = (ep_doc["ip"], ep_doc["port_id"])
                     if ep_key in seen_endpoints:
@@ -1111,7 +1119,7 @@ class DomainTask(CommonTask):
         for item in result:
             self.npoc_service_target_set.add(item["target"])
             item["task_id"] = self.task_id
-            item["save_date"] = utils.curr_date()
+            item["save_date"] = utils.curr_date_obj()
             utils.safe_insert_asset('npoc_service', ['task_id', 'target'], item)
         if result:
             sync_npoc_items_to_service_and_ip(self.task_id, result)
@@ -1148,7 +1156,7 @@ class DomainTask(CommonTask):
         result = run_risk_cruising(targets=targets, plugins=plugins)
         for item in result:
             item["task_id"] = self.task_id
-            item["save_date"] = utils.curr_date()
+            item["save_date"] = utils.curr_date_obj()
             if "plg_name" in item:
                 item["plugin_name"] = item.get("plg_name")
             if "target" in item:
@@ -1175,7 +1183,7 @@ class DomainTask(CommonTask):
                                                             result["body_length"])
             save_item["verify_obj"] = result
             save_item["task_id"] = self.task_id
-            save_item["save_date"] = utils.curr_date()
+            save_item["save_date"] = utils.curr_date_obj()
             save_item["plugin_name"] = save_item["plg_name"]
             save_item["vuln_url"] = save_item["target"]
             utils.safe_insert_asset('vuln', ['task_id', 'vuln_url', 'plugin_name'], save_item)
@@ -1363,3 +1371,5 @@ def domain_task(base_domain, task_id, options):
         d.update_task_field("end_reason", f"核心阶段异常中断: {str(e)[:120]}")
         d.update_task_field("status", TaskStatus.ERROR)
         d.update_task_field("end_time", utils.curr_date())
+        from app.utils.task_statistics import flush_task_statistic_safely
+        flush_task_statistic_safely(task_id, logger)

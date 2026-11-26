@@ -8,6 +8,12 @@ _CACHE_LOCK = threading.Lock()
 _DNS_SERVER_CACHE = {"path": None, "mtime": None, "servers": ()}
 _RR_LOCK = threading.Lock()
 _RR_CURSOR = 0
+_HEALTH_LOCK = threading.Lock()
+_SERVER_HEALTH = {}
+
+_UNHEALTHY_FAIL_THRESHOLD = 2
+_COOLDOWN_BASE_SECONDS = 60.0
+_COOLDOWN_MAX_SECONDS = 300.0
 
 _TRANSIENT_ERRORS = (
     dns.exception.Timeout,
@@ -16,6 +22,72 @@ _TRANSIENT_ERRORS = (
     dns.exception.DNSException,
     OSError,
 )
+
+
+def reset_dns_server_health():
+    """清空上游 DNS 节点的内存健康状态（主要用于测试或重置）。"""
+    with _HEALTH_LOCK:
+        _SERVER_HEALTH.clear()
+
+
+def _record_server_success(server):
+    if not server:
+        return
+    with _HEALTH_LOCK:
+        if server in _SERVER_HEALTH:
+            _SERVER_HEALTH[server] = {"failures": 0, "cooldown_until": 0.0}
+
+
+def _record_server_failure(server, now=None):
+    if not server:
+        return
+    ts = time.monotonic() if now is None else now
+    with _HEALTH_LOCK:
+        entry = _SERVER_HEALTH.get(server)
+        failures = (entry["failures"] if entry else 0) + 1
+        cooldown_until = entry["cooldown_until"] if entry else 0.0
+        if failures >= _UNHEALTHY_FAIL_THRESHOLD:
+            backoff_exp = min(4, failures - _UNHEALTHY_FAIL_THRESHOLD)
+            cooldown = min(_COOLDOWN_MAX_SECONDS, _COOLDOWN_BASE_SECONDS * (2 ** backoff_exp))
+            cooldown_until = ts + cooldown
+        _SERVER_HEALTH[server] = {"failures": failures, "cooldown_until": cooldown_until}
+
+
+def _filter_healthy_servers(servers, now=None):
+    """过滤处于冷却期的故障 DNS 节点；若全部冷却则按冷却截止时间最早者兜底返回。"""
+    if not servers:
+        return ()
+    ts = time.monotonic() if now is None else now
+    with _HEALTH_LOCK:
+        healthy = []
+        cooled = []
+        for s in servers:
+            entry = _SERVER_HEALTH.get(s)
+            cd = entry["cooldown_until"] if entry else 0.0
+            if cd <= ts:
+                healthy.append(s)
+            else:
+                cooled.append((cd, s))
+    if healthy:
+        return tuple(healthy)
+    cooled.sort(key=lambda item: item[0])
+    return tuple(s for _, s in cooled)
+
+
+def _extract_failed_servers_from_exc(exc, batch):
+    """从 dnspython 异常的 errors 列表中提取实际超时或返回异常的 DNS 节点 IP。"""
+    if not batch:
+        return []
+    batch_set = set(batch)
+    failed = []
+    errors = getattr(exc, "kwargs", {}).get("errors") if hasattr(exc, "kwargs") else None
+    if isinstance(errors, (list, tuple)):
+        for err_item in errors:
+            if isinstance(err_item, (list, tuple)) and err_item:
+                ns = str(err_item[0])
+                if ns in batch_set and ns not in failed:
+                    failed.append(ns)
+    return failed
 
 
 def _load_dns_servers(dns_server_path=None):
@@ -69,13 +141,16 @@ def _next_cursor():
 
 
 def _select_nameservers(servers, attempt=0, batch_size=4):
-    """每次请求与重试轮转切分不同公共 DNS 批次，防止单节点超时拖垮整轮解析。"""
+    """每次请求与重试轮转切分不同公共 DNS 批次，优先跳过冷却期内的故障节点，防止单节点超时拖垮整轮解析。"""
     if not servers:
         return None
-    total = len(servers)
+    active_servers = _filter_healthy_servers(servers)
+    if not active_servers:
+        return None
+    total = len(active_servers)
     count = min(batch_size, total)
     start = (_next_cursor() + attempt * count) % total
-    return [servers[(start + i) % total] for i in range(count)]
+    return [active_servers[(start + i) % total] for i in range(count)]
 
 
 def _build_resolver(nameservers=None, timeout=2.5, lifetime=5.0):
@@ -111,7 +186,7 @@ def resolve_records(
     返回值:
         (records: list[str], transient_error: bool)
         - NXDOMAIN / NoAnswer 属于确定性否定，不触发重试，返回 ([], False)
-        - Timeout / NoNameservers 等瞬时异常会轮换上游 DNS 重试，耗尽后返回 ([], True)
+        - Timeout / NoNameservers 等瞬时异常会轮换上游 DNS 重试并触发故障节点动态冷却，耗尽后返回 ([], True)
     """
     domain = (domain or "").strip()
     if not domain:
@@ -125,8 +200,18 @@ def resolve_records(
     for attempt in range(attempts):
         batch = _select_nameservers(configured_servers, attempt=attempt)
         resolver = _build_resolver(nameservers=batch, timeout=timeout, lifetime=lifetime)
+        t0 = time.monotonic()
         try:
             answers = resolver.resolve(domain, rdtype)
+            if batch:
+                responder = getattr(answers, "nameserver", None)
+                if responder and responder in batch:
+                    responder_idx = batch.index(responder)
+                    for failed_ns in batch[:responder_idx]:
+                        _record_server_failure(failed_ns)
+                    _record_server_success(responder)
+                else:
+                    _record_server_success(batch[0])
             records = []
             for rdata in answers:
                 if rdtype == "A":
@@ -143,6 +228,15 @@ def resolve_records(
                         records.append(val)
             return records, False
         except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer) as exc:
+            elapsed = time.monotonic() - t0
+            if batch:
+                if len(batch) > 1 and timeout > 0 and elapsed >= timeout * 0.9:
+                    skipped = min(len(batch) - 1, max(1, int(elapsed // timeout)))
+                    for failed_ns in batch[:skipped]:
+                        _record_server_failure(failed_ns)
+                    _record_server_success(batch[skipped])
+                else:
+                    _record_server_success(batch[0])
             if log_flag:
                 if rdtype == "CNAME":
                     logger.debug("%s %s", domain, exc)
@@ -151,6 +245,10 @@ def resolve_records(
             return [], False
         except _TRANSIENT_ERRORS as exc:
             last_exc = exc
+            if batch:
+                failed_servers = _extract_failed_servers_from_exc(exc, batch)
+                for failed_ns in (failed_servers or batch):
+                    _record_server_failure(failed_ns)
             if attempt < attempts - 1 and backoff_base > 0:
                 time.sleep(min(0.8, backoff_base * (2 ** attempt)))
         except Exception as exc:

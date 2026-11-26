@@ -94,7 +94,7 @@ test('任务组件的翻译引用及插值参数与语言包一致', () => {
 test('已创建的任务表格、计划表格和企业结果列名随语言切换更新', () => {
   const cases = [
     ['views/TaskList.vue', 'enterpriseColumns'], ['views/TaskList.vue', 'columns'],
-    ['views/PlanningTasks.vue', 'columns'], ['views/PlanningTasks.vue', 'monitorColumns'],
+    ['views/PlanningTasks.vue', 'unifiedColumns'],
   ];
   for (const [file, name] of cases) {
     i18n.global.locale.value = 'zh-CN';
@@ -202,8 +202,10 @@ test('中英文提交使用相同的扫描配置、计划类型、时间和用�
     const scan = component('views/TaskList.vue', { ...initial, formState: { ...scanForm }, submitLoading: ref(false),
       visible: ref(true), pagination: { pageSize: 20 }, fetchTasks() {} });
     await scan.read('doSubmitTask')();
-    const plan = component('views/PlanningTasks.vue', { ...initial, addForm: { ...scheduleForm },
-      addFormRef: ref({ validate: async () => {} }), addLoading: ref(false), addModalVisible: ref(true), onPlanSearch() {} });
+    const plan = component('views/PlanningTasks.vue', { ...initial, addMode: ref('planning'), addForm: { ...scheduleForm },
+      addPlanFormRef: ref({ validate: async () => {} }), addMonitorFormRef: ref({ validate: async () => {} }),
+      addLoading: ref(false), addModalVisible: ref(true), fetchAllSchedules() {},
+      notifyAssetMutated() {}, assetMutationVersion: ref(0), lastObservedMutationVersion: 0 });
     await plan.read('submitAdd')();
     results.push(calls);
   }
